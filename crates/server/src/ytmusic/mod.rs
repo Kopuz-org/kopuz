@@ -300,7 +300,7 @@ impl YouTubeMusicClient {
         self.cookies.is_some()
     }
 
-    pub async fn start_mix(&self, seed_video_id: &str) -> Result<Vec<Track>, String> {
+    pub async fn start_mix(&self, seed_video_id: &str) -> Result<mix::MixPage, String> {
         mix::fetch(
             mix::MixSeed::Video(seed_video_id),
             self.cookies.as_deref().unwrap_or(""),
@@ -308,12 +308,20 @@ impl YouTubeMusicClient {
         .await
     }
 
-    pub async fn start_playlist_mix(&self, playlist_id: &str) -> Result<Vec<Track>, String> {
+    pub async fn start_playlist_mix(&self, playlist_id: &str) -> Result<mix::MixPage, String> {
         mix::fetch(
             mix::MixSeed::Playlist(playlist_id),
             self.cookies.as_deref().unwrap_or(""),
         )
         .await
+    }
+
+    pub async fn mix_continuation(
+        &self,
+        playlist_id: &str,
+        token: &str,
+    ) -> Result<mix::MixPage, String> {
+        mix::fetch_continuation(playlist_id, token, self.cookies.as_deref().unwrap_or("")).await
     }
 
     pub async fn discover_home(&self) -> Result<discover::DiscoverHome, String> {

@@ -6,8 +6,8 @@ use crate::{server_ops::ServerConn, ytmusic::YouTubeMusicClient};
 
 use super::{
     AlbumType, ArtistLookup, ArtistView, AuthOutcome, Capabilities, FavoritesPage, FavoritesSync,
-    MediaSource, PlaylistMeta, PlaylistOps, PlaylistPage, RadioSeeds, RemoteAlbum, SourceError,
-    StreamInfo, mirror_added, mirror_created,
+    MediaSource, PlaylistMeta, PlaylistOps, PlaylistPage, RadioPage, RadioSeeds, RemoteAlbum,
+    SourceError, StreamInfo, mirror_added, mirror_created,
 };
 
 /// YT Music's "Liked Music" auto-playlist. It is not browsed like the user's
@@ -92,30 +92,35 @@ impl MediaSource for YtSource {
             .map_err(SourceError::from)
     }
 
-    async fn start_radio(&self, seed_ref: &str) -> Result<Vec<reader::Track>, SourceError> {
+    async fn start_radio(&self, seed_ref: &str) -> Result<RadioPage, SourceError> {
         if seed_ref.trim().is_empty() {
             return Err(SourceError::InvalidInput("track has no video id".into()));
         }
         // /next works anonymously (empty cookies), so no auth gate here.
-        self.client
-            .start_mix(seed_ref)
-            .await
-            .map_err(SourceError::from)
+        let page = self.client.start_mix(seed_ref).await?;
+        Ok(radio_page(page))
     }
 
-    async fn start_playlist_radio(
-        &self,
-        playlist_ref: &str,
-    ) -> Result<Vec<reader::Track>, SourceError> {
+    async fn start_playlist_radio(&self, playlist_ref: &str) -> Result<RadioPage, SourceError> {
         if playlist_ref.trim().is_empty() {
             return Err(SourceError::InvalidInput("playlist has no id".into()));
         }
         // Liked Music needs no special case here: YT builds `RDAMPLLM` like any
-        // other playlist mix — that is exactly what its own web client asks for.
-        self.client
-            .start_playlist_mix(playlist_ref)
-            .await
-            .map_err(SourceError::from)
+        // other playlist mix, which is exactly what its own web client asks for.
+        let page = self.client.start_playlist_mix(playlist_ref).await?;
+        Ok(radio_page(page))
+    }
+
+    async fn more_radio(&self, cursor: &str) -> Result<RadioPage, SourceError> {
+        let (playlist_id, token) = cursor
+            .split_once(RADIO_CURSOR_SEPARATOR)
+            .ok_or_else(|| SourceError::InvalidInput("not a YouTube Music radio cursor".into()))?;
+        let page = self.client.mix_continuation(playlist_id, token).await?;
+        // A continuation page may leave the playlist id out; the mix is the same one.
+        Ok(radio_page(crate::ytmusic::mix::MixPage {
+            playlist_id: page.playlist_id.clone().or(Some(playlist_id.to_string())),
+            ..page
+        }))
     }
 
     fn web_url(&self, track: &reader::Track) -> Option<String> {
@@ -475,5 +480,20 @@ impl MediaSource for YtSource {
     ) -> Result<FavoritesPage, SourceError> {
         let (tracks, next) = self.client.liked_songs_page(cursor.as_deref()).await?;
         Ok(FavoritesPage { tracks, next })
+    }
+}
+
+/// A continuation only answers alongside the mix's playlist id, so the cursor
+/// carries both. Neither an `RD…` id nor a token contains a space.
+const RADIO_CURSOR_SEPARATOR: char = ' ';
+
+fn radio_page(page: crate::ytmusic::mix::MixPage) -> RadioPage {
+    let more = page
+        .playlist_id
+        .zip(page.continuation)
+        .map(|(playlist_id, token)| format!("{playlist_id}{RADIO_CURSOR_SEPARATOR}{token}"));
+    RadioPage {
+        tracks: page.tracks,
+        more,
     }
 }

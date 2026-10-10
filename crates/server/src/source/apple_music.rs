@@ -6,7 +6,7 @@ use db::Db;
 
 use super::{
     AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesSync, LibrarySnapshot, MediaSource,
-    PlaylistMeta, PlaylistOps, RadioSeeds, SourceError, StreamInfo,
+    PlaylistMeta, PlaylistOps, RadioPage, RadioSeeds, SourceError, StreamInfo,
 };
 
 pub(super) struct AppleMusicSource {
@@ -18,6 +18,22 @@ pub(super) struct AppleMusicSource {
 impl AppleMusicSource {
     pub(super) fn new(db: Db, source: Source, client: crate::applemusic::AppleMusicApi) -> Self {
         Self { db, source, client }
+    }
+
+    async fn station_page(&self, station: &str, page: u32) -> Result<RadioPage, SourceError> {
+        const QUEUE_TARGET: usize = 30;
+        let songs = self
+            .client
+            .station_queue(station, QUEUE_TARGET)
+            .await
+            .map_err(SourceError::Backend)?;
+        Ok(RadioPage {
+            tracks: songs
+                .iter()
+                .map(crate::applemusic::track_from_song_data)
+                .collect(),
+            more: Some(format!("{station}{STATION_PAGE_SEPARATOR}{page}")),
+        })
     }
 }
 
@@ -57,9 +73,7 @@ impl MediaSource for AppleMusicSource {
     /// sells: an uploaded library track has no catalog entry and therefore no
     /// station. `resolve_catalog_id` hands back the library id unchanged in
     /// that case, which is what the numeric check catches.
-    async fn start_radio(&self, seed_ref: &str) -> Result<Vec<reader::Track>, SourceError> {
-        const QUEUE_TARGET: usize = 30;
-
+    async fn start_radio(&self, seed_ref: &str) -> Result<RadioPage, SourceError> {
         if seed_ref.trim().is_empty() {
             return Err(SourceError::InvalidInput("track has no id".into()));
         }
@@ -81,25 +95,13 @@ impl MediaSource for AppleMusicSource {
             .map_err(SourceError::Backend)?
             .ok_or_else(|| SourceError::Backend("this track has no station".to_string()))?;
 
-        let songs = self
-            .client
-            .station_queue(&station, QUEUE_TARGET)
-            .await
-            .map_err(SourceError::Backend)?;
-        Ok(songs
-            .iter()
-            .map(crate::applemusic::track_from_song_data)
-            .collect())
+        self.station_page(&station, 1).await
     }
 
     /// The playlist equivalent of [`start_radio`], and what Apple's own client
     /// calls autoplay: a station built from what the playlist contains, rather
     /// than from one song.
-    async fn start_playlist_radio(
-        &self,
-        playlist_ref: &str,
-    ) -> Result<Vec<reader::Track>, SourceError> {
-        const QUEUE_TARGET: usize = 30;
+    async fn start_playlist_radio(&self, playlist_ref: &str) -> Result<RadioPage, SourceError> {
         /// Apple's own client sends ten. More than one matters: a playlist that
         /// opens with uploads would be refused on those alone, while a later
         /// catalog track still gives it something to work from.
@@ -129,15 +131,15 @@ impl MediaSource for AppleMusicSource {
             .await
             .map_err(SourceError::Backend)?;
 
-        let songs = self
-            .client
-            .station_queue(&station, QUEUE_TARGET)
-            .await
-            .map_err(SourceError::Backend)?;
-        Ok(songs
-            .iter()
-            .map(crate::applemusic::track_from_song_data)
-            .collect())
+        self.station_page(&station, 1).await
+    }
+
+    async fn more_radio(&self, cursor: &str) -> Result<RadioPage, SourceError> {
+        let (station, page) = cursor
+            .rsplit_once(STATION_PAGE_SEPARATOR)
+            .and_then(|(station, page)| Some((station, page.parse::<u32>().ok()?)))
+            .ok_or_else(|| SourceError::InvalidInput("not an Apple Music station cursor".into()))?;
+        self.station_page(station, page + 1).await
     }
 
     async fn download_track(
@@ -400,3 +402,8 @@ impl MediaSource for AppleMusicSource {
         Ok(out)
     }
 }
+
+/// A station is a generator: asking it again plays on. The page number only
+/// keeps each cursor distinct from the one before it, since the daemon ends a
+/// radio whose source hands back a cursor it already used.
+const STATION_PAGE_SEPARATOR: char = '#';

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT version, current_queue_index, progress_secs, shuffle_enabled FROM queue_state WHERE source = ?1",
+  "query": "SELECT version, current_queue_index, progress_secs, shuffle_enabled, radio_cursor FROM queue_state WHERE source = ?1",
   "describe": {
     "columns": [
       {
@@ -22,6 +22,11 @@
         "name": "shuffle_enabled",
         "ordinal": 3,
         "type_info": "Integer"
+      },
+      {
+        "name": "radio_cursor",
+        "ordinal": 4,
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -31,8 +36,9 @@
       false,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "1a2dd9bbb80bb0503a241d41a2ca4027209e032f7970304d2ea5adc5db16deed"
+  "hash": "68482b3674edee9d82495919248888c9981efd60507fdbc928c2eeb291f00bfb"
 }

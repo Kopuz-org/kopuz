@@ -121,7 +121,7 @@ pub async fn load_queue(
     // One read snapshot, so a save landing between the reads cannot pair old rows with a new index.
     let mut tx = pool.begin().await?;
     let row = sqlx::query!(
-        "SELECT version, current_queue_index, progress_secs, shuffle_enabled \
+        "SELECT version, current_queue_index, progress_secs, shuffle_enabled, radio_cursor \
          FROM queue_state WHERE source = ?1",
         src
     )
@@ -180,6 +180,7 @@ pub async fn load_queue(
             .map(|at| at.max(0) as usize)
             .collect(),
         shuffle_enabled: row.shuffle_enabled != 0,
+        radio_cursor: row.radio_cursor,
     })
 }
 

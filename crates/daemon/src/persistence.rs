@@ -129,4 +129,29 @@ mod tests {
         store.save(&source, playing(&["/a", "/c"], 5)).await;
         assert_eq!(titles(&db.load_queue(&source).await.unwrap()), ["/a", "/c"]);
     }
+
+    /// A playhead-only save writes the radio cursor too, since a top-up that
+    /// ends a radio changes the cursor without touching the rows.
+    #[tokio::test]
+    async fn the_radio_cursor_survives_a_reload() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = db::init(&dir.path().join("queue.db")).await.expect("db");
+        let store = DbQueueStore::new(db.clone());
+        let source = config::Source::default();
+        let radio = |cursor: Option<&str>| db::QueueSnapshot {
+            version: 1,
+            queue: queue(&["/a", "/b"]),
+            radio_cursor: cursor.map(str::to_string),
+            ..Default::default()
+        };
+
+        store.save(&source, radio(Some("RDAMVMx token"))).await;
+        assert_eq!(
+            store.load(&source).await.unwrap().radio_cursor.as_deref(),
+            Some("RDAMVMx token")
+        );
+
+        store.save(&source, radio(None)).await;
+        assert_eq!(store.load(&source).await.unwrap().radio_cursor, None);
+    }
 }

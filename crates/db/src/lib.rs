@@ -57,6 +57,8 @@ pub struct QueueSnapshot {
     pub progress_secs: u64,
     pub shuffle_order: Vec<usize>,
     pub shuffle_enabled: bool,
+    /// Where a radio queue goes on from: opaque, and only its source reads it.
+    pub radio_cursor: Option<String>,
 }
 
 /// What the lyrics cache holds for a key: the words, or a miss and when it was recorded.

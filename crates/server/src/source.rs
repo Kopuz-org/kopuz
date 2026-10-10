@@ -177,7 +177,7 @@ pub trait MediaSource: Send + Sync {
     /// Start a radio/mix seeded from a track, returning the generated queue. Only
     /// sources whose [`Capabilities::radio`] is set override this; the rest
     /// inherit the unsupported default.
-    async fn start_radio(&self, _seed_ref: &str) -> Result<Vec<reader::Track>, SourceError> {
+    async fn start_radio(&self, _seed_ref: &str) -> Result<RadioPage, SourceError> {
         Err(SourceError::unsupported("radio"))
     }
 
@@ -186,11 +186,15 @@ pub trait MediaSource: Send + Sync {
     /// playlist's tracks — so callers play it as-is. Shares
     /// [`Capabilities::radio`] with [`start_radio`](Self::start_radio): a source
     /// that can seed radio from a track can seed it from a playlist too.
-    async fn start_playlist_radio(
-        &self,
-        _playlist_ref: &str,
-    ) -> Result<Vec<reader::Track>, SourceError> {
+    async fn start_playlist_radio(&self, _playlist_ref: &str) -> Result<RadioPage, SourceError> {
         Err(SourceError::unsupported("playlist radio"))
+    }
+
+    /// The radio page after one whose [`RadioPage::more`] was `cursor`. Only a
+    /// source that hands out a cursor is ever asked, so the default is never
+    /// reached by one that does not.
+    async fn more_radio(&self, _cursor: &str) -> Result<RadioPage, SourceError> {
+        Err(SourceError::unsupported("radio continuation"))
     }
 
     /// The track's canonical public web URL, when this source has shareable web

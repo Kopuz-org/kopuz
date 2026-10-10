@@ -837,6 +837,7 @@ pub async fn run_json_import(
         progress_secs: queue.progress_secs.max(0) as u64,
         shuffle_order: queue.shuffle_order.iter().map(|&at| at as usize).collect(),
         shuffle_enabled: queue.shuffle_enabled,
+        radio_cursor: None,
     };
     super::writes::write_queue(&mut tx, imported_config.active_source.as_str(), &snapshot).await?;
 

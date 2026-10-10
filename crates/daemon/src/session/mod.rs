@@ -15,6 +15,7 @@ use player::engine::{Event as EngineEvent, Phase as EnginePhase, SourceFactory, 
 use player::player::{LoadArgs, NowPlayingMeta, Player, PlayerInitError};
 use reader::Track;
 use server::playback_ref::{PlaybackItemRef, ResolvedStreamRef};
+use server::source::RadioPage;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
@@ -22,9 +23,11 @@ use crate::playback::network_factory;
 use crate::queue_model::{NextOutcome, QueueModel};
 
 mod load;
+mod radio_feed;
 mod reconciler;
 
 use load::{LoadFailure, LoadFinished, PreparedLoad};
+use radio_feed::RadioFeed;
 
 /// Events buffered per subscriber before it is considered lagged.
 pub const EVENT_BUFFER: usize = 512;
@@ -46,6 +49,17 @@ pub(crate) struct QueueMirrorSnapshot {
 #[async_trait::async_trait]
 pub trait QueueMaterializer: Send + Sync {
     async fn materialize(&self, context: &QueueContext) -> Result<Vec<Track>, ApiError>;
+
+    /// What a queue replacement starts with: the tracks, and for a radio that
+    /// can go on, the cursor of its next page.
+    async fn materialize_queue(&self, context: &QueueContext) -> Result<RadioPage, ApiError> {
+        Ok(RadioPage::last(self.materialize(context).await?))
+    }
+
+    /// The radio page after `cursor`, from the source that issued it.
+    async fn more_radio(&self, _cursor: &str) -> Result<RadioPage, ApiError> {
+        Ok(RadioPage::default())
+    }
 
     /// Make a restored queue's rows addressable by key, since some were listed once and never stored.
     fn register_restored(&self, _tracks: &[Track]) {}
@@ -94,6 +108,12 @@ enum SessionCmd {
         token: u64,
         title: String,
         artist: Option<String>,
+    },
+    /// A radio top-up came back, for the feed `feed` asked with `cursor`.
+    RadioTopUp {
+        feed: u64,
+        cursor: String,
+        result: Box<Result<RadioPage, ApiError>>,
     },
     SetQueue(
         SetQueueRequest,
@@ -191,6 +211,8 @@ impl SessionHandle {
             armed_transition: None,
             load_task: None,
             radio_task: None,
+            radio_feed: None,
+            next_feed_id: 0,
             phase: ApiPhase::Idle,
             position: None,
             position_token: None,
@@ -521,6 +543,8 @@ struct Session {
     armed_transition: Option<u64>,
     load_task: Option<(u64, JoinHandle<()>)>,
     radio_task: Option<JoinHandle<()>>,
+    radio_feed: Option<RadioFeed>,
+    next_feed_id: u64,
     phase: ApiPhase,
     position: Option<PositionAnchor>,
     position_token: Option<u64>,
@@ -616,6 +640,11 @@ impl Session {
                 title,
                 artist,
             } => self.apply_radio_metadata(token, title, artist, state_tx),
+            SessionCmd::RadioTopUp {
+                feed,
+                cursor,
+                result,
+            } => self.apply_radio_page(feed, cursor, *result, state_tx),
             SessionCmd::RestoreQueue(snapshot, reply) => {
                 let result = self.handle_restore(*snapshot, state_tx);
                 let _ = reply.send(result);
@@ -913,9 +942,9 @@ impl Session {
         }
         // Bounded so a hanging materializer (a slow source resolve) cannot
         // wedge the whole session command loop.
-        let tracks = tokio::time::timeout(
+        let RadioPage { tracks, more } = tokio::time::timeout(
             MATERIALIZE_TIMEOUT,
-            self.materializer.materialize(&request.context),
+            self.materializer.materialize_queue(&request.context),
         )
         .await
         .map_err(|_| {
@@ -943,9 +972,11 @@ impl Session {
                     });
                     let idx = candidate.jump_to(start.min(len - 1));
                     self.start_immediate_load(candidate, idx)?;
+                    self.set_radio_feed(more);
                 } else {
                     self.model = candidate;
                     self.stop_playback();
+                    self.set_radio_feed(None);
                 }
             }
             // Appending lands past every existing position, so a pending
@@ -996,6 +1027,7 @@ impl Session {
                     self.phase = ApiPhase::Paused;
                 }
                 self.publish_position_anchor(state_tx, None, None, false);
+                self.resume_radio_when_extended();
             }
             NextOutcome::Empty => {}
         }
@@ -1395,6 +1427,7 @@ impl Session {
         self.buffered.clear();
         self.last_recent_key = None;
 
+        self.set_radio_feed(snapshot.radio_cursor);
         let restored = self.model.restore(
             snapshot.queue,
             snapshot.current_queue_index,
@@ -1439,6 +1472,7 @@ impl Session {
             progress_secs,
             shuffle_order: self.model.shuffle_order().to_vec(),
             shuffle_enabled: self.model.shuffle(),
+            radio_cursor: self.radio_cursor(),
         }
     }
 

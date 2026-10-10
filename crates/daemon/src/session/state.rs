@@ -10,6 +10,7 @@ impl Session {
         queue_changed: bool,
     ) -> CommandAck {
         self.rev += 1;
+        self.top_up_radio();
         if queue_changed {
             self.queue_rev = self.rev;
             self.refresh_album_context();

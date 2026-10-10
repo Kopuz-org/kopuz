@@ -569,6 +569,7 @@ async fn a_queue_round_trips_through_its_rows() {
         progress_secs: 40,
         shuffle_order: vec![1, 0, 9],
         shuffle_enabled: true,
+        radio_cursor: None,
     };
 
     db.save_queue(&Source::default(), &saved).await.unwrap();

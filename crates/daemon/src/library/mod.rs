@@ -11,6 +11,7 @@ use std::sync::{Arc, OnceLock};
 
 use api::{ApiError, JobKind, JobRef, Page, QueueContext, Table, TrackFilter, TrackPage};
 use reader::Track;
+use server::source::RadioPage;
 use tokio::sync::watch;
 
 use crate::jobs::{JobCtx, JobRunner};
@@ -598,9 +599,22 @@ impl QueueMaterializer for LibraryService {
                 }
                 Ok(vec![self.radio_track(station_id, stream_id)])
             }
+            QueueContext::TrackRadio { .. } | QueueContext::PlaylistRadio { .. } => {
+                Ok(self.materialize_queue(context).await?.tracks)
+            }
+        }
+    }
+
+    async fn materialize_queue(&self, context: &QueueContext) -> Result<RadioPage, ApiError> {
+        match context {
             QueueContext::TrackRadio { key } => self.catalog_service()?.track_radio(key).await,
             QueueContext::PlaylistRadio { id } => self.catalog_service()?.playlist_radio(id).await,
+            _ => Ok(RadioPage::last(self.materialize(context).await?)),
         }
+    }
+
+    async fn more_radio(&self, cursor: &str) -> Result<RadioPage, ApiError> {
+        self.catalog_service()?.more_radio(cursor).await
     }
 
     fn register_restored(&self, tracks: &[Track]) {

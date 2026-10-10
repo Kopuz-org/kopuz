@@ -17,6 +17,7 @@ use api::{
     ApiError, ArtworkRef, ArtworkTarget, CatalogDetail, CatalogDetailRequest, CatalogItem,
     CatalogItemKind, CatalogPage, CatalogShelf,
 };
+use server::source::RadioPage;
 use server::ytmusic::discover::{DiscoverHome, DiscoverItem};
 
 use crate::library::LibraryService;
@@ -369,28 +370,37 @@ impl CatalogService {
     ///
     /// Sources return the seed somewhere in the list, or not at all; a caller
     /// that asked to start from this track means it should play first.
-    pub async fn track_radio(&self, key: &str) -> Result<Vec<reader::Track>, ApiError> {
+    pub async fn track_radio(&self, key: &str) -> Result<RadioPage, ApiError> {
         let source = self.source();
-        let mut tracks = source.start_radio(key).await.map_err(source_error)?;
-        crate::wire::listed_by(source.source(), &mut tracks);
-        self.library.register_transient(&tracks);
-        let seed = match take_seed(&mut tracks, key) {
+        let mut page = source.start_radio(key).await.map_err(source_error)?;
+        crate::wire::listed_by(source.source(), &mut page.tracks);
+        self.library.register_transient(&page.tracks);
+        let seed = match take_seed(&mut page.tracks, key) {
             Some(seed) => seed,
             None => self.seed_track(key).await?,
         };
-        tracks.insert(0, seed);
-        Ok(tracks)
+        page.tracks.insert(0, seed);
+        Ok(page)
     }
 
-    pub async fn playlist_radio(&self, id: &str) -> Result<Vec<reader::Track>, ApiError> {
+    pub async fn playlist_radio(&self, id: &str) -> Result<RadioPage, ApiError> {
         let source = self.source();
-        let mut tracks = source
+        let mut page = source
             .start_playlist_radio(id)
             .await
             .map_err(source_error)?;
-        crate::wire::listed_by(source.source(), &mut tracks);
-        self.library.register_transient(&tracks);
-        Ok(tracks)
+        crate::wire::listed_by(source.source(), &mut page.tracks);
+        self.library.register_transient(&page.tracks);
+        Ok(page)
+    }
+
+    /// The radio page after the one whose cursor this is.
+    pub async fn more_radio(&self, cursor: &str) -> Result<RadioPage, ApiError> {
+        let source = self.source();
+        let mut page = source.more_radio(cursor).await.map_err(source_error)?;
+        crate::wire::listed_by(source.source(), &mut page.tracks);
+        self.library.register_transient(&page.tracks);
+        Ok(page)
     }
 
     /// The title and artist of a saved album, for a source whose albums are

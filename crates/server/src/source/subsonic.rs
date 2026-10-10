@@ -6,7 +6,8 @@ use crate::{server_ops::ServerConn, subsonic::SubsonicClient};
 
 use super::{
     AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesSync, LibrarySnapshot, MediaSource,
-    PlaylistMeta, PlaylistOps, RadioSeeds, SourceError, StreamInfo, mirror_added, mirror_created,
+    PlaylistMeta, PlaylistOps, RadioPage, RadioSeeds, SourceError, StreamInfo, mirror_added,
+    mirror_created,
 };
 
 pub(super) struct SubsonicSource {
@@ -418,7 +419,7 @@ impl MediaSource for SubsonicSource {
     /// either way it returns neighbours only, so the seed goes at the head of the
     /// queue rather than jumping the user off the track they started from. A seed
     /// the server cannot look up is not fatal: the neighbours still make a queue.
-    async fn start_radio(&self, seed_ref: &str) -> Result<Vec<reader::Track>, SourceError> {
+    async fn start_radio(&self, seed_ref: &str) -> Result<RadioPage, SourceError> {
         const SIMILAR_SONGS_COUNT: usize = 50;
         let similar: Vec<_> = self
             .client
@@ -431,18 +432,19 @@ impl MediaSource for SubsonicSource {
         // read as success and replace the queue with the one song already
         // playing, so hand back empty and let the caller say so.
         if similar.is_empty() {
-            return Ok(Vec::new());
+            return Ok(RadioPage::default());
         }
 
         let seed = self.client.get_song(seed_ref).await.unwrap_or_else(|e| {
             tracing::debug!(seed = %seed_ref, error = %e, "radio seed lookup failed");
             None
         });
-        Ok(seed
-            .into_iter()
-            .chain(similar)
-            .map(|song| song_to_track(&self.client, self.service, song))
-            .collect())
+        Ok(RadioPage::last(
+            seed.into_iter()
+                .chain(similar)
+                .map(|song| song_to_track(&self.client, self.service, song))
+                .collect(),
+        ))
     }
 
     async fn fetch_artist_images(

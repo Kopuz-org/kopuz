@@ -1506,6 +1506,7 @@ async fn restore_seeds_a_paused_resume_point_and_play_continues_there() {
         progress_secs: 2,
         shuffle_order: Vec::new(),
         shuffle_enabled: false,
+        radio_cursor: None,
     };
     harness
         .api
@@ -2365,4 +2366,224 @@ async fn stored_volume(database: &db::Db) -> f32 {
         .expect("load")
         .expect("stored config")
         .volume
+}
+
+/// A source whose radio pages by cursor: `p1` and `p2` add tracks, and `p2`
+/// hands back `p1` again, the loop a source echoing its token makes.
+#[derive(Default)]
+struct RadioLibrary {
+    asked: Mutex<Vec<String>>,
+    /// Holds each page back until a permit is added.
+    gate: Option<tokio::sync::Semaphore>,
+}
+
+impl RadioLibrary {
+    fn asked(&self) -> Vec<String> {
+        self.asked.lock().expect("asked lock").clone()
+    }
+}
+
+fn radio_tracks(keys: &[&str]) -> Vec<Track> {
+    keys.iter()
+        .map(|key| test_track(&(*key).to_string()))
+        .collect()
+}
+
+#[async_trait::async_trait]
+impl QueueMaterializer for RadioLibrary {
+    async fn materialize(&self, context: &QueueContext) -> Result<Vec<Track>, ApiError> {
+        StubLibrary.materialize(context).await
+    }
+
+    async fn materialize_queue(&self, context: &QueueContext) -> Result<RadioPage, ApiError> {
+        match context {
+            QueueContext::TrackRadio { key } => Ok(RadioPage {
+                tracks: radio_tracks(&[key, "r1", "r2", "r3", "r4", "r5"]),
+                more: Some("p1".into()),
+            }),
+            other => Ok(RadioPage::last(self.materialize(other).await?)),
+        }
+    }
+
+    async fn more_radio(&self, cursor: &str) -> Result<RadioPage, ApiError> {
+        self.asked
+            .lock()
+            .expect("asked lock")
+            .push(cursor.to_string());
+        if let Some(gate) = &self.gate {
+            gate.acquire().await.expect("gate open").forget();
+        }
+        Ok(match cursor {
+            "p1" => RadioPage {
+                tracks: radio_tracks(&["r6", "r3", "r7", "r8", "r9", "r10"]),
+                more: Some("p2".into()),
+            },
+            "p2" => RadioPage {
+                tracks: radio_tracks(&["r11", "r12", "r13"]),
+                more: Some("p1".into()),
+            },
+            _ => RadioPage::default(),
+        })
+    }
+}
+
+fn radio_harness(library: Arc<RadioLibrary>) -> Harness {
+    let sink = FakeSinkHandle::default();
+    let player = Player::try_with_sink(Box::new(FakeSink(sink.clone()))).unwrap();
+    let mut services = PlaybackServices::default();
+    services.config.crossfade_seconds = 0;
+    let session = SessionHandle::spawn_with_factory(
+        library,
+        player,
+        services,
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+    Harness {
+        api: LocalApi::new(session),
+        sink,
+    }
+}
+
+fn track_radio(key: &str) -> SetQueueRequest {
+    SetQueueRequest {
+        mode: QueueMode::Replace,
+        context: QueueContext::TrackRadio { key: key.into() },
+        start_index: Some(0),
+        shuffle: None,
+    }
+}
+
+async fn queue_keys(api: &LocalApi) -> Vec<String> {
+    let snapshot = api.queue_snapshot().await.expect("queue snapshot");
+    snapshot.items.into_iter().map(|track| track.key).collect()
+}
+
+#[tokio::test]
+async fn a_radio_tops_up_below_five_and_stops_on_a_repeated_cursor() {
+    let library = Arc::new(RadioLibrary::default());
+    let harness = radio_harness(library.clone());
+    harness.api.set_queue(track_radio("seed")).await.unwrap();
+    wait_committed(&harness.api).await;
+    assert!(
+        library.asked().is_empty(),
+        "five tracks follow the seed, so nothing is fetched yet"
+    );
+
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: 1 })
+        .await
+        .unwrap();
+    wait_state(&harness.api, "the first top-up", |state| {
+        state.queue.length == 11
+    })
+    .await;
+    assert_eq!(library.asked(), ["p1"]);
+
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: 8 })
+        .await
+        .unwrap();
+    wait_state(&harness.api, "the second top-up", |state| {
+        state.queue.length == 14
+    })
+    .await;
+
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: 13 })
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        library.asked(),
+        ["p1", "p2"],
+        "p2 handed back p1, which was already spent"
+    );
+    let keys = queue_keys(&harness.api).await;
+    let unique: std::collections::HashSet<_> = keys.iter().collect();
+    assert_eq!(
+        unique.len(),
+        keys.len(),
+        "no track is queued twice: {keys:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_radio_that_runs_out_plays_on_once_the_top_up_lands() {
+    let library = Arc::new(RadioLibrary {
+        gate: Some(tokio::sync::Semaphore::new(0)),
+        ..Default::default()
+    });
+    let harness = radio_harness(library.clone());
+    harness.api.set_queue(track_radio("seed")).await.unwrap();
+    wait_committed(&harness.api).await;
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: 5 })
+        .await
+        .unwrap();
+    wait_committed(&harness.api).await;
+
+    harness
+        .api
+        .player_command(PlayerCommand::Next)
+        .await
+        .unwrap();
+    let ended = harness.api.player_state().await.unwrap();
+    assert_eq!(
+        (
+            ended.queue.index,
+            ended.queue.length,
+            ended.phase == ApiPhase::Playing
+        ),
+        (Some(5), 6, false),
+        "the page is still on its way"
+    );
+
+    library.gate.as_ref().unwrap().add_permits(1);
+    let state = wait_state(&harness.api, "playback onto the new page", |state| {
+        state.queue.index == Some(6) && state.phase == ApiPhase::Playing
+    })
+    .await;
+    assert_eq!(state.queue.length, 11);
+}
+
+#[tokio::test]
+async fn replacing_a_radio_queue_ends_its_top_ups() {
+    let library = Arc::new(RadioLibrary::default());
+    let harness = radio_harness(library.clone());
+    harness.api.set_queue(track_radio("seed")).await.unwrap();
+    wait_committed(&harness.api).await;
+
+    harness
+        .api
+        .set_queue(replace(&["track-0", "track-1"]))
+        .await
+        .unwrap();
+    wait_committed(&harness.api).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    assert!(library.asked().is_empty(), "{:?}", library.asked());
+    assert_eq!(harness.api.player_state().await.unwrap().queue.length, 2);
+}
+
+#[tokio::test]
+async fn a_restored_radio_queue_picks_its_cursor_back_up() {
+    let library = Arc::new(RadioLibrary::default());
+    let harness = radio_harness(library.clone());
+    let snapshot = db::QueueSnapshot {
+        version: 1,
+        queue: radio_tracks(&["seed", "r1", "r2"]),
+        radio_cursor: Some("p1".into()),
+        ..Default::default()
+    };
+    harness.api.session.restore_queue(snapshot).await.unwrap();
+
+    wait_state(&harness.api, "the restored radio's top-up", |state| {
+        state.queue.length == 9
+    })
+    .await;
+    assert_eq!(library.asked(), ["p1"]);
 }
