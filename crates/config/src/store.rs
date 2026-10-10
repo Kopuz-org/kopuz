@@ -1072,7 +1072,8 @@ mod tests {
     #[test]
     fn symlink_into_store_prefix_is_managed() {
         let dir = tempfile::tempdir().unwrap();
-        let store = dir.path().join("nix-store");
+        // is_managed compares canonical paths, and macOS temp dirs sit behind /var -> /private/var.
+        let store = dir.path().canonicalize().unwrap().join("nix-store");
         std::fs::create_dir_all(&store).unwrap();
         let target = store.join("abc-kopuz-settings.toml");
         std::fs::write(&target, "theme = \"nord\"\n").unwrap();
