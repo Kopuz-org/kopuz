@@ -177,7 +177,7 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
         ..Default::default()
     };
     let anonymous_err = match anonymous_attempt(video_id, extras).await {
-        Ok(info) => return Ok(info),
+        Ok(info) => return Ok(recheck_gated(info, || anonymous_attempt(video_id, extras)).await),
         Err(error) => error,
     };
     tracing::debug!(%anonymous_err, "anonymous path failed");
@@ -197,7 +197,11 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
                     signature_timestamp: None,
                 };
                 match anonymous_attempt(video_id, extras).await {
-                    Ok(info) => return Ok(info),
+                    Ok(info) => {
+                        return Ok(
+                            recheck_gated(info, || anonymous_attempt(video_id, extras)).await
+                        );
+                    }
                     Err(error) => error,
                 }
             }
@@ -256,6 +260,91 @@ async fn anonymous_attempt(
     }
     pick_plain_format(&json, VISIONOS)
         .ok_or_else(|| format!("{} returned no plain audio format", VISIONOS.client_name))
+}
+
+/// Further `/player` calls made for a URL googlevideo gates, before the
+/// stream is handed out sequential.
+const GATED_RETRIES: usize = 2;
+
+/// Bounded well under the range source's own timeout: a probe that hangs
+/// passes, and track start should not wait the full read timeout for it.
+const GATE_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Some plain URLs are gated behind a GVS PO token the response does not ask
+/// for: googlevideo serves the first megabyte or so and answers 403 to any
+/// range past it, at random, so the same request made again usually returns
+/// a URL that is not. `again` repeats the request that produced `info` with
+/// the same extras, so a retry never mints a token of its own. A URL still
+/// gated after [`GATED_RETRIES`] plays sequentially, without seeking.
+async fn recheck_gated<F, Fut>(info: YtStreamInfo, mut again: F) -> YtStreamInfo
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<YtStreamInfo, String>>,
+{
+    let mut current = info;
+    for retry in 0..=GATED_RETRIES {
+        if !is_gated(&current).await {
+            return current;
+        }
+        if retry == GATED_RETRIES {
+            break;
+        }
+        tracing::info!(
+            retry = retry + 1,
+            "googlevideo refused the tail of the stream; resolving again"
+        );
+        match again().await {
+            Ok(next) => current = next,
+            Err(error) => {
+                tracing::debug!(%error, "resolving a gated stream again failed");
+                break;
+            }
+        }
+    }
+    tracing::warn!(
+        "googlevideo refused deep ranges on every resolve; streaming sequentially without seeking"
+    );
+    current.range_safe = false;
+    current
+}
+
+/// True when googlevideo refuses the last byte of the stream. A probe that
+/// fails for any other reason passes; the range source checks the tail again
+/// when it opens.
+async fn is_gated(info: &YtStreamInfo) -> bool {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    let Some(last) = info.content_length.and_then(|len| len.checked_sub(1)) else {
+        return false;
+    };
+    let client = CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(GATE_PROBE_TIMEOUT)
+            .build()
+            .unwrap_or_default()
+    });
+    let started = Instant::now();
+    let response = client
+        .get(&info.url)
+        .header(reqwest::header::USER_AGENT, &info.user_agent)
+        .header(reqwest::header::RANGE, format!("bytes={last}-{last}"))
+        .send()
+        .await;
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    match response {
+        Ok(response) => {
+            let status = response.status();
+            let gated = matches!(
+                status,
+                reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::GONE
+            );
+            tracing::debug!(%status, gated, elapsed_ms, "googlevideo tail probe");
+            gated
+        }
+        Err(error) => {
+            tracing::debug!(%error, elapsed_ms, "googlevideo tail probe failed");
+            false
+        }
+    }
 }
 
 /// Why every path failed, not only the last one.
@@ -694,6 +783,100 @@ mod tests {
         let other = labelled("returned no plain audio format".to_string());
         assert!(!innertube::is_google_block(&other), "{other}");
         assert_eq!(other, "VISIONOS: returned no plain audio format");
+    }
+
+    /// Answers 403 to any request for `/gated` and 206 to anything else.
+    async fn googlevideo() -> std::net::SocketAddr {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = vec![0; 4096];
+                let n = socket.read(&mut request).await.unwrap();
+                let request = String::from_utf8_lossy(&request[..n]);
+                let status = if request.starts_with("GET /gated") {
+                    "403 Forbidden"
+                } else {
+                    "206 Partial Content"
+                };
+                let _ = socket
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 {status}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+                        )
+                        .as_bytes(),
+                    )
+                    .await;
+            }
+        });
+        addr
+    }
+
+    fn stream_at(addr: std::net::SocketAddr, path: &str) -> YtStreamInfo {
+        YtStreamInfo {
+            url: format!("http://{addr}/{path}"),
+            format: AudioFormat::Webm,
+            user_agent: VISIONOS.user_agent.to_string(),
+            content_length: Some(4096),
+            duration_secs: Some(212),
+            bitrate: Some(136544),
+            itag: Some(251),
+            range_safe: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_gated_url_is_replaced_by_a_working_one() {
+        let addr = googlevideo().await;
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let info = recheck_gated(stream_at(addr, "gated"), || {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move { Ok(stream_at(addr, "good")) }
+        })
+        .await;
+        assert!(info.url.ends_with("/good"), "{}", info.url);
+        assert!(info.range_safe);
+        assert_eq!(calls.into_inner(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_url_gated_on_every_resolve_streams_sequentially() {
+        let addr = googlevideo().await;
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let info = recheck_gated(stream_at(addr, "gated"), || {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move { Ok(stream_at(addr, "gated")) }
+        })
+        .await;
+        assert!(!info.range_safe);
+        assert_eq!(calls.into_inner(), GATED_RETRIES);
+    }
+
+    #[tokio::test]
+    async fn a_failed_resolve_keeps_the_gated_url_sequential() {
+        let addr = googlevideo().await;
+        let info = recheck_gated(stream_at(addr, "gated"), || async {
+            Err("VISIONOS playability ERROR: nope".to_string())
+        })
+        .await;
+        assert!(info.url.ends_with("/gated"), "{}", info.url);
+        assert!(!info.range_safe);
+    }
+
+    #[tokio::test]
+    async fn a_working_url_is_not_resolved_again() {
+        let addr = googlevideo().await;
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let info = recheck_gated(stream_at(addr, "good"), || {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move { Ok(stream_at(addr, "gated")) }
+        })
+        .await;
+        assert!(info.url.ends_with("/good"), "{}", info.url);
+        assert!(info.range_safe);
+        assert_eq!(calls.into_inner(), 0);
     }
 
     #[test]
