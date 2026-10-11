@@ -4524,7 +4524,6 @@ name = "kopuz-client"
 version = "0.21.0"
 dependencies = [
  "async-trait",
- "directories",
  "futures-util",
  "hyper-util",
  "kopuz-api",
@@ -4765,6 +4764,7 @@ dependencies = [
 name = "kopuz-proto"
 version = "0.21.0"
 dependencies = [
+ "directories",
  "futures-util",
  "kopuz-api",
  "kopuz-config",

@@ -48,20 +48,7 @@ impl ServeArgs {
     }
 }
 
-#[cfg(windows)]
-pub fn default_socket_path() -> Option<PathBuf> {
-    proto::pipe::default_name().ok().map(PathBuf::from)
-}
-
-#[cfg(not(windows))]
-pub fn default_socket_path() -> Option<PathBuf> {
-    let base = directories::BaseDirs::new()?;
-    let dir = base
-        .runtime_dir()
-        .map(|runtime| runtime.join("kopuz"))
-        .unwrap_or_else(|| base.cache_dir().join("kopuz"));
-    Some(dir.join("kopuzd.sock"))
-}
+pub use proto::default_socket_path;
 
 /// Where the TCP token lives unless told otherwise: beside the socket on
 /// Unix, in the user's cache dir on Windows.

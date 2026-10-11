@@ -16,6 +16,7 @@ name = "proto"
 workspace = true
 
 [dependencies]
+directories = { workspace = true }
 api = { workspace = true }
 config = { workspace = true }
 tonic = { workspace = true }

@@ -538,15 +538,15 @@ fn cell(value: &Value) -> String {
         Value::Null => "-".into(),
         other => other.to_string(),
     };
-    text.chars()
-        .flat_map(|character| {
-            if character.is_control() {
-                character.escape_default().collect::<Vec<_>>()
-            } else {
-                vec![character]
-            }
-        })
-        .collect()
+    let mut escaped = String::with_capacity(text.len());
+    for character in text.chars() {
+        if character.is_control() {
+            escaped.extend(character.escape_default());
+        } else {
+            escaped.push(character);
+        }
+    }
+    escaped
 }
 
 pub fn write_output(mut output: impl Write, value: &Value, json: bool) -> io::Result<()> {

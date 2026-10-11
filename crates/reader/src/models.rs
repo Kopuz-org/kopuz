@@ -98,7 +98,7 @@ impl TrackId {
         match self {
             TrackId::Local(p) => p.to_string_lossy().into_owned(),
             TrackId::Server { service, item_id } => {
-                format!("{}:{}", service_prefix(*service), item_id)
+                format!("{}:{}", service.id(), item_id)
             }
         }
     }
@@ -107,47 +107,20 @@ impl TrackId {
     /// path). Used ONLY by the migration importer; the 3rd cover segment is
     /// dropped here (the importer sets `Track.cover` separately).
     pub fn from_legacy_path(s: &str) -> Self {
-        for (prefix, svc) in [
-            ("ytmusic", config::MusicService::YtMusic),
-            ("jellyfin", config::MusicService::Jellyfin),
-            ("subsonic", config::MusicService::Subsonic),
-            ("custom", config::MusicService::Custom),
-            ("soundcloud", config::MusicService::SoundCloud),
-            ("applemusic", config::MusicService::AppleMusic),
-            ("spotify", config::MusicService::Spotify),
-            ("nextcloud", config::MusicService::Nextcloud),
-            ("clippsly", config::MusicService::Clippsly),
-            ("smb", config::MusicService::Smb),
-        ] {
-            if let Some(rest) = s.strip_prefix(prefix).and_then(|r| r.strip_prefix(':')) {
-                let item_id = if svc == config::MusicService::Smb {
-                    rest
-                } else {
-                    rest.split(':').next().unwrap_or("")
-                }
-                .to_string();
-                return TrackId::Server {
-                    service: svc,
-                    item_id,
-                };
-            }
+        if let Some((prefix, rest)) = s.split_once(':')
+            && let Some(service) = MusicService::from_id(prefix)
+        {
+            let item_id = if service == MusicService::Smb {
+                rest
+            } else {
+                rest.split(':').next().unwrap_or_default()
+            };
+            return Self::Server {
+                service,
+                item_id: item_id.to_string(),
+            };
         }
         TrackId::Local(PathBuf::from(s))
-    }
-}
-
-fn service_prefix(s: config::MusicService) -> &'static str {
-    match s {
-        config::MusicService::YtMusic => "ytmusic",
-        config::MusicService::Jellyfin => "jellyfin",
-        config::MusicService::Subsonic => "subsonic",
-        config::MusicService::Custom => "custom",
-        config::MusicService::SoundCloud => "soundcloud",
-        config::MusicService::AppleMusic => "applemusic",
-        config::MusicService::Spotify => "spotify",
-        config::MusicService::Nextcloud => "nextcloud",
-        config::MusicService::Clippsly => "clippsly",
-        config::MusicService::Smb => "smb",
     }
 }
 
@@ -303,7 +276,7 @@ impl CoverRef {
     /// the item id can hold one itself (a remote path): the third segment would
     /// otherwise start mid-id and resolve to nothing.
     pub fn stored_item_ref(service: MusicService, item_id: &str, cover: Option<&str>) -> String {
-        let prefix = service_prefix(service);
+        let prefix = service.id();
         match cover {
             Some(value) => format!("{prefix}:{item_id}:{value}"),
             None => format!("{prefix}:{item_id}"),

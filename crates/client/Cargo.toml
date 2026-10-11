@@ -18,7 +18,6 @@ workspace = true
 [dependencies]
 api = { workspace = true }
 config = { workspace = true }
-directories = { workspace = true }
 proto = { workspace = true }
 tonic = { workspace = true }
 async-trait = { workspace = true }

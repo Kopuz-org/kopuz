@@ -23,3 +23,20 @@ pub mod convert;
 #[cfg(windows)]
 pub mod pipe;
 pub mod status;
+
+/// The default socket or named pipe served by the desktop app and `kopuzd`.
+#[cfg(windows)]
+pub fn default_socket_path() -> Option<std::path::PathBuf> {
+    pipe::default_name().ok().map(std::path::PathBuf::from)
+}
+
+/// The default socket served by the desktop app and `kopuzd`.
+#[cfg(not(windows))]
+pub fn default_socket_path() -> Option<std::path::PathBuf> {
+    let base = directories::BaseDirs::new()?;
+    let dir = base
+        .runtime_dir()
+        .map(|runtime| runtime.join("kopuz"))
+        .unwrap_or_else(|| base.cache_dir().join("kopuz"));
+    Some(dir.join("kopuzd.sock"))
+}

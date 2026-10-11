@@ -1,7 +1,7 @@
 //! Source construction, credentials, switching, and browser sign-in.
 //! Clients receive `SourceInfo` with authentication status, never credentials.
 
-use crate::error::db_error;
+use crate::error::{db_error, source_error};
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -71,17 +71,6 @@ fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
             FavoritesSync::Instant => FavoritesSyncMode::Instant,
             FavoritesSync::Paginated => FavoritesSyncMode::Paginated,
         },
-    }
-}
-
-fn source_error(error: server::source::SourceError) -> ApiError {
-    use server::source::SourceError;
-    match &error {
-        SourceError::Unsupported(what) => ApiError::unsupported(*what),
-        SourceError::Auth => ApiError::new(ErrorCode::SourceAuthExpired, error.to_string()),
-        SourceError::Connectivity => ApiError::new(ErrorCode::SourceUnreachable, error.to_string()),
-        SourceError::InvalidInput(message) => ApiError::invalid_input(message.clone()),
-        SourceError::Backend(message) => ApiError::internal(message.clone()),
     }
 }
 
