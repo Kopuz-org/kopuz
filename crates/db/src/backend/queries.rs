@@ -568,6 +568,15 @@ pub async fn artists_page(
         c.sql
             .push_str(&format!(" AND ar.name LIKE {n} ESCAPE '\\'"));
     }
+    if let Some(downloaded) = query.downloaded {
+        let exists = if downloaded { "EXISTS" } else { "NOT EXISTS" };
+        c.sql.push_str(&format!(
+            " AND {exists} (SELECT 1 FROM artist_credit_rows dc \
+                JOIN tracks dt ON dt.rowid_pk = dc.track_pk \
+                JOIN offline_tracks o ON o.item_id = dt.track_key \
+               WHERE dc.source = ?1 AND dc.artist_pk = ar.id)"
+        ));
+    }
     let src = query.source.as_str();
     let from = "FROM artist_credit_rows cr JOIN artists ar ON ar.id = cr.artist_pk";
 
@@ -810,6 +819,14 @@ pub async fn albums_page(
     if let Some(artist) = &query.artist_key {
         let n = c.bind(Arg::Text(artist.clone()));
         c.sql.push_str(&format!(" AND ar.key = {n}"));
+    }
+    if let Some(downloaded) = query.downloaded {
+        let exists = if downloaded { "EXISTS" } else { "NOT EXISTS" };
+        c.sql.push_str(&format!(
+            " AND {exists} (SELECT 1 FROM tracks dt \
+                JOIN offline_tracks o ON o.item_id = dt.track_key \
+               WHERE dt.source = al.source AND dt.source_album_id = al.source_album_id)"
+        ));
     }
     if let Some(ids) = &query.ids {
         let slots: Vec<String> = ids.iter().map(|id| c.bind(Arg::Text(id.clone()))).collect();

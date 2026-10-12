@@ -41,6 +41,7 @@ pub fn album_query_to_proto(value: &api::AlbumQuery) -> AlbumQuery {
         year_from: value.year_from.map(u32::from),
         year_to: value.year_to.map(u32::from),
         artist_key: value.artist_key.clone(),
+        downloaded: value.downloaded,
         ids: value.ids.clone().map(|ids| AlbumIds { ids }),
         sort: value
             .sort
@@ -60,6 +61,7 @@ pub fn album_query_from_proto(value: &AlbumQuery) -> api::AlbumQuery {
         year_from: value.year_from.map(year_from_proto),
         year_to: value.year_to.map(year_from_proto),
         artist_key: value.artist_key.clone(),
+        downloaded: value.downloaded,
         ids: value.ids.as_ref().map(|ids| ids.ids.clone()),
         sort: value
             .sort
@@ -86,6 +88,7 @@ pub fn albums_request_to_proto(query: &api::AlbumQuery, page: api::Page) -> Albu
 pub fn artist_query_to_proto(value: &api::ArtistQuery) -> ArtistQuery {
     ArtistQuery {
         search: value.search.clone(),
+        downloaded: value.downloaded,
         sort: value
             .sort
             .iter()
@@ -100,6 +103,7 @@ pub fn artist_query_to_proto(value: &api::ArtistQuery) -> ArtistQuery {
 pub fn artist_query_from_proto(value: &ArtistQuery) -> api::ArtistQuery {
     api::ArtistQuery {
         search: value.search.clone(),
+        downloaded: value.downloaded,
         sort: value
             .sort
             .iter()
@@ -586,6 +590,7 @@ mod tests {
             year_from: Some(1990),
             year_to: Some(2005),
             artist_key: Some("ar-1".into()),
+            downloaded: Some(true),
             ids: Some(vec!["a1".into(), "a2".into()]),
             sort: vec![
                 ::config::SortCriterion::new(
@@ -632,6 +637,7 @@ mod tests {
     fn an_artist_query_round_trips_every_field() {
         let query = api::ArtistQuery {
             search: Some("ada".into()),
+            downloaded: Some(false),
             sort: vec![
                 ::config::SortCriterion::new(
                     ::config::ArtistSortField::Albums,

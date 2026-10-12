@@ -175,7 +175,7 @@ impl MutationService {
         self.session.invalidate(Table::Albums);
         // Read back, so the row carries the artist rows its new credits were filed under.
         let stored = self.track(&patch.key).await?;
-        Ok(crate::wire::track_info(&stored, &config))
+        Ok(crate::wire::track_info(&stored, self.session.offline()))
     }
 
     pub async fn delete_tracks(&self, keys: &[String], from_disk: bool) -> Result<(), ApiError> {

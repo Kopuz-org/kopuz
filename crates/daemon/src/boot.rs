@@ -111,6 +111,8 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         db::legacy::migrate_json_store(&database, &db::config_dir()).await;
     }
     let config = database.load_config().await?.unwrap_or_default();
+    let offline = crate::OfflineIndex::load(&database).await?;
+    let downloads_pruned = offline.pruned();
 
     let settings_path =
         config::store::settings_path_for(db_path.parent().unwrap_or_else(|| Path::new(".")));
@@ -143,11 +145,22 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         queue_store: Some(queue_store.clone()),
         recorder: Some(Arc::new(SourceRecorder::new(active_source.clone()))),
         scrobbler: Some(scrobbler.clone()),
+        offline,
     };
 
     let session = SessionHandle::try_spawn(library.clone(), services)
         .map_err(|error| format!("audio engine init failed: {error:?}"))?;
     library.attach_session(session.clone());
+    {
+        let session = session.clone();
+        tokio::spawn(async move {
+            loop {
+                downloads_pruned.notified().await;
+                session.invalidate(api::Table::Tracks);
+                session.invalidate(api::Table::Albums);
+            }
+        });
+    }
     config_service.attach_session(session.clone());
     scrobbler.attach_session(session.clone());
     {
@@ -161,7 +174,6 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let downloads = crate::DownloadsService::new(
         database.clone(),
         session.clone(),
-        config_service.clone(),
         directories::ProjectDirs::from("moe", "kopuz", "kopuz")
             .map(|dirs| dirs.cache_dir().join("offline_tracks"))
             .unwrap_or_else(|| std::env::temp_dir().join("kopuz-offline")),
@@ -245,8 +257,12 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     );
     let config_service_for_api = config_service.clone();
     let catalog = crate::CatalogService::new(database.clone(), session.clone(), library.clone());
-    let radio_service =
-        crate::RadioService::new(config_service.clone(), library.clone(), session.clone());
+    let radio_service = crate::RadioService::new(
+        database.clone(),
+        config_service.clone(),
+        library.clone(),
+        session.clone(),
+    );
     library.attach_catalog(catalog.clone());
     artwork.attach_library(library.clone());
     artwork.attach_catalog(catalog.clone());
@@ -260,7 +276,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             tracing::warn!(%error, "radio registry could not be loaded");
         }
     });
-    let downloader = crate::UrlDownloadService::new(config_service.clone());
+    let downloader = crate::UrlDownloadService::new(database.clone(), config_service.clone());
     downloader.attach_rescan(library.clone(), jobs.clone());
     // Spotify plays itself, so the session is told where to send a track it
     // cannot decode. Nothing starts until one is actually queued.

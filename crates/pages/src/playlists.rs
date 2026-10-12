@@ -230,7 +230,6 @@ pub fn PlaylistsPage(
                 }
 
                 PlaylistsGrid {
-                    config,
                     selected_playlist_id,
                     refresh_trigger: playlist_refresh_trigger,
                 }
@@ -257,7 +256,6 @@ enum PlaylistCardAction {
 /// gated on [`Capabilities`].
 #[component]
 fn PlaylistsGrid(
-    config: Signal<AppConfig>,
     mut selected_playlist_id: Signal<Option<String>>,
     refresh_trigger: Signal<u64>,
 ) -> Element {
@@ -319,26 +317,19 @@ fn PlaylistsGrid(
 
     // ---- Server (flat remote list) layout ----------------------------------
     let offline = caps().downloads && *is_offline.read();
-    let conf = config.read();
+    let stored = downloads.read().clone();
     let playlists: Vec<api::PlaylistInfo> = if offline {
         store
             .playlists
             .iter()
             .filter(|p| {
-                !p.track_keys.is_empty()
-                    && p.track_keys.iter().all(|tid| {
-                        conf.offline_tracks
-                            .get(tid)
-                            .map(|path| std::path::Path::new(path).exists())
-                            .unwrap_or(false)
-                    })
+                !p.track_keys.is_empty() && p.track_keys.iter().all(|tid| stored.is_stored(tid))
             })
             .cloned()
             .collect()
     } else {
         store.playlists.clone()
     };
-    drop(conf);
     let remote_catalog = caps().albums == api::AlbumPresentation::Remote;
     // The flat remote card has no overflow menu of its own, so radio is its one
     // entry — no kind-tagged action list needed here (unlike the folder card).

@@ -293,13 +293,12 @@ impl api::PlayerApi for LocalApi {
 
     async fn queue_snapshot(&self) -> Result<api::QueueSnapshot, ApiError> {
         let mirror = self.session.queue_mirror().await;
-        let config = self.session.config_watch().borrow().clone();
         Ok(api::QueueSnapshot {
             rev: self.session.state().queue.rev,
             items: mirror
                 .tracks
                 .iter()
-                .map(|track| crate::wire::track_info(track, &config))
+                .map(|track| crate::wire::track_info(track, self.session.offline()))
                 .collect(),
             shuffle_order: mirror
                 .shuffle_order
@@ -523,7 +522,7 @@ impl api::LibraryApi for LocalApi {
 
     async fn stats(&self) -> Result<api::StatsView, ApiError> {
         match &self.library {
-            Some(library) => Ok(library.stats()),
+            Some(library) => library.stats().await,
             None => Err(ApiError::unsupported("no library service")),
         }
     }
@@ -683,7 +682,7 @@ impl api::JobApi for LocalApi {
     }
 
     async fn downloader_history(&self) -> Result<Vec<api::DownloadHistoryEntry>, ApiError> {
-        Ok(self.downloader()?.history().await)
+        self.downloader()?.history().await
     }
 
     async fn clear_downloader_history(&self) -> Result<(), ApiError> {

@@ -149,7 +149,6 @@ pub fn LibraryPage(
 
     let tracks_nodes = {
         let cap = caps();
-        let conf = config.read();
         let row_offset = window_rows.offset as usize;
         window_rows
             .rows
@@ -171,12 +170,7 @@ pub fn LibraryPage(
 
                 // Download state (servers only).
                 let item_id: String = track.key.clone();
-                let is_downloaded = cap.downloads
-                    && conf
-                        .offline_tracks
-                        .get(&item_id)
-                        .map(|p| std::path::Path::new(p).exists())
-                        .unwrap_or(false);
+                let is_downloaded = cap.downloads && track.offline;
                 let is_downloading = cap.downloads && downloads.read().is_active(&item_id);
                 let item_id_dl = item_id.clone();
 

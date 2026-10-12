@@ -93,12 +93,7 @@ impl CatalogService {
     }
 
     /// Convert a browse page `listed` served, registering its songs and tile images so later requests resolve them.
-    fn page(
-        &self,
-        mut home: DiscoverHome,
-        listed: &config::Source,
-        config: &config::AppConfig,
-    ) -> CatalogPage {
+    fn page(&self, mut home: DiscoverHome, listed: &config::Source) -> CatalogPage {
         let songs = home
             .shelves
             .iter_mut()
@@ -130,7 +125,7 @@ impl CatalogService {
                     items: shelf
                         .items
                         .into_iter()
-                        .map(|item| self.item(item, config))
+                        .map(|item| self.item(item))
                         .collect(),
                 })
                 .collect(),
@@ -138,7 +133,7 @@ impl CatalogService {
         }
     }
 
-    fn item(&self, item: DiscoverItem, config: &config::AppConfig) -> CatalogItem {
+    fn item(&self, item: DiscoverItem) -> CatalogItem {
         match item {
             // A song's artwork is the track's own, so the tile and the queue
             // row cannot disagree about which picture belongs to it.
@@ -148,7 +143,7 @@ impl CatalogService {
                 title: track.title.clone(),
                 subtitle: Some(track.artist.clone()),
                 artwork: crate::artwork::track_ref(&track),
-                track: Some(crate::wire::track_info(&track, config)),
+                track: Some(crate::wire::track_info(&track, self.session.offline())),
             },
             DiscoverItem::Playlist {
                 playlist_id,
@@ -204,14 +199,13 @@ impl CatalogService {
     }
 
     pub async fn catalog(&self, continuation: Option<&str>) -> Result<CatalogPage, ApiError> {
-        let config = self.config();
         let source = self.source();
         let home = match continuation {
             Some(token) => source.discover_continuation(token).await,
             None => source.discover_home().await,
         }
         .map_err(source_error)?;
-        Ok(self.page(home, source.source(), &config))
+        Ok(self.page(home, source.source()))
     }
 
     pub async fn detail(&self, request: CatalogDetailRequest) -> Result<CatalogDetail, ApiError> {
@@ -220,7 +214,7 @@ impl CatalogService {
                 "a catalog entity is opened by its id",
             ));
         }
-        let config = self.config();
+        let offline = self.session.offline();
         let source = self.source();
         match request.kind {
             CatalogItemKind::Album => {
@@ -265,7 +259,7 @@ impl CatalogService {
                     tracks: album
                         .tracks
                         .iter()
-                        .map(|track| crate::wire::track_info(track, &config))
+                        .map(|track| crate::wire::track_info(track, offline))
                         .collect(),
                     ..Default::default()
                 })
@@ -291,7 +285,7 @@ impl CatalogService {
                     tracks: page
                         .tracks
                         .iter()
-                        .map(|track| crate::wire::track_info(track, &config))
+                        .map(|track| crate::wire::track_info(track, offline))
                         .collect(),
                     continuation: page.next,
                     ..Default::default()
@@ -325,7 +319,6 @@ impl CatalogService {
                         continuation: None,
                     },
                     source.source(),
-                    &config,
                 );
                 let artwork =
                     self.remember_thumbnail(&artist.channel_id, artist.banner_thumbnail.as_deref());

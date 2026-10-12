@@ -4,8 +4,8 @@ use config::{AppConfig, ListenNowStyle, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{
     use_active_source, use_album_tracks, use_albums, use_albums_window, use_artist_sample_tracks,
-    use_artists, use_favorites, use_playlists, use_recently_added_albums, use_top_genre,
-    use_tracks_by_keys,
+    use_artists, use_downloaded_tracks, use_favorites, use_playlists, use_recently_added_albums,
+    use_top_genre,
 };
 use rand::rng;
 use rand::seq::SliceRandom;
@@ -97,12 +97,13 @@ pub fn HomeBody(
     // cannot hold hook state of their own.
     let active_card_menu = use_signal(|| None::<String>);
 
-    let albums_query = use_memo(|| {
+    let albums_query = use_memo(move || {
         Some(hooks::AlbumQuery {
             sort: vec![config::SortCriterion::new(
                 config::AlbumSortField::Title,
                 config::SortDirection::Asc,
             )],
+            downloaded: (caps().downloads && *is_offline.read()).then_some(true),
             ..Default::default()
         })
     });
@@ -135,19 +136,8 @@ pub fn HomeBody(
             .collect::<HashMap<String, utils::CoverUrl>>()
     });
     let playlists_res = use_playlists();
-    let offline_keys = use_memo(move || -> Vec<String> {
-        if !(caps().downloads && *is_offline.read()) {
-            return Vec::new();
-        }
-        config
-            .read()
-            .offline_tracks
-            .iter()
-            .filter(|(_, path)| std::path::Path::new(path).exists())
-            .map(|(id, _)| id.clone())
-            .collect()
-    });
-    let offline_tracks_res = use_tracks_by_keys(source, offline_keys);
+    let offline_tracks_res =
+        use_downloaded_tracks(source, move || caps().downloads && *is_offline.read());
     // Recently-played for the active source (each source keeps its own history).
     let recent_tracks_res = hooks::use_db_queries::use_recently_played(source);
     // Only the albums the recent tracks are filed under, for the hero and Continue Listening.
@@ -175,7 +165,11 @@ pub fn HomeBody(
     });
     let made_for_you_res = use_albums_window(source, made_for_you_query, SHELF_WINDOW);
     let artist_samples_res = use_artist_sample_tracks(source, 30);
-    let read_error = use_memo(move || albums_res.read().clone().and_then(Result::err));
+    let read_error = use_memo(move || {
+        let albums = albums_res.read().clone().and_then(Result::err);
+        let downloaded = offline_tracks_res.read().clone().and_then(Result::err);
+        albums.or(downloaded)
+    });
 
     // Catalog sources fill an empty cache by syncing; folder sources are populated by the scan.
     let mut fetch_remote = move || {
@@ -184,7 +178,8 @@ pub fn HomeBody(
     };
 
     use_effect(move || {
-        if !caps().sync || *has_fetched.read() {
+        // Offline the listing holds only downloaded albums, so an empty one is no reason to sync.
+        if !caps().sync || *has_fetched.read() || *is_offline.read() {
             return;
         }
         if let Some(Ok(albums)) = albums_res.read().as_ref() {
@@ -203,23 +198,9 @@ pub fn HomeBody(
             .clone()
             .and_then(Result::ok)
             .unwrap_or_default();
-        let offline = caps().downloads && *is_offline.read();
-        let downloaded_album_ids: std::collections::HashSet<String> = if offline {
-            offline_tracks_res
-                .read()
-                .clone()
-                .unwrap_or_default()
-                .iter()
-                .map(|t| t.album_id.clone())
-                .collect()
-        } else {
-            std::collections::HashSet::new()
-        };
-
         albums
             .iter()
             .filter(|album| is_known(album))
-            .filter(|album| !offline || downloaded_album_ids.contains(&album.id))
             .map(album_card)
             .collect()
     });
@@ -322,9 +303,12 @@ pub fn HomeBody(
 
     let source_artists = use_memo(move || {
         let tracks = if caps().downloads && *is_offline.read() {
-            let mut downloaded = offline_tracks_res.read().clone().unwrap_or_default();
-            downloaded.sort_by_key(|a| a.artist.to_lowercase());
-            downloaded
+            // By artist, from the daemon.
+            offline_tracks_res
+                .read()
+                .clone()
+                .and_then(Result::ok)
+                .unwrap_or_default()
         } else {
             artist_samples_res.read().clone().unwrap_or_default()
         };
@@ -360,8 +344,14 @@ pub fn HomeBody(
 
     let recent_playlists = use_memo(move || {
         let store = playlists_res.read().clone().unwrap_or_default();
-        let conf = config.read();
         let offline = caps().downloads && *is_offline.read();
+        let downloaded: std::collections::HashSet<String> = offline_tracks_res
+            .read()
+            .iter()
+            .flatten()
+            .flatten()
+            .map(|t| t.key.clone())
+            .collect();
         store
             .playlists
             .iter()
@@ -369,14 +359,7 @@ pub fn HomeBody(
                 if !offline {
                     return true;
                 }
-                !p.track_keys.is_empty()
-                    && p.track_keys.iter().all(|tid| {
-                        if let Some(path_str) = conf.offline_tracks.get(tid) {
-                            std::path::Path::new(path_str).exists()
-                        } else {
-                            false
-                        }
-                    })
+                !p.track_keys.is_empty() && p.track_keys.iter().all(|tid| downloaded.contains(tid))
             })
             .rev()
             .take(10)

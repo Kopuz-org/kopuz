@@ -164,14 +164,13 @@ async fn spawn_pair() -> Pair {
     let downloads = daemon::DownloadsService::new(
         database.clone(),
         session.clone(),
-        config_service.clone(),
         dir.path().join("offline"),
     );
     let sources =
         daemon::SourceService::new(database.clone(), session.clone(), config_service.clone());
     sources.watch_active(session.config_watch());
     let integrations = daemon::IntegrationService::new(config_service.clone());
-    let downloader = daemon::UrlDownloadService::new(config_service.clone());
+    let downloader = daemon::UrlDownloadService::new(database.clone(), config_service.clone());
     let prefs = daemon::PrefsService::new(database.clone(), session.clone());
     let build_api = |session: SessionHandle| {
         LocalApi::new(session)

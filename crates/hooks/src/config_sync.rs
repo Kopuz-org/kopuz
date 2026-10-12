@@ -128,11 +128,13 @@ mod tests {
     fn a_field_only_the_daemon_writes_reaches_the_copy() {
         let baseline = config(4, false);
         let mut daemon = baseline.clone();
-        daemon.offline_tracks.insert("k".into(), "/cache/k".into());
-        let (next, _) = moved(&baseline, &baseline, &daemon).expect("downloads moved");
+        daemon
+            .server_folders
+            .insert("srv".into(), vec!["/music".into()]);
+        let (next, _) = moved(&baseline, &baseline, &daemon).expect("folders moved");
         assert_eq!(
-            next.offline_tracks.get("k").map(String::as_str),
-            Some("/cache/k")
+            next.server_folders.get("srv").map(Vec::as_slice),
+            Some(&["/music".to_string()][..])
         );
     }
 

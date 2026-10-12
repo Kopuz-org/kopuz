@@ -589,7 +589,6 @@ pub fn config_to_proto(value: &config::AppConfig) -> Config {
         artist_album_view_mode: album_view_mode_to_proto(value.artist_album_view_mode) as i32,
         artists_view_mode: album_view_mode_to_proto(value.artists_view_mode) as i32,
         artist_view_order: artist_view_order_to_proto(&value.artist_view_order) as i32,
-        listen_counts: value.listen_counts.clone().into_iter().collect(),
         language: value.language.clone(),
         reduce_animations: value.reduce_animations,
         fullscreen_use_player_bar: value.fullscreen_use_player_bar,
@@ -640,7 +639,6 @@ pub fn config_to_proto(value: &config::AppConfig) -> Config {
             .iter()
             .map(registry_entry_to_proto)
             .collect(),
-        pinned_stations: value.pinned_stations.clone(),
         prefer_local_lyrics: value.prefer_local_lyrics,
         enable_musixmatch_lyrics: value.enable_musixmatch_lyrics,
         lyrics_offset_ms: value.lyrics_offset_ms,
@@ -696,7 +694,6 @@ pub fn config_from_proto(value: &Config) -> config::AppConfig {
         artist_album_view_mode: album_view_mode_from_proto(value.artist_album_view_mode),
         artists_view_mode: album_view_mode_from_proto(value.artists_view_mode),
         artist_view_order: artist_view_order_from_proto(value.artist_view_order),
-        listen_counts: value.listen_counts.clone().into_iter().collect(),
         language: value.language.clone(),
         reduce_animations: value.reduce_animations,
         fullscreen_use_player_bar: value.fullscreen_use_player_bar,
@@ -746,7 +743,6 @@ pub fn config_from_proto(value: &Config) -> config::AppConfig {
             .iter()
             .map(registry_entry_from_proto)
             .collect(),
-        pinned_stations: value.pinned_stations.clone(),
         prefer_local_lyrics: value.prefer_local_lyrics,
         enable_musixmatch_lyrics: value.enable_musixmatch_lyrics,
         lyrics_offset_ms: value.lyrics_offset_ms,

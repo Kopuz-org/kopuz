@@ -28,12 +28,12 @@ const OUTPUT_DIR: &str = "output_dir";
 /// The settings keys behind the published rows.
 const OUTPUT_DIR_KEY: &str = "ytdlp_output_dir";
 const OPTIONS_KEY: &str = "ytdlp_options";
-const HISTORY_KEY: &str = "ytdlp_history";
 
 /// How many finished downloads the history keeps.
 const HISTORY_LIMIT: usize = 50;
 
 pub struct UrlDownloadService {
+    db: db::Db,
     config: Arc<ConfigService>,
     rescan: std::sync::OnceLock<(Arc<crate::library::LibraryService>, Arc<JobRunner>)>,
 }
@@ -379,8 +379,9 @@ async fn write_tags(
 }
 
 impl UrlDownloadService {
-    pub fn new(config: Arc<ConfigService>) -> Arc<Self> {
+    pub fn new(db: db::Db, config: Arc<ConfigService>) -> Arc<Self> {
         Arc::new(Self {
+            db,
             config,
             rescan: std::sync::OnceLock::new(),
         })
@@ -545,31 +546,31 @@ impl UrlDownloadService {
         Ok(self.settings().await)
     }
 
-    pub async fn history(&self) -> Vec<DownloadHistoryEntry> {
-        self.config
-            .snapshot()
-            .await
-            .downloader_history
-            .iter()
+    pub async fn history(&self) -> Result<Vec<DownloadHistoryEntry>, ApiError> {
+        let entries =
+            self.db.downloader_history().await.map_err(|error| {
+                ApiError::internal(format!("download history unreadable: {error}"))
+            })?;
+        Ok(entries
+            .into_iter()
             .map(|entry| DownloadHistoryEntry {
-                url: entry.url.clone(),
-                title: entry.title.clone(),
                 format: Format::from_stored(&entry.format).id().to_string(),
                 state: match entry.status.as_str() {
                     "completed" => DownloadState::Finished,
                     _ => DownloadState::Failed,
                 },
-                error: entry.error.clone(),
+                url: entry.url,
+                title: entry.title,
+                error: entry.error,
             })
-            .collect()
+            .collect())
     }
 
     pub async fn clear_history(&self) -> Result<(), ApiError> {
-        self.config.ensure_unlocked(&[HISTORY_KEY])?;
-        self.config
-            .mutate_state(&[HISTORY_KEY], |config| config.downloader_history.clear())
-            .await?;
-        Ok(())
+        self.db
+            .clear_downloader_history()
+            .await
+            .map_err(|error| ApiError::internal(format!("download history not cleared: {error}")))
     }
 
     /// Every track the link stands for, one after another. One failing does
@@ -714,8 +715,7 @@ impl UrlDownloadService {
         Ok(())
     }
 
-    /// Downloads are remembered so the page can show what happened after a
-    /// restart, which is why this is config rather than a job list.
+    /// Kept in a table rather than a job list, so the page still shows what happened after a restart.
     async fn record_history(&self, track: &reader::Track, format: Format, error: Option<String>) {
         let entry = config::DownloaderHistoryEntry {
             url: Link::video_url(&track.id.key()),
@@ -728,14 +728,7 @@ impl UrlDownloadService {
             },
             error,
         };
-        if let Err(error) = self
-            .config
-            .mutate_state(&[HISTORY_KEY], move |config| {
-                config.downloader_history.insert(0, entry);
-                config.downloader_history.truncate(HISTORY_LIMIT);
-            })
-            .await
-        {
+        if let Err(error) = self.db.push_downloader_history(&entry, HISTORY_LIMIT).await {
             tracing::warn!(%error, "the download history could not be saved");
         }
     }

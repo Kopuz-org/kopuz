@@ -188,8 +188,7 @@ async fn config_round_trips_with_creds_in_servers_table() {
 
     db.save_config(&cfg).await.unwrap();
 
-    // Play counts are written ONLY through bump_listen_count (a per-play
-    // 1-row upsert), never by save_config — but load_config hydrates them.
+    // Play counts are written only by bump_listen_count and read back by listen_counts.
     for _ in 0..7 {
         db.bump_listen_count(&Source::Server("srv-b".into()), "VID1")
             .await
@@ -209,8 +208,9 @@ async fn config_round_trips_with_creds_in_servers_table() {
     assert_eq!(active.id.as_deref(), Some("srv-b"));
     assert_eq!(active.access_token.as_deref(), Some("TOPSECRET_COOKIE"));
     assert_eq!(active.yt_browser, Some(config::Browser::Brave));
-    assert_eq!(loaded.listen_counts.get("ytmusic:VID1"), Some(&7));
-    assert_eq!(loaded.listen_counts.get("/music/a.flac"), Some(&3));
+    let counts = db.listen_counts().await.unwrap();
+    assert_eq!(counts.get("ytmusic:VID1"), Some(&7));
+    assert_eq!(counts.get("/music/a.flac"), Some(&3));
 
     // The settings file carries settings only: no creds, servers, counts or state.
     let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
@@ -275,8 +275,9 @@ async fn named_local_source_round_trips_as_active() {
     assert_eq!(loaded.local_sources[1], local);
     assert!(loaded.server.is_none());
     assert_eq!(
-        loaded
-            .listen_counts
+        db.listen_counts()
+            .await
+            .unwrap()
             .get("local:test-library|/music/work/a.flac"),
         Some(&1),
     );

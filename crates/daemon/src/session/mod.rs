@@ -86,6 +86,7 @@ pub struct PlaybackServices {
     pub queue_store: Option<Arc<dyn crate::persistence::QueueStore>>,
     pub recorder: Option<Arc<dyn PlaybackRecorder>>,
     pub scrobbler: Option<Arc<crate::scrobbler::Scrobbler>>,
+    pub offline: crate::offline::OfflineIndex,
 }
 
 impl Default for PlaybackServices {
@@ -97,6 +98,7 @@ impl Default for PlaybackServices {
             queue_store: None,
             recorder: None,
             scrobbler: None,
+            offline: crate::offline::OfflineIndex::default(),
         }
     }
 }
@@ -259,6 +261,7 @@ pub struct SessionHandle {
     config_rx: watch::Receiver<config::AppConfig>,
     events: broadcast::Sender<ApiEvent>,
     materializer: Arc<dyn QueueMaterializer>,
+    offline: crate::offline::OfflineIndex,
 }
 
 impl SessionHandle {
@@ -346,6 +349,7 @@ impl SessionHandle {
             config: services.config,
             active_source: services.active_source,
             station_registry: services.station_registry,
+            offline: services.offline.clone(),
             cmd_tx: cmd_tx.clone(),
             factory_override,
         };
@@ -357,6 +361,7 @@ impl SessionHandle {
             config_rx,
             events,
             materializer,
+            offline: services.offline,
         }
     }
 
@@ -395,6 +400,11 @@ impl SessionHandle {
     /// `set_config`. Integration tasks watch this instead of polling.
     pub fn config_watch(&self) -> watch::Receiver<config::AppConfig> {
         self.config_rx.clone()
+    }
+
+    /// The downloaded copies every wire row and offline playback reads.
+    pub fn offline(&self) -> &crate::offline::OfflineIndex {
+        &self.offline
     }
 
     async fn request<T>(
@@ -711,6 +721,7 @@ struct Session {
     config: config::AppConfig,
     active_source: Option<server::source::ActiveSource>,
     station_registry: Arc<radio::registry::StationRegistry>,
+    offline: crate::offline::OfflineIndex,
     cmd_tx: mpsc::UnboundedSender<SessionCmd>,
     factory_override: Option<FactoryOverride>,
 }
@@ -2122,7 +2133,7 @@ impl Session {
             .into_iter()
             .map(|(position, track)| QueueItem {
                 index: position as u32,
-                track: crate::wire::track_info(&track, &self.config),
+                track: crate::wire::track_info(&track, &self.offline),
             })
             .collect();
         QueueWindow {

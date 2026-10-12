@@ -270,14 +270,7 @@ async fn removing_a_server_takes_its_rows_with_it() {
     );
     assert!(db.playlist_entries(&source, "P").await.unwrap().is_empty());
     assert!(db.favorites("s1").await.unwrap().is_empty());
-    assert!(
-        db.load_config()
-            .await
-            .unwrap()
-            .unwrap()
-            .listen_counts
-            .is_empty()
-    );
+    assert!(db.listen_counts().await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -675,18 +668,19 @@ async fn offline_copies_and_pins_live_in_their_own_tables() {
         .await
         .unwrap();
 
-    let mut stale = db.load_config().await.unwrap().unwrap();
-    stale.offline_tracks.clear();
-    stale.pinned_stations.clear();
+    let stale = db.load_config().await.unwrap().unwrap();
     db.save_config(&stale).await.unwrap();
 
-    let loaded = db.load_config().await.unwrap().unwrap();
     assert_eq!(
-        loaded.offline_tracks.get("t1").map(String::as_str),
+        db.offline_tracks()
+            .await
+            .unwrap()
+            .get("t1")
+            .map(String::as_str),
         Some("/cache/t1.flac")
     );
     assert_eq!(
-        loaded.pinned_stations,
+        db.pinned_stations().await.unwrap(),
         [r#"{"id":"moe","name":"LISTEN.moe"}"#, r#"{"id":"jazz"}"#],
         "a re-pin keeps its place"
     );
@@ -696,9 +690,34 @@ async fn offline_copies_and_pins_live_in_their_own_tables() {
 
     db.set_offline_track("t1", None).await.unwrap();
     db.set_pinned_station("moe", None).await.unwrap();
-    let loaded = db.load_config().await.unwrap().unwrap();
-    assert!(loaded.offline_tracks.is_empty());
-    assert_eq!(loaded.pinned_stations, [r#"{"id":"jazz"}"#]);
+    assert!(db.offline_tracks().await.unwrap().is_empty());
+    assert_eq!(db.pinned_stations().await.unwrap(), [r#"{"id":"jazz"}"#]);
+}
+
+#[tokio::test]
+async fn downloader_history_keeps_the_newest_first_up_to_its_limit() {
+    let db = db::init(&unique_db()).await.unwrap();
+    db.save_config(&AppConfig::default()).await.unwrap();
+    let entry = |n: usize| config::DownloaderHistoryEntry {
+        url: format!("https://example.invalid/{n}"),
+        title: format!("Track {n}"),
+        format: "mp3".into(),
+        status: "completed".into(),
+        error: None,
+    };
+    for n in 0..4 {
+        db.push_downloader_history(&entry(n), 3).await.unwrap();
+    }
+    db.save_config(&db.load_config().await.unwrap().unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        db.downloader_history().await.unwrap(),
+        [entry(3), entry(2), entry(1)]
+    );
+    db.clear_downloader_history().await.unwrap();
+    assert!(db.downloader_history().await.unwrap().is_empty());
 }
 
 #[tokio::test]

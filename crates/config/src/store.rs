@@ -72,15 +72,7 @@ pub const SECRET_KEYS: &[&str] = &[
 ];
 
 /// Library data the DB keeps in its own tables.
-pub const DATA_KEYS: &[&str] = &[
-    "server",
-    "servers",
-    "server_folders",
-    "listen_counts",
-    "offline_tracks",
-    "pinned_stations",
-    "ytdlp_history",
-];
+pub const DATA_KEYS: &[&str] = &["server", "servers", "server_folders"];
 
 /// Whether a top-level `AppConfig` field is a setting, which only the settings layers hold.
 pub fn is_setting(key: &str) -> bool {
@@ -806,7 +798,6 @@ mod tests {
                 enabled: false,
                 is_default: false,
             }],
-            pinned_stations: vec!["https://example.invalid/station.json".into()],
             prefer_local_lyrics: true,
             sync_interval_minutes: 90,
             ..Default::default()
@@ -898,8 +889,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
         let mut cfg = AppConfig::default();
-        cfg.offline_tracks
-            .insert("track".into(), "/tmp/x.mp3".into());
+        cfg.server_folders
+            .insert("srv".into(), vec!["/music".into()]);
         cfg.lastfm_session_key = "secret".into();
         cfg.volume = 0.2;
         let cfg_json = serde_json::to_value(&cfg).unwrap();

@@ -642,3 +642,40 @@ async fn tracks_sort_accents_beside_their_letter() {
         .collect();
     assert_eq!(corpus, ["/a.flac", "/e.flac", "/z.flac"]);
 }
+
+/// An album or artist is downloaded when one of its tracks is, the same rows the track filter counts.
+#[tokio::test]
+async fn albums_and_artists_filter_by_a_downloaded_track() {
+    let (database, _dir, source) = library().await;
+    database
+        .set_offline_track("/b2.flac", Some("/offline/b2"))
+        .await
+        .unwrap();
+
+    let downloaded = AlbumQuery {
+        downloaded: Some(true),
+        ..albums(&source)
+    };
+    assert_eq!(titles(&database, &downloaded).await, ["beta"]);
+    assert_eq!(
+        database.albums_page(&downloaded, ALL).await.unwrap().total,
+        1
+    );
+    let rest = AlbumQuery {
+        downloaded: Some(false),
+        ..albums(&source)
+    };
+    assert_eq!(titles(&database, &rest).await.len(), 4);
+
+    let names = async |downloaded| -> Vec<String> {
+        let query = ArtistQuery {
+            downloaded: Some(downloaded),
+            ..artists(&source)
+        };
+        let listing = database.artists_page(&query, ALL).await.unwrap();
+        assert_eq!(listing.total as usize, listing.rows.len());
+        listing.rows.into_iter().map(|artist| artist.name).collect()
+    };
+    assert_eq!(names(true).await, ["Boris"]);
+    assert_eq!(names(false).await, ["Ada", "Cyd"]);
+}

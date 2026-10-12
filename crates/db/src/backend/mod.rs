@@ -387,6 +387,22 @@ impl ReadStore for Native {
     async fn frontend_prefs(&self, frontend: &str) -> Result<Vec<(String, String)>, DbError> {
         frontend_prefs::all(&self.pool(), frontend).await
     }
+
+    async fn listen_counts(&self) -> Result<std::collections::HashMap<String, u64>, DbError> {
+        cfg_store::listen_counts(&self.pool()).await
+    }
+
+    async fn offline_tracks(&self) -> Result<std::collections::HashMap<String, String>, DbError> {
+        cfg_store::offline_tracks(&self.pool()).await
+    }
+
+    async fn pinned_stations(&self) -> Result<Vec<String>, DbError> {
+        cfg_store::pinned_stations(&self.pool()).await
+    }
+
+    async fn downloader_history(&self) -> Result<Vec<config::DownloaderHistoryEntry>, DbError> {
+        cfg_store::downloader_history(&self.pool()).await
+    }
 }
 
 #[async_trait::async_trait]
@@ -602,6 +618,18 @@ impl Storage for Native {
 
     async fn set_pinned_station(&self, id: &str, manifest: Option<&str>) -> Result<(), DbError> {
         writes::set_pinned_station(&self.pool(), id, manifest).await
+    }
+
+    async fn push_downloader_history(
+        &self,
+        entry: &config::DownloaderHistoryEntry,
+        limit: usize,
+    ) -> Result<(), DbError> {
+        cfg_store::push_downloader_history(&self.pool(), entry, limit).await
+    }
+
+    async fn clear_downloader_history(&self) -> Result<(), DbError> {
+        cfg_store::clear_downloader_history(&self.pool()).await
     }
 
     async fn set_frontend_prefs(
