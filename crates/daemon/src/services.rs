@@ -613,16 +613,17 @@ pub fn apply(service: MusicService, draft: &SourceDraft, saved: &mut SavedServer
 }
 
 /// Which settings keys belong to the config rather than the server row.
-pub fn config_keys(server: &SavedServer, values: &[FieldValue]) -> Vec<&'static str> {
+pub fn config_keys(server: &SavedServer, values: &[FieldValue]) -> Vec<config::SettingKey> {
+    use config::{SettingKey, SpotifyKey};
     if server.service != MusicService::Spotify {
         return Vec::new();
     }
     let mut keys = Vec::new();
     if value_of(values, PLAYBACK_BROWSER).is_some() {
-        keys.push("spotify_browser");
+        keys.push(SettingKey::Spotify(SpotifyKey::SpotifyBrowser));
     }
     if value_of(values, PREFER_ACTIVE_DEVICE).is_some() {
-        keys.push("spotify_prefer_active_device");
+        keys.push(SettingKey::Spotify(SpotifyKey::SpotifyPreferActiveDevice));
     }
     keys
 }

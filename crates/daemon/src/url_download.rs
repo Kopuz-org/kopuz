@@ -532,12 +532,13 @@ impl UrlDownloadService {
 
     /// Answer the published options. An absent key is left alone.
     pub async fn set_settings(&self, values: Vec<FieldValue>) -> Result<Vec<FieldSpec>, ApiError> {
+        use config::{DownloadsKey, SettingKey};
         let mut keys = Vec::new();
         if value_of(&values, OUTPUT_DIR).is_some() {
-            keys.push(OUTPUT_DIR_KEY);
+            keys.push(SettingKey::Downloads(DownloadsKey::DownloaderOutputDir));
         }
         if values.iter().any(|value| value.key != OUTPUT_DIR) {
-            keys.push(OPTIONS_KEY);
+            keys.push(SettingKey::Downloads(DownloadsKey::DownloaderOptions));
         }
         self.config.ensure_unlocked(&keys)?;
         self.config

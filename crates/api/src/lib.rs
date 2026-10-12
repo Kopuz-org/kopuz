@@ -70,17 +70,38 @@ pub use sources::{
     SourceLoginRequest,
 };
 
-/// The config view: the layered settings with the daemon-owned keys defaulted, plus the keys a managed settings file pins (rendered locked in settings UIs).
+pub use config::{SettingKey, SettingsEdit};
+
+/// The layered settings, plus the keys a managed settings file pins (rendered locked in settings UIs).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ConfigView {
     pub settings: config::Settings,
-    pub locked_keys: Vec<String>,
+    pub locked: Vec<SettingKey>,
     /// Rises with every saved change, so a client can tell an older view from a newer one.
     pub revision: u64,
 }
 
+/// What became of one edit sent to [`ConfigApi::edit_config`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditOutcome {
+    Applied,
+    /// A managed settings layer pins the key.
+    Locked,
+    /// The value breaks a rule, or the daemon owns the key and sets it through another API.
+    Invalid {
+        reason: String,
+    },
+}
+
+/// One outcome per edit, in the order sent, and the settings after them all.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EditReport {
+    pub outcomes: Vec<EditOutcome>,
+    pub view: ConfigView,
+}
+
 /// What this build speaks: bump it with any wire change a mismatched peer would misread, never for an added field.
-pub const WIRE_REVISION: u32 = 2;
+pub const WIRE_REVISION: u32 = 3;
 
 /// What a daemon says it is, for a frontend that was not built beside it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -549,16 +570,19 @@ pub trait SourceApi: Send + Sync {
 pub trait ConfigApi: Send + Sync {
     async fn config(&self) -> Result<ConfigView, ApiError>;
 
-    /// Replace the settings surface. Read [`Self::config`], change what you
-    /// want, send it back. Credential fields are ignored (the daemon keeps
-    /// its own), and a locked key whose value actually differs is refused
-    /// with `invalid_input`.
-    async fn set_config(&self, settings: config::Settings) -> Result<ConfigView, ApiError>;
+    /// Apply each edit in order and answer each on its own; a refused edit never refuses the rest, and a key no edit names is left as held.
+    async fn edit_config(&self, edits: Vec<SettingsEdit>) -> Result<EditReport, ApiError>;
 
     /// Hear an equalizer setting without keeping it. The engine applies it
     /// live; nothing is written, so cancelling a preview is doing nothing.
     async fn preview_equalizer(&self, equalizer: config::EqualizerSettings)
     -> Result<(), ApiError>;
+
+    /// Hear a ReplayGain setting without keeping it, as [`Self::preview_equalizer`] does.
+    async fn preview_replay_gain(
+        &self,
+        replay_gain: config::ReplayGainSettings,
+    ) -> Result<(), ApiError>;
 
     /// What this daemon is, including the wire contract it speaks.
     async fn daemon_status(&self) -> Result<DaemonStatus, ApiError>;
@@ -662,10 +686,13 @@ mod handshake_tests {
         async fn config(&self) -> Result<ConfigView, ApiError> {
             unreachable!()
         }
-        async fn set_config(&self, _: config::Settings) -> Result<ConfigView, ApiError> {
+        async fn edit_config(&self, _: Vec<SettingsEdit>) -> Result<EditReport, ApiError> {
             unreachable!()
         }
         async fn preview_equalizer(&self, _: config::EqualizerSettings) -> Result<(), ApiError> {
+            unreachable!()
+        }
+        async fn preview_replay_gain(&self, _: config::ReplayGainSettings) -> Result<(), ApiError> {
             unreachable!()
         }
         async fn daemon_status(&self) -> Result<DaemonStatus, ApiError> {

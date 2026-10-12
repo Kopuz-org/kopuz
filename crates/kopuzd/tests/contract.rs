@@ -780,9 +780,12 @@ async fn a_job_says_whether_the_daemons_schedule_started_it_on_every_transport()
     }
 }
 
+const SYNC_INTERVAL: config::SettingKey =
+    config::SettingKey::Library(config::LibraryKey::SyncIntervalMinutes);
+
 async fn activate_jellyfin(pair: &Pair, minutes: u32) {
     pair.config_service
-        .mutate_state(&["sync_interval_minutes"], move |config| {
+        .mutate_state(&[SYNC_INTERVAL], move |config| {
             config.library.sync_interval_minutes = minutes;
         })
         .await
@@ -844,9 +847,14 @@ async fn a_zero_sync_interval_starts_no_syncs() {
     assert!(pair.local.jobs().await.expect("jobs").is_empty());
 
     // Raising it from 0 is a change the running schedule must notice.
-    let mut raised = pair.local.config().await.expect("view").settings;
-    raised.library.sync_interval_minutes = 60;
-    pair.local.set_config(raised).await.expect("interval set");
+    let report = pair
+        .local
+        .edit_config(vec![config::SettingsEdit::Library(
+            config::LibraryEdit::SyncIntervalMinutes(60),
+        )])
+        .await
+        .expect("interval set");
+    assert_eq!(report.outcomes, vec![api::EditOutcome::Applied]);
     assert!(
         wait_job(&pair.wire, api::JobKind::LibrarySync)
             .await
@@ -860,11 +868,17 @@ async fn the_daemons_own_folder_scan_is_automatic_and_a_users_is_not() {
     let pair = spawn_pair().await;
     let music = tempfile::tempdir().expect("tempdir");
     pair.config_service
-        .mutate_state(&["local_sources"], |config| {
-            config.library.local_sources = vec![config::SavedLocalSource::default_library(vec![
-                music.path().to_path_buf(),
-            ])];
-        })
+        .mutate_state(
+            &[config::SettingKey::Library(
+                config::LibraryKey::LocalSources,
+            )],
+            |config| {
+                config.library.local_sources =
+                    vec![config::SavedLocalSource::default_library(vec![
+                        music.path().to_path_buf(),
+                    ])];
+            },
+        )
         .await
         .expect("config saved");
     daemon::folder_scan::spawn(
@@ -1112,8 +1126,9 @@ async fn the_active_sources_status_is_the_daemons_probe() {
     assert_eq!(wire, local, "the wire reports what the daemon holds");
 }
 
+/// Every edit variant crosses the wire, so the same batch earns the same outcomes and leaves the same view on either transport.
 #[tokio::test]
-async fn config_view_and_set_agree_across_transports() {
+async fn config_view_and_edits_agree_across_transports() {
     let pair = spawn_pair().await;
 
     let local_view = pair.local.config().await.expect("local view");
@@ -1122,20 +1137,112 @@ async fn config_view_and_set_agree_across_transports() {
     // these to be equal, so this is the guard on every field mapping.
     assert_eq!(local_view, wire_view);
 
-    let mut next = wire_view.settings.clone();
-    next.playback.crossfade_seconds = 7;
-    next.ui.theme = "nord".to_string();
-    next.library.offline_quality = config::OfflineQuality::Kbps160;
-    let written = pair.wire.set_config(next).await.expect("set over the wire");
-    assert_eq!(written.settings.playback.crossfade_seconds, 7);
+    let edits = config::edit_samples();
+    let wire = pair
+        .wire
+        .edit_config(edits.clone())
+        .await
+        .expect("wire edit");
+    let local = pair
+        .local
+        .edit_config(edits.clone())
+        .await
+        .expect("local edit");
+    assert_eq!(wire.outcomes.len(), edits.len());
+    assert_eq!(local.outcomes, wire.outcomes);
+    for (edit, outcome) in edits.iter().zip(&wire.outcomes) {
+        let owned = config::SettingKey::of(edit).daemon_owned();
+        assert_eq!(
+            matches!(outcome, api::EditOutcome::Invalid { .. }),
+            owned,
+            "{edit:?}: {outcome:?}"
+        );
+    }
+    assert_eq!(
+        local.view, wire.view,
+        "a no-op repeat leaves the view as is"
+    );
+    assert_eq!(pair.wire.config().await.expect("wire view"), local.view);
+    assert_eq!(pair.tcp.config().await.expect("tcp view"), local.view);
+}
+
+#[tokio::test]
+async fn edit_config_touches_only_named_keys_across_transports() {
+    let pair = spawn_pair().await;
+    let mut events = pair.session.subscribe();
+    let stale = pair.wire.config().await.expect("wire view");
+
+    let other = pair
+        .local
+        .edit_config(vec![config::SettingsEdit::Playback(
+            config::PlaybackEdit::CrossfadeSeconds(7),
+        )])
+        .await
+        .expect("local edit");
+    assert_eq!(other.view.settings.playback.crossfade_seconds, 7);
+    assert!(other.view.revision > stale.revision);
+
+    // The wire client never saw the crossfade change; its edits must not undo it.
+    let written = pair
+        .wire
+        .edit_config(vec![
+            config::SettingsEdit::Ui(config::UiEdit::Theme("nord".into())),
+            config::SettingsEdit::Library(config::LibraryEdit::OfflineQuality(
+                config::OfflineQuality::Kbps160,
+            )),
+        ])
+        .await
+        .expect("wire edit")
+        .view;
     assert_eq!(written.settings.ui.theme, "nord");
+    assert_eq!(written.settings.playback.crossfade_seconds, 7);
     assert_eq!(
         written.settings.library.offline_quality,
         config::OfflineQuality::Kbps160
     );
+    assert_eq!(
+        written.revision,
+        other.view.revision + 1,
+        "one batch, one save"
+    );
+    assert_eq!(pair.local.config().await.expect("local view"), written);
+    assert_eq!(pair.tcp.config().await.expect("tcp view"), written);
 
-    let local_view = pair.local.config().await.expect("local view after set");
-    assert_eq!(local_view.settings, written.settings);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Ok(ApiEvent::ConfigChanged { revision }) = events.recv().await
+                && revision == written.revision
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("config-changed event carries the view revision");
+
+    let refused = vec![
+        config::SettingsEdit::Playback(config::PlaybackEdit::CrossfadeSeconds(13)),
+        config::SettingsEdit::Lyrics(config::LyricsEdit::LyricsDepthBlurStrength(5)),
+        config::SettingsEdit::Spotify(config::SpotifyEdit::SpotifyBrowser(Some("x".into()))),
+        config::SettingsEdit::Downloads(config::DownloadsEdit::DownloaderOutputDir("/x".into())),
+    ];
+    let local = pair
+        .local
+        .edit_config(refused.clone())
+        .await
+        .expect("local answers");
+    let wire = pair.wire.edit_config(refused).await.expect("wire answers");
+    assert_eq!(local.outcomes, wire.outcomes);
+    assert!(
+        local
+            .outcomes
+            .iter()
+            .all(|outcome| matches!(outcome, api::EditOutcome::Invalid { .. })),
+        "{:?}",
+        local.outcomes
+    );
+    assert_eq!(local.view, written, "refused edits change nothing");
+    assert_eq!(wire.view, written);
 }
 
 fn pref(key: &str, value: Option<&str>) -> api::PrefEntry {
@@ -1328,18 +1435,32 @@ async fn frontend_prefs_refuse_bad_input_identically_and_store_nothing() {
 async fn playback_settings_and_their_capabilities_agree_across_transports() {
     let pair = spawn_pair().await;
 
-    let mut next = pair.wire.config().await.expect("wire view").settings;
-    assert_eq!(next.playback.stream_quality, config::StreamQuality::High);
+    let before = pair.wire.config().await.expect("wire view").settings;
+    assert_eq!(before.playback.stream_quality, config::StreamQuality::High);
     assert!(
-        !next.playback.autoplay_radio
-            && !next.playback.skip_explicit
-            && !next.playback.pause_watch_history
+        !before.playback.autoplay_radio
+            && !before.playback.skip_explicit
+            && !before.playback.pause_watch_history
     );
-    next.playback.stream_quality = config::StreamQuality::Low;
-    next.playback.autoplay_radio = true;
-    next.playback.skip_explicit = true;
-    next.playback.pause_watch_history = true;
-    let written = pair.wire.set_config(next).await.expect("set over the wire");
+    let report = pair
+        .wire
+        .edit_config(vec![
+            config::SettingsEdit::Playback(config::PlaybackEdit::StreamQuality(
+                config::StreamQuality::Low,
+            )),
+            config::SettingsEdit::Playback(config::PlaybackEdit::AutoplayRadio(true)),
+            config::SettingsEdit::Playback(config::PlaybackEdit::SkipExplicit(true)),
+            config::SettingsEdit::Playback(config::PlaybackEdit::PauseWatchHistory(true)),
+        ])
+        .await
+        .expect("edit over the wire");
+    assert!(
+        report
+            .outcomes
+            .iter()
+            .all(|outcome| *outcome == api::EditOutcome::Applied)
+    );
+    let written = report.view;
     assert_eq!(
         written.settings.playback.stream_quality,
         config::StreamQuality::Low

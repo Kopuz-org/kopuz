@@ -354,6 +354,16 @@ impl PlayerController {
         });
     }
 
+    /// Apply a ReplayGain preview to the engine, as [`Self::preview_equalizer`] does.
+    pub fn preview_replay_gain(&self, replay_gain: config::ReplayGainSettings) {
+        let handle = self.handle();
+        spawn(async move {
+            if let Err(error) = handle.preview_replay_gain(replay_gain).await {
+                tracing::warn!(%error, "replay gain preview failed");
+            }
+        });
+    }
+
     pub fn set_shuffle(&mut self, on: bool) {
         if *self.shuffle.peek() != on {
             self.toggle_shuffle();

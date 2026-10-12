@@ -1,19 +1,18 @@
-//! What the app has to write on exit, stashed for the SIGINT path, which runs on the ctrlc thread where no signal can be read.
+//! What the app has not sent yet, stashed for the SIGINT path, which runs on the ctrlc thread where no signal can be read.
 
 use std::sync::Mutex;
 use std::time::Duration;
 
-static STASHED: Mutex<Option<config::Settings>> = Mutex::new(None);
+static STASHED: Mutex<Option<Vec<config::SettingsEdit>>> = Mutex::new(None);
 static STASHED_PREFS: Mutex<Option<Vec<api::PrefEntry>>> = Mutex::new(None);
 
 /// How long an exiting process waits for each write; a window that will not close is worse than a lost last-moment change.
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// Stash an eligibility-checked config snapshot (guards: `initial_load_done
-/// && config_loaded_ok`).
-pub fn stash_config(config: config::Settings) {
+/// Stash the settings edits the daemon has not answered, so an exit write sends only what this app changed.
+pub fn stash_config(edits: Vec<config::SettingsEdit>) {
     if let Ok(mut stashed) = STASHED.lock() {
-        *stashed = Some(config);
+        *stashed = Some(edits);
     }
 }
 
@@ -24,13 +23,14 @@ pub fn stash_prefs(entries: Vec<api::PrefEntry>) {
     }
 }
 
-/// Persist the config and unsent preferences on a fresh thread: `block_on` panics inside dioxus's tokio context.
+/// Persist unsent edits on a fresh thread: `block_on` panics inside dioxus's tokio context.
 pub fn persist_on_fresh_thread(
-    config: Option<config::Settings>,
+    edits: Option<Vec<config::SettingsEdit>>,
     prefs: Option<Vec<api::PrefEntry>>,
 ) {
+    let edits = edits.filter(|edits| !edits.is_empty());
     let prefs = prefs.filter(|prefs| !prefs.is_empty());
-    if config.is_none() && prefs.is_none() {
+    if edits.is_none() && prefs.is_none() {
         return;
     }
     let api = crate::backend::api();
@@ -42,12 +42,21 @@ pub fn persist_on_fresh_thread(
             return;
         };
         runtime.block_on(async move {
-            if let Some(config) = config {
-                let write = tokio::time::timeout(FLUSH_TIMEOUT, api.set_config(config));
+            if let Some(edits) = edits {
+                let write = tokio::time::timeout(FLUSH_TIMEOUT, api.edit_config(edits));
                 match write.await {
                     Ok(Err(error)) => tracing::warn!(%error, "config flush on exit failed"),
                     Err(_) => tracing::warn!("config flush on exit timed out"),
-                    Ok(Ok(_)) => {}
+                    Ok(Ok(report)) => {
+                        let refused = report
+                            .outcomes
+                            .iter()
+                            .filter(|outcome| **outcome != api::EditOutcome::Applied)
+                            .count();
+                        if refused > 0 {
+                            tracing::warn!(refused, "settings refused on exit");
+                        }
+                    }
                 }
             }
             if let Some(prefs) = prefs {
@@ -69,7 +78,7 @@ pub fn persist_on_fresh_thread(
 /// no-op before the startup loads complete, so an early Ctrl+C cannot wipe
 /// saved state.
 pub fn flush_stashed_blocking() {
-    let config = match STASHED.lock() {
+    let edits = match STASHED.lock() {
         Ok(stashed) => stashed.clone(),
         Err(_) => return,
     };
@@ -78,7 +87,7 @@ pub fn flush_stashed_blocking() {
         Err(_) => None,
     };
     if crate::backend::core().is_some() {
-        persist_on_fresh_thread(config, prefs);
+        persist_on_fresh_thread(edits, prefs);
     }
     crate::backend::shutdown();
 }
