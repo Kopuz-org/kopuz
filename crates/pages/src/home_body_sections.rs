@@ -28,7 +28,6 @@ pub(super) fn render_server_section(
     match key {
         "hero" => rsx! {
             ServerHeroBanner {
-                config,
                 edit,
                 is_vaxry,
                 hero_entry,
@@ -108,13 +107,13 @@ pub(super) fn render_server_section(
 
 #[component]
 fn ServerHeroBanner(
-    mut config: Signal<AppConfig>,
     edit: bool,
     is_vaxry: bool,
     hero_entry: Option<(Track, Option<Album>, Option<String>)>,
     hero_cover: Option<String>,
     on_play_album: EventHandler<String>,
 ) -> Element {
+    let mut prefs = hooks::ui_prefs::use_ui_prefs();
     let mut is_resizing = use_signal(|| false);
     let mut hero_menu_open = use_signal(|| false);
     let mut start_y = use_signal(|| 0.0_f64);
@@ -158,7 +157,7 @@ fn ServerHeroBanner(
                     if let Some(y) = val.as_f64() {
                         let delta = y - sy;
                         let new_h = ((sh as f64) + delta).clamp(140.0, 800.0) as u32;
-                        config.write().hero_height = new_h;
+                        prefs.write().hero_height = new_h;
                     } else if val.as_str() == Some("stop") {
                         is_resizing.set(false);
                         break;
@@ -172,7 +171,7 @@ fn ServerHeroBanner(
         return rsx! {};
     }
 
-    let hero_height = config.read().hero_height;
+    let hero_height = prefs.read().hero_height;
     let section_class = if is_vaxry {
         "relative rounded-xl overflow-hidden mb-10"
     } else {
@@ -318,7 +317,7 @@ fn ServerHeroBanner(
                     onmousedown: move |evt| {
                         evt.stop_propagation();
                         start_y.set(evt.client_coordinates().y);
-                        start_h.set(config.peek().hero_height);
+                        start_h.set(prefs.peek().hero_height);
                         is_resizing.set(true);
                     },
                     div { class: "w-10 h-1 rounded-full bg-white/60" }

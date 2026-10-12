@@ -252,10 +252,10 @@ mod tests {
         assert!(view.locked_keys.is_empty());
 
         let mut next = view.config.clone();
-        next.hero_height = 320;
+        next.cover_art_darkening = 32;
         next.crossfade_seconds = 4;
         let (view, updated, changed) = service.set(next).await.expect("set");
-        assert_eq!(view.config.hero_height, 320);
+        assert_eq!(view.config.cover_art_darkening, 32);
         assert_eq!(updated.crossfade_seconds, 4);
         assert_eq!(changed.len(), 2, "only the two edited keys are reported");
 

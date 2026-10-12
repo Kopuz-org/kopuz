@@ -1520,11 +1520,6 @@ message SavedFolderSource {
   repeated string directories = 3;
 }
 
-message HomeSection {
-  string key = 1;
-  bool enabled = 2;
-}
-
 message RegistryEntry {
   string url = 1;
   bool enabled = 2;
@@ -1553,45 +1548,20 @@ message ReplayGainSettings {
   optional bool normalize_loudness = 5;
 }
 
-message AlbumSortCriterion {
-  AlbumSortField field = 1;
-  SortDirection direction = 2;
-}
-
-message TrackSortCriterion {
-  TrackSortField field = 1;
-  SortDirection direction = 2;
-}
-
-message ArtistSortCriterion {
-  ArtistSortField field = 1;
-  SortDirection direction = 2;
-}
-
 // The settings surface, mirroring config::AppConfig minus the keys the
 // daemon never sends: credentials and machine-local path state.
 message Config {
   repeated SavedFolderSource folder_sources = 69;
-  bool source_explicitly_set = 3;
+  reserved 3, 14 to 22, 27, 38, 56 to 58; // were the UI state each frontend now keeps in its own prefs
   // 5-7, 11-13, 48-50 were the settings the daemon publishes as field lists, and the retired music_directory.
   reserved 1, 5, 6, 7, 11, 12, 13, 48, 49, 50;
   reserved 23, 62; // were listen_counts and pinned_stations, now read from their own tables
   reserved 2, 4, 10; // were active_source, server_folders and device_id, which SourceApi owns
   string theme = 8;
   string live_theme_path = 9;
-  SortOrder sort_order = 14;
-  repeated AlbumSortCriterion album_sort = 15;
-  repeated TrackSortCriterion library_sort = 16;
-  repeated AlbumSortCriterion artist_album_sort = 17;
-  repeated ArtistSortCriterion artist_sort = 18;
-  AlbumViewMode album_view_mode = 19;
-  AlbumViewMode artist_album_view_mode = 20;
-  AlbumViewMode artists_view_mode = 21;
-  ArtistViewOrder artist_view_order = 22;
   string language = 24;
   bool reduce_animations = 25;
   bool fullscreen_use_player_bar = 26;
-  bool fullscreen_tabs_collapsed = 27;
   bool cover_art_background = 28;
   uint32 cover_art_darkening = 29;
   uint32 cover_art_blur = 30;
@@ -1602,7 +1572,6 @@ message Config {
   bool minimize_to_tray = 35;
   bool show_source_toggle = 36;
   bool show_row_images = 37;
-  repeated string sidebar_order = 38;
   reserved 39; // was volume, which PlayerState carries
   float volume_scroll_step = 40;
   uint32 crossfade_seconds = 41;
@@ -1617,9 +1586,6 @@ message Config {
   PlayerBarPosition player_bar_position = 53;
   UiStyle ui_style = 54;
   SettingsLayout settings_layout = 55;
-  uint32 hero_height = 56;
-  repeated HomeSection home_sections = 57;
-  ListenNowStyle listen_now_style = 58;
   bool auto_fetch_covers = 59;
   FetchStrategy cover_fetch_strategy = 60;
   repeated RegistryEntry radio_registries = 61;
@@ -1633,18 +1599,6 @@ message Config {
   reserved 71; // was muted, which PlayerState carries
   // Absent from a peer that predates it, which must not read as 0 (never).
   optional uint32 sync_interval_minutes = 78;
-}
-
-enum AlbumViewMode {
-  ALBUM_VIEW_MODE_UNSPECIFIED = 0;
-  ALBUM_VIEW_MODE_GRID = 1;
-  ALBUM_VIEW_MODE_LIST = 2;
-}
-
-enum ArtistViewOrder {
-  ARTIST_VIEW_ORDER_UNSPECIFIED = 0;
-  ARTIST_VIEW_ORDER_TRACKS = 1;
-  ARTIST_VIEW_ORDER_ALBUMS = 2;
 }
 
 enum BackBehavior {
@@ -1676,12 +1630,6 @@ enum FetchStrategy {
   FETCH_STRATEGY_LAST_FM_ONLY = 4;
 }
 
-enum ListenNowStyle {
-  LISTEN_NOW_STYLE_UNSPECIFIED = 0;
-  LISTEN_NOW_STYLE_LIST = 1;
-  LISTEN_NOW_STYLE_CARDS = 2;
-}
-
 enum OfflineQuality {
   OFFLINE_QUALITY_UNSPECIFIED = 0;
   OFFLINE_QUALITY_KBPS128 = 1;
@@ -1708,13 +1656,6 @@ enum SettingsLayout {
   SETTINGS_LAYOUT_UNSPECIFIED = 0;
   SETTINGS_LAYOUT_CD = 1;
   SETTINGS_LAYOUT_TOP_BAR = 2;
-}
-
-enum SortOrder {
-  SORT_ORDER_UNSPECIFIED = 0;
-  SORT_ORDER_TITLE = 1;
-  SORT_ORDER_ARTIST = 2;
-  SORT_ORDER_ALBUM = 3;
 }
 
 enum TitlebarMode {
@@ -1749,22 +1690,6 @@ enum ReplayGainMode {
   REPLAY_GAIN_MODE_AUTO = 4;
 }
 
-enum SortDirection {
-  SORT_DIRECTION_UNSPECIFIED = 0;
-  SORT_DIRECTION_ASC = 1;
-  SORT_DIRECTION_DESC = 2;
-}
-
-enum AlbumSortField {
-  ALBUM_SORT_FIELD_UNSPECIFIED = 0;
-  ALBUM_SORT_FIELD_TITLE = 1;
-  ALBUM_SORT_FIELD_ARTIST = 2;
-  ALBUM_SORT_FIELD_YEAR = 3;
-  ALBUM_SORT_FIELD_GENRE = 4;
-  ALBUM_SORT_FIELD_RECENTLY_ADDED = 5;
-  ALBUM_SORT_FIELD_TRACK_COUNT = 6;
-}
-
 enum TrackSortField {
   TRACK_SORT_FIELD_UNSPECIFIED = 0;
   TRACK_SORT_FIELD_TITLE = 1;
@@ -1772,13 +1697,6 @@ enum TrackSortField {
   TRACK_SORT_FIELD_ALBUM = 3;
   TRACK_SORT_FIELD_DURATION = 4;
   TRACK_SORT_FIELD_DATE_ADDED = 5;
-}
-
-enum ArtistSortField {
-  ARTIST_SORT_FIELD_UNSPECIFIED = 0;
-  ARTIST_SORT_FIELD_NAME = 1;
-  ARTIST_SORT_FIELD_TRACKS = 2;
-  ARTIST_SORT_FIELD_ALBUMS = 3;
 }
 
 enum AlbumOrderField {

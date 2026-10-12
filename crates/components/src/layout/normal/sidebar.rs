@@ -133,7 +133,8 @@ const BOTTOM_MENU: &[SidebarItem] = &[SidebarItem {
 
 #[component]
 pub fn SidebarNormal(props: SidebarProps) -> Element {
-    let mut config = use_context::<Signal<config::AppConfig>>();
+    let config = use_context::<Signal<config::AppConfig>>();
+    let mut prefs = hooks::ui_prefs::use_ui_prefs();
     let mut width = use_signal(|| 240);
     let mut is_collapsed = use_signal(|| false);
     let mut is_resizing = use_signal(|| false);
@@ -189,7 +190,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
     let caps = hooks::sources::use_capabilities();
     let has_discover = use_memo(move || caps().discover);
     let ordered_items: Vec<SidebarItem> = {
-        let order = config.read().sidebar_order.clone();
+        let order = prefs.read().sidebar_order.clone();
         let mut items: Vec<SidebarItem> = order
             .iter()
             .filter_map(|key| TOP_MENU.iter().find(|item| item.key == key).cloned())
@@ -205,7 +206,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
     };
 
     let _item_count = ordered_items.len();
-    let order_len = config.read().sidebar_order.len();
+    let order_len = prefs.read().sidebar_order.len();
 
     let root_class = if is_android {
         "h-full bg-(--surface-chrome)/97 text-slate-400 flex flex-col flex-shrink-0 select-none relative border-r border-white/10 overflow-hidden transition-all duration-300 ease-out".to_string()
@@ -305,17 +306,17 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                                 if is_android { mobile_collapsed.set(true); }
                             },
                             on_move_up: move |_| {
-                                let mut order = config.peek().sidebar_order.clone();
+                                let mut order = prefs.peek().sidebar_order.clone();
                                 if idx > 0 {
                                     order.swap(idx, idx - 1);
-                                    config.write().sidebar_order = order;
+                                    prefs.write().sidebar_order = order;
                                 }
                             },
                             on_move_down: move |_| {
-                                let mut order = config.peek().sidebar_order.clone();
+                                let mut order = prefs.peek().sidebar_order.clone();
                                 if idx + 1 < order.len() {
                                     order.swap(idx, idx + 1);
-                                    config.write().sidebar_order = order;
+                                    prefs.write().sidebar_order = order;
                                 }
                             },
                         }

@@ -41,6 +41,7 @@ pub async fn apply_source_switch(config: Signal<AppConfig>, id: String) -> bool 
     match api.switch_source(id).await {
         Ok(info) => {
             crate::sources::show_active(&info);
+            crate::ui_prefs::mark_source_chosen();
             let usable = info.authenticated;
             // Read back now rather than on the event, so a caller sees the switched config on return.
             if let (Some(baseline), Ok(view)) = (baseline, api.config().await) {

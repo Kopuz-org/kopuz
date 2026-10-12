@@ -52,27 +52,28 @@ pub fn Artist(
     let artist_tracks_res = use_artist_tracks(source, open_artist);
     let artist_res = use_artist(source, open_artist);
 
-    let sort_order = use_signal(move || config.read().artist_view_order.clone());
+    let mut prefs = hooks::ui_prefs::use_ui_prefs();
+    let sort_order = use_signal(move || prefs.peek().artist_view_order.clone());
     use_effect(move || {
         let curr = sort_order.read().clone();
-        if config.peek().artist_view_order != curr {
-            config.write().artist_view_order = curr;
+        if prefs.peek().artist_view_order != curr {
+            prefs.write().artist_view_order = curr;
         }
     });
 
-    let album_sort = use_signal(|| config.peek().artist_album_sort.clone());
+    let album_sort = use_signal(|| prefs.peek().artist_album_sort.clone());
     use_effect(move || {
         let curr = album_sort.read().clone();
-        if config.peek().artist_album_sort != curr {
-            config.write().artist_album_sort = curr;
+        if prefs.peek().artist_album_sort != curr {
+            prefs.write().artist_album_sort = curr;
         }
     });
 
-    let artist_sort = use_signal(|| config.peek().artist_sort.clone());
+    let artist_sort = use_signal(|| prefs.peek().artist_sort.clone());
     use_effect(move || {
         let curr = artist_sort.read().clone();
-        if config.peek().artist_sort != curr {
-            config.write().artist_sort = curr;
+        if prefs.peek().artist_sort != curr {
+            prefs.write().artist_sort = curr;
         }
     });
 
@@ -104,19 +105,19 @@ pub fn Artist(
     });
     let artist_albums_res = use_albums(source, artist_albums_query);
 
-    let album_view_mode = use_signal(|| config.peek().artist_album_view_mode);
+    let album_view_mode = use_signal(|| prefs.peek().artist_album_view_mode);
     use_effect(move || {
         let curr = *album_view_mode.read();
-        if config.peek().artist_album_view_mode != curr {
-            config.write().artist_album_view_mode = curr;
+        if prefs.peek().artist_album_view_mode != curr {
+            prefs.write().artist_album_view_mode = curr;
         }
     });
 
-    let artists_view_mode = use_signal(|| config.peek().artists_view_mode);
+    let artists_view_mode = use_signal(|| prefs.peek().artists_view_mode);
     use_effect(move || {
         let curr = *artists_view_mode.read();
-        if config.peek().artists_view_mode != curr {
-            config.write().artists_view_mode = curr;
+        if prefs.peek().artists_view_mode != curr {
+            prefs.write().artists_view_mode = curr;
         }
     });
 

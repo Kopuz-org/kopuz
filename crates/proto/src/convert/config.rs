@@ -8,36 +8,6 @@
 
 use crate::*;
 
-pub fn album_view_mode_to_proto(value: config::AlbumViewMode) -> AlbumViewMode {
-    match value {
-        config::AlbumViewMode::Grid => AlbumViewMode::Grid,
-        config::AlbumViewMode::List => AlbumViewMode::List,
-    }
-}
-
-pub fn album_view_mode_from_proto(value: i32) -> config::AlbumViewMode {
-    match AlbumViewMode::try_from(value).unwrap_or(AlbumViewMode::Unspecified) {
-        AlbumViewMode::Grid => config::AlbumViewMode::Grid,
-        AlbumViewMode::List => config::AlbumViewMode::List,
-        AlbumViewMode::Unspecified => config::AlbumViewMode::default(),
-    }
-}
-
-pub fn artist_view_order_to_proto(value: &config::ArtistViewOrder) -> ArtistViewOrder {
-    match value {
-        config::ArtistViewOrder::Tracks => ArtistViewOrder::Tracks,
-        config::ArtistViewOrder::Albums => ArtistViewOrder::Albums,
-    }
-}
-
-pub fn artist_view_order_from_proto(value: i32) -> config::ArtistViewOrder {
-    match ArtistViewOrder::try_from(value).unwrap_or(ArtistViewOrder::Unspecified) {
-        ArtistViewOrder::Tracks => config::ArtistViewOrder::Tracks,
-        ArtistViewOrder::Albums => config::ArtistViewOrder::Albums,
-        ArtistViewOrder::Unspecified => config::ArtistViewOrder::Tracks,
-    }
-}
-
 pub fn back_behavior_to_proto(value: config::BackBehavior) -> BackBehavior {
     match value {
         config::BackBehavior::RewindThenPrev => BackBehavior::RewindThenPrev,
@@ -110,21 +80,6 @@ pub fn fetch_strategy_from_proto(value: i32) -> config::FetchStrategy {
     }
 }
 
-pub fn listen_now_style_to_proto(value: config::ListenNowStyle) -> ListenNowStyle {
-    match value {
-        config::ListenNowStyle::List => ListenNowStyle::List,
-        config::ListenNowStyle::Cards => ListenNowStyle::Cards,
-    }
-}
-
-pub fn listen_now_style_from_proto(value: i32) -> config::ListenNowStyle {
-    match ListenNowStyle::try_from(value).unwrap_or(ListenNowStyle::Unspecified) {
-        ListenNowStyle::List => config::ListenNowStyle::List,
-        ListenNowStyle::Cards => config::ListenNowStyle::Cards,
-        ListenNowStyle::Unspecified => config::ListenNowStyle::default(),
-    }
-}
-
 pub fn offline_quality_to_proto(value: config::OfflineQuality) -> OfflineQuality {
     match value {
         config::OfflineQuality::Kbps128 => OfflineQuality::Kbps128,
@@ -193,23 +148,6 @@ pub fn settings_layout_from_proto(value: i32) -> config::SettingsLayout {
     }
 }
 
-pub fn sort_order_to_proto(value: &config::SortOrder) -> SortOrder {
-    match value {
-        config::SortOrder::Title => SortOrder::Title,
-        config::SortOrder::Artist => SortOrder::Artist,
-        config::SortOrder::Album => SortOrder::Album,
-    }
-}
-
-pub fn sort_order_from_proto(value: i32) -> config::SortOrder {
-    match SortOrder::try_from(value).unwrap_or(SortOrder::Unspecified) {
-        SortOrder::Title => config::SortOrder::Title,
-        SortOrder::Artist => config::SortOrder::Artist,
-        SortOrder::Album => config::SortOrder::Album,
-        SortOrder::Unspecified => config::SortOrder::Title,
-    }
-}
-
 pub fn titlebar_mode_to_proto(value: config::TitlebarMode) -> TitlebarMode {
     match value {
         config::TitlebarMode::Custom => TitlebarMode::Custom,
@@ -267,44 +205,6 @@ pub fn eq_preset_from_proto(value: i32) -> config::EqPreset {
     }
 }
 
-pub fn sort_direction_to_proto(value: config::SortDirection) -> SortDirection {
-    match value {
-        config::SortDirection::Asc => SortDirection::Asc,
-        config::SortDirection::Desc => SortDirection::Desc,
-    }
-}
-
-pub fn sort_direction_from_proto(value: i32) -> config::SortDirection {
-    match SortDirection::try_from(value).unwrap_or(SortDirection::Unspecified) {
-        SortDirection::Asc => config::SortDirection::Asc,
-        SortDirection::Desc => config::SortDirection::Desc,
-        SortDirection::Unspecified => config::SortDirection::default(),
-    }
-}
-
-pub fn album_sort_field_to_proto(value: config::AlbumSortField) -> AlbumSortField {
-    match value {
-        config::AlbumSortField::Title => AlbumSortField::Title,
-        config::AlbumSortField::Artist => AlbumSortField::Artist,
-        config::AlbumSortField::Year => AlbumSortField::Year,
-        config::AlbumSortField::Genre => AlbumSortField::Genre,
-        config::AlbumSortField::RecentlyAdded => AlbumSortField::RecentlyAdded,
-        config::AlbumSortField::TrackCount => AlbumSortField::TrackCount,
-    }
-}
-
-pub fn album_sort_field_from_proto(value: i32) -> config::AlbumSortField {
-    match AlbumSortField::try_from(value).unwrap_or(AlbumSortField::Unspecified) {
-        AlbumSortField::Title => config::AlbumSortField::Title,
-        AlbumSortField::Artist => config::AlbumSortField::Artist,
-        AlbumSortField::Year => config::AlbumSortField::Year,
-        AlbumSortField::Genre => config::AlbumSortField::Genre,
-        AlbumSortField::RecentlyAdded => config::AlbumSortField::RecentlyAdded,
-        AlbumSortField::TrackCount => config::AlbumSortField::TrackCount,
-        AlbumSortField::Unspecified => config::AlbumSortField::Title,
-    }
-}
-
 pub fn track_sort_field_to_proto(value: config::TrackSortField) -> TrackSortField {
     match value {
         config::TrackSortField::Title => TrackSortField::Title,
@@ -323,23 +223,6 @@ pub fn track_sort_field_from_proto(value: i32) -> config::TrackSortField {
         TrackSortField::Duration => config::TrackSortField::Duration,
         TrackSortField::DateAdded => config::TrackSortField::DateAdded,
         TrackSortField::Unspecified => config::TrackSortField::Title,
-    }
-}
-
-pub fn artist_sort_field_to_proto(value: config::ArtistSortField) -> ArtistSortField {
-    match value {
-        config::ArtistSortField::Name => ArtistSortField::Name,
-        config::ArtistSortField::Tracks => ArtistSortField::Tracks,
-        config::ArtistSortField::Albums => ArtistSortField::Albums,
-    }
-}
-
-pub fn artist_sort_field_from_proto(value: i32) -> config::ArtistSortField {
-    match ArtistSortField::try_from(value).unwrap_or(ArtistSortField::Unspecified) {
-        ArtistSortField::Name => config::ArtistSortField::Name,
-        ArtistSortField::Tracks => config::ArtistSortField::Tracks,
-        ArtistSortField::Albums => config::ArtistSortField::Albums,
-        ArtistSortField::Unspecified => config::ArtistSortField::Name,
     }
 }
 
@@ -380,20 +263,6 @@ pub fn saved_folder_source_from_proto(value: &SavedFolderSource) -> config::Save
             .iter()
             .map(std::path::PathBuf::from)
             .collect(),
-    }
-}
-
-pub fn home_section_to_proto(value: &config::HomeSection) -> HomeSection {
-    HomeSection {
-        key: value.key.clone(),
-        enabled: value.enabled,
-    }
-}
-
-pub fn home_section_from_proto(value: &HomeSection) -> config::HomeSection {
-    config::HomeSection {
-        key: value.key.clone(),
-        enabled: value.enabled,
     }
 }
 
@@ -493,60 +362,6 @@ pub fn replay_gain_from_proto(value: Option<&ReplayGainSettings>) -> config::Rep
     }
 }
 
-pub fn album_sort_criterion_to_proto(
-    value: &config::SortCriterion<config::AlbumSortField>,
-) -> AlbumSortCriterion {
-    AlbumSortCriterion {
-        field: album_sort_field_to_proto(value.field) as i32,
-        direction: sort_direction_to_proto(value.direction) as i32,
-    }
-}
-
-pub fn album_sort_criterion_from_proto(
-    value: &AlbumSortCriterion,
-) -> config::SortCriterion<config::AlbumSortField> {
-    config::SortCriterion {
-        field: album_sort_field_from_proto(value.field),
-        direction: sort_direction_from_proto(value.direction),
-    }
-}
-
-pub fn track_sort_criterion_to_proto(
-    value: &config::SortCriterion<config::TrackSortField>,
-) -> TrackSortCriterion {
-    TrackSortCriterion {
-        field: track_sort_field_to_proto(value.field) as i32,
-        direction: sort_direction_to_proto(value.direction) as i32,
-    }
-}
-
-pub fn track_sort_criterion_from_proto(
-    value: &TrackSortCriterion,
-) -> config::SortCriterion<config::TrackSortField> {
-    config::SortCriterion {
-        field: track_sort_field_from_proto(value.field),
-        direction: sort_direction_from_proto(value.direction),
-    }
-}
-
-pub fn artist_sort_criterion_to_proto(
-    value: &config::SortCriterion<config::ArtistSortField>,
-) -> ArtistSortCriterion {
-    ArtistSortCriterion {
-        field: artist_sort_field_to_proto(value.field) as i32,
-        direction: sort_direction_to_proto(value.direction) as i32,
-    }
-}
-
-pub fn artist_sort_criterion_from_proto(
-    value: &ArtistSortCriterion,
-) -> config::SortCriterion<config::ArtistSortField> {
-    config::SortCriterion {
-        field: artist_sort_field_from_proto(value.field),
-        direction: sort_direction_from_proto(value.direction),
-    }
-}
-
 pub fn config_to_proto(value: &config::AppConfig) -> Config {
     Config {
         folder_sources: value
@@ -554,38 +369,11 @@ pub fn config_to_proto(value: &config::AppConfig) -> Config {
             .iter()
             .map(saved_folder_source_to_proto)
             .collect(),
-        source_explicitly_set: value.source_explicitly_set,
         theme: value.theme.clone(),
         live_theme_path: value.live_theme_path.clone(),
-        sort_order: sort_order_to_proto(&value.sort_order) as i32,
-        album_sort: value
-            .album_sort
-            .iter()
-            .map(album_sort_criterion_to_proto)
-            .collect(),
-        library_sort: value
-            .library_sort
-            .iter()
-            .map(track_sort_criterion_to_proto)
-            .collect(),
-        artist_album_sort: value
-            .artist_album_sort
-            .iter()
-            .map(album_sort_criterion_to_proto)
-            .collect(),
-        artist_sort: value
-            .artist_sort
-            .iter()
-            .map(artist_sort_criterion_to_proto)
-            .collect(),
-        album_view_mode: album_view_mode_to_proto(value.album_view_mode) as i32,
-        artist_album_view_mode: album_view_mode_to_proto(value.artist_album_view_mode) as i32,
-        artists_view_mode: album_view_mode_to_proto(value.artists_view_mode) as i32,
-        artist_view_order: artist_view_order_to_proto(&value.artist_view_order) as i32,
         language: value.language.clone(),
         reduce_animations: value.reduce_animations,
         fullscreen_use_player_bar: value.fullscreen_use_player_bar,
-        fullscreen_tabs_collapsed: value.fullscreen_tabs_collapsed,
         cover_art_background: value.cover_art_background,
         cover_art_darkening: u32::from(value.cover_art_darkening),
         cover_art_blur: u32::from(value.cover_art_blur),
@@ -596,7 +384,6 @@ pub fn config_to_proto(value: &config::AppConfig) -> Config {
         minimize_to_tray: value.minimize_to_tray,
         show_source_toggle: value.show_source_toggle,
         show_row_images: value.show_row_images,
-        sidebar_order: value.sidebar_order.clone(),
         volume_scroll_step: value.volume_scroll_step,
         crossfade_seconds: u32::from(value.crossfade_seconds),
         custom_themes: value
@@ -616,13 +403,6 @@ pub fn config_to_proto(value: &config::AppConfig) -> Config {
         player_bar_position: player_bar_position_to_proto(value.player_bar_position) as i32,
         ui_style: ui_style_to_proto(value.ui_style) as i32,
         settings_layout: settings_layout_to_proto(value.settings_layout) as i32,
-        hero_height: value.hero_height,
-        home_sections: value
-            .home_sections
-            .iter()
-            .map(home_section_to_proto)
-            .collect(),
-        listen_now_style: listen_now_style_to_proto(value.listen_now_style) as i32,
         auto_fetch_covers: value.auto_fetch_covers,
         cover_fetch_strategy: fetch_strategy_to_proto(value.cover_fetch_strategy) as i32,
         radio_registries: value
@@ -650,38 +430,11 @@ pub fn config_from_proto(value: &Config) -> config::AppConfig {
             .iter()
             .map(saved_folder_source_from_proto)
             .collect(),
-        source_explicitly_set: value.source_explicitly_set,
         theme: value.theme.clone(),
         live_theme_path: value.live_theme_path.clone(),
-        sort_order: sort_order_from_proto(value.sort_order),
-        album_sort: value
-            .album_sort
-            .iter()
-            .map(album_sort_criterion_from_proto)
-            .collect(),
-        library_sort: value
-            .library_sort
-            .iter()
-            .map(track_sort_criterion_from_proto)
-            .collect(),
-        artist_album_sort: value
-            .artist_album_sort
-            .iter()
-            .map(album_sort_criterion_from_proto)
-            .collect(),
-        artist_sort: value
-            .artist_sort
-            .iter()
-            .map(artist_sort_criterion_from_proto)
-            .collect(),
-        album_view_mode: album_view_mode_from_proto(value.album_view_mode),
-        artist_album_view_mode: album_view_mode_from_proto(value.artist_album_view_mode),
-        artists_view_mode: album_view_mode_from_proto(value.artists_view_mode),
-        artist_view_order: artist_view_order_from_proto(value.artist_view_order),
         language: value.language.clone(),
         reduce_animations: value.reduce_animations,
         fullscreen_use_player_bar: value.fullscreen_use_player_bar,
-        fullscreen_tabs_collapsed: value.fullscreen_tabs_collapsed,
         cover_art_background: value.cover_art_background,
         cover_art_darkening: value.cover_art_darkening.min(u32::from(u8::MAX)) as u8,
         cover_art_blur: value.cover_art_blur.min(u32::from(u8::MAX)) as u8,
@@ -692,7 +445,6 @@ pub fn config_from_proto(value: &Config) -> config::AppConfig {
         minimize_to_tray: value.minimize_to_tray,
         show_source_toggle: value.show_source_toggle,
         show_row_images: value.show_row_images,
-        sidebar_order: value.sidebar_order.clone(),
         volume_scroll_step: value.volume_scroll_step,
         crossfade_seconds: value.crossfade_seconds.min(u32::from(u8::MAX)) as u8,
         custom_themes: value
@@ -711,13 +463,6 @@ pub fn config_from_proto(value: &Config) -> config::AppConfig {
         player_bar_position: player_bar_position_from_proto(value.player_bar_position),
         ui_style: ui_style_from_proto(value.ui_style),
         settings_layout: settings_layout_from_proto(value.settings_layout),
-        hero_height: value.hero_height,
-        home_sections: value
-            .home_sections
-            .iter()
-            .map(home_section_from_proto)
-            .collect(),
-        listen_now_style: listen_now_style_from_proto(value.listen_now_style),
         auto_fetch_covers: value.auto_fetch_covers,
         cover_fetch_strategy: fetch_strategy_from_proto(value.cover_fetch_strategy),
         radio_registries: value

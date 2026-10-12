@@ -14,7 +14,7 @@
 //! 3. drop-ins (`<stem>.d/*.toml`, lexicographic order),
 //! 4. `KOPUZ_CONFIG_<FIELD>` environment variables.
 //!
-//! Every layer holds settings only: state, credentials and library data are the DB's ([`is_setting`]).
+//! Every layer holds settings only: state, credentials and library data are the DB's, and `AppConfig` has no field for them.
 //!
 //! Keys pinned by a layer the settings UI cannot usefully edit — a managed
 //! (Nix-store / read-only) file, any drop-in, any env var — are reported in
@@ -35,37 +35,6 @@ pub const ENV_PREFIX: &str = "KOPUZ_CONFIG_";
 pub const ENV_PATH_OVERRIDE: &str = "KOPUZ_CONFIG_PATH";
 
 const NIX_STORE_PREFIX: &str = "/nix/store";
-
-/// What the app changes by being used rather than through its settings: the DB keeps it, and no settings layer holds it.
-pub const STATE_KEYS: &[&str] = &[
-    "source_explicitly_set",
-    "fullscreen_tabs_collapsed",
-    "sort_order",
-    "album_sort",
-    "library_sort",
-    "artist_album_sort",
-    "artist_sort",
-    "album_view_mode",
-    "artist_album_view_mode",
-    "artists_view_mode",
-    "artist_view_order",
-    "sidebar_order",
-    "home_sections",
-    "listen_now_style",
-    "hero_height",
-];
-
-/// Whether a top-level `AppConfig` field is a setting, which only the settings layers hold.
-pub fn is_setting(key: &str) -> bool {
-    !STATE_KEYS.contains(&key)
-}
-
-fn settings_only(
-    mut map: serde_json::Map<String, JsonValue>,
-) -> serde_json::Map<String, JsonValue> {
-    map.retain(|key, _| is_setting(key));
-    map
-}
 
 /// Folds the retired `music_directory` key into the default folder source and makes sure that source exists.
 pub(crate) fn fold_legacy_directories(value: &mut JsonValue, force: bool) {
@@ -178,13 +147,12 @@ impl FileLayers {
 
         // Under the main file, so a managed file's keys still win over what the app saved beside it.
         if let Some(map) = read_toml_table(&local_path_for(settings_path)) {
-            merge_into(&mut overrides, JsonValue::Object(settings_only(map)));
+            merge_into(&mut overrides, JsonValue::Object(map));
         }
 
         let managed = is_managed(settings_path, store_prefix);
         let file_exists;
         if let Some(map) = read_toml_table(settings_path) {
-            let map = settings_only(map);
             file_exists = true;
             if managed {
                 locked_keys.extend(map.keys().cloned());
@@ -199,14 +167,13 @@ impl FileLayers {
         let dropin_dir = dropin_dir_for(settings_path);
         for path in sorted_toml_files(&dropin_dir) {
             if let Some(map) = read_toml_table(&path) {
-                let map = settings_only(map);
                 locked_keys.extend(map.keys().cloned());
                 merge_into(&mut overrides, JsonValue::Object(map));
             }
         }
 
         let env_layer = match env_overrides(env) {
-            JsonValue::Object(map) => settings_only(map),
+            JsonValue::Object(map) => map,
             _ => serde_json::Map::new(),
         };
         locked_keys.extend(env_layer.keys().cloned());
@@ -312,7 +279,6 @@ pub fn save_settings_file(
             "config did not serialize to an object",
         ));
     };
-    obj.retain(|key, _| is_setting(key));
     // A pinned key's value in `cfg_json` is the layer's, merged in on load.
     // Writing it back would bake the override into the base file, so it would
     // keep applying once the drop-in/env layer is gone.
@@ -678,10 +644,8 @@ mod tests {
         let defaults = AppConfig::default();
         assert_eq!(restored.theme, defaults.theme);
         assert_eq!(restored.local_sources, defaults.local_sources);
-        assert_eq!(restored.home_sections, defaults.home_sections);
         assert_eq!(restored.equalizer, defaults.equalizer);
         assert_eq!(restored.radio_registries, defaults.radio_registries);
-        assert_eq!(restored.sidebar_order, defaults.sidebar_order);
         assert_eq!(restored.downloader_options, defaults.downloader_options);
     }
 
@@ -694,11 +658,9 @@ mod tests {
         use std::collections::HashMap;
 
         use crate::{
-            AlbumSortField, AlbumViewMode, BackBehavior, ChannelMode, CustomTheme,
-            DeviceChangeBehavior, EqPreset, EqualizerSettings, FetchStrategy, HomeSection,
-            ListenNowStyle, OfflineQuality, PlayerBarPosition, RegistryEntry, SampleRateMode,
-            SavedLocalSource, SettingsLayout, SortCriterion, SortDirection, SortOrder,
-            TitlebarMode, UiStyle,
+            BackBehavior, ChannelMode, CustomTheme, DeviceChangeBehavior, EqPreset,
+            EqualizerSettings, FetchStrategy, OfflineQuality, PlayerBarPosition, RegistryEntry,
+            SampleRateMode, SavedLocalSource, SettingsLayout, TitlebarMode, UiStyle,
         };
 
         let dir = tempfile::tempdir().unwrap();
@@ -721,16 +683,9 @@ mod tests {
             theme: "custom-one".into(),
             discord_presence: Some(false),
             discord_presence_source: None,
-            sort_order: SortOrder::Album,
-            album_sort: vec![
-                SortCriterion::new(AlbumSortField::Year, SortDirection::Desc),
-                SortCriterion::new(AlbumSortField::Title, SortDirection::Asc),
-            ],
-            album_view_mode: AlbumViewMode::List,
             language: "tr".into(),
             cover_art_darkening: 42,
             custom_font_path: "/fonts/Inter.ttf".into(),
-            sidebar_order: vec!["home".into(), "albums".into()],
             crossfade_seconds: 7,
             custom_themes: HashMap::from([(
                 "custom-one".to_string(),
@@ -758,18 +713,6 @@ mod tests {
             player_bar_position: PlayerBarPosition::Top,
             ui_style: UiStyle::Vaxry,
             settings_layout: SettingsLayout::TopBar,
-            hero_height: 420,
-            home_sections: vec![
-                HomeSection {
-                    key: "recently_played".into(),
-                    enabled: false,
-                },
-                HomeSection {
-                    key: "favorites".into(),
-                    enabled: true,
-                },
-            ],
-            listen_now_style: ListenNowStyle::Cards,
             auto_fetch_covers: true,
             cover_fetch_strategy: FetchStrategy::LastFmOnly,
             radio_registries: vec![RegistryEntry {
@@ -826,12 +769,6 @@ mod tests {
         assert_eq!(restored.radio_registries, cfg.radio_registries);
         assert_eq!(restored.prefer_local_lyrics, cfg.prefer_local_lyrics);
         assert_eq!(restored.sync_interval_minutes, cfg.sync_interval_minutes);
-
-        assert_eq!(
-            restored.hero_height,
-            AppConfig::default().hero_height,
-            "state stays in the DB"
-        );
     }
 
     #[test]
@@ -864,30 +801,22 @@ mod tests {
     }
 
     #[test]
-    fn nothing_but_settings_reaches_or_leaves_a_settings_layer() {
+    fn a_key_an_older_build_wrote_is_ignored() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
-        let cfg = AppConfig {
-            hero_height: 200,
-            ..Default::default()
-        };
-        let cfg_json = serde_json::to_value(&cfg).unwrap();
-
-        save_settings_file(&path, &cfg_json, &BTreeSet::new()).unwrap();
-
-        let written: toml::Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
-        for key in STATE_KEYS {
-            assert!(!written.contains_key(*key), "{key} leaked into the file");
-        }
-
-        // A file an older build wrote still holds them; no layer may hand them back.
         std::fs::write(&path, "hero_height = 900\ntheme = \"nord\"\n").unwrap();
-        let env = [("KOPUZ_CONFIG_HERO_HEIGHT".to_string(), "100".to_string())].into_iter();
-        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, env);
-        let mut base = serde_json::json!({});
-        layers.apply(&mut base);
-        assert_eq!(base, serde_json::json!({ "theme": "nord" }));
-        assert!(!layers.is_locked("hero_height"));
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
+        let cfg = layers.merge_and_parse(serde_json::json!({})).unwrap();
+        assert_eq!(cfg.theme, "nord");
+
+        save_settings_file(
+            &path,
+            &serde_json::to_value(&cfg).unwrap(),
+            &BTreeSet::new(),
+        )
+        .unwrap();
+        let written: toml::Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
+        assert!(!written.contains_key("hero_height"));
     }
 
     #[test]
@@ -1019,20 +948,14 @@ mod tests {
     fn a_save_that_changes_no_setting_leaves_the_file_as_written() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
-        let mut cfg = AppConfig::default();
-        let cfg_json = serde_json::to_value(&cfg).unwrap();
+        let cfg_json = serde_json::to_value(AppConfig::default()).unwrap();
         save_settings_file(&path, &cfg_json, &BTreeSet::new()).unwrap();
         let hand_written = format!("# mine\n{}", std::fs::read_to_string(&path).unwrap());
         std::fs::write(&path, &hand_written).unwrap();
 
-        cfg.hero_height += 1;
-        let saved = save_settings_file(
-            &path,
-            &serde_json::to_value(&cfg).unwrap(),
-            &BTreeSet::new(),
-        );
+        let saved = save_settings_file(&path, &cfg_json, &BTreeSet::new());
 
-        assert!(!saved.unwrap(), "only state changed");
+        assert!(!saved.unwrap(), "no setting changed");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), hand_written);
     }
 
@@ -1125,7 +1048,7 @@ mod tests {
         std::fs::write(&path, "theme = \"nord\"\n").unwrap();
 
         let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
-        let base = serde_json::json!({ "hero_height": { "not": "a number" } });
+        let base = serde_json::json!({ "crossfade_seconds": { "not": "a number" } });
 
         assert!(
             layers.merge_and_parse(base).is_err(),

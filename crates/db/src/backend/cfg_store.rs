@@ -16,53 +16,15 @@ pub async fn load_config(
     settings_path: &Path,
 ) -> Result<Option<AppConfig>, DbError> {
     let layers = config::store::FileLayers::read(settings_path);
-    let state = sqlx::query!(
-        "SELECT source_explicitly_set, fullscreen_tabs_collapsed, sort_order, album_view_mode, artist_album_view_mode, \
-                artists_view_mode, artist_view_order, listen_now_style, hero_height \
-           FROM app_state WHERE id = 1"
-    )
-    .fetch_optional(pool)
-    .await?;
+    let state: Option<i64> = sqlx::query_scalar("SELECT id FROM app_state WHERE id = 1")
+        .fetch_optional(pool)
+        .await?;
     // Nothing saved and no settings file either: never configured.
     if state.is_none() && !layers.has_overrides() {
         return Ok(None);
     }
     let mut cfg: AppConfig = layers.merge_and_parse(serde_json::json!({}))?;
-
-    if let Some(state) = state {
-        cfg.source_explicitly_set = state.source_explicitly_set != 0;
-        cfg.fullscreen_tabs_collapsed = state.fullscreen_tabs_collapsed != 0;
-        read_variant(&state.sort_order, &mut cfg.sort_order);
-        read_variant(&state.album_view_mode, &mut cfg.album_view_mode);
-        read_variant(
-            &state.artist_album_view_mode,
-            &mut cfg.artist_album_view_mode,
-        );
-        read_variant(&state.artists_view_mode, &mut cfg.artists_view_mode);
-        read_variant(&state.artist_view_order, &mut cfg.artist_view_order);
-        read_variant(&state.listen_now_style, &mut cfg.listen_now_style);
-        cfg.hero_height = state.hero_height.clamp(0, u32::MAX as i64) as u32;
-        cfg.album_sort = view_sort(pool, VIEW_ALBUMS).await?;
-        cfg.library_sort = view_sort(pool, VIEW_LIBRARY).await?;
-        cfg.artist_album_sort = view_sort(pool, VIEW_ARTIST_ALBUMS).await?;
-        cfg.artist_sort = view_sort(pool, VIEW_ARTISTS).await?;
-        cfg.sidebar_order = sqlx::query_scalar!("SELECT item FROM sidebar_items ORDER BY position")
-            .fetch_all(pool)
-            .await?;
-        cfg.home_sections =
-            sqlx::query!("SELECT key, enabled FROM home_sections ORDER BY position")
-                .fetch_all(pool)
-                .await?
-                .into_iter()
-                .map(|row| config::HomeSection {
-                    key: row.key,
-                    enabled: row.enabled != 0,
-                })
-                .collect();
-    }
-    // The in-memory shape migrations the legacy file load used to run.
-    cfg.migrate_home_sections();
-    cfg.migrate_sidebar_order();
+    // The in-memory shape migration the legacy file load used to run.
     cfg.migrate_registry_paths();
 
     Ok(Some(cfg))
@@ -205,51 +167,6 @@ pub(crate) async fn write_history(
     Ok(())
 }
 
-const VIEW_ALBUMS: &str = "albums";
-const VIEW_LIBRARY: &str = "library";
-const VIEW_ARTIST_ALBUMS: &str = "artist_albums";
-const VIEW_ARTISTS: &str = "artists";
-
-/// A unit variant's serde name, which is what a text column stores.
-fn variant<T: serde::Serialize>(value: &T) -> Result<String, DbError> {
-    match serde_json::to_value(value)? {
-        serde_json::Value::String(name) => Ok(name),
-        other => Err(DbError::Serde(format!("{other} is not a unit variant"))),
-    }
-}
-
-fn parse_variant<T: serde::de::DeserializeOwned>(name: String) -> Option<T> {
-    serde_json::from_value(serde_json::Value::String(name)).ok()
-}
-
-/// A variant no build knows any more leaves the default in place rather than failing the load.
-fn read_variant<T: serde::de::DeserializeOwned>(name: &str, slot: &mut T) {
-    if let Some(value) = parse_variant(name.to_owned()) {
-        *slot = value;
-    }
-}
-
-async fn view_sort<F: serde::de::DeserializeOwned>(
-    pool: &SqlitePool,
-    view: &str,
-) -> Result<Vec<config::SortCriterion<F>>, DbError> {
-    let rows = sqlx::query!(
-        "SELECT field, direction FROM view_sorts WHERE view = ?1 ORDER BY position",
-        view
-    )
-    .fetch_all(pool)
-    .await?;
-    Ok(rows
-        .into_iter()
-        .filter_map(|row| {
-            Some(config::SortCriterion::new(
-                parse_variant(row.field)?,
-                parse_variant(row.direction)?,
-            ))
-        })
-        .collect())
-}
-
 pub async fn integration_credentials(
     pool: &SqlitePool,
 ) -> Result<HashMap<String, String>, DbError> {
@@ -291,7 +208,7 @@ pub async fn save_config(
 ) -> Result<(), DbError> {
     // It can read before it writes, and a deferred BEGIN then fails at once against a write that landed meanwhile.
     let mut tx = super::begin_immediate(pool).await?;
-    write_state(&mut tx, cfg).await?;
+    ensure_state_row(&mut tx).await?;
     tx.commit().await?;
     write_settings(cfg, settings_path)
 }
@@ -361,91 +278,17 @@ pub(crate) async fn write_discord_presence_paused(
     Ok(())
 }
 
-/// The app_state row's own columns; a first write also stamps a fresh device id, the default source and the default playback state, which have writers of their own.
-async fn write_state_row(
-    conn: &mut sqlx::SqliteConnection,
-    cfg: &AppConfig,
-    on_conflict: &str,
-) -> Result<(), DbError> {
-    let sql = format!(
-        "INSERT INTO app_state (id, device_id, active_source, volume, source_explicitly_set, \
-           fullscreen_tabs_collapsed, sort_order, album_view_mode, artist_album_view_mode, \
-           artists_view_mode, artist_view_order, listen_now_style, hero_height) \
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
-         ON CONFLICT(id) {on_conflict}"
-    );
-    sqlx::query(&sql)
-        .bind(uuid::Uuid::new_v4().to_string())
-        .bind(Source::default().as_str())
-        .bind(f64::from(DEFAULT_VOLUME))
-        .bind(cfg.source_explicitly_set)
-        .bind(cfg.fullscreen_tabs_collapsed)
-        .bind(variant(&cfg.sort_order)?)
-        .bind(variant(&cfg.album_view_mode)?)
-        .bind(variant(&cfg.artist_album_view_mode)?)
-        .bind(variant(&cfg.artists_view_mode)?)
-        .bind(variant(&cfg.artist_view_order)?)
-        .bind(variant(&cfg.listen_now_style)?)
-        .bind(i64::from(cfg.hero_height))
-        .execute(&mut *conn)
-        .await?;
-    Ok(())
-}
-
-const UPDATE_STATE: &str = "DO UPDATE SET source_explicitly_set = ?4, \
-    fullscreen_tabs_collapsed = ?5, sort_order = ?6, album_view_mode = ?7, \
-    artist_album_view_mode = ?8, artists_view_mode = ?9, artist_view_order = ?10, \
-    listen_now_style = ?11, hero_height = ?12";
-
-/// Create the app_state row with the defaults if nothing has written it yet.
-async fn ensure_state_row(conn: &mut sqlx::SqliteConnection) -> Result<(), DbError> {
-    write_state_row(conn, &AppConfig::default(), "DO NOTHING").await
-}
-
-/// State and the lists the app keeps; the sources, credentials, play counts, offline copies and pins each have their own writer.
-pub(crate) async fn write_state(
-    conn: &mut sqlx::SqliteConnection,
-    cfg: &AppConfig,
-) -> Result<(), DbError> {
-    write_state_row(conn, cfg, UPDATE_STATE).await?;
-
-    sqlx::query!("DELETE FROM view_sorts")
-        .execute(&mut *conn)
-        .await?;
-    write_view_sort(conn, VIEW_ALBUMS, &cfg.album_sort).await?;
-    write_view_sort(conn, VIEW_LIBRARY, &cfg.library_sort).await?;
-    write_view_sort(conn, VIEW_ARTIST_ALBUMS, &cfg.artist_album_sort).await?;
-    write_view_sort(conn, VIEW_ARTISTS, &cfg.artist_sort).await?;
-
-    sqlx::query!("DELETE FROM sidebar_items")
-        .execute(&mut *conn)
-        .await?;
-    for (position, item) in cfg.sidebar_order.iter().enumerate() {
-        let position = position as i64;
-        sqlx::query!(
-            "INSERT INTO sidebar_items (position, item) VALUES (?1, ?2)",
-            position,
-            item
-        )
-        .execute(&mut *conn)
-        .await?;
-    }
-
-    sqlx::query!("DELETE FROM home_sections")
-        .execute(&mut *conn)
-        .await?;
-    for (position, section) in cfg.home_sections.iter().enumerate() {
-        let position = position as i64;
-        let enabled = section.enabled as i64;
-        sqlx::query!(
-            "INSERT INTO home_sections (position, key, enabled) VALUES (?1, ?2, ?3)",
-            position,
-            section.key,
-            enabled
-        )
-        .execute(&mut *conn)
-        .await?;
-    }
+/// Create the app_state row if nothing has written it yet, with a fresh device id, the default source and the default playback state, which have writers of their own.
+pub(crate) async fn ensure_state_row(conn: &mut sqlx::SqliteConnection) -> Result<(), DbError> {
+    sqlx::query(
+        "INSERT INTO app_state (id, device_id, active_source, volume) VALUES (1, ?1, ?2, ?3) \
+         ON CONFLICT(id) DO NOTHING",
+    )
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind(Source::default().as_str())
+    .bind(f64::from(DEFAULT_VOLUME))
+    .execute(&mut *conn)
+    .await?;
     Ok(())
 }
 
@@ -583,28 +426,6 @@ pub async fn delete_server(pool: &SqlitePool, id: &str) -> Result<(), DbError> {
         .execute(&mut *tx)
         .await?;
     tx.commit().await
-}
-
-async fn write_view_sort<F: serde::Serialize>(
-    conn: &mut sqlx::SqliteConnection,
-    view: &str,
-    criteria: &[config::SortCriterion<F>],
-) -> Result<(), DbError> {
-    for (position, criterion) in criteria.iter().enumerate() {
-        let position = position as i64;
-        let field = variant(&criterion.field)?;
-        let direction = variant(&criterion.direction)?;
-        sqlx::query!(
-            "INSERT INTO view_sorts (view, position, field, direction) VALUES (?1, ?2, ?3, ?4)",
-            view,
-            position,
-            field,
-            direction
-        )
-        .execute(&mut *conn)
-        .await?;
-    }
-    Ok(())
 }
 
 /// The settings go to the settings file, which is only rewritten when one of them changed.
