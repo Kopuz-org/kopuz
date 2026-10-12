@@ -12,7 +12,7 @@ pub use source::{
     Browser, BrowserEngine, DEFAULT_LOCAL_ID, DEFAULT_LOCAL_NAME, JellyfinServer, MusicServer,
     MusicService, SavedLocalSource, SavedServer, Source,
 };
-pub use views::{IntegrationConfig, LibraryConfig, PlaybackConfig, ServerAuth, UiConfig};
+pub use views::{LibraryConfig, PlaybackConfig, ServerAuth, UiConfig};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum FetchStrategy {
@@ -831,20 +831,6 @@ pub struct AppConfig {
     pub artists_view_mode: AlbumViewMode,
     #[serde(default = "default_artist_view_order")]
     pub artist_view_order: ArtistViewOrder,
-    #[serde(default)]
-    pub musicbrainz_token: String,
-    #[serde(default)]
-    pub lastfm_api_key: String,
-    #[serde(default)]
-    pub lastfm_api_secret: String,
-    #[serde(default)]
-    pub lastfm_session_key: String,
-    #[serde(default)]
-    pub librefm_api_key: String,
-    #[serde(default)]
-    pub librefm_api_secret: String,
-    #[serde(default)]
-    pub librefm_session_key: String,
     #[serde(default = "default_language")]
     pub language: String,
     #[serde(default)]
@@ -1113,13 +1099,6 @@ impl Default for AppConfig {
             artist_album_view_mode: AlbumViewMode::Grid,
             artists_view_mode: AlbumViewMode::Grid,
             artist_view_order: default_artist_view_order(),
-            musicbrainz_token: String::new(),
-            lastfm_api_key: String::new(),
-            lastfm_api_secret: String::new(),
-            lastfm_session_key: String::new(),
-            librefm_api_key: String::new(),
-            librefm_api_secret: String::new(),
-            librefm_session_key: String::new(),
             language: default_language(),
             reduce_animations: false,
             fullscreen_use_player_bar: false,

@@ -363,6 +363,12 @@ impl ReadStore for Native {
         cfg_store::load_sources(&self.pool()).await
     }
 
+    async fn integration_credentials(
+        &self,
+    ) -> Result<std::collections::HashMap<String, String>, DbError> {
+        cfg_store::integration_credentials(&self.pool()).await
+    }
+
     async fn set_server_credentials(
         &self,
         id: &str,
@@ -444,6 +450,11 @@ impl Storage for Native {
 
     async fn set_device_id(&self, device_id: &str) -> Result<(), DbError> {
         cfg_store::set_device_id(&self.pool(), device_id).await
+    }
+
+    async fn set_integration_credential(&self, key: &str, value: &str) -> Result<(), DbError> {
+        let mut conn = self.pool().acquire().await?;
+        cfg_store::write_integration_credential(&mut conn, key, value).await
     }
 
     async fn import_legacy_json(&self, config_dir: &Path) -> Result<crate::ImportReport, DbError> {

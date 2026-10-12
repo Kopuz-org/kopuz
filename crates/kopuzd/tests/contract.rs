@@ -166,11 +166,15 @@ async fn spawn_pair() -> Pair {
         dir.path().join("settings.toml"),
         config::AppConfig::default(),
     ));
+    let credentials = daemon::CredentialStore::load(&database)
+        .await
+        .expect("credentials");
     let library = Arc::new(LibraryService::new(
         database.clone(),
         config::Source::default(),
         Arc::new(radio::registry::StationRegistry::default()),
         dir.path().join("covers"),
+        credentials.clone(),
     ));
     let player = Player::try_with_sink(Box::new(NullSink::new())).expect("headless player starts");
     let provider: FactoryOverride = Arc::new(|_| Some(wav_factory(6)));
@@ -207,7 +211,7 @@ async fn spawn_pair() -> Pair {
         session.sources(),
     );
     sources.watch_active(session.sources_watch());
-    let integrations = daemon::IntegrationService::new(config_service.clone());
+    let integrations = daemon::IntegrationService::new(config_service.clone(), credentials);
     let downloader =
         daemon::UrlDownloadService::new(database.clone(), config_service.clone(), sources.clone());
     let prefs = daemon::PrefsService::new(database.clone(), session.clone());
@@ -1113,7 +1117,6 @@ async fn config_view_and_set_agree_across_transports() {
     // The whole config surface has to survive the proto round trip for
     // these to be equal, so this is the guard on every field mapping.
     assert_eq!(local_view, wire_view);
-    assert!(local_view.config.lastfm_session_key.is_empty());
 
     let mut next = wire_view.config.clone();
     next.crossfade_seconds = 7;
@@ -1129,11 +1132,6 @@ async fn config_view_and_set_agree_across_transports() {
 
     let local_view = pair.local.config().await.expect("local view after set");
     assert_eq!(local_view.config, written.config);
-
-    // Credentials are absent from the wire, so writing a view straight back
-    // cannot erase them; the daemon keeps its own. (Seeding one is only
-    // possible below the API, so the depth test lives in config_service.)
-    assert!(written.config.lastfm_session_key.is_empty());
 }
 
 fn pref(key: &str, value: Option<&str>) -> api::PrefEntry {
@@ -3431,6 +3429,11 @@ async fn integrations_agree_across_transports_and_carry_no_secret() {
     assert!(
         !rendered.contains("a-key-nobody-should-see"),
         "no response may carry the secret: {rendered}"
+    );
+    let settings = format!("{:?}", pair.wire.config().await.expect("wire view"));
+    assert!(
+        !settings.contains("a-key-nobody-should-see"),
+        "nor may the settings a client reads: {settings}"
     );
 
     assert_eq!(

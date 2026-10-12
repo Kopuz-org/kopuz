@@ -1,4 +1,4 @@
-//! Config persistence: settings in the settings file (`config::store`), and state, credentials and library data in tables, hydrated into one `AppConfig`.
+//! Config persistence: settings in the settings file (`config::store`) and state in tables, hydrated into one `AppConfig`; credentials and library data have tables of their own.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -63,14 +63,6 @@ pub async fn load_config(
                     enabled: row.enabled != 0,
                 })
                 .collect();
-    }
-    let credentials = sqlx::query!("SELECT key, value FROM integration_credentials")
-        .fetch_all(pool)
-        .await?;
-    for row in credentials {
-        if let Some(slot) = credential_mut(&mut cfg, &row.key) {
-            *slot = row.value;
-        }
     }
     // The in-memory shape migrations the legacy file load used to run.
     cfg.migrate_home_sections();
@@ -262,30 +254,37 @@ async fn view_sort<F: serde::de::DeserializeOwned>(
         .collect())
 }
 
-/// The config field a stored credential fills.
-fn credential_mut<'a>(cfg: &'a mut AppConfig, key: &str) -> Option<&'a mut String> {
-    Some(match key {
-        "musicbrainz_token" => &mut cfg.musicbrainz_token,
-        "lastfm_api_key" => &mut cfg.lastfm_api_key,
-        "lastfm_api_secret" => &mut cfg.lastfm_api_secret,
-        "lastfm_session_key" => &mut cfg.lastfm_session_key,
-        "librefm_api_key" => &mut cfg.librefm_api_key,
-        "librefm_api_secret" => &mut cfg.librefm_api_secret,
-        "librefm_session_key" => &mut cfg.librefm_session_key,
-        _ => return None,
-    })
+pub async fn integration_credentials(
+    pool: &SqlitePool,
+) -> Result<HashMap<String, String>, DbError> {
+    let rows = sqlx::query!("SELECT key, value FROM integration_credentials")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().map(|row| (row.key, row.value)).collect())
 }
 
-fn credentials(cfg: &AppConfig) -> [(&'static str, &str); 7] {
-    [
-        ("musicbrainz_token", &cfg.musicbrainz_token),
-        ("lastfm_api_key", &cfg.lastfm_api_key),
-        ("lastfm_api_secret", &cfg.lastfm_api_secret),
-        ("lastfm_session_key", &cfg.lastfm_session_key),
-        ("librefm_api_key", &cfg.librefm_api_key),
-        ("librefm_api_secret", &cfg.librefm_api_secret),
-        ("librefm_session_key", &cfg.librefm_session_key),
-    ]
+/// Store one integration credential, or drop it when `value` is empty.
+pub(crate) async fn write_integration_credential(
+    conn: &mut sqlx::SqliteConnection,
+    key: &str,
+    value: &str,
+) -> Result<(), DbError> {
+    if value.is_empty() {
+        sqlx::query("DELETE FROM integration_credentials WHERE key = ?1")
+            .bind(key)
+            .execute(&mut *conn)
+            .await?;
+    } else {
+        sqlx::query(
+            "INSERT INTO integration_credentials (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        )
+        .bind(key)
+        .bind(value)
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(())
 }
 
 #[tracing::instrument(name = "config.save", skip_all)]
@@ -344,7 +343,7 @@ async fn ensure_state_row(conn: &mut sqlx::SqliteConnection) -> Result<(), DbErr
     write_state_row(conn, &AppConfig::default(), "DO NOTHING").await
 }
 
-/// State, credentials and the lists the app keeps; the sources, play counts, offline copies and pins each have their own writer.
+/// State and the lists the app keeps; the sources, credentials, play counts, offline copies and pins each have their own writer.
 pub(crate) async fn write_state(
     conn: &mut sqlx::SqliteConnection,
     cfg: &AppConfig,
@@ -384,22 +383,6 @@ pub(crate) async fn write_state(
             position,
             section.key,
             enabled
-        )
-        .execute(&mut *conn)
-        .await?;
-    }
-
-    sqlx::query!("DELETE FROM integration_credentials")
-        .execute(&mut *conn)
-        .await?;
-    for (key, value) in credentials(cfg) {
-        if value.is_empty() {
-            continue;
-        }
-        sqlx::query!(
-            "INSERT INTO integration_credentials (key, value) VALUES (?1, ?2)",
-            key,
-            value
         )
         .execute(&mut *conn)
         .await?;

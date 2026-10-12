@@ -470,11 +470,7 @@ fn App() -> Element {
     // because the tracing subscriber and the titlebar come out of its config.
     let session = core.session.clone();
     let favorites_service = core.favorites.clone();
-    let scrobbler = core.scrobbler.clone();
 
-    // Config reaches the session through the daemon's own write path, which
-    // is the only copy that still holds the credentials this process is never
-    // shown. Pushing the view we hold would blank them until the next save.
     let mut scan_current_file = use_signal(|| Option::<String>::None);
     let current_playing = use_signal(|| 0);
     let current_song_title = use_signal(String::new);
@@ -867,7 +863,6 @@ fn App() -> Element {
     let _is_offline = app_lifecycle::use_connectivity_probe(network_banner);
 
     let favorites_for_load = favorites_service.clone();
-    let scrobbler_for_load = scrobbler.clone();
     use_hook(move || {
         {
             let api = backend::api();
@@ -905,17 +900,8 @@ fn App() -> Element {
                 }
 
                 initial_load_done.set(true);
-                // Kick one reconcile shortly after startup so pending offline
-                // likes from the previous session push now, not on the first
-                // multi-minute interval; drain queued scrobbles the same way.
+                // Pending offline likes push now, not on the first multi-minute reconcile interval.
                 favorites_for_load.nudge_activate();
-                {
-                    let scrobbler = scrobbler_for_load.clone();
-                    let drain_config = config.peek().clone();
-                    spawn(async move {
-                        scrobbler.drain_queue(&drain_config).await;
-                    });
-                }
             }.instrument(tracing::info_span!("startup.load")));
         }
     });

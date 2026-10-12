@@ -58,22 +58,9 @@ pub const STATE_KEYS: &[&str] = &[
     "hero_height",
 ];
 
-/// Credentials, which a settings file kept in dotfiles or the Nix store must never hold.
-pub const SECRET_KEYS: &[&str] = &[
-    "musicbrainz_token",
-    "lastfm_api_key",
-    "lastfm_api_secret",
-    "lastfm_session_key",
-    "librefm_api_key",
-    "librefm_api_secret",
-    "librefm_session_key",
-];
-
 /// Whether a top-level `AppConfig` field is a setting, which only the settings layers hold.
 pub fn is_setting(key: &str) -> bool {
-    ![STATE_KEYS, SECRET_KEYS]
-        .iter()
-        .any(|keys| keys.contains(&key))
+    !STATE_KEYS.contains(&key)
 }
 
 fn settings_only(
@@ -955,7 +942,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
         let cfg = AppConfig {
-            lastfm_session_key: "secret".into(),
             volume: 0.2,
             ..Default::default()
         };
@@ -964,16 +950,12 @@ mod tests {
         save_settings_file(&path, &cfg_json, &BTreeSet::new()).unwrap();
 
         let written: toml::Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
-        for key in [STATE_KEYS, SECRET_KEYS].concat() {
-            assert!(!written.contains_key(key), "{key} leaked into the file");
+        for key in STATE_KEYS {
+            assert!(!written.contains_key(*key), "{key} leaked into the file");
         }
 
         // A file an older build wrote still holds them; no layer may hand them back.
-        std::fs::write(
-            &path,
-            "volume = 0.9\nlastfm_session_key = \"old\"\ntheme = \"nord\"\n",
-        )
-        .unwrap();
+        std::fs::write(&path, "volume = 0.9\ntheme = \"nord\"\n").unwrap();
         let env = [("KOPUZ_CONFIG_VOLUME".to_string(), "0.1".to_string())].into_iter();
         let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, env);
         let mut base = serde_json::json!({});
