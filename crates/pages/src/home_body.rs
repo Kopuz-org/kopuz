@@ -88,7 +88,8 @@ pub fn HomeBody(
     on_open_artist: EventHandler<String>,
 ) -> Element {
     let is_offline = use_context::<Signal<bool>>();
-    let mut config = use_context::<Signal<AppConfig>>();
+    let config = use_context::<Signal<AppConfig>>();
+    let mut prefs = hooks::ui_prefs::use_ui_prefs();
     let source = use_active_source();
     let caps = hooks::sources::use_capabilities();
     let mut has_fetched = use_signal(|| false);
@@ -388,15 +389,15 @@ pub fn HomeBody(
         Some(cover.to_string())
     });
 
-    let conf_snapshot = config.read();
-    let is_vaxry = conf_snapshot.ui_style == UiStyle::Vaxry;
-    let listen_now_style = conf_snapshot.listen_now_style;
-    let sections: Vec<(String, bool)> = conf_snapshot
+    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let prefs_snapshot = prefs.read();
+    let listen_now_style = prefs_snapshot.listen_now_style;
+    let sections: Vec<(String, bool)> = prefs_snapshot
         .home_sections
         .iter()
         .map(|s| (s.key.clone(), s.enabled))
         .collect();
-    drop(conf_snapshot);
+    drop(prefs_snapshot);
 
     let scroll_container = move |id: &str, direction: i32| {
         let script = format!(
@@ -440,7 +441,7 @@ pub fn HomeBody(
                                                     class: "app-button-tonal px-3 h-7 rounded-md bg-white/5 hover:bg-white/15 text-white/70 hover:text-white text-xs font-semibold transition-colors",
                                                     title: i18n::t("listen_now_layout").to_string(),
                                                     onclick: move |_| {
-                                                        let mut conf = config.write();
+                                                        let mut conf = prefs.write();
                                                         conf.listen_now_style = match conf.listen_now_style {
                                                             ListenNowStyle::List => ListenNowStyle::Cards,
                                                             ListenNowStyle::Cards => ListenNowStyle::List,
@@ -455,7 +456,7 @@ pub fn HomeBody(
                                                 title: i18n::t("move_up").to_string(),
                                                 disabled: idx == 0,
                                                 onclick: move |_| {
-                                                    let mut conf = config.write();
+                                                    let mut conf = prefs.write();
                                                     if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_up)
                                                         && i > 0 { conf.home_sections.swap(i, i - 1); }
                                                 },
@@ -466,7 +467,7 @@ pub fn HomeBody(
                                                 title: i18n::t("move_down").to_string(),
                                                 disabled: idx + 1 >= total,
                                                 onclick: move |_| {
-                                                    let mut conf = config.write();
+                                                    let mut conf = prefs.write();
                                                     if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_down)
                                                         && i + 1 < conf.home_sections.len() { conf.home_sections.swap(i, i + 1); }
                                                 },
@@ -479,7 +480,7 @@ pub fn HomeBody(
                                                     "app-button-outlined px-3 h-7 rounded-md bg-white/5 hover:bg-white/15 text-white/60 text-xs font-semibold transition-colors"
                                                 },
                                                 onclick: move |_| {
-                                                    let mut conf = config.write();
+                                                    let mut conf = prefs.write();
                                                     if let Some(s) = conf.home_sections.iter_mut().find(|s| s.key == key_toggle) {
                                                         s.enabled = !s.enabled;
                                                     }

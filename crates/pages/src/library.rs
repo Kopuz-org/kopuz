@@ -34,7 +34,7 @@ fn window_padding(total_tracks: usize, window: &WindowRows) -> (f64, f64) {
 
 #[component]
 pub fn LibraryPage(
-    mut config: Signal<AppConfig>,
+    config: Signal<AppConfig>,
     on_rescan: EventHandler,
     mut is_playing: Signal<bool>,
     mut current_playing: Signal<u64>,
@@ -49,7 +49,8 @@ pub fn LibraryPage(
     let caps = hooks::sources::use_capabilities();
     let downloads = hooks::downloads::use_downloads();
 
-    let library_sort = use_signal(|| config.peek().library_sort.clone());
+    let mut prefs = hooks::ui_prefs::use_ui_prefs();
+    let library_sort = use_signal(|| prefs.peek().library_sort.clone());
     let filter = use_memo(move || {
         // The source is the daemon's; naming it here only keeps the memo
         // re-running across a switch.
@@ -61,8 +62,8 @@ pub fn LibraryPage(
     });
     use_effect(move || {
         let curr = library_sort.read().clone();
-        if config.peek().library_sort != curr {
-            config.write().library_sort = curr;
+        if prefs.peek().library_sort != curr {
+            prefs.write().library_sort = curr;
         }
     });
 

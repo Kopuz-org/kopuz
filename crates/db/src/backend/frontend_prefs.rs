@@ -13,6 +13,25 @@ pub async fn all(pool: &SqlitePool, frontend: &str) -> Result<Vec<(String, Strin
     )
 }
 
+/// Store each entry the frontend does not hold yet, leaving what it stored itself.
+pub(crate) async fn seed(
+    conn: &mut sqlx::SqliteConnection,
+    frontend: &str,
+    entries: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> Result<(), DbError> {
+    for (key, value) in entries {
+        sqlx::query(
+            "INSERT OR IGNORE INTO frontend_prefs (frontend, key, value) VALUES (?1, ?2, ?3)",
+        )
+        .bind(frontend)
+        .bind(key)
+        .bind(value.to_string())
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(())
+}
+
 /// Apply every entry or none; answers the keys whose stored value changed, or `None` when the result would pass `budget` bytes.
 pub async fn set(
     pool: &SqlitePool,

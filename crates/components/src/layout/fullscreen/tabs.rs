@@ -5,13 +5,14 @@ use dioxus::prelude::*;
 
 #[component]
 pub(crate) fn Tabs(
-    mut config: Signal<AppConfig>,
+    config: Signal<AppConfig>,
     items: Vec<api::TrackInfo>,
     current_queue_index: Signal<usize>,
     lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
     current_song_progress: Signal<u64>,
     active_tab: Signal<usize>,
 ) -> Element {
+    let mut prefs = hooks::ui_prefs::use_ui_prefs();
     rsx! {
         div {
             class: "flex-1 flex flex-col h-full min-w-0 bg-black/45 border-l border-white/5",
@@ -47,7 +48,7 @@ pub(crate) fn Tabs(
                     class: "app-icon-button ml-auto w-8 h-8 flex items-center justify-center text-white/40 hover:text-white transition-colors",
                     "aria-label": i18n::t("hide_side_panel").to_string(),
                     title: i18n::t("hide_side_panel").to_string(),
-                    onclick: move |_| config.write().fullscreen_tabs_collapsed = true,
+                    onclick: move |_| prefs.write().fullscreen_tabs_collapsed = true,
                     i { class: "fa-solid fa-chevron-right text-sm" }
                 }
             }

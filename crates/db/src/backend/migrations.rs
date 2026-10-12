@@ -351,6 +351,8 @@ async fn fill_state(pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(
     };
     let blob: serde_json::Value = serde_json::from_str(&stored)?;
     let data = LegacyData::deserialize(&blob)?;
+    // The UI state goes to the old tables, which a later migration carries into each frontend's prefs.
+    let ui = config::UiPrefs::deserialize(&blob)?;
     let layers = settings_path
         .map(config::store::FileLayers::read)
         .unwrap_or_default();
@@ -370,28 +372,28 @@ async fn fill_state(pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(
     )
     .bind(&data.device_id)
     .bind(data.active_source.as_str())
-    .bind(cfg.source_explicitly_set)
+    .bind(ui.source_explicitly_set)
     .bind(f64::from(data.volume))
     .bind(data.discord_presence_paused)
-    .bind(cfg.fullscreen_tabs_collapsed)
-    .bind(name(serde_json::to_value(&cfg.sort_order)?)?)
-    .bind(name(serde_json::to_value(cfg.album_view_mode)?)?)
-    .bind(name(serde_json::to_value(cfg.artist_album_view_mode)?)?)
-    .bind(name(serde_json::to_value(cfg.artists_view_mode)?)?)
-    .bind(name(serde_json::to_value(&cfg.artist_view_order)?)?)
-    .bind(name(serde_json::to_value(cfg.listen_now_style)?)?)
-    .bind(i64::from(cfg.hero_height))
+    .bind(ui.fullscreen_tabs_collapsed)
+    .bind(name(serde_json::to_value(&ui.sort_order)?)?)
+    .bind(name(serde_json::to_value(ui.album_view_mode)?)?)
+    .bind(name(serde_json::to_value(ui.artist_album_view_mode)?)?)
+    .bind(name(serde_json::to_value(ui.artists_view_mode)?)?)
+    .bind(name(serde_json::to_value(&ui.artist_view_order)?)?)
+    .bind(name(serde_json::to_value(ui.listen_now_style)?)?)
+    .bind(i64::from(ui.hero_height))
     .execute(&mut *tx)
     .await?;
 
     let sorts = [
-        ("albums", serde_json::to_value(&cfg.album_sort)?),
-        ("library", serde_json::to_value(&cfg.library_sort)?),
+        ("albums", serde_json::to_value(&ui.album_sort)?),
+        ("library", serde_json::to_value(&ui.library_sort)?),
         (
             "artist_albums",
-            serde_json::to_value(&cfg.artist_album_sort)?,
+            serde_json::to_value(&ui.artist_album_sort)?,
         ),
-        ("artists", serde_json::to_value(&cfg.artist_sort)?),
+        ("artists", serde_json::to_value(&ui.artist_sort)?),
     ];
     for (view, criteria) in sorts {
         let criteria = criteria.as_array().cloned().unwrap_or_default();
@@ -407,14 +409,14 @@ async fn fill_state(pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(
             .await?;
         }
     }
-    for (position, item) in cfg.sidebar_order.iter().enumerate() {
+    for (position, item) in ui.sidebar_order.iter().enumerate() {
         sqlx::query("INSERT OR REPLACE INTO sidebar_items (position, item) VALUES (?1, ?2)")
             .bind(position as i64)
             .bind(item)
             .execute(&mut *tx)
             .await?;
     }
-    for (position, section) in cfg.home_sections.iter().enumerate() {
+    for (position, section) in ui.home_sections.iter().enumerate() {
         sqlx::query(
             "INSERT OR REPLACE INTO home_sections (position, key, enabled) VALUES (?1, ?2, ?3)",
         )
@@ -987,6 +989,9 @@ fn legacy_options(yt_browser: Option<&str>, yt_anonymous: bool) -> Vec<(&'static
     )
 }
 
+/// The frontends whose UI state the importer seeds, as `ui_state_prefs.sql` seeds them from the tables.
+const UI_FRONTENDS: [&str; 2] = ["kopuz", "gpui"];
+
 /// The legacy config as an `AppConfig` and its active source, its state and credentials written to their tables; the caller writes its settings file after commit.
 async fn import_config(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -1012,6 +1017,13 @@ async fn import_config(
         );
     }
     let data = LegacyData::deserialize(&legacy).unwrap_or_default();
+    let ui = match config::UiPrefs::deserialize(&legacy) {
+        Ok(ui) => ui,
+        Err(error) => {
+            tracing::warn!(%error, "legacy config.json UI state is unreadable; importing defaults");
+            config::UiPrefs::default()
+        }
+    };
     let config: config::AppConfig = match serde_json::from_value(legacy) {
         Ok(config) => config,
         Err(error) => {
@@ -1019,7 +1031,9 @@ async fn import_config(
             config::AppConfig::default()
         }
     };
-    super::cfg_store::write_state(tx, &config).await?;
+    for frontend in UI_FRONTENDS {
+        super::frontend_prefs::seed(tx, frontend, &ui.entries()).await?;
+    }
     for (key, value) in data.credentials() {
         super::cfg_store::write_integration_credential(tx, key, value).await?;
     }
@@ -1900,9 +1914,6 @@ mod row_fill_tests {
             "DROP TABLE lyric_lines",
             "DROP TABLE lyrics",
             "DROP TABLE app_state",
-            "DROP TABLE view_sorts",
-            "DROP TABLE sidebar_items",
-            "DROP TABLE home_sections",
             "DROP TABLE integration_credentials",
             "DROP TABLE ytdlp_history",
             "DROP TABLE server_folders",
@@ -2000,12 +2011,21 @@ mod row_fill_tests {
             ("yt-1".into(), f64::from(0.3f32), Some(false), false),
             "the blob's state is rows now"
         );
-        let sort: (String, String, String) =
-            sqlx::query_as("SELECT view, field, direction FROM view_sorts")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(sort, ("albums".into(), "Year".into(), "Desc".into()));
+        let sorts: Vec<(String, String)> = sqlx::query_as(
+            "SELECT frontend, value FROM frontend_prefs WHERE key = 'album_sort' ORDER BY frontend",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let year_desc = r#"[{"field":"Year","direction":"Desc"}]"#.to_string();
+        assert_eq!(
+            sorts,
+            [
+                ("gpui".into(), year_desc.clone()),
+                ("kopuz".into(), year_desc)
+            ],
+            "the blob's sort reaches each frontend's prefs"
+        );
         let secret: String = sqlx::query_scalar(
             "SELECT value FROM integration_credentials WHERE key = 'lastfm_session_key'",
         )
@@ -2112,5 +2132,194 @@ mod master_order_tests {
                 .unwrap();
         assert_eq!(versions.len(), MIGRATOR.iter().count());
         assert!(versions.iter().any(|version| ours_before_master(*version)));
+    }
+}
+
+#[cfg(test)]
+mod ui_state_prefs_tests {
+    use super::*;
+    use config::{
+        AlbumSortField, AlbumViewMode, ArtistSortField, ArtistViewOrder, HomeSection,
+        ListenNowStyle, SortCriterion, SortDirection, SortOrder, TrackSortField,
+    };
+
+    const UI_STATE_PREFS: i64 = 20261019000006;
+
+    async fn prefs(pool: &SqlitePool, frontend: &str) -> HashMap<String, String> {
+        sqlx::query_as::<_, (String, String)>(
+            "SELECT key, value FROM frontend_prefs WHERE frontend = ?1",
+        )
+        .bind(frontend)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .collect()
+    }
+
+    fn read<T: serde::de::DeserializeOwned>(prefs: &HashMap<String, String>, key: &str) -> T {
+        let text = prefs.get(key).unwrap_or_else(|| panic!("{key} missing"));
+        serde_json::from_str(text).unwrap_or_else(|error| panic!("{key} = {text}: {error}"))
+    }
+
+    /// The UI state the app kept becomes the same prefs for both frontends, in the shape serde reads, and its old home is gone.
+    #[tokio::test]
+    async fn the_ui_state_becomes_each_frontends_prefs() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let before = sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|m| m.version < UI_STATE_PREFS)
+                    .cloned()
+                    .collect(),
+            ),
+            ..sqlx::migrate::Migrator::DEFAULT
+        };
+        before.run(&pool).await.unwrap();
+        sqlx::raw_sql(
+            "INSERT INTO app_state (id, device_id, active_source, source_explicitly_set, volume, \
+               discord_presence_paused, fullscreen_tabs_collapsed, sort_order, album_view_mode, \
+               artist_album_view_mode, artists_view_mode, artist_view_order, listen_now_style, hero_height) \
+             VALUES (1, 'dev', 'local', 1, 0.5, NULL, 1, 'Album', 'List', 'Grid', 'List', 'Albums', 'Cards', 420); \
+             INSERT INTO view_sorts (view, position, field, direction) VALUES \
+               ('albums', 1, 'Title', 'Asc'), ('albums', 0, 'Year', 'Desc'), \
+               ('library', 0, 'DateAdded', 'Desc'), ('artists', 0, 'Tracks', 'Asc'); \
+             INSERT INTO sidebar_items (position, item) VALUES (1, 'home'), (0, 'albums'); \
+             INSERT INTO home_sections (position, key, enabled) VALUES (1, 'hero', 1), (0, 'playlists', 0); \
+             INSERT INTO frontend_prefs (frontend, key, value) VALUES ('gpui', 'hero_height', '999');",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        run_migrations(&pool, None).await.unwrap();
+
+        let kopuz = prefs(&pool, "kopuz").await;
+        let gpui = prefs(&pool, "gpui").await;
+        for prefs in [&kopuz, &gpui] {
+            assert!(read::<bool>(prefs, "source_explicitly_set"));
+            assert!(read::<bool>(prefs, "fullscreen_tabs_collapsed"));
+            assert_eq!(read::<SortOrder>(prefs, "sort_order"), SortOrder::Album);
+            assert_eq!(
+                read::<Vec<SortCriterion<AlbumSortField>>>(prefs, "album_sort"),
+                [
+                    SortCriterion::new(AlbumSortField::Year, SortDirection::Desc),
+                    SortCriterion::new(AlbumSortField::Title, SortDirection::Asc),
+                ]
+            );
+            assert_eq!(
+                read::<Vec<SortCriterion<TrackSortField>>>(prefs, "library_sort"),
+                [SortCriterion::new(
+                    TrackSortField::DateAdded,
+                    SortDirection::Desc
+                )]
+            );
+            assert_eq!(
+                read::<Vec<SortCriterion<ArtistSortField>>>(prefs, "artist_sort"),
+                [SortCriterion::new(
+                    ArtistSortField::Tracks,
+                    SortDirection::Asc
+                )]
+            );
+            assert!(
+                read::<Vec<SortCriterion<AlbumSortField>>>(prefs, "artist_album_sort").is_empty(),
+                "a view whose sort was emptied stays empty, as it loaded before"
+            );
+            assert_eq!(
+                read::<AlbumViewMode>(prefs, "album_view_mode"),
+                AlbumViewMode::List
+            );
+            assert_eq!(
+                read::<AlbumViewMode>(prefs, "artist_album_view_mode"),
+                AlbumViewMode::Grid
+            );
+            assert_eq!(
+                read::<AlbumViewMode>(prefs, "artists_view_mode"),
+                AlbumViewMode::List
+            );
+            assert_eq!(
+                read::<ArtistViewOrder>(prefs, "artist_view_order"),
+                ArtistViewOrder::Albums
+            );
+            assert_eq!(
+                read::<ListenNowStyle>(prefs, "listen_now_style"),
+                ListenNowStyle::Cards
+            );
+            assert_eq!(
+                read::<Vec<String>>(prefs, "sidebar_order"),
+                ["albums", "home"]
+            );
+            assert_eq!(
+                read::<Vec<HomeSection>>(prefs, "home_sections"),
+                [
+                    HomeSection {
+                        key: "playlists".into(),
+                        enabled: false,
+                    },
+                    HomeSection {
+                        key: "hero".into(),
+                        enabled: true,
+                    },
+                ]
+            );
+            assert_eq!(prefs.len(), 15);
+        }
+        assert_eq!(read::<u32>(&kopuz, "hero_height"), 420);
+        assert_eq!(
+            read::<u32>(&gpui, "hero_height"),
+            999,
+            "a pref the frontend stored itself wins"
+        );
+        let mut seeded = kopuz.clone();
+        seeded.remove("hero_height");
+        let mut theirs = gpui.clone();
+        theirs.remove("hero_height");
+        assert_eq!(seeded, theirs, "both frontends are seeded alike");
+        assert_eq!(
+            kopuz["album_sort"],
+            serde_json::to_string(&[
+                SortCriterion::new(AlbumSortField::Year, SortDirection::Desc),
+                SortCriterion::new(AlbumSortField::Title, SortDirection::Asc),
+            ])
+            .unwrap(),
+            "encoded as serde writes the field"
+        );
+
+        let moved: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('view_sorts', 'sidebar_items', 'home_sections')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(moved, 0, "the old tables are dropped");
+        let columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('app_state') ORDER BY cid")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            columns,
+            [
+                "id",
+                "device_id",
+                "active_source",
+                "volume",
+                "discord_presence_paused",
+                "muted"
+            ]
+        );
+    }
+
+    /// A fresh install has nothing to carry, so no frontend gets a pref it never set.
+    #[tokio::test]
+    async fn an_empty_database_seeds_nothing() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool, None).await.unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM frontend_prefs")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
     }
 }

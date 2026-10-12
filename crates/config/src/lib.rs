@@ -7,12 +7,14 @@ use std::path::PathBuf;
 
 mod source;
 pub mod store;
+mod ui_prefs;
 mod views;
 pub use source::{
     Browser, BrowserEngine, DEFAULT_LOCAL_ID, DEFAULT_LOCAL_NAME, JellyfinServer, MusicServer,
     MusicService, SavedLocalSource, SavedServer, Source,
 };
-pub use views::{LibraryConfig, ServerAuth, UiConfig};
+pub use ui_prefs::UiPrefs;
+pub use views::ServerAuth;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum FetchStrategy {
@@ -781,17 +783,11 @@ pub fn default_home_sections() -> Vec<HomeSection> {
         .collect()
 }
 
-fn default_hero_height() -> u32 {
-    300
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppConfig {
     /// Isolated filesystem libraries; the one under `DEFAULT_LOCAL_ID` is the install's own.
     #[serde(default)]
     pub local_sources: Vec<SavedLocalSource>,
-    #[serde(default)]
-    pub source_explicitly_set: bool,
     /// Browser id used to host Spotify playback (`chrome`/`edge`/`brave`/
     /// `chromium`/`vivaldi`/`safari`); `None` picks the first available.
     #[serde(default)]
@@ -811,24 +807,6 @@ pub struct AppConfig {
     pub discord_presence: Option<bool>,
     #[serde(default = "default_discord_presence_source")]
     pub discord_presence_source: Option<bool>,
-    #[serde(default = "default_sort_order")]
-    pub sort_order: SortOrder,
-    #[serde(default = "default_album_sort")]
-    pub album_sort: Vec<SortCriterion<AlbumSortField>>,
-    #[serde(default = "default_library_sort")]
-    pub library_sort: Vec<SortCriterion<TrackSortField>>,
-    #[serde(default = "default_album_sort")]
-    pub artist_album_sort: Vec<SortCriterion<AlbumSortField>>,
-    #[serde(default = "default_artist_sort")]
-    pub artist_sort: Vec<SortCriterion<ArtistSortField>>,
-    #[serde(default)]
-    pub album_view_mode: AlbumViewMode,
-    #[serde(default)]
-    pub artist_album_view_mode: AlbumViewMode,
-    #[serde(default)]
-    pub artists_view_mode: AlbumViewMode,
-    #[serde(default = "default_artist_view_order")]
-    pub artist_view_order: ArtistViewOrder,
     #[serde(default = "default_language")]
     pub language: String,
     #[serde(default)]
@@ -837,10 +815,6 @@ pub struct AppConfig {
     /// the player bar act as the multimedia controller instead.
     #[serde(default)]
     pub fullscreen_use_player_bar: bool,
-    /// Fullscreen: the Up Next / Lyrics side panel is collapsed. Toggled from
-    /// the fullscreen UI itself, remembered across sessions.
-    #[serde(default)]
-    pub fullscreen_tabs_collapsed: bool,
     /// Use the current track's cover as the app background, overriding the
     /// active theme's background (including the album-art gradient).
     #[serde(default)]
@@ -876,8 +850,6 @@ pub struct AppConfig {
     pub show_source_toggle: bool,
     #[serde(default = "default_true")]
     pub show_row_images: bool,
-    #[serde(default = "default_sidebar_order")]
-    pub sidebar_order: Vec<String>,
     #[serde(default = "default_volume_scroll_step")]
     pub volume_scroll_step: f32,
     #[serde(default = "default_crossfade_seconds")]
@@ -920,12 +892,6 @@ pub struct AppConfig {
     pub ui_style: UiStyle,
     #[serde(default)]
     pub settings_layout: SettingsLayout,
-    #[serde(default = "default_hero_height")]
-    pub hero_height: u32,
-    #[serde(default = "default_home_sections")]
-    pub home_sections: Vec<HomeSection>,
-    #[serde(default)]
-    pub listen_now_style: ListenNowStyle,
     #[serde(default)]
     pub auto_fetch_covers: bool,
     #[serde(default)]
@@ -970,35 +936,6 @@ fn default_discord_presence() -> Option<bool> {
 
 fn default_discord_presence_source() -> Option<bool> {
     Some(true)
-}
-
-fn default_sort_order() -> SortOrder {
-    SortOrder::Title
-}
-
-fn default_album_sort() -> Vec<SortCriterion<AlbumSortField>> {
-    vec![SortCriterion::new(
-        AlbumSortField::Title,
-        SortDirection::Asc,
-    )]
-}
-
-fn default_library_sort() -> Vec<SortCriterion<TrackSortField>> {
-    vec![SortCriterion::new(
-        TrackSortField::Title,
-        SortDirection::Asc,
-    )]
-}
-
-fn default_artist_sort() -> Vec<SortCriterion<ArtistSortField>> {
-    vec![SortCriterion::new(
-        ArtistSortField::Name,
-        SortDirection::Asc,
-    )]
-}
-
-fn default_artist_view_order() -> ArtistViewOrder {
-    ArtistViewOrder::Tracks
 }
 
 fn default_show_source_toggle() -> bool {
@@ -1068,26 +1005,15 @@ impl Default for AppConfig {
         let music_directory = default_music_directory();
         Self {
             local_sources: vec![SavedLocalSource::default_library(vec![music_directory])],
-            source_explicitly_set: false,
             spotify_browser: None,
             spotify_prefer_active_device: true,
             theme: default_theme(),
             live_theme_path: String::new(),
             discord_presence: Some(true),
             discord_presence_source: Some(true),
-            sort_order: default_sort_order(),
-            album_sort: default_album_sort(),
-            library_sort: default_library_sort(),
-            artist_album_sort: default_album_sort(),
-            artist_sort: default_artist_sort(),
-            album_view_mode: AlbumViewMode::Grid,
-            artist_album_view_mode: AlbumViewMode::Grid,
-            artists_view_mode: AlbumViewMode::Grid,
-            artist_view_order: default_artist_view_order(),
             language: default_language(),
             reduce_animations: false,
             fullscreen_use_player_bar: false,
-            fullscreen_tabs_collapsed: false,
             cover_art_background: false,
             cover_art_darkening: default_cover_art_darkening(),
             cover_art_blur: 0,
@@ -1098,7 +1024,6 @@ impl Default for AppConfig {
             minimize_to_tray: false,
             show_source_toggle: default_show_source_toggle(),
             show_row_images: true,
-            sidebar_order: default_sidebar_order(),
             volume_scroll_step: default_volume_scroll_step(),
             crossfade_seconds: default_crossfade_seconds(),
             custom_themes: HashMap::new(),
@@ -1119,9 +1044,6 @@ impl Default for AppConfig {
             player_bar_position: PlayerBarPosition::Bottom,
             ui_style: UiStyle::Normal,
             settings_layout: SettingsLayout::Cd,
-            hero_height: default_hero_height(),
-            home_sections: default_home_sections(),
-            listen_now_style: ListenNowStyle::default(),
             auto_fetch_covers: false,
             cover_fetch_strategy: FetchStrategy::default(),
             radio_registries: default_radio_registries(),
@@ -1137,44 +1059,8 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
-    pub fn migrate_home_sections(&mut self) {
-        let allowed: std::collections::HashSet<&&str> = HOME_SECTION_KEYS.iter().collect();
-        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let existing = std::mem::take(&mut self.home_sections);
-        for s in existing {
-            if allowed.contains(&s.key.as_str()) && seen.insert(s.key.clone()) {
-                self.home_sections.push(s);
-            }
-        }
-        for key in HOME_SECTION_KEYS {
-            if !seen.contains(*key) {
-                self.home_sections.push(HomeSection {
-                    key: (*key).to_string(),
-                    enabled: true,
-                });
-            }
-        }
-    }
-
     pub fn remove_local_source(&mut self, id: &str) {
         self.local_sources.retain(|source| source.id != id);
-    }
-
-    pub fn migrate_sidebar_order(&mut self) {
-        // The downloads entry was keyed by the tool that fetches; a stored
-        // order still names it that way.
-        for key in self.sidebar_order.iter_mut() {
-            if key == "downloader" {
-                *key = "downloader".to_string();
-            }
-        }
-        let all_keys = default_sidebar_order();
-        for key in &all_keys {
-            if !self.sidebar_order.iter().any(|k| k == key) {
-                self.sidebar_order.push(key.to_string());
-            }
-        }
-        self.sidebar_order.retain(|k| all_keys.contains(k));
     }
 
     pub fn migrate_registry_paths(&mut self) {

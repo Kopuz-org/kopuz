@@ -43,6 +43,8 @@ async fn imports_synthetic_fixture() {
             "theme": "dark",
             "volume": 0.8,
             "discord_presence_paused": false,
+            "hero_height": 410,
+            "album_sort": [{ "field": "Year", "direction": "Desc" }],
             "active_source": "Server",
             "listen_counts": { "ytmusic:VID1:urlhex_deadbeef": 5, "/music/a.flac": 2 },
             "server": {
@@ -188,6 +190,27 @@ async fn imports_synthetic_fixture() {
         !settings.contains("SECRET_COOKIE"),
         "no token leaked into the settings file"
     );
+
+    // Its UI state seeds both frontends' prefs alike.
+    for frontend in ["kopuz", "gpui"] {
+        let prefs: std::collections::HashMap<String, String> = db
+            .frontend_prefs(frontend)
+            .await
+            .unwrap()
+            .into_iter()
+            .collect();
+        let ui = config::UiPrefs::from_entries(prefs.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+        assert_eq!(ui.hero_height, 410, "{frontend}");
+        assert_eq!(
+            ui.album_sort,
+            [config::SortCriterion::new(
+                config::AlbumSortField::Year,
+                config::SortDirection::Desc
+            )],
+            "{frontend}"
+        );
+        assert_eq!(prefs["hero_height"], "410");
+    }
 
     // The YT sync time becomes the YT server's favorites stamp, or its first open would re-stream the liked library.
     let stamp: Option<String> = sqlx::query_scalar(

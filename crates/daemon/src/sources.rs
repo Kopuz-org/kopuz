@@ -336,19 +336,6 @@ impl SourceService {
             .set_active_source(Some(self.build_active(&held)));
     }
 
-    /// Remember that the user picked a source, which only the first pick has to write.
-    async fn mark_chosen(&self) -> Result<(), ApiError> {
-        if self.current().await.source_explicitly_set {
-            return Ok(());
-        }
-        self.config
-            .mutate_state(&["source_explicitly_set"], |config| {
-                config.source_explicitly_set = true;
-            })
-            .await?;
-        Ok(())
-    }
-
     /// The last probe answer for `id`, if it has been probed.
     pub fn status(&self, id: &str) -> Option<SourceState> {
         let status = self.status.lock().ok()?;
@@ -541,7 +528,6 @@ impl SourceService {
         let source = target.active.clone();
         let changed = previous != source;
         let server = target.server.clone();
-        self.mark_chosen().await?;
         self.mutate(move |sources| match source {
             config::Source::LocalLibrary(_) => sources.set_active_local(source),
             config::Source::Server(_) => {
@@ -609,18 +595,10 @@ impl SourceService {
         }
         let was_active = self.snapshot().await.active.local_library_id() == Some(id);
         let id_owned = id.to_string();
-        let keys: &[&str] = if was_active {
-            &["local_sources", "source_explicitly_set"]
-        } else {
-            &["local_sources"]
-        };
         // The folder list goes first, so the session forgets the queue of the source it leaves rather than parking it.
         self.config
-            .mutate_state(keys, move |config| {
+            .mutate_state(&["local_sources"], move |config| {
                 config.remove_local_source(&id_owned);
-                if was_active {
-                    config.source_explicitly_set = true;
-                }
             })
             .await?;
         // The session drops this source's queue itself once its pending saves land, so none outlives the purge.
@@ -886,9 +864,6 @@ impl SourceService {
             .map(|server| server.service);
         let was_active = current.active.server_id() == Some(id);
         let id_owned = id.to_string();
-        if was_active {
-            self.mark_chosen().await?;
-        }
         self.mutate(move |sources| {
             sources.remove_saved_server(&id_owned);
             if was_active {
@@ -2131,7 +2106,6 @@ mod tests {
         let info = service.switch_source("local:b").await.expect("switch");
         assert!(info.active);
         assert_eq!(database.load_sources().await.expect("load").active, b);
-        assert!(config.snapshot().await.source_explicitly_set);
         reaches_the_session(&session, &b).await;
 
         service.delete_source("local:b").await.expect("delete");

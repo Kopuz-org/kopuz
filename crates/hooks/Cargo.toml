@@ -28,3 +28,6 @@ tokio = { workspace = true, features = ["fs", "sync", "macros"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 player = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "test-util"] }

@@ -372,9 +372,11 @@ fn resync(
     gens: hooks::db_reactivity::Generations,
     config: Signal<config::AppConfig>,
     baseline: hooks::config_sync::ConfigBaseline,
+    ui_prefs: hooks::ui_prefs::UiPrefsStore,
 ) {
     gens.bump_all();
     spawn(adopt_daemon_config(config, baseline));
+    ui_prefs.reload();
 }
 
 #[component]
@@ -455,6 +457,7 @@ fn App() -> Element {
     // daemon reads those layers; nothing here opens the file.
     hooks::config_view::use_locked_keys_provider();
     let config_baseline = hooks::config_sync::use_config_baseline_provider();
+    let ui_prefs = hooks::ui_prefs::use_ui_prefs_provider();
 
     // Capabilities of the active source — drives source-agnostic routing (e.g.
     // which artist view to render) without hardcoding services in the router.
@@ -525,7 +528,7 @@ fn App() -> Element {
                 // queue is the core's: it owns the store and persists on the
                 // way out, so only the config surface is ours to push.
                 let cfg = (*config_loaded_ok.peek()).then(|| config.peek().clone());
-                exit_flush::persist_on_fresh_thread(cfg);
+                exit_flush::persist_on_fresh_thread(cfg, Some(ui_prefs.unsent()));
             }
             backend::shutdown();
             // After the persists, so they (and any failure warnings) land in
@@ -684,6 +687,8 @@ fn App() -> Element {
         }
         exit_flush::stash_config(config.read().clone());
     });
+    #[cfg(not(target_os = "android"))]
+    use_effect(move || exit_flush::stash_prefs(ui_prefs.unsent_tracked()));
     // Settings are written through the daemon, which owns the file and the
     // blob: a direct database write would leave its copy stale and lose the
     // credentials it keeps out of what this process holds.
@@ -933,12 +938,19 @@ fn App() -> Element {
                             api::ApiEvent::ConfigChanged { .. } => {
                                 spawn(adopt_daemon_config(config, config_baseline));
                             }
+                            api::ApiEvent::FrontendPrefsChanged { frontend, .. }
+                                if frontend == hooks::ui_prefs::FRONTEND =>
+                            {
+                                ui_prefs.reload();
+                            }
                             api::ApiEvent::Resync => {
-                                resync(gens, config, config_baseline);
+                                resync(gens, config, config_baseline, ui_prefs);
                             }
                             _ => {}
                         },
-                        Err(RecvError::Lagged(_)) => resync(gens, config, config_baseline),
+                        Err(RecvError::Lagged(_)) => {
+                            resync(gens, config, config_baseline, ui_prefs)
+                        }
                         Err(RecvError::Closed) => break,
                     }
                 }
@@ -1832,7 +1844,6 @@ fn App() -> Element {
                         },
                         Route::Album => rsx! {
                             pages::album::Album {
-                                config: config,
                                 album_id: selected_album_id,
                                 queue: queue,
                                 current_queue_index: current_queue_index,
@@ -1973,7 +1984,7 @@ fn App() -> Element {
                         let api = hooks::consume_api();
                         let _ = quick_search_source();
                         let filter = hooks::TrackFilter {
-                            sort: hooks::TrackSort::Fields(config.peek().library_sort.clone()),
+                            sort: hooks::TrackSort::Fields(ui_prefs.prefs().peek().library_sort.clone()),
                             ..Default::default()
                         };
                         spawn(async move {
