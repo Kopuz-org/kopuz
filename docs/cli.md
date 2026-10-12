@@ -25,10 +25,10 @@ address. No daemon starts automatically when a client connects.
 
 ```sh
 kopuzctl --socket /path/to/kopuzd.sock status
-kopuzctl --address 127.0.0.1:7770 --token-file /path/to/kopuzd.token status
+kopuzctl --address 127.0.0.1:7770 status
 ```
 
-TCP needs `kopuzd --listen` and its token file. It uses unencrypted HTTP/2; see
+TCP needs `kopuzd --listen`. It uses unencrypted HTTP/2 with no credentials; see
 [the transport documentation](api.md#over-tcp).
 
 ## Playback and library

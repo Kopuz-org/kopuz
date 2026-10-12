@@ -7,11 +7,7 @@ use ctl::Cli;
 
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let api = match cli.address {
-        Some(address) => {
-            let path = cli.token_file.ok_or("--address requires --token-file")?;
-            let token = ctl::read_secret(std::fs::File::open(path)?)?;
-            client::GrpcApi::connect_tcp(address, &token)?
-        }
+        Some(address) => client::GrpcApi::connect_tcp(address)?,
         None => {
             let socket = cli
                 .socket

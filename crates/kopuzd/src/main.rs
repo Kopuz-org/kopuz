@@ -1,5 +1,5 @@
 //! Headless Kopuz daemon: a core from `daemon::boot`, served on a socket
-//! and, with `--listen`, on a token-gated TCP port.
+//! and, with `--listen`, on a TCP port.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -11,8 +11,7 @@ const USAGE: &str = "\
 usage: kopuzd [options]
 
   --socket <path>        socket (named pipe on Windows) to serve on
-  --listen <ip>:<port>   also serve on a TCP port, gated on a token
-  --token-file <path>    where the TCP token lives
+  --listen <ip>:<port>   also serve on a TCP port
   --db-path <file>       library database to open
   --app-id <id>          AppUserModelID the Windows media flyout and
                          notifications show this process as; defaults to
@@ -48,11 +47,6 @@ fn parse_args(
                         .parse()
                         .map_err(|error| format!("--listen {address}: {error}"))?,
                 );
-            }
-            "--token-file" => {
-                args.token_path = Some(PathBuf::from(
-                    iter.next().ok_or("--token-file requires a path")?,
-                ));
             }
             "--db-path" => {
                 args.db_path = Some(iter.next().ok_or("--db-path requires a path")?);
