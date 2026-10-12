@@ -83,22 +83,23 @@ pub enum TrackSort {
     DateAdded,
     /// Most-played first (`listen_counts` join), ties by title.
     PlayCount,
+    /// Disc → track → title: the order an album plays in.
+    TrackNumber,
     /// Stacked user criteria (library sort control): the first field decides,
     /// the rest break ties. Empty falls back to [`TrackSort::ArtistAlbum`].
     Fields(Vec<config::SortCriterion<config::TrackSortField>>),
 }
 
-/// What a windowed track listing selects: which source, how it's sorted, and
-/// an optional case-insensitive search across title/artist/album. Drives
-/// `WHERE`/`ORDER BY` so only the needed rows are materialized. Narrower
-/// listings (one album, one artist, one genre, a folder) have dedicated
-/// `Storage` methods instead of filter fields — there is deliberately no way
-/// to pull a whole source and filter it in memory.
+/// What a windowed track listing selects, all of it in SQL so only the page is materialized.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TrackFilter {
     pub source: Source,
     pub sort: TrackSort,
     pub search: String,
+    /// Only the tracks of this album (`source_album_id`).
+    pub album: Option<String>,
+    /// Only the tracks on albums of this genre.
+    pub genre: Option<String>,
     /// Restrict to favorites (`Some(true)`) or non-favorites (`Some(false)`).
     /// Matched against the local favorites mirror, which every source keeps
     /// under its own `source.as_str()` key.

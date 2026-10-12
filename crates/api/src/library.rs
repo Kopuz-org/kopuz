@@ -1,7 +1,6 @@
 use crate::player::TrackKind;
 
-/// Library ordering. `Default` is the daemon's own choice, so a caller that
-/// does not care says nothing.
+/// Library ordering. `Default` is the listing's natural order: disc and track for an album, artist then album otherwise.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum TrackSort {
     #[default]
@@ -103,7 +102,7 @@ pub struct TrackFilter {
     /// Inclusive bounds on the year of the track's album; an album with no year is in neither.
     pub year_from: Option<u16>,
     pub year_to: Option<u16>,
-    /// Run `sort` backwards (`DateAdded` becomes oldest first); an album or genre keeps its own track order, which this flips.
+    /// Run `sort` backwards: every term flips, so `DateAdded` becomes oldest first.
     pub reverse: bool,
 }
 

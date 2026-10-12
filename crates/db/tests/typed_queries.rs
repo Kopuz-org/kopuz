@@ -318,3 +318,49 @@ async fn track_filter_selects_favorites_in_sql() {
         "the two halves partition the library"
     );
 }
+
+#[tokio::test]
+async fn album_and_genre_listings_honour_the_sort() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    seed(&db_path).await;
+    let page = Page {
+        offset: 0,
+        limit: 50,
+    };
+    let titles =
+        |tracks: Vec<reader::Track>| tracks.into_iter().map(|t| t.title).collect::<Vec<_>>();
+    let listing =
+        |album: Option<&str>, genre: Option<&str>, sort: TrackSort, reverse: bool| TrackFilter {
+            album: album.map(Into::into),
+            genre: genre.map(Into::into),
+            sort,
+            reverse,
+            ..TrackFilter::new(Source::default())
+        };
+
+    let natural = listing(Some("al-rock"), None, TrackSort::TrackNumber, false);
+    assert_eq!(
+        titles(db.tracks_page(&natural, page).await.unwrap()),
+        ["Ballad", "Anthem"]
+    );
+    assert_eq!(db.tracks_count(&natural).await.unwrap(), 2);
+
+    let by_title = listing(Some("al-rock"), None, TrackSort::Title, false);
+    assert_eq!(
+        titles(db.tracks_page(&by_title, page).await.unwrap()),
+        ["Anthem", "Ballad"]
+    );
+
+    let newest = listing(None, Some("Jazz"), TrackSort::DateAdded, false);
+    assert_eq!(
+        titles(db.tracks_page(&newest, page).await.unwrap()),
+        ["Drift", "Cool"]
+    );
+    let oldest = listing(None, Some("Jazz"), TrackSort::DateAdded, true);
+    assert_eq!(
+        titles(db.tracks_page(&oldest, page).await.unwrap()),
+        ["Cool", "Drift"]
+    );
+    assert_eq!(db.tracks_count(&newest).await.unwrap(), 2);
+}

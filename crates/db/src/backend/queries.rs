@@ -88,6 +88,7 @@ fn order_terms(sort: &TrackSort) -> Vec<Term> {
         TrackSort::Album => vec![ALBUM, DISC, TRACK],
         TrackSort::DateAdded => vec![("t.added_at", true), ("t.rowid_pk", true)],
         TrackSort::PlayCount => vec![("COALESCE(lc.count, 0)", true), TITLE],
+        TrackSort::TrackNumber => vec![DISC, TRACK, TITLE],
         TrackSort::Fields(criteria) => {
             if criteria.is_empty() {
                 return order_terms(&TrackSort::ArtistAlbum);
@@ -192,6 +193,17 @@ fn bind_scalar_args<'q, O>(
 /// WHERE clause + ordered bind values for a filter (after the `source = ?1` bind).
 fn filter_clauses(filter: &TrackFilter) -> Clauses {
     let mut c = Clauses::default();
+    if let Some(album) = &filter.album {
+        let n = c.bind(Arg::Text(album.clone()));
+        c.sql.push_str(&format!(" AND t.source_album_id = {n}"));
+    }
+    if let Some(genre) = &filter.genre {
+        let n = c.bind(Arg::Text(genre.clone()));
+        c.sql.push_str(&format!(
+            " AND EXISTS (SELECT 1 FROM albums g \
+              WHERE g.source = t.source AND g.source_album_id = t.source_album_id AND g.genre = {n})"
+        ));
+    }
     if !filter.search.trim().is_empty() {
         let n = c.bind(Arg::Text(format!(
             "%{}%",
