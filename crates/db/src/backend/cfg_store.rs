@@ -1,6 +1,6 @@
 //! Config persistence: settings in the settings file (`config::store`), and state, credentials and library data in tables, hydrated into one `AppConfig`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use config::{AppConfig, Browser, MusicServer, MusicService, SavedServer, Source};
@@ -74,20 +74,6 @@ pub async fn load_config(
             *slot = row.value;
         }
     }
-    cfg.downloader_history = sqlx::query!(
-        "SELECT url, title, format, status, error FROM ytdlp_history ORDER BY position"
-    )
-    .fetch_all(pool)
-    .await?
-    .into_iter()
-    .map(|row| config::DownloaderHistoryEntry {
-        url: row.url,
-        title: row.title,
-        format: row.format,
-        status: row.status,
-        error: row.error,
-    })
-    .collect();
     let folders =
         sqlx::query!("SELECT server_id, path FROM server_folders ORDER BY server_id, position")
             .fetch_all(pool)
@@ -114,14 +100,18 @@ pub async fn load_config(
             .map(StoredServer::music_server)
     });
 
-    // Hydrate play counts under the uid keys every reader of the map looks them up by.
+    Ok(Some(cfg))
+}
+
+/// Every play count, under the uid keys every reader of the map looks them up by.
+pub async fn listen_counts(pool: &SqlitePool) -> Result<HashMap<String, u64>, DbError> {
     let counts = sqlx::query!(
         "SELECT lc.source, lc.track_key, lc.count, s.service \
            FROM listen_counts lc LEFT JOIN servers s ON s.id = lc.source"
     )
     .fetch_all(pool)
     .await?;
-    cfg.listen_counts = counts
+    Ok(counts
         .into_iter()
         .map(|r| {
             let uid = match r.service {
@@ -131,18 +121,91 @@ pub async fn load_config(
             let key = Source::from_column(&r.source).listen_count_key(&uid);
             (key, r.count.max(0) as u64)
         })
-        .collect();
+        .collect())
+}
 
+pub async fn offline_tracks(pool: &SqlitePool) -> Result<HashMap<String, String>, DbError> {
     let offline = sqlx::query!("SELECT item_id, path FROM offline_tracks")
         .fetch_all(pool)
         .await?;
-    cfg.offline_tracks = offline.into_iter().map(|r| (r.item_id, r.path)).collect();
-    cfg.pinned_stations =
-        sqlx::query_scalar!("SELECT manifest FROM pinned_stations ORDER BY position")
-            .fetch_all(pool)
-            .await?;
+    Ok(offline.into_iter().map(|r| (r.item_id, r.path)).collect())
+}
 
-    Ok(Some(cfg))
+pub async fn pinned_stations(pool: &SqlitePool) -> Result<Vec<String>, DbError> {
+    sqlx::query_scalar!("SELECT manifest FROM pinned_stations ORDER BY position")
+        .fetch_all(pool)
+        .await
+        .map_err(Into::into)
+}
+
+async fn history_rows(
+    conn: &mut sqlx::SqliteConnection,
+) -> Result<Vec<config::DownloaderHistoryEntry>, DbError> {
+    Ok(sqlx::query!(
+        "SELECT url, title, format, status, error FROM ytdlp_history ORDER BY position"
+    )
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .map(|row| config::DownloaderHistoryEntry {
+        url: row.url,
+        title: row.title,
+        format: row.format,
+        status: row.status,
+        error: row.error,
+    })
+    .collect())
+}
+
+pub async fn downloader_history(
+    pool: &SqlitePool,
+) -> Result<Vec<config::DownloaderHistoryEntry>, DbError> {
+    let mut conn = pool.acquire().await?;
+    history_rows(&mut conn).await
+}
+
+/// Put `entry` at the head of the downloader history, keeping at most `limit` rows.
+pub async fn push_downloader_history(
+    pool: &SqlitePool,
+    entry: &config::DownloaderHistoryEntry,
+    limit: usize,
+) -> Result<(), DbError> {
+    let mut tx = super::begin_immediate(pool).await?;
+    let mut entries = history_rows(&mut tx).await?;
+    entries.insert(0, entry.clone());
+    entries.truncate(limit);
+    write_history(&mut tx, &entries).await?;
+    tx.commit().await
+}
+
+pub async fn clear_downloader_history(pool: &SqlitePool) -> Result<(), DbError> {
+    let mut conn = pool.acquire().await?;
+    write_history(&mut conn, &[]).await
+}
+
+pub(crate) async fn write_history(
+    conn: &mut sqlx::SqliteConnection,
+    entries: &[config::DownloaderHistoryEntry],
+) -> Result<(), DbError> {
+    sqlx::query!("DELETE FROM ytdlp_history")
+        .execute(&mut *conn)
+        .await?;
+    for (position, entry) in entries.iter().enumerate() {
+        let position = position as i64;
+        sqlx::query!(
+            "INSERT INTO ytdlp_history (position, url, title, format, status, error) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            position,
+            entry.url,
+            entry.title,
+            entry.format,
+            entry.status,
+            entry.error
+        )
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(())
 }
 
 const VIEW_ALBUMS: &str = "albums";
@@ -397,25 +460,6 @@ pub(crate) async fn write_state(
             "INSERT INTO integration_credentials (key, value) VALUES (?1, ?2)",
             key,
             value
-        )
-        .execute(&mut *conn)
-        .await?;
-    }
-
-    sqlx::query!("DELETE FROM ytdlp_history")
-        .execute(&mut *conn)
-        .await?;
-    for (position, entry) in cfg.downloader_history.iter().enumerate() {
-        let position = position as i64;
-        sqlx::query!(
-            "INSERT INTO ytdlp_history (position, url, title, format, status, error) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            position,
-            entry.url,
-            entry.title,
-            entry.format,
-            entry.status,
-            entry.error
         )
         .execute(&mut *conn)
         .await?;

@@ -143,6 +143,8 @@ pub struct AlbumQuery {
     pub artist_key: Option<String>,
     /// Only these albums, by source album id; an empty list matches none.
     pub ids: Option<Vec<String>>,
+    /// Only those with a downloaded track (`Some(true)`), or only those with none.
+    pub downloaded: Option<bool>,
     /// The first criterion decides, the rest break ties; artist then title settle what is left.
     pub sort: Vec<config::SortCriterion<config::AlbumSortField>>,
 }
@@ -152,6 +154,8 @@ pub struct ArtistQuery {
     pub source: Source,
     /// Case-insensitive (ASCII) match on the artist's name.
     pub search: String,
+    /// Only those with a downloaded track (`Some(true)`), or only those with none.
+    pub downloaded: Option<bool>,
     /// The first criterion decides, the rest break ties; name then key settle what is left.
     pub sort: Vec<config::SortCriterion<config::ArtistSortField>>,
 }
@@ -428,6 +432,18 @@ pub trait ReadStore: Send + Sync {
 
     /// One frontend's stored preferences as `(key, value)`, key-ordered. The values are opaque to the daemon.
     async fn frontend_prefs(&self, frontend: &str) -> Result<Vec<(String, String)>, DbError>;
+
+    /// Every play count, keyed by [`Source::listen_count_key`] over the track's uid.
+    async fn listen_counts(&self) -> Result<std::collections::HashMap<String, u64>, DbError>;
+
+    /// Every downloaded copy, item id to file path.
+    async fn offline_tracks(&self) -> Result<std::collections::HashMap<String, String>, DbError>;
+
+    /// The pinned stations' manifests, in pin order.
+    async fn pinned_stations(&self) -> Result<Vec<String>, DbError>;
+
+    /// The URL downloader's finished downloads, newest first.
+    async fn downloader_history(&self) -> Result<Vec<config::DownloaderHistoryEntry>, DbError>;
 }
 
 /// The persistence API: every mutation plus admin/dev ops, layered on top of the
@@ -615,6 +631,16 @@ pub trait Storage: ReadStore {
 
     /// Pin (`Some` manifest) a station after the others, or unpin it (`None`).
     async fn set_pinned_station(&self, id: &str, manifest: Option<&str>) -> Result<(), DbError>;
+
+    /// Record a finished download at the head of the history, keeping the newest `limit`.
+    async fn push_downloader_history(
+        &self,
+        entry: &config::DownloaderHistoryEntry,
+        limit: usize,
+    ) -> Result<(), DbError>;
+
+    /// Forget the whole downloader history.
+    async fn clear_downloader_history(&self) -> Result<(), DbError>;
 
     /// Set (`Some`) or delete (`None`) a frontend's preferences in one transaction; answers the changed keys, or `None` (nothing written) when the frontend would hold more than `budget` bytes.
     async fn set_frontend_prefs(

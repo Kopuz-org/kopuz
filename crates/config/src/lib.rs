@@ -848,8 +848,6 @@ pub struct AppConfig {
     #[serde(default = "default_artist_view_order")]
     pub artist_view_order: ArtistViewOrder,
     #[serde(default)]
-    pub listen_counts: HashMap<String, u64>,
-    #[serde(default)]
     pub musicbrainz_token: String,
     #[serde(default)]
     pub lastfm_api_key: String,
@@ -934,20 +932,15 @@ pub struct AppConfig {
     pub device_change_behavior: DeviceChangeBehavior,
     #[serde(default)]
     pub sample_rate_mode: SampleRateMode,
-    /// Stored under the names the yt-dlp downloader gave these, so existing
-    /// settings and history carry over.
+    /// Stored under the names the yt-dlp downloader gave these, so existing settings carry over.
     #[serde(default, rename = "ytdlp_output_dir")]
     pub downloader_output_dir: String,
     #[serde(default, rename = "ytdlp_options")]
     pub downloader_options: DownloaderOptions,
-    #[serde(default, rename = "ytdlp_history")]
-    pub downloader_history: Vec<DownloaderHistoryEntry>,
     #[serde(default)]
     pub titlebar_mode: TitlebarMode,
     #[serde(default)]
     pub offline_quality: OfflineQuality,
-    #[serde(default)]
-    pub offline_tracks: HashMap<String, String>,
     #[serde(default)]
     pub stream_quality: StreamQuality,
     /// Only a source with track radio can do this.
@@ -975,9 +968,6 @@ pub struct AppConfig {
     pub cover_fetch_strategy: FetchStrategy,
     #[serde(default = "default_radio_registries")]
     pub radio_registries: Vec<RegistryEntry>,
-    /// Station manifests (JSON) pinned from the radio browser.
-    #[serde(default)]
-    pub pinned_stations: Vec<String>,
     #[serde(default)]
     pub prefer_local_lyrics: bool,
     #[serde(default)]
@@ -1148,7 +1138,6 @@ impl Default for AppConfig {
             artist_album_view_mode: AlbumViewMode::Grid,
             artists_view_mode: AlbumViewMode::Grid,
             artist_view_order: default_artist_view_order(),
-            listen_counts: HashMap::new(),
             musicbrainz_token: String::new(),
             lastfm_api_key: String::new(),
             lastfm_api_secret: String::new(),
@@ -1184,10 +1173,8 @@ impl Default for AppConfig {
             sample_rate_mode: SampleRateMode::System,
             downloader_output_dir: String::new(),
             downloader_options: DownloaderOptions::default(),
-            downloader_history: Vec::new(),
             titlebar_mode: TitlebarMode::Custom,
             offline_quality: OfflineQuality::default(),
-            offline_tracks: HashMap::new(),
             stream_quality: StreamQuality::High,
             autoplay_radio: false,
             skip_explicit: false,
@@ -1201,7 +1188,6 @@ impl Default for AppConfig {
             auto_fetch_covers: false,
             cover_fetch_strategy: FetchStrategy::default(),
             radio_registries: default_radio_registries(),
-            pinned_stations: Vec::new(),
             prefer_local_lyrics: false,
             enable_musixmatch_lyrics: false,
             lyrics_offset_ms: 0,

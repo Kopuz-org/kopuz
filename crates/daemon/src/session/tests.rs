@@ -1355,7 +1355,7 @@ async fn radio_tracks_reject_seek_commands() {
 #[test]
 fn radio_sentinel_becomes_wire_kind() {
     let track = test_track(&"radio:station:main".to_string());
-    let now = track_info(&track, &config::AppConfig::default());
+    let now = track_info(&track, &crate::offline::OfflineIndex::default());
     assert_eq!(now.kind, TrackKind::Radio);
     assert_eq!(now.duration_ms, None);
     assert!(!now.seekable);
@@ -1373,14 +1373,14 @@ fn the_playing_row_carries_both_the_library_ref_and_the_source_qualified_id() {
         },
         ..test_track(&"abc123".to_string())
     };
-    let now = track_info(&server, &config::AppConfig::default());
+    let now = track_info(&server, &crate::offline::OfflineIndex::default());
     assert_eq!(now.key, "abc123", "key is the bare library ref");
     assert_eq!(now.uid, "ytmusic:abc123", "uid is source-qualified");
     assert_ne!(now.key, now.uid, "the two must not be conflated");
 
     // Local tracks are the case that hides the mistake: both are the path.
     let local = test_track(&"/music/a.flac".to_string());
-    let now = track_info(&local, &config::AppConfig::default());
+    let now = track_info(&local, &crate::offline::OfflineIndex::default());
     assert_eq!(now.key, now.uid);
 }
 

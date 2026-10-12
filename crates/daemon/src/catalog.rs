@@ -91,10 +91,9 @@ impl CatalogService {
         &self,
         home: DiscoverHome,
         source: &dyn MediaSource,
-        config: &config::AppConfig,
     ) -> CatalogPage {
         CatalogPage {
-            shelves: self.shelves(home.shelves, source, config),
+            shelves: self.shelves(home.shelves, source),
             continuation: home.continuation,
         }
     }
@@ -103,7 +102,6 @@ impl CatalogService {
         &self,
         mut shelves: Vec<DiscoverShelf>,
         source: &dyn MediaSource,
-        config: &config::AppConfig,
     ) -> Vec<CatalogShelf> {
         let songs = shelves
             .iter_mut()
@@ -145,7 +143,7 @@ impl CatalogService {
                     items: shelf
                         .items
                         .into_iter()
-                        .map(|item| self.item(item, source, config))
+                        .map(|item| self.item(item, source))
                         .collect(),
                 }
             })
@@ -156,7 +154,6 @@ impl CatalogService {
         &self,
         item: DiscoverItem,
         source: &dyn MediaSource,
-        config: &config::AppConfig,
     ) -> CatalogItem {
         match item {
             // A song's artwork is the track's own, so the tile and the queue
@@ -169,7 +166,7 @@ impl CatalogService {
                 artwork: crate::artwork::track_ref(&track),
                 explicit: track.explicit,
                 web_url: source.web_url(&track),
-                track: Some(crate::wire::track_info(&track, config)),
+                track: Some(crate::wire::track_info(&track, self.session.offline())),
                 accent: None,
                 actions: actions(item_actions),
             },
@@ -244,7 +241,7 @@ impl CatalogService {
             },
             DiscoverItem::Video(track, item_actions) => CatalogItem {
                 kind: CatalogItemKind::Video,
-                ..self.item(DiscoverItem::Song(track, item_actions), source, config)
+                ..self.item(DiscoverItem::Song(track, item_actions), source)
             },
             DiscoverItem::Episode {
                 track,
@@ -254,7 +251,6 @@ impl CatalogService {
                 let item = self.item(
                     DiscoverItem::Song(track, ItemActions::default()),
                     source,
-                    config,
                 );
                 let subtitle: Vec<&str> = [published.as_deref(), item.subtitle.as_deref()]
                     .into_iter()
@@ -295,14 +291,13 @@ impl CatalogService {
     }
 
     pub async fn catalog(&self, continuation: Option<&str>) -> Result<CatalogPage, ApiError> {
-        let config = self.config();
         let source = self.source();
         let home = match continuation {
             Some(token) => source.discover_continuation(token).await,
             None => source.discover_home().await,
         }
         .map_err(source_error)?;
-        Ok(self.page(home, &*source, &config))
+        Ok(self.page(home, &*source))
     }
 
     pub async fn detail(&self, request: CatalogDetailRequest) -> Result<CatalogDetail, ApiError> {
@@ -311,7 +306,7 @@ impl CatalogService {
                 "a catalog entity is opened by its id",
             ));
         }
-        let config = self.config();
+        let offline = self.session.offline();
         let source = self.source();
         match request.kind {
             CatalogItemKind::Album => {
@@ -338,7 +333,7 @@ impl CatalogService {
                     tracks: album
                         .tracks
                         .iter()
-                        .map(|track| crate::wire::track_info(track, &config))
+                        .map(|track| crate::wire::track_info(track, offline))
                         .collect(),
                     ..Default::default()
                 })
@@ -377,7 +372,7 @@ impl CatalogService {
                     tracks: page
                         .tracks
                         .iter()
-                        .map(|track| crate::wire::track_info(track, &config))
+                        .map(|track| crate::wire::track_info(track, offline))
                         .collect(),
                     continuation: page.next,
                     header: CatalogHeader::Detail,
@@ -412,7 +407,6 @@ impl CatalogService {
                         continuation: None,
                     },
                     &*source,
-                    &config,
                 );
                 let artwork =
                     self.remember_thumbnail(&artist.channel_id, artist.banner_thumbnail.as_deref());
@@ -441,12 +435,12 @@ impl CatalogService {
                     .browse_page(&request.id, request.continuation.as_deref())
                     .await
                     .map_err(source_error)?;
-                Ok(self.browse_detail(request, page, &*source, &config))
+                Ok(self.browse_detail(request, page, &*source))
             }
             // A song's own page is what the source relates to it.
             CatalogItemKind::Track | CatalogItemKind::Video => {
                 let page = source.related(&request.id).await.map_err(source_error)?;
-                Ok(self.browse_detail(request, page, &*source, &config))
+                Ok(self.browse_detail(request, page, &*source))
             }
             CatalogItemKind::Unknown => Err(ApiError::unsupported(
                 "this catalog kind has no detail page",
@@ -543,7 +537,6 @@ impl CatalogService {
         request: CatalogDetailRequest,
         page: BrowsePage,
         source: &dyn MediaSource,
-        config: &config::AppConfig,
     ) -> CatalogDetail {
         let id = request.id;
         let artwork = self.remember_thumbnail(&id, page.thumbnail.as_deref());
@@ -575,7 +568,7 @@ impl CatalogService {
             },
             owner: page.owner,
             plays: page.plays,
-            shelves: self.shelves(page.shelves, source, config),
+            shelves: self.shelves(page.shelves, source),
             continuation: page.continuation,
             actions: actions(page.actions),
             privacy: page.privacy.map(privacy),
@@ -589,7 +582,6 @@ impl CatalogService {
         &self,
         request: api::SearchRequest,
     ) -> Result<api::SearchResults, ApiError> {
-        let config = self.config();
         let source = self.source();
         // A continuation page is parsed as its filter's kind, so it travels with it.
         let filter = request
@@ -601,7 +593,7 @@ impl CatalogService {
             .await
             .map_err(source_error)?;
         Ok(api::SearchResults {
-            shelves: self.shelves(page.shelves, &*source, &config),
+            shelves: self.shelves(page.shelves, &*source),
             continuation: page.continuation,
             correction: page.correction,
             ..Default::default()
@@ -613,7 +605,6 @@ impl CatalogService {
         query: &str,
     ) -> Result<Vec<api::SearchSuggestion>, ApiError> {
         use server::ytmusic::browse::search::Suggestion;
-        let config = self.config();
         let source = self.source();
         let suggestions = source
             .search_suggestions(query)
@@ -641,7 +632,7 @@ impl CatalogService {
             search_filter: None,
         };
         let mut hits = self
-            .shelves(vec![shelf], &*source, &config)
+            .shelves(vec![shelf], &*source)
             .into_iter()
             .flat_map(|shelf| shelf.items);
         Ok(order

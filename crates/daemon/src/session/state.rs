@@ -134,7 +134,7 @@ impl Session {
             Some(external) => external.track.as_ref(),
             None => self.model.current_track(),
         };
-        let track = shown.map(|track| crate::wire::track_info(track, &self.config));
+        let track = shown.map(|track| crate::wire::track_info(track, &self.offline));
         let fading = self.pending_transition.as_ref().and_then(|pending| {
             (pending.stage == TransitionStage::Fading).then(|| FadingState {
                 from_token: pending.from_token,

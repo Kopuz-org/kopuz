@@ -153,6 +153,8 @@ pub struct AlbumQuery {
     pub artist_key: Option<String>,
     /// Only these albums, by id; an empty list matches none.
     pub ids: Option<Vec<String>>,
+    /// Only those with a downloaded track (`Some(true)`), or only those with none.
+    pub downloaded: Option<bool>,
     /// The first criterion decides and the rest break ties; artist then title settle what is left.
     pub sort: Vec<config::SortCriterion<config::AlbumSortField>>,
 }
@@ -162,6 +164,8 @@ pub struct AlbumQuery {
 pub struct ArtistQuery {
     /// Matches the artist's name, ignoring ASCII case.
     pub search: Option<String>,
+    /// Only those with a downloaded track (`Some(true)`), or only those with none.
+    pub downloaded: Option<bool>,
     /// The first criterion decides and the rest break ties; name then key settle what is left.
     pub sort: Vec<config::SortCriterion<config::ArtistSortField>>,
 }

@@ -27,9 +27,7 @@ const SOURCE_KEYS: &[&str] = &[
     "server_folders",
 ];
 
-/// Never serialized to a client and never patchable: credentials move through
-/// the dedicated provisioning endpoints, and `offline_tracks` is
-/// machine-local path state that reaches clients as per-track flags instead.
+/// Never serialized to a client and never patchable: credentials move through the provisioning endpoints.
 pub struct ConfigService {
     db: db::Db,
     settings_path: PathBuf,
@@ -135,60 +133,6 @@ impl ConfigService {
         self.save(&next).await?;
         held.config = next;
         self.publish(&mut held, keys.iter().map(|key| key.to_string()).collect());
-        Ok(held.config.clone())
-    }
-
-    /// Persist one offline-track registration without rewriting the whole
-    /// config, then update the in-memory snapshot used by daemon services.
-    pub async fn set_offline_track(
-        &self,
-        item_id: &str,
-        path: Option<String>,
-    ) -> Result<config::AppConfig, ApiError> {
-        let mut held = self.current.write().await;
-        self.db
-            .set_offline_track(item_id, path.as_deref())
-            .await
-            .map_err(|error| {
-                ApiError::internal(format!("offline track registration failed: {error}"))
-            })?;
-        match path {
-            Some(path) => {
-                held.config.offline_tracks.insert(item_id.to_string(), path);
-            }
-            None => {
-                held.config.offline_tracks.remove(item_id);
-            }
-        }
-        self.publish(&mut held, vec!["offline_tracks".to_string()]);
-        Ok(held.config.clone())
-    }
-
-    /// Pin a station's manifest after the other pins (`Some`), or unpin it (`None`), without a whole-config save.
-    pub async fn set_pinned_station(
-        &self,
-        id: &str,
-        manifest: Option<String>,
-    ) -> Result<config::AppConfig, ApiError> {
-        let mut held = self.current.write().await;
-        self.db
-            .set_pinned_station(id, manifest.as_deref())
-            .await
-            .map_err(|error| ApiError::internal(format!("station pin failed: {error}")))?;
-        // Mirrors the row write: a re-pin keeps its place, a new pin goes last.
-        let pins = &mut held.config.pinned_stations;
-        let at = pins
-            .iter()
-            .position(|pinned| manifest_id(pinned).as_deref() == Some(id));
-        match (manifest, at) {
-            (Some(manifest), Some(at)) => pins[at] = manifest,
-            (Some(manifest), None) => pins.push(manifest),
-            (None, Some(at)) => {
-                pins.remove(at);
-            }
-            (None, None) => {}
-        }
-        self.publish(&mut held, vec!["pinned_stations".to_string()]);
         Ok(held.config.clone())
     }
 
@@ -300,8 +244,6 @@ fn with_daemon_owned_fields(
     incoming.librefm_api_key = current.librefm_api_key.clone();
     incoming.librefm_api_secret = current.librefm_api_secret.clone();
     incoming.librefm_session_key = current.librefm_session_key.clone();
-    incoming.offline_tracks = current.offline_tracks.clone();
-    incoming.pinned_stations = current.pinned_stations.clone();
     incoming.spotify_browser = current.spotify_browser.clone();
     incoming.spotify_prefer_active_device = current.spotify_prefer_active_device;
     incoming.discord_presence = current.discord_presence;
@@ -309,24 +251,13 @@ fn with_daemon_owned_fields(
     incoming.discord_presence_source = current.discord_presence_source;
     incoming.downloader_output_dir = current.downloader_output_dir.clone();
     incoming.downloader_options = current.downloader_options.clone();
-    incoming.downloader_history = current.downloader_history.clone();
     incoming
-}
-
-/// The id a pinned manifest names; the registry's document is otherwise opaque here.
-fn manifest_id(manifest: &str) -> Option<String> {
-    let manifest: serde_json::Value = serde_json::from_str(manifest).ok()?;
-    manifest.get("id")?.as_str().map(str::to_string)
 }
 
 /// The credentials blanked for a caller. Not a security boundary on a socket
 /// only this user can open -- it keeps secrets out of a surface that is
 /// written back wholesale, so a frontend cannot round-trip a stale copy over
 /// them.
-///
-/// `offline_tracks` is deliberately not blanked. It is not a secret: it is
-/// which tracks have a local copy, which is exactly what a download indicator
-/// renders. Blanking it made every one of those read empty.
 ///
 /// `volume` and the cover-lookup keys are restored for the same reason: they
 /// are daemon-owned on the way in, so the helper above would hand back the
@@ -335,7 +266,6 @@ fn manifest_id(manifest: &str) -> Option<String> {
 /// that simply refuses to take them.
 fn stripped(config: &config::AppConfig) -> config::AppConfig {
     let mut view = with_daemon_owned_fields(config.clone(), &config::AppConfig::default());
-    view.offline_tracks = config.offline_tracks.clone();
     view.volume = config.volume;
     view.muted = config.muted;
     view.auto_fetch_covers = config.auto_fetch_covers;

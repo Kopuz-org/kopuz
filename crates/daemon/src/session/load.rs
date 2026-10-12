@@ -48,28 +48,16 @@ impl Session {
             .and_then(|provider| provider(&track));
 
         let offline_path = if factory_override.is_none() && is_server {
-            let raw = self
-                .config
-                .offline_tracks
-                .get(&item_id)
+            // Imported paths are untrusted: one with a placeholder extension streams instead.
+            self.offline
+                .present(&item_id)
                 .map(PathBuf::from)
-                .filter(|path| path.exists());
-            if let Some(path) = raw.as_ref() {
-                let bad_ext = matches!(
-                    path.extension().and_then(|extension| extension.to_str()),
-                    Some("audio") | Some("bin")
-                );
-                if bad_ext {
-                    // Imported config paths are untrusted. Remove only the
-                    // stale mapping; deleting the path could remove user data.
-                    self.config.offline_tracks.remove(&item_id);
-                    None
-                } else {
-                    raw
-                }
-            } else {
-                raw
-            }
+                .filter(|path| {
+                    !matches!(
+                        path.extension().and_then(|extension| extension.to_str()),
+                        Some("audio") | Some("bin")
+                    )
+                })
         } else {
             None
         };

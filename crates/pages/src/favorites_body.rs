@@ -134,13 +134,7 @@ pub fn FavoritesBody(
             let matches_current_path = currently_playing_path.as_ref() == Some(&track.uid);
 
             let item_id: String = track.key.clone();
-            let is_downloaded = cap.downloads
-                && config
-                    .read()
-                    .offline_tracks
-                    .get(&item_id)
-                    .map(|p| std::path::Path::new(p).exists())
-                    .unwrap_or(false);
+            let is_downloaded = cap.downloads && track.offline;
             let is_downloading = cap.downloads && downloads.read().is_active(&item_id);
             let item_id_dl = item_id.clone();
 

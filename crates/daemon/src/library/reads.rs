@@ -72,7 +72,7 @@ impl LibraryService {
         if keys.is_empty() {
             return Ok(Vec::new());
         }
-        let config = self.current_config();
+        let offline = self.offline();
         let rows = self
             .db
             .tracks_by_keys(&self.query_source(), keys)
@@ -80,7 +80,7 @@ impl LibraryService {
             .map_err(db_error)?;
         Ok(rows
             .iter()
-            .map(|track| crate::wire::track_info(track, &config))
+            .map(|track| crate::wire::track_info(track, &offline))
             .collect())
     }
 
@@ -170,7 +170,7 @@ impl LibraryService {
     }
 
     pub async fn album_tracks(&self, id: &str, page: Page) -> Result<TrackPage, ApiError> {
-        let config = self.current_config();
+        let offline = self.offline();
         let rows = self
             .db
             .album_tracks(&self.query_source(), id)
@@ -182,7 +182,7 @@ impl LibraryService {
             offset: page.offset,
             items: items
                 .iter()
-                .map(|track| crate::wire::track_info(track, &config))
+                .map(|track| crate::wire::track_info(track, &offline))
                 .collect(),
         })
     }
@@ -254,7 +254,7 @@ impl LibraryService {
     }
 
     pub async fn artist_tracks(&self, artist: &str, page: Page) -> Result<TrackPage, ApiError> {
-        let config = self.current_config();
+        let offline = self.offline();
         let row = self.artist_row(artist).await?;
         let rows = self
             .db
@@ -267,13 +267,13 @@ impl LibraryService {
             offset: page.offset,
             items: items
                 .iter()
-                .map(|track| crate::wire::track_info(track, &config))
+                .map(|track| crate::wire::track_info(track, &offline))
                 .collect(),
         })
     }
 
     pub async fn artist_sample_tracks(&self, page: Page) -> Result<TrackPage, ApiError> {
-        let config = self.current_config();
+        let offline = self.offline();
         let rows = self
             .db
             .artist_sample_tracks(&self.query_source(), page.limit)
@@ -285,7 +285,7 @@ impl LibraryService {
             offset: 0,
             items: rows
                 .iter()
-                .map(|track| crate::wire::track_info(track, &config))
+                .map(|track| crate::wire::track_info(track, &offline))
                 .collect(),
         })
     }
@@ -302,7 +302,7 @@ impl LibraryService {
     }
 
     pub async fn genre_tracks(&self, genre: &str, page: Page) -> Result<TrackPage, ApiError> {
-        let config = self.current_config();
+        let offline = self.offline();
         let rows = self
             .db
             .genre_tracks(&self.query_source(), genre)
@@ -314,13 +314,13 @@ impl LibraryService {
             offset: page.offset,
             items: items
                 .iter()
-                .map(|track| crate::wire::track_info(track, &config))
+                .map(|track| crate::wire::track_info(track, &offline))
                 .collect(),
         })
     }
 
     pub async fn recent_tracks(&self, page: Page) -> Result<TrackPage, ApiError> {
-        let config = self.current_config();
+        let offline = self.offline();
         let source = self.query_source();
         // Recents are a key list; the rows come back unordered, so they are
         // put back into play order here.
@@ -346,13 +346,14 @@ impl LibraryService {
                 .into_iter()
                 .skip(page.offset as usize)
                 .take(page.limit as usize)
-                .map(|track| crate::wire::track_info(track, &config))
+                .map(|track| crate::wire::track_info(track, &offline))
                 .collect(),
         })
     }
 
     pub async fn search(&self, query: &str) -> Result<SearchResults, ApiError> {
         let config = self.current_config();
+        let offline = self.offline();
         // A remote source answers over the network, so search is the one read
         // here that goes through the source rather than straight to the DB.
         let source = server::source::active(self.db.clone(), &config);
@@ -368,7 +369,7 @@ impl LibraryService {
         Ok(SearchResults {
             tracks: tracks
                 .iter()
-                .map(|track| crate::wire::track_info(track, &config))
+                .map(|track| crate::wire::track_info(track, &offline))
                 .collect(),
             albums: albums.iter().map(album_info).collect(),
             ..Default::default()

@@ -350,6 +350,7 @@ async fn fill_state(pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(
         return Ok(());
     };
     let blob: serde_json::Value = serde_json::from_str(&stored)?;
+    let data = LegacyData::deserialize(&blob)?;
     let layers = settings_path
         .map(config::store::FileLayers::read)
         .unwrap_or_default();
@@ -442,7 +443,7 @@ async fn fill_state(pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(
             .execute(&mut *tx)
             .await?;
     }
-    for (position, entry) in cfg.downloader_history.iter().enumerate() {
+    for (position, entry) in data.downloader_history.iter().enumerate() {
         sqlx::query(
             "INSERT OR REPLACE INTO ytdlp_history (position, url, title, format, status, error) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -1025,6 +1026,7 @@ async fn import_config(
             },
         );
     }
+    let data = LegacyData::deserialize(&legacy).unwrap_or_default();
     let config: config::AppConfig = match serde_json::from_value(legacy) {
         Ok(config) => config,
         Err(error) => {
@@ -1033,7 +1035,8 @@ async fn import_config(
         }
     };
     super::cfg_store::write_state(tx, &config, &config.active_source).await?;
-    for (item_id, path) in &config.offline_tracks {
+    super::cfg_store::write_history(tx, &data.downloader_history).await?;
+    for (item_id, path) in &data.offline_tracks {
         sqlx::query!(
             "INSERT OR REPLACE INTO offline_tracks (item_id, path) VALUES (?1, ?2)",
             item_id,
@@ -1042,7 +1045,7 @@ async fn import_config(
         .execute(&mut **tx)
         .await?;
     }
-    for manifest in &config.pinned_stations {
+    for manifest in &data.pinned_stations {
         let id = serde_json::from_str::<serde_json::Value>(manifest)
             .ok()
             .and_then(|station| station.get("id")?.as_str().map(str::to_owned));
@@ -1597,6 +1600,17 @@ struct LegacyQueue {
     shuffle_order: Vec<u32>,
     #[serde(default)]
     shuffle_enabled: bool,
+}
+
+/// The library data an old config blob or `config.json` held beside its settings.
+#[derive(Deserialize, Default)]
+struct LegacyData {
+    #[serde(default)]
+    offline_tracks: HashMap<String, String>,
+    #[serde(default)]
+    pinned_stations: Vec<String>,
+    #[serde(default, rename = "ytdlp_history")]
+    downloader_history: Vec<config::DownloaderHistoryEntry>,
 }
 
 #[cfg(test)]
