@@ -46,15 +46,24 @@ pub fn job_status_from_proto(value: &JobStatus) -> api::JobStatus {
 pub fn config_view_to_proto(value: &api::ConfigView) -> ConfigView {
     ConfigView {
         config: Some(config_to_proto(&value.settings)),
-        locked_keys: value.locked_keys.clone(),
+        locked: value
+            .locked
+            .iter()
+            .map(|key| setting_key_to_proto(*key) as i32)
+            .collect(),
         revision: value.revision,
     }
 }
 
+/// A locked key this build does not know is dropped: it cannot render a row for it anyway.
 pub fn config_view_from_proto(value: &ConfigView) -> api::ConfigView {
     api::ConfigView {
         settings: config_from_proto(value.config.as_ref().unwrap_or(&Config::default())),
-        locked_keys: value.locked_keys.clone(),
+        locked: value
+            .locked
+            .iter()
+            .filter_map(|key| setting_key_from_proto(*key))
+            .collect(),
         revision: value.revision,
     }
 }
@@ -90,6 +99,16 @@ mod tests {
             daemon_status_from_proto(&daemon_status_to_proto(&status)),
             status
         );
+    }
+
+    #[test]
+    fn a_config_view_keeps_its_locked_keys_and_revision() {
+        let view = api::ConfigView {
+            settings: ::config::Settings::default(),
+            locked: ::config::SettingKey::iter().collect(),
+            revision: 7,
+        };
+        assert_eq!(config_view_from_proto(&config_view_to_proto(&view)), view);
     }
 
     #[test]

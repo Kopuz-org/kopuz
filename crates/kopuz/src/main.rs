@@ -44,11 +44,6 @@ mod windows_titlebar;
 
 #[cfg(target_os = "windows")]
 const TOOLBAR_ICONS: Asset = asset!("../assets/toolbar_icons", AssetOptions::folder());
-/// Store saves (config/library/playlists/favorites) are full-replace and
-/// expensive; bursts of mutations (batch downloads, syncs) coalesce into one
-/// save per settle+cooldown window instead of one per mutation.
-const STORE_SAVE_SETTLE_MS: u64 = 600;
-const STORE_SAVE_COOLDOWN_MS: u64 = 2500;
 /// How often the matugen/pywal palette is stat'd. The active rate is what a
 /// wallpaper change costs before the colours follow; the idle one only exists to
 /// notice the theme being switched on.
@@ -345,26 +340,14 @@ fn main() -> std::process::ExitCode {
     std::process::ExitCode::SUCCESS
 }
 
-/// Pull the daemon's settings into the app's copy, keeping edits not yet sent.
-async fn adopt_daemon_config(
-    settings: Signal<config::Settings>,
-    baseline: hooks::config_sync::ConfigBaseline,
-) {
-    match backend::api().config().await {
-        Ok(view) => baseline.adopt(settings, &view),
-        Err(error) => tracing::warn!(%error, "re-reading settings failed"),
-    }
-}
-
 /// Events were lost, so re-read everything the app holds from the daemon.
 fn resync(
     gens: hooks::db_reactivity::Generations,
-    settings: Signal<config::Settings>,
-    baseline: hooks::config_sync::ConfigBaseline,
+    settings: hooks::settings::SettingsHandle,
     ui_prefs: hooks::ui_prefs::UiPrefsStore,
 ) {
     gens.bump_all();
-    spawn(adopt_daemon_config(settings, baseline));
+    settings.reload();
     ui_prefs.reload();
 }
 
@@ -432,8 +415,7 @@ fn App() -> Element {
     // ROOT-owned: detached tasks (download workers, close-flush) read/write
     // these after the spawning page — and in principle this component — is
     // gone; owning them at ROOT keeps Dioxus's cross-scope lint honest.
-    let mut settings =
-        use_hook(|| Signal::new_in_scope(config::Settings::default(), ScopeId::ROOT));
+    let settings = use_hook(|| Signal::new_in_scope(config::Settings::default(), ScopeId::ROOT));
     let core = backend::core().expect("core started in main before launch");
     // The one seam every hook and page reads through.
     use_context_provider(|| core.api.clone() as Arc<dyn api::KopuzApi>);
@@ -443,10 +425,8 @@ fn App() -> Element {
     #[cfg(debug_assertions)]
     use_context_provider(|| core.db.clone());
     hooks::db_reactivity::use_generations_provider();
-    // Which settings a managed file pins, so those rows render locked. The
-    // daemon reads those layers; nothing here opens the file.
-    hooks::config_view::use_locked_keys_provider();
-    let config_baseline = hooks::config_sync::use_config_baseline_provider();
+    // Edits reach the daemon through this, which also says which keys a managed file pins.
+    let settings_handle = hooks::settings::use_settings_provider(settings);
     let ui_prefs = hooks::ui_prefs::use_ui_prefs_provider();
 
     // Capabilities of the active source — drives source-agnostic routing (e.g.
@@ -483,11 +463,7 @@ fn App() -> Element {
     let is_devices_open = use_signal(|| false);
     let rightbar_width = use_signal(|| 320usize);
     let mut palette = use_signal(|| Option::<Vec<utils::color::Color>>::None);
-    // Config is the one remaining whole-value save: persisting a default that
-    // exists only because the LOAD FAILED would wipe real settings/servers, so
-    // its save stays disarmed unless the load demonstrably succeeded (a fresh
-    // empty DB still counts). Library/playlists/favorites have no such flag
-    // anymore — they're targeted per-row writes, never full-replace.
+    // Edits made over defaults born of a failed load are never sent, so they cannot overwrite real settings.
     let mut config_loaded_ok = use_signal(|| false);
     #[cfg(not(target_os = "android"))]
     let close_hides_window = use_signal(|| false);
@@ -517,8 +493,8 @@ fn App() -> Element {
                 // already committed as a targeted write when it happened. The
                 // queue is the core's: it owns the store and persists on the
                 // way out, so only the config surface is ours to push.
-                let cfg = (*config_loaded_ok.peek()).then(|| settings.peek().clone());
-                exit_flush::persist_on_fresh_thread(cfg, Some(ui_prefs.unsent()));
+                let unsent = (*config_loaded_ok.peek()).then(|| settings_handle.unsent());
+                exit_flush::persist_on_fresh_thread(unsent, Some(ui_prefs.unsent()));
             }
             backend::shutdown();
             // After the persists, so they (and any failure warnings) land in
@@ -660,52 +636,10 @@ fn App() -> Element {
         );
     });
 
-    // Debounced: a settings save is a whole-config write, so a burst of edits must coalesce into one.
-    let mut config_dirty = use_signal(|| 0u64);
-    use_effect(move || {
-        if !*initial_load_done.read() || !*config_loaded_ok.read() {
-            return;
-        }
-        let _ = settings.read();
-        config_dirty += 1;
-    });
     #[cfg(not(target_os = "android"))]
-    use_effect(move || {
-        if !*initial_load_done.read() || !*config_loaded_ok.read() {
-            return;
-        }
-        exit_flush::stash_config(settings.read().clone());
-    });
+    use_effect(move || exit_flush::stash_config(settings_handle.unsent_tracked()));
     #[cfg(not(target_os = "android"))]
     use_effect(move || exit_flush::stash_prefs(ui_prefs.unsent_tracked()));
-    // Settings are written through the daemon, which owns the file and the
-    // blob: a direct database write would leave its copy stale and lose the
-    // credentials it keeps out of what this process holds.
-    use_future(move || async move {
-        let api = hooks::consume_api();
-        let mut flushed = 0u64;
-        loop {
-            if *config_dirty.peek() == flushed {
-                utils::sleep(std::time::Duration::from_millis(250)).await;
-                continue;
-            }
-            utils::sleep(std::time::Duration::from_millis(STORE_SAVE_SETTLE_MS)).await;
-            flushed = *config_dirty.peek();
-            let snapshot = settings.peek().clone();
-            match api
-                .set_config(snapshot.clone())
-                .instrument(tracing::info_span!("config.persist"))
-                .await
-            {
-                Ok(view) => {
-                    config_baseline.sent(snapshot);
-                    config_baseline.adopt(settings, &view);
-                }
-                Err(error) => tracing::error!(%error, "failed to save settings"),
-            }
-            utils::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
-        }
-    });
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     use_effect(move || {
@@ -846,34 +780,22 @@ fn App() -> Element {
             let api = backend::api();
 
             spawn(async move {
-                // The queue is restored by the core before the window exists;
-                // the config is all that is left to pull up into the signals.
-                // Everything else is queried on demand by the page hooks.
-                // Config marks itself loaded ONLY on success: its save is the
-                // one remaining whole-value write, and persisting a default
-                // born of a read failure would wipe real settings.
-                let cfg_loaded = match api
+                // The core restored the queue before the window existed, so the settings are all that is left to pull up.
+                match api
                     .config()
                     .instrument(tracing::info_span!("startup.load_config"))
                     .await
                 {
                     Ok(view) => {
                         config_loaded_ok.set(true);
-                        config_baseline.loaded(&view);
-                        Some(view.settings)
+                        let _apply = tracing::info_span!("startup.apply_config").entered();
+                        settings_handle.load(view);
                     }
                     Err(error) => {
                         tracing::error!(%error, "could not read settings; saves are off this session");
-                        None
                     }
-                };
-                let cfg_loaded = cfg_loaded.unwrap_or_default();
-                {
-                    let _apply = tracing::info_span!("startup.apply_config").entered();
-                    let loaded = cfg_loaded;
-                    settings.set(loaded.clone());
-                    i18n::set_locale(&loaded.ui.language);
                 }
+                i18n::set_locale(&settings.peek().ui.language);
 
                 initial_load_done.set(true);
                 // Pending offline likes push now, not on the first multi-minute reconcile interval.
@@ -924,22 +846,18 @@ fn App() -> Element {
                             } => {
                                 scan_current_file.set(None);
                             }
-                            api::ApiEvent::ConfigChanged { .. } => {
-                                spawn(adopt_daemon_config(settings, config_baseline));
-                            }
+                            api::ApiEvent::ConfigChanged { .. } => settings_handle.reload(),
                             api::ApiEvent::FrontendPrefsChanged { frontend, .. }
                                 if frontend == hooks::ui_prefs::FRONTEND =>
                             {
                                 ui_prefs.reload();
                             }
                             api::ApiEvent::Resync => {
-                                resync(gens, settings, config_baseline, ui_prefs);
+                                resync(gens, settings_handle, ui_prefs);
                             }
                             _ => {}
                         },
-                        Err(RecvError::Lagged(_)) => {
-                            resync(gens, settings, config_baseline, ui_prefs)
-                        }
+                        Err(RecvError::Lagged(_)) => resync(gens, settings_handle, ui_prefs),
                         Err(RecvError::Closed) => break,
                     }
                 }

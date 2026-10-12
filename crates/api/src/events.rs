@@ -97,8 +97,9 @@ pub enum ApiEvent {
         /// Started by the daemon's own schedule rather than by a user.
         automatic: bool,
     },
+    /// The settings moved; re-read the view, whose revision this is.
     ConfigChanged {
-        keys: Vec<String>,
+        revision: u64,
     },
     /// A frontend's stored preferences changed (set or deleted) in these keys; re-read what you hold.
     FrontendPrefsChanged {

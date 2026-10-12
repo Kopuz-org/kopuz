@@ -1088,22 +1088,41 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::RemoveDownloadResponse {}))
     }
 
-    async fn set_config(
+    /// An edit this build cannot read is answered invalid in its place; the readable ones still apply.
+    async fn edit_config(
         &self,
-        request: Request<proto::SetConfigRequest>,
-    ) -> Result<Response<proto::ConfigView>, Status> {
-        let config = request
+        request: Request<proto::EditConfigRequest>,
+    ) -> Result<Response<proto::EditReport>, Status> {
+        let decoded: Vec<Option<config::SettingsEdit>> = request
             .get_ref()
-            .config
-            .as_ref()
-            .ok_or_else(|| Status::invalid_argument("SetConfig needs a config"))?;
-        let view = self
+            .edits
+            .iter()
+            .map(convert::config_edit_from_proto)
+            .collect();
+        let report = self
             .0
             .api
-            .set_config(convert::config_from_proto(config))
+            .edit_config(decoded.iter().flatten().cloned().collect())
             .await
             .map_err(failed)?;
-        Ok(Response::new(convert::config_view_to_proto(&view)))
+        let mut applied = report.outcomes.into_iter();
+        let outcomes = decoded
+            .iter()
+            .map(|edit| match edit {
+                Some(_) => applied.next().unwrap_or(api::EditOutcome::Invalid {
+                    reason: "the daemon answered fewer edits than it was sent".into(),
+                }),
+                None => api::EditOutcome::Invalid {
+                    reason: "an edit this daemon cannot read".into(),
+                },
+            })
+            .collect();
+        Ok(Response::new(convert::edit_report_to_proto(
+            &api::EditReport {
+                outcomes,
+                view: report.view,
+            },
+        )))
     }
 
     async fn get_frontend_prefs(
@@ -1147,6 +1166,19 @@ impl Kopuz for KopuzGrpc {
         self.0
             .api
             .preview_equalizer(equalizer)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn preview_replay_gain(
+        &self,
+        request: Request<proto::ReplayGainSettings>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let replay_gain = convert::replay_gain_from_proto(Some(request.get_ref()));
+        self.0
+            .api
+            .preview_replay_gain(replay_gain)
             .await
             .map_err(failed)?;
         Ok(Response::new(proto::Unit {}))

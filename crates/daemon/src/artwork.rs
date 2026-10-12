@@ -642,7 +642,7 @@ mod tests {
 /// without knowing which services exist.
 pub mod settings {
     use api::schema::{ChoiceOption, FieldKind, FieldSpec, FieldValue, Text, value_of};
-    use config::{FetchStrategy, Settings};
+    use config::{FetchStrategy, LibraryKey, SettingKey, Settings};
 
     pub const AUTO_FETCH: &str = "auto_fetch_covers";
     pub const STRATEGY: &str = "cover_fetch_strategy";
@@ -704,13 +704,13 @@ pub mod settings {
     }
 
     /// The settings keys an answer list would write.
-    pub fn written_keys(values: &[FieldValue]) -> Vec<&'static str> {
+    pub fn written_keys(values: &[FieldValue]) -> Vec<SettingKey> {
         let mut keys = Vec::new();
         if value_of(values, AUTO_FETCH).is_some() {
-            keys.push(AUTO_FETCH);
+            keys.push(SettingKey::Library(LibraryKey::AutoFetchCovers));
         }
         if value_of(values, STRATEGY).is_some() {
-            keys.push(STRATEGY);
+            keys.push(SettingKey::Library(LibraryKey::CoverFetchStrategy));
         }
         keys
     }

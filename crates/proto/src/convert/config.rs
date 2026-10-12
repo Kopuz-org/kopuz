@@ -1,4 +1,4 @@
-//! `config::Settings` <-> the flat wire `Config` message; the daemon-owned keys it lacks come back as defaults that the daemon restores.
+//! `config::Settings` <-> the flat wire `Config` message, every setting included.
 
 use crate::*;
 
@@ -356,6 +356,31 @@ pub fn replay_gain_from_proto(value: Option<&ReplayGainSettings>) -> config::Rep
     }
 }
 
+pub fn downloader_options_to_proto(value: &config::DownloaderOptions) -> DownloaderOptions {
+    DownloaderOptions {
+        embed_metadata: value.embed_metadata,
+        embed_thumbnail: value.embed_thumbnail,
+        write_thumbnail: value.write_thumbnail,
+        organize_by_album: value.organize_by_album,
+        overwrite_existing: value.overwrite_existing,
+    }
+}
+
+pub fn downloader_options_from_proto(
+    value: Option<&DownloaderOptions>,
+) -> config::DownloaderOptions {
+    let Some(value) = value else {
+        return config::DownloaderOptions::default();
+    };
+    config::DownloaderOptions {
+        embed_metadata: value.embed_metadata,
+        embed_thumbnail: value.embed_thumbnail,
+        write_thumbnail: value.write_thumbnail,
+        organize_by_album: value.organize_by_album,
+        overwrite_existing: value.overwrite_existing,
+    }
+}
+
 pub fn config_to_proto(value: &config::Settings) -> Config {
     let config::Settings {
         playback,
@@ -364,8 +389,8 @@ pub fn config_to_proto(value: &config::Settings) -> Config {
         lyrics,
         library,
         integrations,
-        downloads: _,
-        spotify: _,
+        downloads,
+        spotify,
         system,
     } = value;
     Config {
@@ -422,12 +447,16 @@ pub fn config_to_proto(value: &config::Settings) -> Config {
         lyrics_depth_blur: lyrics.lyrics_depth_blur,
         lyrics_depth_blur_strength: u32::from(lyrics.lyrics_depth_blur_strength),
         sync_interval_minutes: Some(library.sync_interval_minutes),
+        discord_presence: integrations.discord_presence,
+        discord_presence_source: integrations.discord_presence_source,
+        spotify_browser: spotify.spotify_browser.clone(),
+        spotify_prefer_active_device: spotify.spotify_prefer_active_device,
+        downloader_output_dir: downloads.downloader_output_dir.clone(),
+        downloader_options: Some(downloader_options_to_proto(&downloads.downloader_options)),
     }
 }
 
-/// The daemon-owned settings that are not on the wire come back as their defaults here; the daemon restores what it holds before anything is persisted.
 pub fn config_from_proto(value: &Config) -> config::Settings {
-    let defaults = config::Settings::default();
     config::Settings {
         playback: config::Playback {
             volume_scroll_step: value.volume_scroll_step,
@@ -487,19 +516,27 @@ pub fn config_from_proto(value: &Config) -> config::Settings {
                 .unwrap_or(config::DEFAULT_SYNC_INTERVAL_MINUTES),
         },
         integrations: config::Integrations {
+            discord_presence: value.discord_presence,
+            discord_presence_source: value.discord_presence_source,
             radio_registries: value
                 .radio_registries
                 .iter()
                 .map(registry_entry_from_proto)
                 .collect(),
-            ..defaults.integrations
+        },
+        downloads: config::Downloads {
+            downloader_output_dir: value.downloader_output_dir.clone(),
+            downloader_options: downloader_options_from_proto(value.downloader_options.as_ref()),
+        },
+        spotify: config::Spotify {
+            spotify_browser: value.spotify_browser.clone(),
+            spotify_prefer_active_device: value.spotify_prefer_active_device,
         },
         system: config::System {
             tracing_enabled: value.tracing_enabled,
             auto_check_updates: value.auto_check_updates,
             minimize_to_tray: value.minimize_to_tray,
         },
-        ..defaults
     }
 }
 
@@ -527,31 +564,15 @@ mod tests {
         assert_eq!(ui_style_from_proto(2), config::UiStyle::Vaxry);
     }
 
-    /// Every wire field lands in its section and comes back; the daemon-owned fields not on the wire read as defaults.
+    /// Every setting is on the wire now, the daemon-owned ones included, so every sample edit survives the round trip.
     #[test]
     fn every_wire_setting_survives_the_round_trip() {
         let mut original = config::Settings::default();
-        original.playback.crossfade_seconds = 5;
-        original.playback.volume_scroll_step = 0.1;
-        original.ui.language = "tr".into();
-        original.background.cover_art_blur = 12;
-        original.lyrics.lyrics_offset_ms = -200;
-        original.library.sync_interval_minutes = 30;
-        original.library.auto_fetch_covers = true;
         original.integrations.radio_registries.clear();
-        original.system.minimize_to_tray = true;
+        for edit in config::edit_samples() {
+            original.apply(edit);
+        }
         let restored = config_from_proto(&config_to_proto(&original));
         assert_eq!(restored, original);
-
-        original.spotify.spotify_browser = Some("brave".into());
-        original.integrations.discord_presence = Some(false);
-        original.downloads.downloader_output_dir = "/downloads".into();
-        let restored = config_from_proto(&config_to_proto(&original));
-        assert_eq!(restored.spotify, config::Spotify::default());
-        assert_eq!(
-            restored.integrations.discord_presence,
-            config::Integrations::default().discord_presence
-        );
-        assert_eq!(restored.downloads, config::Downloads::default());
     }
 }

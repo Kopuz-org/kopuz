@@ -1046,6 +1046,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "castaway"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dec551ab6e7578819132c713a93c022a05d60159dc86e7a7050223577484c55a"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "cbc"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1307,6 +1316,20 @@ checksum = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd"
 dependencies = [
  "bytes",
  "memchr",
+]
+
+[[package]]
+name = "compact_str"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9dfdd1c2274d9aa354115b09dc9a901d6c5576818cdf70d14cae2bdb47df00ab"
+dependencies = [
+ "castaway",
+ "cfg-if",
+ "itoa",
+ "rustversion",
+ "ryu",
+ "static_assertions",
 ]
 
 [[package]]
@@ -3274,6 +3297,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "garde"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d7f479d28d1daedf23970890723b8774d120aa627abcb33c1d7c93d0965e6c3"
+dependencies = [
+ "compact_str",
+ "garde_derive",
+ "smallvec",
+]
+
+[[package]]
+name = "garde_derive"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b0252cacdca8e6f30a900e6d436fbf294e23f674b9288ca4a5bd35976bef87c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
 name = "gdk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4616,8 +4661,10 @@ name = "kopuz-config"
 version = "0.21.0"
 dependencies = [
  "directories",
+ "garde",
  "serde",
  "serde_json",
+ "strum",
  "tempfile",
  "toml 0.8.2",
  "tracing",

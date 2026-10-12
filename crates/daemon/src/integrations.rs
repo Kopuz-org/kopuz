@@ -667,7 +667,7 @@ fn info_of(
 
 /// The settings keys an answer set would actually write. A field nobody
 /// answered writes nothing, and neither does a secret answered empty.
-fn write_keys<'a>(info: &'a IntegrationInfo, values: &[FieldValue]) -> Vec<&'a str> {
+fn write_keys(info: &IntegrationInfo, values: &[FieldValue]) -> Vec<config::SettingKey> {
     info.fields
         .iter()
         .filter(|field| match value_of(values, &field.key) {
@@ -675,6 +675,7 @@ fn write_keys<'a>(info: &'a IntegrationInfo, values: &[FieldValue]) -> Vec<&'a s
             None => false,
         })
         .filter_map(|field| field.config_key.as_deref())
+        .filter_map(config::SettingKey::named)
         .collect()
 }
 
@@ -829,7 +830,7 @@ impl IntegrationService {
                 .any(|key| value_of(&values, key).is_some())
             {
                 self.config
-                    .mutate_state(&[INTEGRATIONS_KEY], move |config| {
+                    .mutate_state(&PRESENCE_KEYS, move |config| {
                         apply_presence(&values, config)
                     })
                     .await?;
@@ -847,10 +848,10 @@ impl IntegrationService {
     pub async fn clear(&self, id: &str) -> Result<(), ApiError> {
         self.info(id).await?;
         if id == DISCORD {
-            self.config.ensure_unlocked(&["discord_presence"])?;
+            self.config.ensure_unlocked(&PRESENCE_KEYS[..1])?;
             // Discord holds no credential, so unconfigured means presence off.
             self.config
-                .mutate_state(&[INTEGRATIONS_KEY], |config| {
+                .mutate_state(&PRESENCE_KEYS[..1], |config| {
                     config.integrations.discord_presence = Some(false)
                 })
                 .await?;
@@ -985,7 +986,10 @@ async fn listenbrainz_token_from(
 }
 
 /// What a presence write reports as changed, so the session republishes the config.
-const INTEGRATIONS_KEY: &str = "integrations";
+const PRESENCE_KEYS: [config::SettingKey; 2] = [
+    config::SettingKey::Integrations(config::IntegrationsKey::DiscordPresence),
+    config::SettingKey::Integrations(config::IntegrationsKey::DiscordPresenceSource),
+];
 
 /// Open the approval page, then poll for the session key. The person has to
 /// click through in a browser, so the wait is generous and bounded.

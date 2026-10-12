@@ -53,9 +53,9 @@ pub fn event_to_proto(value: &api::ApiEvent) -> Event {
             error: error.as_ref().map(error_body_to_proto),
             automatic: *automatic,
         }),
-        api::ApiEvent::ConfigChanged { keys } => {
-            event::Kind::ConfigChanged(ConfigChanged { keys: keys.clone() })
-        }
+        api::ApiEvent::ConfigChanged { revision } => event::Kind::ConfigChanged(ConfigChanged {
+            revision: *revision,
+        }),
         api::ApiEvent::FrontendPrefsChanged { frontend, keys } => {
             event::Kind::FrontendPrefsChanged(FrontendPrefsChanged {
                 frontend: frontend.clone(),
@@ -122,7 +122,7 @@ pub fn event_from_proto(value: &Event) -> Option<api::ApiEvent> {
             automatic: finished.automatic,
         },
         event::Kind::ConfigChanged(changed) => api::ApiEvent::ConfigChanged {
-            keys: changed.keys.clone(),
+            revision: changed.revision,
         },
         event::Kind::FrontendPrefsChanged(changed) => api::ApiEvent::FrontendPrefsChanged {
             frontend: changed.frontend.clone(),
@@ -198,9 +198,7 @@ mod tests {
                 error: None,
                 automatic: true,
             },
-            api::ApiEvent::ConfigChanged {
-                keys: vec!["volume".into()],
-            },
+            api::ApiEvent::ConfigChanged { revision: 9 },
             api::ApiEvent::FrontendPrefsChanged {
                 frontend: "gpui".into(),
                 keys: vec!["skin".into(), "columns".into()],

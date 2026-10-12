@@ -25,8 +25,10 @@ pub fn SettingItem(
     #[props(default)] nested: bool,
 ) -> Element {
     let locked = try_consume_context::<hooks::config_view::LockedKeys>().is_some_and(|layers| {
-        (!config_key.is_empty() && layers.is_locked(&config_key))
-            || extra_config_keys.iter().any(|key| layers.is_locked(key))
+        (!config_key.is_empty() && layers.is_name_locked(&config_key))
+            || extra_config_keys
+                .iter()
+                .any(|key| layers.is_name_locked(key))
     });
     let nested_class = if nested { "settings-row-nested" } else { "" };
     rsx! {
@@ -577,7 +579,14 @@ pub fn range_style(value: f64, min: f64, max: f64) -> String {
 
 /// A dB slider with a signed monospace readout, for the two ReplayGain trims.
 #[component]
-pub fn GainSlider(value: f32, min: f32, max: f32, on_change: EventHandler<f32>) -> Element {
+pub fn GainSlider(
+    value: f32,
+    min: f32,
+    max: f32,
+    on_preview: EventHandler<f32>,
+    on_commit: EventHandler<f32>,
+) -> Element {
+    let parse = move |raw: String| raw.parse::<f32>().ok().map(|db| db.clamp(min, max));
     rsx! {
         div { class: "settings-slider flex items-center gap-3 min-w-[220px]",
             input {
@@ -589,8 +598,13 @@ pub fn GainSlider(value: f32, min: f32, max: f32, on_change: EventHandler<f32>) 
                 class: "w-40",
                 style: range_style(f64::from(value), f64::from(min), f64::from(max)),
                 oninput: move |evt| {
-                    if let Ok(parsed) = evt.value().parse::<f32>() {
-                        on_change.call(parsed.clamp(min, max));
+                    if let Some(db) = parse(evt.value()) {
+                        on_preview.call(db);
+                    }
+                },
+                onchange: move |evt| {
+                    if let Some(db) = parse(evt.value()) {
+                        on_commit.call(db);
                     }
                 }
             }

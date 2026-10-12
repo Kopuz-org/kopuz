@@ -29,6 +29,10 @@ use crate::session::SessionHandle;
 /// How long a browser sign-in may sit waiting for a person.
 const SIGNIN_TIMEOUT: Duration = Duration::from_secs(300);
 
+const LOCAL_SOURCES: [config::SettingKey; 1] = [config::SettingKey::Library(
+    config::LibraryKey::LocalSources,
+)];
+
 /// How often an active source that is not online is probed again, so it recovers without a switch.
 const RETRY_PROBE: Duration = Duration::from_secs(60);
 
@@ -422,7 +426,7 @@ impl SourceService {
     }
 
     async fn upsert_folder_source(&self, draft: SourceDraft) -> Result<SourceInfo, ApiError> {
-        self.config.ensure_unlocked(&["local_sources"])?;
+        self.config.ensure_unlocked(&LOCAL_SOURCES)?;
         if let Some(problem) = crate::services::check_folders(&draft).first() {
             return Err(ApiError::invalid_input(crate::services::problem_text(
                 problem,
@@ -444,7 +448,7 @@ impl SourceService {
                 .collect(),
         };
         self.config
-            .mutate_state(&["local_sources"], move |config| {
+            .mutate_state(&LOCAL_SOURCES, move |config| {
                 match config
                     .library
                     .local_sources
@@ -462,7 +466,7 @@ impl SourceService {
     }
 
     async fn delete_folder_source(&self, id: &str) -> Result<(), ApiError> {
-        self.config.ensure_unlocked(&["local_sources"])?;
+        self.config.ensure_unlocked(&LOCAL_SOURCES)?;
         if id == config::DEFAULT_LOCAL_ID {
             return Err(ApiError::invalid_input(
                 "the default folder source cannot be deleted",
@@ -481,7 +485,7 @@ impl SourceService {
         let id_owned = id.to_string();
         // The folder list goes first, so the session forgets the queue of the source it leaves rather than parking it.
         self.config
-            .mutate_state(&["local_sources"], move |config| {
+            .mutate_state(&LOCAL_SOURCES, move |config| {
                 config.library.remove_local_source(&id_owned);
             })
             .await?;
@@ -522,7 +526,7 @@ impl SourceService {
                 "a source directory cannot be empty",
             ));
         }
-        self.config.ensure_unlocked(&["local_sources"])?;
+        self.config.ensure_unlocked(&LOCAL_SOURCES)?;
         let current = self.current().await;
         if !current
             .library
@@ -534,7 +538,7 @@ impl SourceService {
         }
         let target = id.to_string();
         self.config
-            .mutate_state(&["local_sources"], move |config| {
+            .mutate_state(&LOCAL_SOURCES, move |config| {
                 if let Some(saved) = config
                     .library
                     .local_sources

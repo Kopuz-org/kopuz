@@ -16,6 +16,10 @@ use components::settings_items::{
 };
 use components::settings_popups::{AddRegistryPopup, AddSourcePopup, LoginPopup};
 use components::settings_remote_folders::RemoteFolderSettings;
+use config::{
+    BackgroundEdit, IntegrationsEdit, LibraryEdit, LyricsEdit, PlaybackEdit, RadioRegistryOp,
+    SettingsEdit, SystemEdit, UiEdit,
+};
 use dioxus::prelude::*;
 
 use crate::DebugPanel;
@@ -55,6 +59,7 @@ fn BuildInfoCard() -> Element {
 #[component]
 pub fn Settings(settings: Signal<config::Settings>) -> Element {
     let ctrl = use_context::<PlayerController>();
+    let edits = hooks::settings::use_settings();
     // The sources are the daemon's: it holds their credentials, so the config
     // this page reads never carries them.
     let sources = hooks::sources::use_sources();
@@ -135,7 +140,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
 
     let handle_add_registry = move |_| {
         crate::settings_actions::add_registry(
-            settings,
+            edits,
             registry_url,
             registry_error,
             registry_loading,
@@ -248,7 +253,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                 ThemeSelector {
                                     current_theme: settings.read().ui.theme.clone(),
                                     on_change: move |theme| {
-                                        settings.write().ui.theme = theme;
+                                        edits.edit(SettingsEdit::Ui(UiEdit::Theme(theme)));
                                     }
                                 }
                             }
@@ -260,7 +265,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                 LanguageSelector {
                                     current_language: settings.read().ui.language.clone(),
                                     on_change: move |lang: String| {
-                                        settings.write().ui.language = lang.clone();
+                                        edits.edit(SettingsEdit::Ui(UiEdit::Language(lang.clone())));
                                         i18n::set_locale(&lang);
                                     }
                                 }
@@ -282,7 +287,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                         if !settings.read().ui.live_theme_path.is_empty() {
                                             button {
                                                 class: "app-button-tonal app-button-danger px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-red-300 text-sm transition-colors",
-                                                onclick: move |_| settings.write().ui.live_theme_path = String::new(),
+                                                onclick: move |_| edits.edit(SettingsEdit::Ui(UiEdit::LiveThemePath(String::new()))),
                                                 "{i18n::t(\"remove\")}"
                                             }
                                         }
@@ -296,8 +301,9 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                                         .pick_file()
                                                         .await
                                                     {
-                                                        settings.write().ui.live_theme_path =
-                                                            file.path().display().to_string();
+                                                        edits.edit(SettingsEdit::Ui(UiEdit::LiveThemePath(
+                                                            file.path().display().to_string(),
+                                                        )));
                                                     }
                                                 });
                                             },
@@ -320,7 +326,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                             }
                                             button {
                                                 class: "app-button-tonal app-button-danger px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-red-300 text-sm transition-colors",
-                                                onclick: move |_| settings.write().ui.custom_font_path = String::new(),
+                                                onclick: move |_| edits.edit(SettingsEdit::Ui(UiEdit::CustomFontPath(String::new()))),
                                                 "{i18n::t(\"remove\")}"
                                             }
                                         }
@@ -334,8 +340,9 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                                         .pick_file()
                                                         .await
                                                     {
-                                                        settings.write().ui.custom_font_path =
-                                                            file.path().display().to_string();
+                                                        edits.edit(SettingsEdit::Ui(UiEdit::CustomFontPath(
+                                                            file.path().display().to_string(),
+                                                        )));
                                                     }
                                                 });
                                             },
@@ -353,7 +360,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                             control: rsx! {
                                 ToggleSetting {
                                     enabled: settings.read().background.cover_art_background,
-                                    on_change: move |val| settings.write().background.cover_art_background = val,
+                                    on_change: move |val| edits.edit(SettingsEdit::Background(BackgroundEdit::CoverArtBackground(val))),
                                 }
                             }
                         }
@@ -370,7 +377,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                             }
                                             button {
                                                 class: "app-button-tonal app-button-danger px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-red-300 text-sm transition-colors",
-                                                onclick: move |_| settings.write().background.custom_background_path = String::new(),
+                                                onclick: move |_| edits.edit(SettingsEdit::Background(BackgroundEdit::CustomBackgroundPath(String::new()))),
                                                 "{i18n::t(\"remove\")}"
                                             }
                                         }
@@ -384,8 +391,9 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                                         .pick_file()
                                                         .await
                                                     {
-                                                        settings.write().background.custom_background_path =
-                                                            file.path().display().to_string();
+                                                        edits.edit(SettingsEdit::Background(BackgroundEdit::CustomBackgroundPath(
+                                                            file.path().display().to_string(),
+                                                        )));
                                                     }
                                                 });
                                             },
@@ -414,7 +422,12 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                                 style: components::settings::items::range_style(f64::from(settings.read().background.cover_art_darkening), 0.0, 95.0),
                                                 oninput: move |evt| {
                                                     if let Ok(value) = evt.value().parse::<u8>() {
-                                                        settings.write().background.cover_art_darkening = value.min(95);
+                                                        edits.preview(SettingsEdit::Background(BackgroundEdit::CoverArtDarkening(value.min(95))));
+                                                    }
+                                                },
+                                                onchange: move |evt| {
+                                                    if let Ok(value) = evt.value().parse::<u8>() {
+                                                        edits.edit(SettingsEdit::Background(BackgroundEdit::CoverArtDarkening(value.min(95))));
                                                     }
                                                 }
                                             }
@@ -441,7 +454,12 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                                 style: components::settings::items::range_style(f64::from(settings.read().background.cover_art_blur), 0.0, 100.0),
                                                 oninput: move |evt| {
                                                     if let Ok(value) = evt.value().parse::<u8>() {
-                                                        settings.write().background.cover_art_blur = value.min(100);
+                                                        edits.preview(SettingsEdit::Background(BackgroundEdit::CoverArtBlur(value.min(100))));
+                                                    }
+                                                },
+                                                onchange: move |evt| {
+                                                    if let Ok(value) = evt.value().parse::<u8>() {
+                                                        edits.edit(SettingsEdit::Background(BackgroundEdit::CoverArtBlur(value.min(100))));
                                                     }
                                                 }
                                             }
@@ -461,7 +479,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                             control: rsx! {
                                 ToggleSetting {
                                     enabled: settings.read().lyrics.lyrics_depth_blur,
-                                    on_change: move |val| settings.write().lyrics.lyrics_depth_blur = val,
+                                    on_change: move |val| edits.edit(SettingsEdit::Lyrics(LyricsEdit::LyricsDepthBlur(val))),
                                 }
                             }
                         }
@@ -482,7 +500,12 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                             style: components::settings::items::range_style(f64::from(settings.read().lyrics.lyrics_depth_blur_strength), 10.0, 200.0),
                                             oninput: move |evt| {
                                                 if let Ok(value) = evt.value().parse::<u8>() {
-                                                    settings.write().lyrics.lyrics_depth_blur_strength = value.clamp(10, 200);
+                                                    edits.preview(SettingsEdit::Lyrics(LyricsEdit::LyricsDepthBlurStrength(value.clamp(10, 200))));
+                                                }
+                                            },
+                                            onchange: move |evt| {
+                                                if let Ok(value) = evt.value().parse::<u8>() {
+                                                    edits.edit(SettingsEdit::Lyrics(LyricsEdit::LyricsDepthBlurStrength(value.clamp(10, 200))));
                                                 }
                                             }
                                         }
@@ -502,7 +525,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                             control: rsx! {
                                 ToggleSetting {
                                     enabled: settings.read().ui.reduce_animations,
-                                    on_change: move |val| settings.write().ui.reduce_animations = val,
+                                    on_change: move |val| edits.edit(SettingsEdit::Ui(UiEdit::ReduceAnimations(val))),
                                 }
                             }
                         }
@@ -513,7 +536,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                 control: rsx! {
                                     ToggleSetting {
                                         enabled: settings.read().ui.fullscreen_use_player_bar,
-                                        on_change: move |val| settings.write().ui.fullscreen_use_player_bar = val,
+                                        on_change: move |val| edits.edit(SettingsEdit::Ui(UiEdit::FullscreenUsePlayerBar(val))),
                                     }
                                 }
                             }
@@ -524,7 +547,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                 control: rsx! {
                                 ToggleSetting {
                                     enabled: settings.read().ui.show_source_toggle,
-                                    on_change: move |val| settings.write().ui.show_source_toggle = val,
+                                    on_change: move |val| edits.edit(SettingsEdit::Ui(UiEdit::ShowSourceToggle(val))),
                                 }
                             }
                         }
@@ -534,7 +557,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                             control: rsx! {
                                 ToggleSetting {
                                     enabled: settings.read().ui.show_row_images,
-                                    on_change: move |val| settings.write().ui.show_row_images = val,
+                                    on_change: move |val| edits.edit(SettingsEdit::Ui(UiEdit::ShowRowImages(val))),
                                 }
                             }
                         }
@@ -551,11 +574,11 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                                 value: match current_mode { config::TitlebarMode::System => "system", config::TitlebarMode::Off => "off", config::TitlebarMode::Custom => "custom" }.to_string(),
                                                 options: vec![("custom".into(), i18n::t("titlebar_custom")), ("system".into(), i18n::t("titlebar_system")), ("off".into(), i18n::t("titlebar_off"))],
                                                 on_change: move |value: String| {
-                                                    settings.write().ui.titlebar_mode = match value.as_str() {
+                                                    edits.edit(SettingsEdit::Ui(UiEdit::TitlebarMode(match value.as_str() {
                                                         "system" => config::TitlebarMode::System,
                                                         "off" => config::TitlebarMode::Off,
                                                         _ => config::TitlebarMode::Custom,
-                                                    };
+                                                    })));
                                                 },
                                             }
                                         }
@@ -575,11 +598,11 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                             value: current_style.as_str().to_string(),
                                             options: vec![("normal".into(), i18n::t("ui_normal")), ("vaxry".into(), i18n::t("ui_vaxry")), ("material3".into(), i18n::t("ui_material3"))],
                                             on_change: move |value: String| {
-                                                settings.write().ui.ui_style = match value.as_str() {
+                                                edits.edit(SettingsEdit::Ui(UiEdit::UiStyle(match value.as_str() {
                                                     "vaxry" => config::UiStyle::Vaxry,
                                                     "material3" => config::UiStyle::Material3,
                                                     _ => config::UiStyle::Normal,
-                                                };
+                                                })));
                                             },
                                         }
                                     }
@@ -598,10 +621,10 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                             value: (if current_position == config::PlayerBarPosition::Top { "top" } else { "bottom" }).to_string(),
                                             options: vec![("bottom".into(), i18n::t("position_bottom")), ("top".into(), i18n::t("position_top"))],
                                             on_change: move |value: String| {
-                                                settings.write().ui.player_bar_position = match value.as_str() {
+                                                edits.edit(SettingsEdit::Ui(UiEdit::PlayerBarPosition(match value.as_str() {
                                                     "top" => config::PlayerBarPosition::Top,
                                                     _ => config::PlayerBarPosition::Bottom,
-                                                };
+                                                })));
                                             },
                                         }
                                     }
@@ -621,10 +644,10 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                                 value: (if current_layout == config::SettingsLayout::TopBar { "topbar" } else { "cd" }).to_string(),
                                                 options: vec![("cd".into(), i18n::t("settings_layout_cd")), ("topbar".into(), i18n::t("settings_layout_topbar"))],
                                                 on_change: move |value: String| {
-                                                    settings.write().ui.settings_layout = match value.as_str() {
+                                                    edits.edit(SettingsEdit::Ui(UiEdit::SettingsLayout(match value.as_str() {
                                                         "topbar" => config::SettingsLayout::TopBar,
                                                         _ => config::SettingsLayout::Cd,
-                                                    };
+                                                    })));
                                                 },
                                             }
                                         }
@@ -639,29 +662,23 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                             registries: settings.read().integrations.radio_registries.clone(),
                             error: registry_toggle_error,
                             on_toggle: move |index: usize| {
-                                let (is_enabling, url) = {
-                                    let cfg = settings.read();
-                                    let entry = cfg.integrations.radio_registries.get(index);
-                                    (
-                                        entry.map(|e| !e.enabled).unwrap_or(false),
-                                        entry.map(|e| e.url.clone()).unwrap_or_default(),
-                                    )
+                                let Some(entry) = settings.read().integrations.radio_registries.get(index).cloned() else {
+                                    return;
+                                };
+                                let (enabling, url) = (!entry.enabled, entry.url.clone());
+                                let put = move |enabled: bool| {
+                                    edits.edit(SettingsEdit::Integrations(IntegrationsEdit::RadioRegistries(
+                                        RadioRegistryOp::Put(config::RegistryEntry { enabled, ..entry.clone() }),
+                                    )));
                                 };
 
-                                if is_enabling && !url.is_empty() {
+                                if enabling && !url.is_empty() {
                                     registry_toggle_error.set(None);
                                     let api = hooks::consume_api();
                                     spawn(async move {
-                                        match api.validate_radio_registry(url.clone()).await {
+                                        match api.validate_radio_registry(url).await {
                                             Ok(_) => {
-                                                let mut cfg = settings.write();
-                                                if let Some(entry) = cfg
-                                                .integrations.radio_registries
-                                                .iter_mut()
-                                                .find(|entry| entry.url == url)
-                                                {
-                                                    entry.enabled = true;
-                                                }
+                                                put(true);
                                                 registry_toggle_error.set(None);
                                             }
                                             Err(e) => {
@@ -670,20 +687,23 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                         }
                                     });
                                 } else {
-                                    let mut cfg = settings.write();
-                                    if let Some(entry) = cfg.integrations.radio_registries.get_mut(index) {
-                                        entry.enabled = false;
-                                    }
+                                    put(false);
                                     registry_toggle_error.set(None);
                                 }
                             },
                             on_add: move |_| show_add_registry.set(true),
                             on_delete: move |index: usize| {
-                                let mut cfg = settings.write();
-                                if index < cfg.integrations.radio_registries.len()
-                                    && !cfg.integrations.radio_registries[index].is_default
-                                {
-                                    cfg.integrations.radio_registries.remove(index);
+                                let url = settings
+                                    .read()
+                                    .integrations
+                                    .radio_registries
+                                    .get(index)
+                                    .filter(|entry| !entry.is_default)
+                                    .map(|entry| entry.url.clone());
+                                if let Some(url) = url {
+                                    edits.edit(SettingsEdit::Integrations(IntegrationsEdit::RadioRegistries(
+                                        RadioRegistryOp::Remove { url },
+                                    )));
                                 }
                             }
                         }
@@ -698,7 +718,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                     options: sync_interval_options(settings.read().library.sync_interval_minutes),
                                     on_change: move |value: String| {
                                         if let Ok(minutes) = value.parse::<u32>() {
-                                            settings.write().library.sync_interval_minutes = minutes;
+                                            edits.edit(SettingsEdit::Library(LibraryEdit::SyncIntervalMinutes(minutes)));
                                         }
                                     },
                                 }
@@ -730,7 +750,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                             control: rsx! {
                                 ToggleSetting {
                                     enabled: settings.read().system.auto_check_updates,
-                                    on_change: move |val| settings.write().system.auto_check_updates = val,
+                                    on_change: move |val| edits.edit(SettingsEdit::System(SystemEdit::AutoCheckUpdates(val))),
                                 }
                             }
                         }
@@ -741,7 +761,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                 control: rsx! {
                                     ToggleSetting {
                                         enabled: settings.read().system.minimize_to_tray,
-                                        on_change: move |val| settings.write().system.minimize_to_tray = val,
+                                        on_change: move |val| edits.edit(SettingsEdit::System(SystemEdit::MinimizeToTray(val))),
                                     }
                                 }
                             }
@@ -752,7 +772,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                             control: rsx! {
                                 BackBehaviorSelector {
                                     current: settings.read().playback.back_behavior,
-                                    on_change: move |val| settings.write().playback.back_behavior = val,
+                                    on_change: move |val| edits.edit(SettingsEdit::Playback(PlaybackEdit::BackBehavior(val))),
                                 }
                             }
                         }

@@ -7,6 +7,7 @@
 
 mod catalog;
 mod config;
+mod config_edit;
 mod enums;
 mod error;
 mod events;
@@ -25,6 +26,7 @@ mod fixtures;
 
 pub use catalog::*;
 pub use config::*;
+pub use config_edit::*;
 pub use enums::*;
 pub use error::*;
 pub use events::*;

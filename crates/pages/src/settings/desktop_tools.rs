@@ -28,7 +28,7 @@ fn trigger_test_crash() {
 }
 
 #[cfg(not(target_os = "android"))]
-pub(super) fn logs_section(mut settings: Signal<Settings>) -> Element {
+pub(super) fn logs_section(settings: Signal<Settings>) -> Element {
     rsx! {
         SettingsSection { title: i18n::t("logs").to_string(),
             div {
@@ -39,7 +39,9 @@ pub(super) fn logs_section(mut settings: Signal<Settings>) -> Element {
                         ToggleSetting {
                             enabled: settings.read().system.tracing_enabled,
                             on_change: move |v| {
-                                settings.write().system.tracing_enabled = v;
+                                hooks::settings::edit(config::SettingsEdit::System(
+                                    config::SystemEdit::TracingEnabled(v),
+                                ));
                             },
                         }
                     },

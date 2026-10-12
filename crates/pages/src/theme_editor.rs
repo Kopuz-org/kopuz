@@ -1,4 +1,4 @@
-use config::{CustomTheme, Settings};
+use config::{CustomTheme, CustomThemeOp, Settings, SettingsEdit, UiEdit};
 use dioxus::prelude::*;
 use std::collections::HashMap;
 
@@ -95,6 +95,7 @@ fn sanitize_hex_input(value: &str) -> String {
 
 #[component]
 pub fn ThemeEditorPage(settings: Signal<Settings>, #[props(default)] embedded: bool) -> Element {
+    let edits = hooks::settings::use_settings();
     let mut selected_id: Signal<Option<String>> = use_signal(|| None);
     let mut editing_name = use_signal(String::new);
     let mut editing_vars: Signal<HashMap<String, String>> = use_signal(default_vars_map);
@@ -348,7 +349,10 @@ pub fn ThemeEditorPage(settings: Signal<Settings>, #[props(default)] embedded: b
                                     }
                                 }
                             });
-                            settings.write().ui.custom_themes.insert(id.clone(), CustomTheme { name, vars });
+                            edits.edit(SettingsEdit::Ui(UiEdit::CustomThemes(CustomThemeOp::Put {
+                                name: id.clone(),
+                                theme: CustomTheme { name, vars },
+                            })));
                             selected_id.set(Some(id));
                         },
                         "{i18n::t(\"save_theme\")}"
@@ -357,12 +361,13 @@ pub fn ThemeEditorPage(settings: Signal<Settings>, #[props(default)] embedded: b
                         button {
                             class: "app-button-tonal app-button-danger px-4 py-2 bg-red-500/20 hover:bg-red-500/30 rounded text-sm text-red-400 transition-colors",
                             onclick: move |_| {
-                                if let Some(id) = selected_id.write().take() {
-                                    let mut cfg = settings.write();
-                                    cfg.ui.custom_themes.remove(&id);
-                                    if cfg.ui.theme == id {
-                                        cfg.ui.theme = "default".to_string();
-                                    }
+                                let Some(id) = selected_id.write().take() else {
+                                    return;
+                                };
+                                let was_active = settings.peek().ui.theme == id;
+                                edits.edit(SettingsEdit::Ui(UiEdit::CustomThemes(CustomThemeOp::Delete { name: id })));
+                                if was_active {
+                                    edits.edit(SettingsEdit::Ui(UiEdit::Theme("default".to_string())));
                                 }
                             },
                             "{i18n::t(\"delete\")}"

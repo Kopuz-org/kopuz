@@ -4,9 +4,16 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+mod edit;
 mod source;
 pub mod store;
 mod ui_prefs;
+pub use edit::{
+    BackgroundEdit, BackgroundKey, CustomThemeOp, DownloadsEdit, DownloadsKey, IntegrationsEdit,
+    IntegrationsKey, LibraryEdit, LibraryKey, LyricsEdit, LyricsKey, PlaybackEdit, PlaybackKey,
+    RadioRegistryOp, SettingKey, SettingsEdit, SpotifyEdit, SpotifyKey, SystemEdit, SystemKey,
+    UiEdit, UiKey, edit_samples,
+};
 pub use source::{
     Browser, BrowserEngine, DEFAULT_LOCAL_ID, DEFAULT_LOCAL_NAME, JellyfinServer, MusicServer,
     MusicService, SavedLocalSource, SavedServer, Source,
@@ -376,19 +383,31 @@ where
     Ok(out)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, garde::Validate)]
 pub struct EqualizerSettings {
     #[serde(default)]
+    #[garde(skip)]
     pub enabled: bool,
     #[serde(default)]
+    #[garde(skip)]
     pub preset: EqPreset,
     #[serde(
         default = "default_eq_bands",
         deserialize_with = "deserialize_eq_bands"
     )]
+    #[garde(inner(custom(finite), range(min = -12.0, max = 12.0)))]
     pub bands: [f32; 10],
     #[serde(default)]
+    #[garde(custom(finite), range(min = -12.0, max = 6.0))]
     pub preamp_db: f32,
+}
+
+/// `range` lets NaN through, since every comparison with it is false.
+fn finite(value: &f32, _: &()) -> garde::Result {
+    match value.is_finite() {
+        true => Ok(()),
+        false => Err(garde::Error::new("not a finite number")),
+    }
 }
 
 impl EqualizerSettings {
@@ -480,22 +499,27 @@ impl ReplayGainInfo {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, garde::Validate)]
 pub struct ReplayGainSettings {
     #[serde(default)]
+    #[garde(skip)]
     pub mode: ReplayGainMode,
     /// Hold the gain down far enough that the track's stored peak stays under
     /// full scale. Only does something for tracks that tagged a peak.
     #[serde(default = "default_prevent_clipping")]
+    #[garde(skip)]
     pub prevent_clipping: bool,
     /// Applied on top of every resolved gain, tagged or not.
     #[serde(default)]
+    #[garde(custom(finite), range(min = -GAIN_LIMIT_DB, max = GAIN_LIMIT_DB))]
     pub preamp_db: f32,
     /// Used in place of a gain for tracks that carry none.
     #[serde(default)]
+    #[garde(custom(finite), range(min = -GAIN_LIMIT_DB, max = GAIN_LIMIT_DB))]
     pub fallback_gain_db: f32,
     /// Levels untagged tracks by their service loudness regardless of `mode`.
     #[serde(default = "default_normalize_loudness")]
+    #[garde(skip)]
     pub normalize_loudness: bool,
 }
 
@@ -765,24 +789,33 @@ pub struct Settings {
     pub system: System,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Each section's `garde` rules are what its settings UI clamps to; they run on an edit, never on load.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, garde::Validate)]
 #[serde(default)]
 pub struct Playback {
     #[serde(default = "default_volume_scroll_step")]
+    #[garde(custom(finite), range(min = 0.01, max = 0.5))]
     pub volume_scroll_step: f32,
     #[serde(default = "default_crossfade_seconds")]
+    #[garde(range(max = 12))]
     pub crossfade_seconds: u8,
     #[serde(default)]
+    #[garde(skip)]
     pub back_behavior: BackBehavior,
     #[serde(default)]
+    #[garde(skip)]
     pub channel_mode: ChannelMode,
     #[serde(default)]
+    #[garde(dive)]
     pub equalizer: EqualizerSettings,
     #[serde(default)]
+    #[garde(dive)]
     pub replay_gain: ReplayGainSettings,
     #[serde(default)]
+    #[garde(skip)]
     pub device_change_behavior: DeviceChangeBehavior,
     #[serde(default)]
+    #[garde(skip)]
     pub sample_rate_mode: SampleRateMode,
 }
 
@@ -801,37 +834,50 @@ impl Default for Playback {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, garde::Validate)]
 #[serde(default)]
 pub struct Ui {
     #[serde(default = "default_theme")]
+    #[garde(skip)]
     pub theme: String,
     /// Palette file matugen or pywal writes, polled while the live theme is active; empty means whichever default location exists.
     #[serde(default)]
+    #[garde(skip)]
     pub live_theme_path: String,
     #[serde(default)]
+    #[garde(skip)]
     pub custom_themes: HashMap<String, CustomTheme>,
     #[serde(default = "default_language")]
+    #[garde(skip)]
     pub language: String,
     #[serde(default)]
+    #[garde(skip)]
     pub reduce_animations: bool,
     /// Fullscreen hides its own transport controls and lets the player bar act as the controller.
     #[serde(default)]
+    #[garde(skip)]
     pub fullscreen_use_player_bar: bool,
     #[serde(default = "default_show_source_toggle")]
+    #[garde(skip)]
     pub show_source_toggle: bool,
     #[serde(default = "default_true")]
+    #[garde(skip)]
     pub show_row_images: bool,
     #[serde(default)]
+    #[garde(skip)]
     pub titlebar_mode: TitlebarMode,
     #[serde(default)]
+    #[garde(skip)]
     pub player_bar_position: PlayerBarPosition,
     #[serde(default)]
+    #[garde(skip)]
     pub ui_style: UiStyle,
     #[serde(default)]
+    #[garde(skip)]
     pub settings_layout: SettingsLayout,
     /// User-chosen font file (ttf/otf/woff/woff2) replacing the default JetBrains Mono stack; empty means unset.
     #[serde(default)]
+    #[garde(skip)]
     pub custom_font_path: String,
 }
 
@@ -855,20 +901,24 @@ impl Default for Ui {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, garde::Validate)]
 #[serde(default)]
 pub struct Background {
     /// Use the current track's cover as the app background, overriding the theme's (album-art gradient included).
     #[serde(default)]
+    #[garde(skip)]
     pub cover_art_background: bool,
     /// How strongly the cover art background is darkened, in percent (0-95).
     #[serde(default = "default_cover_art_darkening")]
+    #[garde(range(max = 95))]
     pub cover_art_darkening: u8,
     /// Blur radius of the cover art background, in pixels (0 = sharp).
     #[serde(default)]
+    #[garde(range(max = 100))]
     pub cover_art_blur: u8,
     /// User-chosen background image over both the theme and the cover art, sharing their darkening and blur; empty means unset.
     #[serde(default)]
+    #[garde(skip)]
     pub custom_background_path: String,
 }
 
@@ -883,24 +933,30 @@ impl Default for Background {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, garde::Validate)]
 #[serde(default)]
 pub struct Lyrics {
     #[serde(default)]
+    #[garde(skip)]
     pub prefer_local_lyrics: bool,
     #[serde(default)]
+    #[garde(skip)]
     pub enable_musixmatch_lyrics: bool,
     /// Milliseconds to hold the lyrics behind the playback clock.
     #[serde(default, deserialize_with = "deserialize_lyrics_offset_ms")]
+    #[garde(range(min = -LYRICS_OFFSET_LIMIT_MS, max = LYRICS_OFFSET_LIMIT_MS))]
     pub lyrics_offset_ms: i32,
     /// Take the offset from the backend's playback timestamp instead.
     #[serde(default = "default_true")]
+    #[garde(skip)]
     pub lyrics_offset_auto: bool,
     /// Apple Music style depth-of-field: blur lines by distance from the active one instead of just dimming them.
     #[serde(default = "default_true")]
+    #[garde(skip)]
     pub lyrics_depth_blur: bool,
     /// Scales the depth-of-field ramp, in percent (100 = the built-in ramp).
     #[serde(default = "default_depth_blur_strength")]
+    #[garde(range(min = 10, max = 200))]
     pub lyrics_depth_blur_strength: u8,
 }
 
@@ -917,19 +973,24 @@ impl Default for Lyrics {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, garde::Validate)]
 #[serde(default)]
 pub struct Library {
     /// Isolated filesystem libraries; the one under `DEFAULT_LOCAL_ID` is the install's own.
+    #[garde(skip)]
     pub local_sources: Vec<SavedLocalSource>,
     #[serde(default)]
+    #[garde(skip)]
     pub auto_fetch_covers: bool,
     #[serde(default)]
+    #[garde(skip)]
     pub cover_fetch_strategy: FetchStrategy,
     #[serde(default)]
+    #[garde(skip)]
     pub offline_quality: OfflineQuality,
     /// Minutes between the daemon's own library syncs and folder rescans; 0 turns them off.
     #[serde(default = "default_sync_interval_minutes")]
+    #[garde(range(max = MAX_SYNC_INTERVAL_MINUTES))]
     pub sync_interval_minutes: u32,
 }
 
@@ -953,14 +1014,17 @@ impl Library {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, garde::Validate)]
 #[serde(default)]
 pub struct Integrations {
     #[serde(default = "default_discord_presence")]
+    #[garde(skip)]
     pub discord_presence: Option<bool>,
     #[serde(default = "default_discord_presence_source")]
+    #[garde(skip)]
     pub discord_presence_source: Option<bool>,
     #[serde(default = "default_radio_registries")]
+    #[garde(skip)]
     pub radio_registries: Vec<RegistryEntry>,
 }
 
@@ -991,23 +1055,27 @@ impl Integrations {
 }
 
 /// Stored under the names the yt-dlp downloader gave these, so existing settings carry over.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, garde::Validate)]
 #[serde(default)]
 pub struct Downloads {
     #[serde(default, rename = "ytdlp_output_dir")]
+    #[garde(skip)]
     pub downloader_output_dir: String,
     #[serde(default, rename = "ytdlp_options")]
+    #[garde(skip)]
     pub downloader_options: DownloaderOptions,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, garde::Validate)]
 #[serde(default)]
 pub struct Spotify {
     /// Browser id hosting Spotify playback (`chrome`/`edge`/`brave`/`chromium`/`vivaldi`/`safari`); `None` picks the first available.
     #[serde(default)]
+    #[garde(skip)]
     pub spotify_browser: Option<String>,
     /// Adopt a Connect device that is already playing (default) instead of starting on this app's own device.
     #[serde(default = "default_true")]
+    #[garde(skip)]
     pub spotify_prefer_active_device: bool,
 }
 
@@ -1020,16 +1088,19 @@ impl Default for Spotify {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, garde::Validate)]
 #[serde(default)]
 pub struct System {
     /// Opt-in chrome/Perfetto trace, read once at startup so a change needs a restart.
     #[serde(default)]
+    #[garde(skip)]
     pub tracing_enabled: bool,
     #[serde(default = "default_auto_check_updates")]
+    #[garde(skip)]
     pub auto_check_updates: bool,
     /// Desktop-only: closing the window hides it to the tray instead of quitting, so playback keeps running.
     #[serde(default)]
+    #[garde(skip)]
     pub minimize_to_tray: bool,
 }
 
@@ -1044,6 +1115,9 @@ impl Default for System {
 }
 
 pub const DEFAULT_SYNC_INTERVAL_MINUTES: u32 = 24 * 60;
+
+/// The longest interval the settings UI offers.
+pub const MAX_SYNC_INTERVAL_MINUTES: u32 = 7 * 24 * 60;
 
 fn default_sync_interval_minutes() -> u32 {
     DEFAULT_SYNC_INTERVAL_MINUTES

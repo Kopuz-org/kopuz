@@ -575,14 +575,11 @@ impl api::ConfigApi for LocalApi {
         }
     }
 
-    async fn set_config(&self, config: config::Settings) -> Result<api::ConfigView, ApiError> {
-        let Some(service) = &self.config else {
-            return Err(ApiError::unsupported(
-                "this daemon runs without a config service",
-            ));
-        };
-        let (view, _, _) = service.set(config).await?;
-        Ok(view)
+    async fn edit_config(
+        &self,
+        edits: Vec<config::SettingsEdit>,
+    ) -> Result<api::EditReport, ApiError> {
+        self.config_service()?.edit(edits).await
     }
 
     async fn preview_equalizer(
@@ -590,6 +587,14 @@ impl api::ConfigApi for LocalApi {
         equalizer: config::EqualizerSettings,
     ) -> Result<(), ApiError> {
         self.session.preview_equalizer(equalizer);
+        Ok(())
+    }
+
+    async fn preview_replay_gain(
+        &self,
+        replay_gain: config::ReplayGainSettings,
+    ) -> Result<(), ApiError> {
+        self.session.preview_replay_gain(replay_gain);
         Ok(())
     }
 
