@@ -15,6 +15,7 @@ use api::{
 use reader::Track;
 use tokio::sync::{broadcast, watch};
 
+use crate::credentials::{CredentialStore, Credentials};
 use crate::session::{PlaybackRecorder, SessionHandle};
 
 const DISCORD_APP_ID: &str = "1470087339639443658";
@@ -515,14 +516,13 @@ fn toggle_field(key: &str, config_key: &str, value: bool) -> FieldSpec {
     }
 }
 
-/// A credential row: it carries no value out, only somewhere to type a new one.
-fn secret_field(key: &str, label: Text, placeholder: &str, config_key: &str) -> FieldSpec {
+/// A credential row: it carries no value out, only somewhere to type a new one. No settings layer holds a credential, so it has no settings key to lock.
+fn secret_field(key: &str, label: Text, placeholder: &str) -> FieldSpec {
     FieldSpec {
         key: key.to_string(),
         label,
         placeholder: Some(Text::key(placeholder)),
         kind: FieldKind::Secret,
-        config_key: Some(config_key.to_string()),
         ..Default::default()
     }
 }
@@ -551,12 +551,12 @@ fn discord(config: &config::AppConfig) -> IntegrationInfo {
     }
 }
 
-fn listenbrainz(config: &config::AppConfig) -> IntegrationInfo {
+fn listenbrainz(credentials: &Credentials) -> IntegrationInfo {
     IntegrationInfo {
         id: LISTENBRAINZ.to_string(),
         name: Text::key("listenbrainz"),
         icon: Icon::Class("fa-solid fa-compact-disc".into()),
-        configured: !config.musicbrainz_token.trim().is_empty(),
+        configured: !credentials.musicbrainz_token.trim().is_empty(),
         // Android has no desktop browser profile to take a session from.
         connect: if cfg!(target_os = "android") {
             ConnectKind::None
@@ -567,42 +567,39 @@ fn listenbrainz(config: &config::AppConfig) -> IntegrationInfo {
             TOKEN,
             Text::key("listenbrainz"),
             "listenbrainz_token_placeholder",
-            "musicbrainz_token",
         )],
     }
 }
 
-fn lastfm(config: &config::AppConfig) -> IntegrationInfo {
+fn lastfm(credentials: &Credentials) -> IntegrationInfo {
     IntegrationInfo {
         id: LASTFM.to_string(),
         name: Text::key("lastfm"),
         icon: Icon::Class("fa-brands fa-lastfm".into()),
         // A session key is what scrobbles; the api key alone only reaches the sign-in page.
-        configured: !config.lastfm_session_key.trim().is_empty(),
+        configured: !credentials.lastfm_session_key.trim().is_empty(),
         connect: ConnectKind::WebSignIn,
         fields: vec![
             secret_field(
                 API_KEY,
                 Text::key("lastfm_api_key_label"),
                 "lastfm_api_key_placeholder",
-                "lastfm_api_key",
             ),
             secret_field(
                 API_SECRET,
                 Text::key("lastfm_api_secret_label"),
                 "lastfm_api_secret_placeholder",
-                "lastfm_api_secret",
             ),
         ],
     }
 }
 
-fn librefm(config: &config::AppConfig) -> IntegrationInfo {
+fn librefm(credentials: &Credentials) -> IntegrationInfo {
     IntegrationInfo {
         id: LIBREFM.to_string(),
         name: Text::key("librefm"),
         icon: Icon::Class("fa-brands fa-lastfm".into()),
-        configured: !config.librefm_session_key.trim().is_empty(),
+        configured: !credentials.librefm_session_key.trim().is_empty(),
         connect: ConnectKind::WebSignIn,
         // Its api key and secret are compiled in, so there is nothing to fill in.
         fields: Vec::new(),
@@ -610,20 +607,24 @@ fn librefm(config: &config::AppConfig) -> IntegrationInfo {
 }
 
 /// What this build publishes, in the order a settings page lists it.
-fn all(config: &config::AppConfig) -> Vec<IntegrationInfo> {
+fn all(config: &config::AppConfig, credentials: &Credentials) -> Vec<IntegrationInfo> {
     let mut published = Vec::new();
     // Android has no Discord client to talk to, so the row is not offered there.
     if !cfg!(target_os = "android") {
         published.push(discord(config));
     }
-    published.push(listenbrainz(config));
-    published.push(lastfm(config));
-    published.push(librefm(config));
+    published.push(listenbrainz(credentials));
+    published.push(lastfm(credentials));
+    published.push(librefm(credentials));
     published
 }
 
-fn info_of(id: &str, config: &config::AppConfig) -> Result<IntegrationInfo, ApiError> {
-    all(config)
+fn info_of(
+    id: &str,
+    config: &config::AppConfig,
+    credentials: &Credentials,
+) -> Result<IntegrationInfo, ApiError> {
+    all(config, credentials)
         .into_iter()
         .find(|info| info.id == id)
         .ok_or_else(|| ApiError::not_found("no such integration"))
@@ -658,47 +659,39 @@ fn set_toggle(values: &[FieldValue], key: &str, stored: &mut Option<bool>) {
     }
 }
 
-fn apply(id: &str, values: &[FieldValue], config: &mut config::AppConfig) {
+fn apply_presence(values: &[FieldValue], config: &mut config::AppConfig) {
+    set_toggle(values, PRESENCE, &mut config.discord_presence);
+    set_toggle(values, PAUSED, &mut config.discord_presence_paused);
+    set_toggle(values, PRESENCE_SOURCE, &mut config.discord_presence_source);
+}
+
+fn apply_credentials(id: &str, values: &[FieldValue], credentials: &mut Credentials) {
     match id {
-        DISCORD => {
-            set_toggle(values, PRESENCE, &mut config.discord_presence);
-            set_toggle(values, PAUSED, &mut config.discord_presence_paused);
-            set_toggle(values, PRESENCE_SOURCE, &mut config.discord_presence_source);
-        }
-        LISTENBRAINZ => set_secret(values, TOKEN, &mut config.musicbrainz_token),
+        LISTENBRAINZ => set_secret(values, TOKEN, &mut credentials.musicbrainz_token),
         LASTFM => {
-            set_secret(values, API_KEY, &mut config.lastfm_api_key);
-            set_secret(values, API_SECRET, &mut config.lastfm_api_secret);
+            set_secret(values, API_KEY, &mut credentials.lastfm_api_key);
+            set_secret(values, API_SECRET, &mut credentials.lastfm_api_secret);
         }
         _ => {}
     }
 }
 
-/// The keys clearing one writes, which is more than it publishes: a session
-/// key is held but never rendered.
-fn clear_keys(id: &str) -> Vec<&'static str> {
+/// Clearing drops more than an integration publishes: a session key is held but never rendered.
+fn clear_credentials(id: &str, credentials: &mut Credentials) {
     match id {
-        DISCORD => vec!["discord_presence"],
-        LISTENBRAINZ => vec!["musicbrainz_token"],
-        LASTFM => vec!["lastfm_api_key", "lastfm_api_secret", "lastfm_session_key"],
-        LIBREFM => vec!["librefm_session_key"],
-        _ => Vec::new(),
+        LISTENBRAINZ => credentials.musicbrainz_token.clear(),
+        LASTFM => {
+            credentials.lastfm_api_key.clear();
+            credentials.lastfm_api_secret.clear();
+            credentials.lastfm_session_key.clear();
+        }
+        LIBREFM => credentials.librefm_session_key.clear(),
+        _ => {}
     }
 }
 
-fn clear_stored(id: &str, config: &mut config::AppConfig) {
-    match id {
-        // Discord holds no credential, so unconfigured means presence off.
-        DISCORD => config.discord_presence = Some(false),
-        LISTENBRAINZ => config.musicbrainz_token.clear(),
-        LASTFM => {
-            config.lastfm_api_key.clear();
-            config.lastfm_api_secret.clear();
-            config.lastfm_session_key.clear();
-        }
-        LIBREFM => config.librefm_session_key.clear(),
-        _ => {}
-    }
+fn credential_error(error: db::DbError) -> ApiError {
+    ApiError::internal(format!("database error: {error}"))
 }
 
 /// Scrobbling, metadata and presence accounts.
@@ -709,15 +702,30 @@ fn clear_stored(id: &str, config: &mut config::AppConfig) {
 /// and asks whether one is configured, never what it holds.
 pub struct IntegrationService {
     config: Arc<crate::config_service::ConfigService>,
+    credentials: CredentialStore,
 }
 
 impl IntegrationService {
-    pub fn new(config: Arc<crate::config_service::ConfigService>) -> Arc<Self> {
-        Arc::new(Self { config })
+    pub fn new(
+        config: Arc<crate::config_service::ConfigService>,
+        credentials: CredentialStore,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            config,
+            credentials,
+        })
     }
 
     pub async fn list(&self) -> Vec<IntegrationInfo> {
-        all(&self.config.snapshot().await)
+        all(&self.config.snapshot().await, &self.credentials.snapshot())
+    }
+
+    async fn info(&self, id: &str) -> Result<IntegrationInfo, ApiError> {
+        info_of(
+            id,
+            &self.config.snapshot().await,
+            &self.credentials.snapshot(),
+        )
     }
 
     /// Answer an integration's fields. An absent key is left alone, and so is
@@ -727,27 +735,41 @@ impl IntegrationService {
         id: &str,
         values: Vec<FieldValue>,
     ) -> Result<IntegrationInfo, ApiError> {
-        let info = info_of(id, &self.config.snapshot().await)?;
+        let info = self.info(id).await?;
         self.config.ensure_unlocked(&write_keys(&info, &values))?;
-        let target = id.to_string();
-        let updated = self
-            .config
-            .mutate_state(&[INTEGRATIONS_KEY], move |config| {
-                apply(&target, &values, config)
-            })
-            .await?;
-        info_of(id, &updated)
+        if id == DISCORD {
+            self.config
+                .mutate_state(&[INTEGRATIONS_KEY], move |config| {
+                    apply_presence(&values, config)
+                })
+                .await?;
+        } else {
+            let target = id.to_string();
+            self.credentials
+                .update(move |credentials| apply_credentials(&target, &values, credentials))
+                .await
+                .map_err(credential_error)?;
+        }
+        self.info(id).await
     }
 
     pub async fn clear(&self, id: &str) -> Result<(), ApiError> {
-        info_of(id, &self.config.snapshot().await)?;
-        self.config.ensure_unlocked(&clear_keys(id))?;
-        let target = id.to_string();
-        self.config
-            .mutate_state(&[INTEGRATIONS_KEY], move |config| {
-                clear_stored(&target, config)
-            })
-            .await?;
+        self.info(id).await?;
+        if id == DISCORD {
+            self.config.ensure_unlocked(&["discord_presence"])?;
+            // Discord holds no credential, so unconfigured means presence off.
+            self.config
+                .mutate_state(&[INTEGRATIONS_KEY], |config| {
+                    config.discord_presence = Some(false)
+                })
+                .await?;
+        } else {
+            let target = id.to_string();
+            self.credentials
+                .update(move |credentials| clear_credentials(&target, credentials))
+                .await
+                .map_err(credential_error)?;
+        }
         Ok(())
     }
 
@@ -757,46 +779,37 @@ impl IntegrationService {
     /// to approve, then trade the token for a session key -- a browser and a
     /// poll loop, which is why it is not a frontend's job.
     pub async fn authenticate(&self, id: &str) -> Result<IntegrationInfo, ApiError> {
-        let config = self.config.snapshot().await;
-        let info = info_of(id, &config)?;
+        let info = self.info(id).await?;
         if matches!(info.connect, ConnectKind::None) {
             return Err(ApiError::unsupported(
                 "this integration takes a token rather than a web sign-in",
             ));
         }
         let librefm = id == LIBREFM;
-        let session_setting = if librefm {
-            "librefm_session_key"
-        } else {
-            "lastfm_session_key"
-        };
-        self.config.ensure_unlocked(&[session_setting])?;
         let (api_key, api_secret) = if librefm {
             (
                 scrobble::librefm::API_KEY.to_string(),
                 scrobble::librefm::API_SECRET.to_string(),
             )
         } else {
-            (
-                config.lastfm_api_key.clone(),
-                config.lastfm_api_secret.clone(),
-            )
+            let held = self.credentials.snapshot();
+            (held.lastfm_api_key, held.lastfm_api_secret)
         };
         if api_key.trim().is_empty() || api_secret.trim().is_empty() {
             return Err(ApiError::invalid_input("set the API key and secret first"));
         }
         let session_key = web_sign_in(id, &api_key, &api_secret).await?;
-        let updated = self
-            .config
-            .mutate_state(&[INTEGRATIONS_KEY], move |config| {
+        self.credentials
+            .update(move |credentials| {
                 if librefm {
-                    config.librefm_session_key = session_key;
+                    credentials.librefm_session_key = session_key;
                 } else {
-                    config.lastfm_session_key = session_key;
+                    credentials.lastfm_session_key = session_key;
                 }
             })
-            .await?;
-        info_of(id, &updated)
+            .await
+            .map_err(credential_error)?;
+        self.info(id).await
     }
 
     /// Take an integration's credential from one of [`browser_profiles`] and
@@ -807,14 +820,13 @@ impl IntegrationService {
         id: &str,
         profile: &str,
     ) -> Result<IntegrationInfo, ApiError> {
-        let info = info_of(id, &self.config.snapshot().await)?;
+        let info = self.info(id).await?;
         // ListenBrainz is the only one offering it, so the token is its.
         if id != LISTENBRAINZ || info.connect != ConnectKind::BrowserProfile {
             return Err(ApiError::unsupported(
                 "this integration does not connect from a browser profile",
             ));
         }
-        self.config.ensure_unlocked(&["musicbrainz_token"])?;
         let profile = server::cookies::browser_profiles()
             .into_iter()
             .find(|candidate| candidate.dir.to_string_lossy() == profile)
@@ -829,13 +841,11 @@ impl IntegrationService {
                 )
             })?;
         tracing::info!(%user, browser = profile.browser.id(), "connected to listenbrainz from a browser");
-        let updated = self
-            .config
-            .mutate_state(&[INTEGRATIONS_KEY], move |config| {
-                config.musicbrainz_token = token;
-            })
-            .await?;
-        info_of(id, &updated)
+        self.credentials
+            .update(move |credentials| credentials.musicbrainz_token = token)
+            .await
+            .map_err(credential_error)?;
+        self.info(id).await
     }
 }
 
@@ -883,7 +893,7 @@ async fn listenbrainz_token_from(
         })
 }
 
-/// What an integration write reports as changed, so the running scrobbler picks it up.
+/// What a presence write reports as changed, so the session republishes the config.
 const INTEGRATIONS_KEY: &str = "integrations";
 
 /// Open the approval page, then poll for the session key. The person has to

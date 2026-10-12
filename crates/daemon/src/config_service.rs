@@ -1,10 +1,6 @@
 //! ConfigService: authority over the running `AppConfig`.
 //!
-//! Reads arrive fully layered from the database (blob, `settings.toml`,
-//! `settings.d` drop-ins, env); writes go back through `db::save_config`,
-//! which owns the blob/settings-file split. This service adds the wire
-//! contract on top: credential stripping, hjem-locked keys, RFC 7396 merge
-//! patches, and pushing accepted changes into the player session.
+//! Reads arrive layered from the database and settings files, writes go back through `db::save_config`; this adds daemon-owned keys, hjem-locked keys, RFC 7396 patches and pushing changes into the session.
 //!
 //! Patches persist immediately rather than debounced: API clients act on
 //! explicit user intent (a settings form submit), not per-keystroke signal
@@ -18,7 +14,6 @@ use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use crate::session::SessionHandle;
 
-/// Never serialized to a client and never patchable: credentials move through the provisioning endpoints.
 pub struct ConfigService {
     db: db::Db,
     settings_path: PathBuf,
@@ -99,11 +94,7 @@ impl ConfigService {
         }
     }
 
-    /// Change config from inside the daemon, persist it, pass it to the session
-    /// under `keys`, and hand back the result.
-    ///
-    /// Unlike [`Self::set`] this touches credential fields, which is the
-    /// point: signing in writes a token no caller ever sent us.
+    /// Change config from inside the daemon, daemon-owned fields included, persist it, pass it to the session under `keys`, and hand back the result.
     pub async fn mutate_state(
         &self,
         keys: &[&str],
@@ -174,8 +165,7 @@ impl ConfigService {
         Ok((self.view_of(&held), updated, changed))
     }
 
-    /// Persist the engine's own volume and mute. They are not caller-set keys,
-    /// so they skip the locked-key and secret machinery of [`Self::set`].
+    /// Persist the engine's own volume and mute, which the session owns, so they skip the locked-key and daemon-owned machinery of [`Self::set`].
     pub async fn set_volume(&self, volume: f32, muted: bool) -> Result<(), ApiError> {
         let mut held = self.current.write().await;
         let volume = volume.clamp(0.0, 1.0);
@@ -193,19 +183,7 @@ impl ConfigService {
     }
 }
 
-/// The keys the daemon owns: credentials, and path state that only means
-/// something on this machine. They are absent from the wire, so a caller
-/// cannot set them and does not have to know them to write anything else.
-/// Keep what the daemon owns: the credentials, and the settings it publishes
-/// as field lists of its own. Both are absent from the surface a caller reads,
-/// so a caller writing that surface back must not be able to blank them.
-///
-/// `volume` and `muted` are here for the same reason even though they are on
-/// the wire: the session owns them and [`Self::set_volume`] is how they move,
-/// so a whole-config write carrying a frontend's older copy must not roll the
-/// engine back. The two cover-lookup keys follow the same rule: `ArtworkApi`
-/// publishes them as a field list and writes them through `mutate_state`, so a
-/// frontend that changed one never saw it in the settings surface it holds.
+/// Keep what the daemon owns (the volume and mute the session moves, and the settings it publishes as field lists of its own), so a stale whole-config write cannot roll them back.
 fn with_daemon_owned_fields(
     mut incoming: config::AppConfig,
     current: &config::AppConfig,
@@ -215,13 +193,6 @@ fn with_daemon_owned_fields(
     incoming.auto_fetch_covers = current.auto_fetch_covers;
     incoming.cover_fetch_strategy = current.cover_fetch_strategy;
     incoming.local_sources = current.local_sources.clone();
-    incoming.musicbrainz_token = current.musicbrainz_token.clone();
-    incoming.lastfm_api_key = current.lastfm_api_key.clone();
-    incoming.lastfm_api_secret = current.lastfm_api_secret.clone();
-    incoming.lastfm_session_key = current.lastfm_session_key.clone();
-    incoming.librefm_api_key = current.librefm_api_key.clone();
-    incoming.librefm_api_secret = current.librefm_api_secret.clone();
-    incoming.librefm_session_key = current.librefm_session_key.clone();
     incoming.spotify_browser = current.spotify_browser.clone();
     incoming.spotify_prefer_active_device = current.spotify_prefer_active_device;
     incoming.discord_presence = current.discord_presence;
@@ -232,16 +203,7 @@ fn with_daemon_owned_fields(
     incoming
 }
 
-/// The credentials blanked for a caller. Not a security boundary on a socket
-/// only this user can open -- it keeps secrets out of a surface that is
-/// written back wholesale, so a frontend cannot round-trip a stale copy over
-/// them.
-///
-/// `volume` and the cover-lookup keys are restored for the same reason: they
-/// are daemon-owned on the way in, so the helper above would hand back the
-/// default here. A frontend reads this to place its volume slider at startup,
-/// and a read that lied about the others would be a worse surface than one
-/// that simply refuses to take them.
+/// The daemon-owned fields left at their defaults for a caller, except the ones it reads truthfully though it cannot write them.
 fn stripped(config: &config::AppConfig) -> config::AppConfig {
     let mut view = with_daemon_owned_fields(config.clone(), &config::AppConfig::default());
     view.volume = config.volume;
@@ -296,15 +258,19 @@ mod tests {
     async fn set_round_trips_and_keeps_credentials_the_caller_never_saw() {
         let dir = tempfile::tempdir().expect("tempdir");
         let database = db::init(&dir.path().join("cfg.db")).await.expect("db");
-        let seeded = config::AppConfig {
-            lastfm_session_key: "secret".into(),
-            ..Default::default()
-        };
-        let service =
-            ConfigService::new(database.clone(), dir.path().join("settings.toml"), seeded);
+        database
+            .set_integration_credential("lastfm_session_key", "secret")
+            .await
+            .expect("seed credential");
+        let service = ConfigService::new(
+            database.clone(),
+            dir.path().join("settings.toml"),
+            config::AppConfig::default(),
+        );
 
         let view = service.view().await.expect("view");
-        assert!(view.config.lastfm_session_key.is_empty());
+        let rendered = serde_json::to_string(&view.config).expect("json");
+        assert!(!rendered.contains("secret"), "{rendered}");
         assert!(view.locked_keys.is_empty());
 
         let mut next = view.config.clone();
@@ -314,14 +280,18 @@ mod tests {
         assert_eq!(view.config.hero_height, 320);
         assert_eq!(updated.crossfade_seconds, 4);
         assert_eq!(changed.len(), 2, "only the two edited keys are reported");
-        assert_eq!(
-            updated.lastfm_session_key, "secret",
-            "writing back a blanked view must not erase the credential"
-        );
 
         let reloaded = database.load_config().await.expect("reload").expect("some");
         assert_eq!(reloaded.crossfade_seconds, 4);
-        assert_eq!(reloaded.lastfm_session_key, "secret");
+        let credentials = database
+            .integration_credentials()
+            .await
+            .expect("credentials");
+        assert_eq!(
+            credentials.get("lastfm_session_key").map(String::as_str),
+            Some("secret"),
+            "writing back the view must not erase the credential"
+        );
     }
 
     /// A caller that sends back exactly what it read changes nothing, so it
@@ -379,8 +349,11 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("vol.db");
         let database = db::init(&path).await.expect("db");
+        database
+            .set_integration_credential("lastfm_session_key", "secret")
+            .await
+            .expect("seed credential");
         let seeded = config::AppConfig {
-            lastfm_session_key: "secret".into(),
             crossfade_seconds: 7,
             ..Default::default()
         };
@@ -399,7 +372,14 @@ mod tests {
             .expect("stored config");
         assert_eq!(stored.volume, 0.42);
         assert_eq!(stored.crossfade_seconds, 7);
-        assert_eq!(stored.lastfm_session_key, "secret");
+        let credentials = database
+            .integration_credentials()
+            .await
+            .expect("credentials");
+        assert_eq!(
+            credentials.get("lastfm_session_key").map(String::as_str),
+            Some("secret")
+        );
         assert_eq!(service.view().await.expect("view").config.volume, 0.42);
     }
 

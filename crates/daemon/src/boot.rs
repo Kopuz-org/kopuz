@@ -112,6 +112,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     }
     let config = database.load_config().await?.unwrap_or_default();
     let sources = Arc::new(crate::sources::load(&database).await?);
+    let credentials = crate::CredentialStore::load(&database).await?;
     let offline = crate::OfflineIndex::load(&database).await?;
     let downloads_pruned = offline.pruned();
 
@@ -132,13 +133,14 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         sources.active.clone(),
         station_registry.clone(),
         cover_cache,
+        credentials.clone(),
     ));
     server::ytmusic::player::init_tier_store(database.clone());
     db::cache::init(database.clone());
     let active_source: server::source::ActiveSource =
         Arc::from(server::source::active(database.clone(), &sources));
     let queue_store: Arc<dyn QueueStore> = Arc::new(DbQueueStore::new(database.clone()));
-    let scrobbler = crate::Scrobbler::new(database.clone());
+    let scrobbler = crate::Scrobbler::new(database.clone(), credentials.clone());
     let services = PlaybackServices {
         config: config.clone(),
         sources: sources.clone(),
@@ -167,9 +169,8 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     scrobbler.attach_session(session.clone());
     {
         let scrobbler = scrobbler.clone();
-        let config = session.config_watch().borrow().clone();
         tokio::spawn(async move {
-            scrobbler.drain_queue(&config).await;
+            scrobbler.drain_queue().await;
         });
     }
     let jobs = Arc::new(JobRunner::new(session.clone()));
@@ -315,7 +316,10 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .with_sources(sources.clone())
             .with_downloader(downloader)
             .with_spotify(spotify)
-            .with_integrations(crate::IntegrationService::new(config_service_for_api)),
+            .with_integrations(crate::IntegrationService::new(
+                config_service_for_api,
+                credentials,
+            )),
     );
 
     Ok(Core {

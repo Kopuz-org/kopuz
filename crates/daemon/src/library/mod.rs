@@ -24,6 +24,8 @@ pub struct LibraryService {
     /// registry toggle takes effect without a restart.
     station_registry: std::sync::RwLock<Arc<radio::registry::StationRegistry>>,
     cover_cache: PathBuf,
+    /// The cover fetcher's Last.fm key.
+    credentials: crate::CredentialStore,
     config_rx: OnceLock<watch::Receiver<config::AppConfig>>,
     sources_rx: OnceLock<watch::Receiver<Arc<server::sources::Sources>>>,
     session: OnceLock<SessionHandle>,
@@ -143,12 +145,14 @@ impl LibraryService {
         source: config::Source,
         station_registry: Arc<radio::registry::StationRegistry>,
         cover_cache: PathBuf,
+        credentials: crate::CredentialStore,
     ) -> Self {
         Self {
             db,
             source,
             station_registry: std::sync::RwLock::new(station_registry),
             cover_cache,
+            credentials,
             config_rx: OnceLock::new(),
             sources_rx: OnceLock::new(),
             session: OnceLock::new(),
@@ -677,11 +681,15 @@ mod tests {
             .await
             .expect("seed tracks");
         let cover_cache = dir.path().join("covers");
+        let credentials = crate::CredentialStore::load(&database)
+            .await
+            .expect("credentials");
         let service = LibraryService::new(
             database,
             source,
             Arc::new(radio::registry::StationRegistry::default()),
             cover_cache,
+            credentials,
         );
         (dir, service)
     }

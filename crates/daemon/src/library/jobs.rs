@@ -236,7 +236,7 @@ impl LibraryService {
             if config.auto_fetch_covers && !ctx.cancelled() {
                 ctx.progress("fetching covers", None, None, None);
                 let lastfm_key = {
-                    let key = config.lastfm_api_key.trim().to_owned();
+                    let key = self.credentials.snapshot().lastfm_api_key.trim().to_owned();
                     (!key.is_empty()).then_some(key)
                 };
                 let fetcher = reader::cover_fetcher::CoverFetcher::new(

@@ -1,7 +1,7 @@
 use crate::{
     AppConfig, ArtistViewOrder, BackBehavior, Browser, ChannelMode, EqualizerSettings,
     FetchStrategy, HomeSection, ListenNowStyle, MusicServer, MusicService, PlayerBarPosition,
-    RegistryEntry, ReplayGainSettings, SettingsLayout, SortOrder, TitlebarMode, UiStyle,
+    ReplayGainSettings, SettingsLayout, SortOrder, TitlebarMode, UiStyle,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,23 +51,6 @@ pub struct LibraryConfig {
     pub artist_view_order: ArtistViewOrder,
     pub auto_fetch_covers: bool,
     pub cover_fetch_strategy: FetchStrategy,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct IntegrationConfig {
-    pub discord_presence: Option<bool>,
-    pub discord_presence_paused: Option<bool>,
-    pub discord_presence_source: Option<bool>,
-    pub musicbrainz_token: String,
-    pub lastfm_api_key: String,
-    pub lastfm_api_secret: String,
-    pub lastfm_session_key: String,
-    pub librefm_api_key: String,
-    pub librefm_api_secret: String,
-    pub librefm_session_key: String,
-    pub prefer_local_lyrics: bool,
-    pub enable_musixmatch_lyrics: bool,
-    pub radio_registries: Vec<RegistryEntry>,
 }
 
 impl MusicServer {
@@ -124,24 +107,6 @@ impl AppConfig {
             artist_view_order: self.artist_view_order.clone(),
             auto_fetch_covers: self.auto_fetch_covers,
             cover_fetch_strategy: self.cover_fetch_strategy,
-        }
-    }
-
-    pub fn integrations(&self) -> IntegrationConfig {
-        IntegrationConfig {
-            discord_presence: self.discord_presence,
-            discord_presence_paused: self.discord_presence_paused,
-            discord_presence_source: self.discord_presence_source,
-            musicbrainz_token: self.musicbrainz_token.clone(),
-            lastfm_api_key: self.lastfm_api_key.clone(),
-            lastfm_api_secret: self.lastfm_api_secret.clone(),
-            lastfm_session_key: self.lastfm_session_key.clone(),
-            librefm_api_key: self.librefm_api_key.clone(),
-            librefm_api_secret: self.librefm_api_secret.clone(),
-            librefm_session_key: self.librefm_session_key.clone(),
-            prefer_local_lyrics: self.prefer_local_lyrics,
-            enable_musixmatch_lyrics: self.enable_musixmatch_lyrics,
-            radio_registries: self.radio_registries.clone(),
         }
     }
 }

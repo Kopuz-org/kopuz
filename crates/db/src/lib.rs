@@ -412,6 +412,11 @@ pub trait ReadStore: Send + Sync {
     /// The active source, every saved server, their library roots and the device id.
     async fn load_sources(&self) -> Result<StoredSources, DbError>;
 
+    /// Every stored integration credential, key to value.
+    async fn integration_credentials(
+        &self,
+    ) -> Result<std::collections::HashMap<String, String>, DbError>;
+
     /// Store one server's credentials on their own, whether or not it is active.
     async fn set_server_credentials(
         &self,
@@ -487,6 +492,9 @@ pub trait Storage: ReadStore {
     async fn set_server_folders(&self, id: &str, folders: &[String]) -> Result<(), DbError>;
 
     async fn set_device_id(&self, device_id: &str) -> Result<(), DbError>;
+
+    /// Store one integration credential; an empty value clears it.
+    async fn set_integration_credential(&self, key: &str, value: &str) -> Result<(), DbError>;
 
     /// One-shot import of the legacy `*.json` store at `config_dir` into the DB,
     /// then rename each imported file to `*.json.bak` and drop a sentinel. No-op

@@ -424,24 +424,8 @@ async fn fill_state(pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(
         .execute(&mut *tx)
         .await?;
     }
-    let credentials = [
-        ("musicbrainz_token", &cfg.musicbrainz_token),
-        ("lastfm_api_key", &cfg.lastfm_api_key),
-        ("lastfm_api_secret", &cfg.lastfm_api_secret),
-        ("lastfm_session_key", &cfg.lastfm_session_key),
-        ("librefm_api_key", &cfg.librefm_api_key),
-        ("librefm_api_secret", &cfg.librefm_api_secret),
-        ("librefm_session_key", &cfg.librefm_session_key),
-    ];
-    for (key, value) in credentials {
-        if value.is_empty() {
-            continue;
-        }
-        sqlx::query("INSERT OR REPLACE INTO integration_credentials (key, value) VALUES (?1, ?2)")
-            .bind(key)
-            .bind(value)
-            .execute(&mut *tx)
-            .await?;
+    for (key, value) in data.credentials() {
+        super::cfg_store::write_integration_credential(&mut tx, key, value).await?;
     }
     for (position, entry) in data.downloader_history.iter().enumerate() {
         sqlx::query(
@@ -1034,6 +1018,9 @@ async fn import_config(
         }
     };
     super::cfg_store::write_state(tx, &config).await?;
+    for (key, value) in data.credentials() {
+        super::cfg_store::write_integration_credential(tx, key, value).await?;
+    }
     super::cfg_store::write_source_state(tx, Some(&data.active_source), Some(&data.device_id))
         .await?;
     for (server, folders) in &data.server_folders {
@@ -1603,7 +1590,7 @@ struct LegacyQueue {
     shuffle_enabled: bool,
 }
 
-/// The library data and source state an old config blob or `config.json` held beside its settings.
+/// The library data, source state and credentials an old config blob or `config.json` held beside its settings.
 #[derive(Deserialize)]
 #[serde(default)]
 struct LegacyData {
@@ -1614,6 +1601,24 @@ struct LegacyData {
     server_folders: HashMap<String, Vec<String>>,
     active_source: config::Source,
     device_id: String,
+    musicbrainz_token: String,
+    lastfm_api_key: String,
+    lastfm_api_secret: String,
+    lastfm_session_key: String,
+    librefm_session_key: String,
+}
+
+impl LegacyData {
+    /// Each credential under the `integration_credentials` key it is stored by.
+    fn credentials(&self) -> [(&'static str, &str); 5] {
+        [
+            ("musicbrainz_token", &self.musicbrainz_token),
+            ("lastfm_api_key", &self.lastfm_api_key),
+            ("lastfm_api_secret", &self.lastfm_api_secret),
+            ("lastfm_session_key", &self.lastfm_session_key),
+            ("librefm_session_key", &self.librefm_session_key),
+        ]
+    }
 }
 
 impl Default for LegacyData {
@@ -1625,6 +1630,11 @@ impl Default for LegacyData {
             server_folders: HashMap::new(),
             active_source: config::Source::default(),
             device_id: uuid::Uuid::new_v4().to_string(),
+            musicbrainz_token: String::new(),
+            lastfm_api_key: String::new(),
+            lastfm_api_secret: String::new(),
+            lastfm_session_key: String::new(),
+            librefm_session_key: String::new(),
         }
     }
 }
