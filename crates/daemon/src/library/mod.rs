@@ -146,13 +146,6 @@ fn lyrics_view(lyrics: server::lyrics::Lyrics) -> api::LyricsView {
     }
 }
 
-fn matches_search(track: &Track, needle: &str) -> bool {
-    let needle = needle.to_lowercase();
-    [&track.title, &track.artist, &track.album]
-        .into_iter()
-        .any(|field| field.to_lowercase().contains(&needle))
-}
-
 impl LibraryService {
     pub fn new(
         db: db::Db,
@@ -281,84 +274,16 @@ impl LibraryService {
         filter: TrackFilter,
         page: Page,
     ) -> Result<(u32, Vec<Track>), ApiError> {
-        let narrowed = if let Some(album) = filter.album.as_deref() {
-            Some(
-                self.db
-                    .album_tracks(&self.query_source(), album)
-                    .await
-                    .map_err(db_error)?,
-            )
-        } else if let Some(genre) = filter.genre.as_deref() {
-            Some(
-                self.db
-                    .genre_tracks(&self.query_source(), genre)
-                    .await
-                    .map_err(db_error)?,
-            )
-        } else {
-            None
+        let sort = match filter.sort {
+            api::TrackSort::Default if filter.album.is_some() => db::TrackSort::TrackNumber,
+            sort => map_sort(sort),
         };
-
-        if let Some(mut rows) = narrowed {
-            if let Some(search) = filter.search.as_deref().filter(|s| !s.is_empty()) {
-                rows.retain(|track| matches_search(track, search));
-            }
-            if let Some(favorite) = filter.favorite {
-                let source = self.query_source();
-                let favorites: std::collections::HashSet<String> = self
-                    .db
-                    .favorites(source.as_str())
-                    .await
-                    .map_err(db_error)?
-                    .into_iter()
-                    .collect();
-                rows.retain(|track| favorites.contains(track.id.key().as_ref()) == favorite);
-            }
-            if let Some(downloaded) = filter.downloaded {
-                let config = self.current_config();
-                rows.retain(|track| {
-                    config.offline_tracks.contains_key(track.id.key().as_ref()) == downloaded
-                });
-            }
-            if filter.year_from.is_some() || filter.year_to.is_some() {
-                let in_range = self
-                    .db
-                    .albums_page(
-                        &db::AlbumQuery {
-                            source: self.query_source(),
-                            year_from: filter.year_from,
-                            year_to: filter.year_to,
-                            ..Default::default()
-                        },
-                        db::Page {
-                            offset: 0,
-                            limit: u32::MAX,
-                        },
-                    )
-                    .await
-                    .map_err(db_error)?
-                    .rows
-                    .into_iter()
-                    .map(|album| album.id)
-                    .collect::<std::collections::HashSet<_>>();
-                rows.retain(|track| in_range.contains(&track.album_id));
-            }
-            if filter.reverse {
-                rows.reverse();
-            }
-            let total = rows.len() as u32;
-            let items = rows
-                .into_iter()
-                .skip(page.offset as usize)
-                .take(page.limit as usize)
-                .collect();
-            return Ok((total, items));
-        }
-
         let db_filter = db::TrackFilter {
             source: self.query_source(),
-            sort: map_sort(filter.sort),
+            sort,
             search: filter.search.unwrap_or_default(),
+            album: filter.album,
+            genre: filter.genre,
             favorite: filter.favorite,
             downloaded: filter.downloaded,
             year_from: filter.year_from,
