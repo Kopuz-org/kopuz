@@ -59,6 +59,8 @@ pub struct QueueSnapshot {
     pub shuffle_enabled: bool,
     /// Opaque; only the source that issued it reads it.
     pub radio_cursor: Option<String>,
+    /// What the queue was built from, opaque here: the daemon encodes and decodes it.
+    pub origin: Option<String>,
 }
 
 /// What the lyrics cache holds for a key: the words, or a miss and when it was recorded.

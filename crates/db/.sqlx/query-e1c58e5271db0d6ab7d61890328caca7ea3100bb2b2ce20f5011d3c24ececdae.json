@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO queue_state (source, version, current_queue_index, progress_secs, shuffle_enabled, radio_cursor, origin) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(source) DO UPDATE SET version = ?2, current_queue_index = ?3, progress_secs = ?4, shuffle_enabled = ?5, radio_cursor = ?6, origin = ?7",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "e1c58e5271db0d6ab7d61890328caca7ea3100bb2b2ce20f5011d3c24ececdae"
+}

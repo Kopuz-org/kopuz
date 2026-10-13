@@ -87,6 +87,7 @@ pub fn queue_summary_to_proto(value: &api::QueueSummary) -> QueueSummary {
         index: value.index,
         shuffle: value.shuffle,
         r#loop: loop_to_proto(value.loop_mode) as i32,
+        context: value.context.as_ref().map(queue_context_to_proto),
     }
 }
 
@@ -98,6 +99,7 @@ pub fn queue_summary_from_proto(value: Option<&QueueSummary>) -> api::QueueSumma
         index: value.index,
         shuffle: value.shuffle,
         loop_mode: loop_from_proto(value.r#loop),
+        context: value.context.as_ref().and_then(queue_context_from_proto),
     }
 }
 

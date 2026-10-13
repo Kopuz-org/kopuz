@@ -42,6 +42,7 @@ pub(super) fn sample_state() -> api::PlayerState {
             index: Some(3),
             shuffle: true,
             loop_mode: api::LoopMode::Queue,
+            context: Some(api::QueueContext::Album { id: "MPRE1".into() }),
         },
         volume: 0.8,
         muted: true,
