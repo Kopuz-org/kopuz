@@ -288,12 +288,21 @@ pub fn Radio(props: RadioProps) -> Element {
                                         style: "grid-template-columns: {station_cols};",
 
                                         div { class: "flex items-center justify-center",
-                                            div {
-                                                class: "w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
-                                                style: "background: color-mix(in oklab, var(--color-indigo-500) 15%, transparent);",
-                                                i {
-                                                    class: "{station.icon} text-base",
-                                                    style: "color: var(--color-indigo-500);",
+                                            if let Some(art) = station_art(station) {
+                                                img {
+                                                    src: "{art}",
+                                                    class: "w-9 h-9 rounded-lg object-cover shrink-0",
+                                                    style: "background: rgba(255,255,255,0.05);",
+                                                    decoding: "async", loading: "lazy",
+                                                }
+                                            } else {
+                                                div {
+                                                    class: "w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
+                                                    style: "background: color-mix(in oklab, var(--color-indigo-500) 15%, transparent);",
+                                                    i {
+                                                        class: "{station.icon} text-base",
+                                                        style: "color: var(--color-indigo-500);",
+                                                    }
                                                 }
                                             }
                                         }
@@ -448,12 +457,21 @@ pub fn Radio(props: RadioProps) -> Element {
                                         }
                                     },
 
-                                    div {
-                                        class: "w-11 h-11 rounded-md flex items-center justify-center shrink-0",
-                                        style: "background: rgba(255,255,255,0.05);",
-                                        i {
-                                            class: "{station.icon} text-lg",
-                                            style: "color: var(--color-slate-300);",
+                                    if let Some(art) = station_art(station) {
+                                        img {
+                                            src: "{art}",
+                                            class: "w-11 h-11 rounded-md object-cover shrink-0",
+                                            style: "background: rgba(255,255,255,0.05);",
+                                            decoding: "async", loading: "lazy",
+                                        }
+                                    } else {
+                                        div {
+                                            class: "w-11 h-11 rounded-md flex items-center justify-center shrink-0",
+                                            style: "background: rgba(255,255,255,0.05);",
+                                            i {
+                                                class: "{station.icon} text-lg",
+                                                style: "color: var(--color-slate-300);",
+                                            }
                                         }
                                     }
 
