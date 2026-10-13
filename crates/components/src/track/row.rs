@@ -660,6 +660,11 @@ pub fn TrackRow(
                 if track.explicit {
                     span { class: "ml-1.5 inline-flex shrink-0", ExplicitBadge {} }
                 }
+                if is_downloaded && (is_album || !show_row_images) {
+                    div { class: "shrink-0 ml-2 w-3 h-3 bg-indigo-500 rounded flex items-center justify-center",
+                        i { class: "fa-solid fa-check text-white", style: "font-size: 6px;" }
+                    }
+                }
                 if let Some(ref ft) = file_type {
                     span {
                         class: "shrink-0 ml-2 text-[9px] font-semibold uppercase px-1 py-0.5 rounded leading-none tracking-wide",
