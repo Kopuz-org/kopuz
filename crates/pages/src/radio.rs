@@ -274,6 +274,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                 // Outer wrapper — not a grid, expanded row renders below without overlap
                                 div {
                                     class: "rounded-lg mx-1 group cursor-pointer transition-colors hover:bg-white/[0.04]",
+                                    oncontextmenu: move |evt| evt.prevent_default(),
                                     onclick: {
                                         let station_id = station.id.clone();
                                         let stream_id = station.streams.first().map(|s| s.id.clone()).unwrap_or_default();
@@ -438,6 +439,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                     key: "{station.id}",
                                     class: "group flex items-start gap-4 p-4 rounded-xl border transition-colors cursor-pointer hover:bg-white/10",
                                     style: "border-color: rgba(255,255,255,0.08);",
+                                    oncontextmenu: move |evt| evt.prevent_default(),
                                     onclick: {
                                         let station_id = station.id.clone();
                                         let stream_id = station.streams.first().map(|s| s.id.clone()).unwrap_or_default();
@@ -572,6 +574,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                             key: "{st.id}",
                                             class: "grid items-center px-4 py-2.5 rounded-lg mx-1 group cursor-pointer transition-colors hover:bg-white/[0.04]",
                                             style: "grid-template-columns: {station_cols};",
+                                            oncontextmenu: move |evt| evt.prevent_default(),
                                             onclick: {
                                                 let st = st.clone();
                                                 move |_| {
@@ -668,6 +671,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                             key: "{st.id}",
                                             class: "group flex items-start gap-4 p-4 rounded-xl border transition-colors cursor-pointer hover:bg-white/10",
                                             style: "border-color: rgba(255,255,255,0.08);",
+                                            oncontextmenu: move |evt| evt.prevent_default(),
                                             onclick: {
                                                 let st = st.clone();
                                                 move |_| {
