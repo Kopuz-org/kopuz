@@ -217,10 +217,17 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                 h1 { class: "text-2xl font-semibold tracking-tight text-white mb-5 px-1", "{i18n::t(\"settings\")}" }
             }
 
-            if try_consume_context::<hooks::config_view::LockedKeys>().is_some_and(|layers| layers.any()) {
+            if let Some(notices) = try_consume_context::<hooks::config_view::LockedKeys>()
+                .map(|layers| lock_notices(&layers.0.read()))
+                .filter(|notices| !notices.is_empty())
+            {
                 aside { class: "mb-4 rounded-xl border border-white/10 bg-white/5 px-5 py-3 flex items-center gap-3",
                     i { class: "fa-solid fa-lock text-white/40 text-sm shrink-0" }
-                    p { class: "text-sm text-white/70", "{i18n::t(\"settings_managed_notice\")}" }
+                    div { class: "flex flex-col gap-1",
+                        for notice in notices {
+                            p { class: "text-sm text-white/70", "{notice}" }
+                        }
+                    }
                 }
             }
 
@@ -858,6 +865,28 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
     }
 }
 
+/// One sentence for each kind of layer that pins a setting, so the banner names only what does.
+fn lock_notices(locks: &[api::SettingLock]) -> Vec<String> {
+    let pinned_by = |kind: fn(&api::LockSource) -> bool| locks.iter().any(|lock| kind(&lock.by));
+    [
+        (
+            pinned_by(|by| matches!(by, api::LockSource::Managed(_))),
+            i18n::t("settings_managed_notice"),
+        ),
+        (
+            pinned_by(|by| matches!(by, api::LockSource::DropIn(_))),
+            i18n::t("settings_dropin_notice"),
+        ),
+        (
+            pinned_by(|by| matches!(by, api::LockSource::Env(_))),
+            i18n::t("settings_env_notice"),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(pinned, notice)| pinned.then_some(notice))
+    .collect()
+}
+
 const SYNC_INTERVAL_PRESETS: [u32; 6] = [0, 60, 6 * 60, 12 * 60, 24 * 60, 7 * 24 * 60];
 
 fn sync_interval_label(minutes: u32) -> String {
@@ -927,4 +956,40 @@ fn set_directories(id: String, directories: Vec<String>) {
             hooks::toast::toast_error(&error.to_string());
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lock_notices;
+
+    fn lock(by: api::LockSource) -> api::SettingLock {
+        api::SettingLock {
+            key: config::SettingKey::Ui(config::UiKey::Theme),
+            by,
+        }
+    }
+
+    #[test]
+    fn the_lock_banner_names_only_the_layers_that_pin() {
+        let dropin = lock(api::LockSource::DropIn("/x/settings.d/30-c.toml".into()));
+        let env = lock(api::LockSource::Env("KOPUZ_CONFIG_THEME".into()));
+        let managed = lock(api::LockSource::Managed("/x/settings.toml".into()));
+
+        assert!(lock_notices(&[]).is_empty());
+        assert_eq!(
+            lock_notices(std::slice::from_ref(&dropin)),
+            vec![i18n::t("settings_dropin_notice")]
+        );
+        assert_eq!(
+            lock_notices(&[env.clone(), dropin.clone(), env]),
+            vec![
+                i18n::t("settings_dropin_notice"),
+                i18n::t("settings_env_notice")
+            ]
+        );
+        assert_eq!(
+            lock_notices(&[managed]),
+            vec![i18n::t("settings_managed_notice")]
+        );
+    }
 }
