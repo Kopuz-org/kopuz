@@ -181,6 +181,9 @@ pub(crate) fn use_session_projector(ctrl: PlayerController) {
         let api = ctrl.api.peek().clone();
         let mut events = api.events();
         let mut daemon_clock = resync(&mut ctrl, &api).await;
+        // Made once: a sleep made per pass restarts on every event, and a stream's buffer events come faster than a second.
+        let mut tick = tokio::time::interval(Duration::from_millis(1000));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             let ticking = *ctrl.is_playing.peek() && ctrl.engine_anchor.peek().is_some();
             tokio::select! {
@@ -229,7 +232,7 @@ pub(crate) fn use_session_projector(ctrl: PlayerController) {
                     // app reports that elsewhere.
                     None => break,
                 },
-                _ = tokio::time::sleep(Duration::from_millis(1000)), if ticking => {
+                _ = tick.tick(), if ticking => {
                     let progress = ctrl.displayed_progress_secs_f64() as u64;
                     set_if_changed(&mut ctrl.current_song_progress, progress);
                 }
