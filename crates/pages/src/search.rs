@@ -28,13 +28,18 @@ pub fn Search(
     on_select_playlist: EventHandler<(api::CatalogItemKind, String, String)>,
 ) -> Element {
     let filters = hooks::sources::use_capabilities()().search_filters;
+    let source = use_active_source();
     if !filters.is_empty() {
+        // Keyed like LocalSearch's bar, so a source switch remounts the field empty.
         return rsx! {
-            crate::server::search::CatalogSearch {
-                search_query,
-                filters,
-                on_select_album,
-                on_select_playlist,
+            for source_key in std::iter::once(source()) {
+                crate::server::search::CatalogSearch {
+                    key: "{source_key}",
+                    search_query,
+                    filters: filters.clone(),
+                    on_select_album,
+                    on_select_playlist,
+                }
             }
         };
     }
@@ -136,7 +141,10 @@ fn LocalSearch(
                     selected_track_for_playlist,
                 }
             } else {
-                SearchBar { search_query: data.search_query }
+                // A one-item keyed list remounts the uncontrolled input, empty, when a source switch resets the query.
+                for source_key in std::iter::once(source()) {
+                    SearchBar { key: "{source_key}", search_query: data.search_query }
+                }
 
                 if let Some(Some((tracks, albums))) = data.search_results.cloned() {
                     SearchResults {

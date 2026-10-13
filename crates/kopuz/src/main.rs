@@ -566,7 +566,7 @@ fn App() -> Element {
     let mut discover_selected_playlist_kind = use_signal(|| api::CatalogItemKind::Playlist);
     let mut selected_artist = use_signal(|| None::<String>);
     let catalog_page = use_signal(|| None::<components::CatalogPageRef>);
-    let search_query = use_signal(String::new);
+    let mut search_query = use_signal(String::new);
     let queue = use_signal(Vec::<api::TrackInfo>::new);
     let current_queue_index = use_signal(|| 0usize);
 
@@ -988,6 +988,7 @@ fn App() -> Element {
         }
         last_active_source.set(Some(active));
         if previous.is_some() {
+            search_query.set(String::new());
             nav_ctrl.leave_source();
         }
     });
