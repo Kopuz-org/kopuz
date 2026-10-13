@@ -544,19 +544,6 @@ fn App() -> Element {
         );
     });
 
-    use_effect(move || {
-        let _ = dioxus::document::eval(&format!(
-            r#"document.addEventListener('error',function(e){{
-                var t=e.target;
-                if(t.tagName==='IMG'&&!t.dataset.fallback&&t.src){{
-                    t.dataset.fallback='1';
-                    t.src='{}';
-                }}
-            }},true);"#,
-            utils::DEFAULT_COVER_SVG.replace('\'', "%27"),
-        ));
-    });
-
     let mut selected_album_id = use_signal(String::new);
     let mut selected_playlist_id = use_signal(|| None::<String>);
     let mut discover_selected_playlist_id = use_signal(|| None::<String>);
