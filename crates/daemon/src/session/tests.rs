@@ -1792,6 +1792,62 @@ async fn switching_sources_parks_and_resumes_each_queue() {
     assert_eq!(queue_titles(&api).await.len(), 1, "and B its own");
 }
 
+/// Entering a source with nothing queued must not keep the position of the one left.
+#[tokio::test]
+async fn switching_to_an_empty_source_drops_the_position_left_behind() {
+    let store = Arc::new(MemoryStore::default());
+    let sink = FakeSinkHandle::default();
+    let player =
+        Player::try_with_sink(Box::new(FakeSink(sink.clone()))).expect("headless player starts");
+    let mut config = config::Settings::default();
+    config.library.local_sources.push(config::SavedLocalSource {
+        id: "local:b".into(),
+        name: "B".into(),
+        directories: Vec::new(),
+    });
+    let on_b = config::Source::LocalLibrary("local:b".into());
+    let services = PlaybackServices {
+        settings: config,
+        sources: active_on(config::Source::default()),
+        queue_store: Some(store.clone()),
+        ..Default::default()
+    };
+    let session = SessionHandle::spawn_with_factory(
+        Arc::new(StubLibrary),
+        player,
+        services,
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+    let api = LocalApi::new(session.clone());
+    session
+        .restore_queue(db::QueueSnapshot {
+            version: 1,
+            queue: vec![test_track(&"a-0".to_string())],
+            current_queue_index: 0,
+            progress_secs: 4,
+            ..Default::default()
+        })
+        .await
+        .expect("restore");
+    let paused = api.player_state().await.expect("state");
+    assert_eq!(paused.position.map(|anchor| anchor.ms), Some(4000));
+
+    session.set_sources(active_on(on_b.clone()));
+    session.persist_now().await;
+
+    let state = api.player_state().await.expect("state");
+    assert!(state.track.is_none(), "{:?}", state.track);
+    assert_eq!(state.queue.length, 0);
+    assert_eq!(state.position, None);
+    let saved = store.saved.lock().expect("store lock");
+    let (_, last) = saved
+        .iter()
+        .rev()
+        .find(|(at, _)| *at == on_b)
+        .expect("B was saved");
+    assert_eq!(last.progress_secs, 0);
+}
+
 /// A deleted source is not parked: its queue would outlive it.
 #[tokio::test]
 async fn leaving_a_deleted_source_parks_nothing() {

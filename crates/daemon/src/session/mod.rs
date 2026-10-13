@@ -898,10 +898,8 @@ impl Session {
             SessionCmd::SetExternalSink(player) => self.sink = Some(player),
             SessionCmd::DetachExternal => {
                 if self.external.take().is_some() {
+                    self.stop_playback();
                     self.last_recent_key = None;
-                    self.set_intent(PlaybackIntent::Stopped);
-                    self.phase = ApiPhase::Idle;
-                    self.position = None;
                     self.push_external_now_playing();
                     self.publish(state_tx, false);
                 }
@@ -1929,15 +1927,9 @@ impl Session {
     ) -> Result<CommandAck, ApiError> {
         // A restore replaces whatever is playing, an integration's device included.
         self.release_external();
-        self.cancel_load_task();
-        self.cancel_radio_task();
-        self.pending_transition = None;
-        self.armed_transition = None;
-        self.player.stop();
-        self.phase = ApiPhase::Idle;
-        self.set_intent(PlaybackIntent::Stopped);
-        self.pending_resume = None;
-        self.buffered.clear();
+        self.stop_playback();
+        self.position = None;
+        self.position_token = None;
         self.last_recent_key = None;
 
         self.set_radio_feed(snapshot.radio_cursor);
