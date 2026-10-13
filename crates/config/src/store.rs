@@ -273,32 +273,34 @@ impl FileLayers {
 
         // Under the main file, so a managed file's keys still win over what the app saved beside it.
         if let Some(table) = &self.local {
-            merge_into(&mut overrides, table.clone());
+            let local = local_path_for(&self.path);
+            merge_usable(&mut overrides, table, &local.display().to_string());
         }
         if let Some(table) = &self.main {
+            let taken = merge_usable(&mut overrides, table, &self.path.display().to_string());
             if self.managed {
-                for key in table.keys() {
+                for key in &taken {
                     pin(&mut locks, key, LockSource::Managed(self.path.clone()));
                 }
             }
-            merge_into(&mut overrides, table.clone());
         }
         // Drop-ins always lock their keys: they out-rank the main file, so a UI edit saved there could never take effect.
         for (path, table) in &self.dropins {
-            for key in table.keys() {
-                pin(&mut locks, key, LockSource::DropIn(path.clone()));
+            for key in merge_usable(&mut overrides, table, &path.display().to_string()) {
+                pin(&mut locks, &key, LockSource::DropIn(path.clone()));
             }
-            merge_into(&mut overrides, table.clone());
         }
-        for key in self.env.keys() {
+        for (key, value) in &self.env {
             let var = self
                 .env_vars
                 .get(key)
                 .cloned()
                 .unwrap_or_else(|| format!("{ENV_PREFIX}{}", key.to_uppercase()));
-            pin(&mut locks, key, LockSource::Env(var));
+            let single = Table::from_iter([(key.clone(), value.clone())]);
+            if !merge_usable(&mut overrides, &single, &var).is_empty() {
+                pin(&mut locks, key, LockSource::Env(var));
+            }
         }
-        merge_into(&mut overrides, self.env.clone());
 
         // The retired key's value now lives in the default folder source, and the higher of the two pins wins it.
         if let Some(legacy) = locks.get("music_directory").cloned() {
@@ -607,6 +609,31 @@ fn shorten_f32(f: f64) -> f64 {
     format!("{narrow}").parse().unwrap_or(f)
 }
 
+/// Deep-merge `layer` over `overrides` key by key, leaving out a key whose merged value would not parse so the layers under it still apply; answers the keys taken.
+fn merge_usable(overrides: &mut Table, layer: &Table, origin: &str) -> Vec<String> {
+    let mut taken = Vec::new();
+    for (key, value) in layer {
+        let mut merged: Table = overrides
+            .get(key)
+            .map(|lower| (key.clone(), lower.clone()))
+            .into_iter()
+            .collect();
+        merge_into(
+            &mut merged,
+            Table::from_iter([(key.clone(), value.clone())]),
+        );
+        let mut candidate = merged.clone();
+        fold_legacy_directories(&mut candidate, true);
+        if let Err(error) = parse(candidate) {
+            tracing::warn!(layer = %origin, %key, "ignoring an unusable config key: {error}");
+            continue;
+        }
+        merge_into(overrides, merged);
+        taken.push(key.clone());
+    }
+    taken
+}
+
 /// Deep merge: tables merge key-wise, everything else replaces.
 fn merge_into(base: &mut Table, layer: Table) {
     for (key, value) in layer {
@@ -851,6 +878,48 @@ mod tests {
                 },
             ]
         );
+    }
+
+    /// A drop-in or env value of the wrong type is dropped from that layer alone: the value and the lock come from the layer under it.
+    #[cfg(unix)]
+    #[test]
+    fn an_unusable_key_falls_back_to_the_layer_under_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        std::fs::write(&path, "crossfade_seconds = 5\ntheme = \"nord\"\n").unwrap();
+        let dropins = dropin_dir_for(&path);
+        std::fs::create_dir_all(&dropins).unwrap();
+        let dropin = dropins.join("30-c.toml");
+        std::fs::write(&dropin, "crossfade_seconds = \"abc\"\nlanguage = \"tr\"\n").unwrap();
+        let env = vec![("KOPUZ_CONFIG_THEME".to_string(), "[1]".to_string())];
+
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, env.clone().into_iter());
+        let settings = layers.merge_and_parse(Table::new()).unwrap();
+        assert_eq!(settings.playback.crossfade_seconds, 5);
+        assert_eq!(settings.ui.theme, "nord");
+        assert_eq!(settings.ui.language, "tr");
+        assert_eq!(
+            layers.locks(),
+            vec![SettingLock {
+                key: SettingKey::Ui(crate::UiKey::Language),
+                by: LockSource::DropIn(dropin.clone()),
+            }]
+        );
+
+        write_read_only(&path, "crossfade_seconds = 5\n");
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, env.into_iter());
+        assert_eq!(
+            layers
+                .merge_and_parse(Table::new())
+                .unwrap()
+                .playback
+                .crossfade_seconds,
+            5
+        );
+        assert!(layers.locks().contains(&SettingLock {
+            key: SettingKey::Playback(crate::PlaybackKey::CrossfadeSeconds),
+            by: LockSource::Managed(path.clone()),
+        }));
     }
 
     #[test]
@@ -1240,6 +1309,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
 
+        let (raw, _) = env_overrides(env.clone().into_iter());
+        // JSON is not TOML, so a JSON object stays the literal text.
+        assert_eq!(raw["custom_themes"].as_str(), Some(r#"{"a":1}"#));
         let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, env.into_iter());
 
         let mut base = Table::new();
@@ -1248,8 +1320,10 @@ mod tests {
         assert_eq!(base["theme"].as_str(), Some("nord"));
         assert_eq!(base["equalizer"]["enabled"].as_bool(), Some(true));
         assert_eq!(base["music_directory"][1].as_str(), Some("/archive"));
-        // JSON is not TOML, so a JSON object stays the literal text.
-        assert_eq!(base["custom_themes"].as_str(), Some(r#"{"a":1}"#));
+        assert!(
+            !base.contains_key("custom_themes"),
+            "text where a theme map belongs is no override"
+        );
         assert_eq!(base["live_theme_path"].as_str(), Some("1979-05-27"));
         // The path override is not a field.
         assert!(!base.contains_key("path"));
