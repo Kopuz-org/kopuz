@@ -27,6 +27,9 @@ use dioxus::prelude::*;
 use crate::DebugPanel;
 use hooks::use_player_controller::PlayerController;
 
+/// The sources section, which Manage sources opens Settings at.
+const MEDIA_SERVERS_SECTION: &str = "settings-media-servers";
+
 /// The category Settings shows, held at the app root so the remount a language change does keeps it.
 #[derive(Clone, Copy)]
 pub struct OpenCategory(pub Signal<SettingsCategory>);
@@ -129,24 +132,50 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
     let subpage = try_consume_context::<components::tabbar::SettingsSubpage>()
         .map(|components::tabbar::SettingsSubpage(subpage)| subpage);
 
-    let mut open_category = move |category: SettingsCategory| {
+    // A section a tab switch has to render before it can be scrolled to; it scrolls itself once mounted.
+    let mut pending_section = use_signal(|| None::<&'static str>);
+    let mut open_category = move |category: SettingsCategory, section: Option<&'static str>| {
+        let shown = *active_category.peek() == category;
         active_category.set(category);
         if cfg!(target_os = "android")
             && let Some(mut subpage) = subpage
         {
             subpage.set(Some(category.title_key()));
         }
-        let _ = document::eval(
-            "requestAnimationFrame(() => document.getElementById('settings-category-content')?.scrollIntoView({ block: 'start' }))",
-        );
+        match section {
+            Some(section) if !shown => pending_section.set(Some(section)),
+            _ => {
+                let target = section.unwrap_or("settings-category-content");
+                let _ = document::eval(&format!(
+                    "requestAnimationFrame(() => document.getElementById('{target}')?.scrollIntoView({{ block: 'start' }}))"
+                ));
+            }
+        }
+    };
+    let mut scroll_if_pending = move |section: &'static str, mounted: std::rc::Rc<MountedData>| {
+        if *pending_section.peek() != Some(section) {
+            return;
+        }
+        pending_section.set(None);
+        spawn(async move {
+            if let Err(error) = mounted.scroll_to(ScrollBehavior::Instant).await {
+                tracing::debug!(%error, section, "scrolling to a settings section failed");
+            }
+        });
     };
 
+    // The page consumes its own anchor: the app shell cleared it before an already open Settings could read it.
     use_effect(move || {
-        if settings_anchor.is_some_and(|components::source_switcher::SettingsAnchor(anchor)| {
-            anchor.read().as_deref() == Some("settings-media-servers")
-        }) {
-            open_category(SettingsCategory::Library);
+        let Some(components::source_switcher::SettingsAnchor(mut anchor)) = settings_anchor else {
+            return;
+        };
+        let Some(id) = anchor.read().clone() else {
+            return;
+        };
+        if id == MEDIA_SERVERS_SECTION {
+            open_category(SettingsCategory::Library, Some(MEDIA_SERVERS_SECTION));
         }
+        anchor.set(None);
     });
 
     use_effect(move || {
@@ -316,14 +345,14 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                 SettingsIndex {
                     settings,
                     active_source: all_sources().into_iter().find(|source| source.active),
-                    on_select: open_category,
+                    on_select: move |category| open_category(category, None),
                 }
             } else {
             div { class: "settings-workspace",
                 if !is_android {
                     SettingsNavigation {
                         selected: active_category(),
-                        on_select: open_category,
+                        on_select: move |category| open_category(category, None),
                     }
                 }
                 main { id: "settings-category-content", class: "settings-category-content",
@@ -810,7 +839,8 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                             }
                         }
 
-                        div { id: "settings-media-servers",
+                        // Clears the sticky category tabs when Manage sources scrolls here.
+                        div { id: MEDIA_SERVERS_SECTION, style: "scroll-margin-top: 5rem;", onmounted: move |event| scroll_if_pending(MEDIA_SERVERS_SECTION, event.data()),
                             SettingItem {
                                 title: i18n::t("sources").to_string(),
                                 stacked: true,
