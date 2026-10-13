@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 mod edit;
 mod source;
@@ -1247,9 +1247,19 @@ fn default_music_directory() -> PathBuf {
     if cfg!(target_os = "android") {
         return PathBuf::from("/storage/emulated/0/Music");
     }
-    directories::UserDirs::new()
-        .and_then(|u| u.audio_dir().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| PathBuf::from("./assets"))
+    let dirs = directories::UserDirs::new();
+    music_directory_of(
+        dirs.as_ref().and_then(directories::UserDirs::audio_dir),
+        dirs.as_ref().map(directories::UserDirs::home_dir),
+    )
+}
+
+/// The XDG music folder, else `Music` under the home directory, which is where it would be had user-dirs named it.
+fn music_directory_of(audio_dir: Option<&Path>, home_dir: Option<&Path>) -> PathBuf {
+    audio_dir
+        .map(Path::to_path_buf)
+        .or_else(|| home_dir.map(|home| home.join("Music")))
+        .unwrap_or_else(|| PathBuf::from("Music"))
 }
 
 #[cfg(test)]
@@ -1534,5 +1544,19 @@ mod tests {
     fn an_empty_document_reads_as_the_defaults() {
         let settings: Settings = serde_json::from_str("{}").expect("empty settings parse");
         assert_eq!(settings, Settings::default());
+    }
+
+    #[test]
+    fn with_no_user_dirs_file_the_music_folder_is_under_home() {
+        use std::path::{Path, PathBuf};
+        let home = Path::new("/home/someone");
+        assert_eq!(
+            super::music_directory_of(None, Some(home)),
+            PathBuf::from("/home/someone/Music")
+        );
+        assert_eq!(
+            super::music_directory_of(Some(Path::new("/srv/tunes")), Some(home)),
+            PathBuf::from("/srv/tunes")
+        );
     }
 }
