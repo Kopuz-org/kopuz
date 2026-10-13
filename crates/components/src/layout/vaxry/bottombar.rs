@@ -20,7 +20,6 @@ pub fn BottombarVaxry(
     mut current_song_title: Signal<String>,
     mut current_song_artist: Signal<String>,
     mut volume: Signal<f32>,
-    mut persisted_volume: Signal<f32>,
     mut is_rightbar_open: Signal<bool>,
     is_devices_open: Signal<bool>,
 ) -> Element {
@@ -234,7 +233,7 @@ pub fn BottombarVaxry(
                 crate::dont_recommend::DontRecommendButton {
                     class: "text-slate-500 hover:text-slate-300 transition-colors text-xs w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/10 active:scale-95",
                 }
-                VolumeSlider { config, volume, persisted_volume, variant: ControlsVariant::Bar }
+                VolumeSlider { config, volume, variant: ControlsVariant::Bar }
                 button {
                     class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                     onclick: move |_| { let c = *is_rightbar_open.read(); is_rightbar_open.set(!c); },

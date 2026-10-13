@@ -20,7 +20,6 @@ pub(crate) fn FullscreenDesktop(
     items: Vec<api::TrackInfo>,
     lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
     volume: Signal<f32>,
-    persisted_volume: Signal<f32>,
     background_style: Memo<String>,
     cover_background: Memo<Option<String>>,
 ) -> Element {
@@ -78,7 +77,7 @@ pub(crate) fn FullscreenDesktop(
 
                         TransportButtons { is_playing, variant: ControlsVariant::Fullscreen }
 
-                        VolumeSlider { config, volume, persisted_volume, variant: ControlsVariant::Fullscreen }
+                        VolumeSlider { config, volume, variant: ControlsVariant::Fullscreen }
                     }
                 }
 

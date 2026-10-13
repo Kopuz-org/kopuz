@@ -1850,7 +1850,7 @@ message Config {
   bool show_source_toggle = 36;
   bool show_row_images = 37;
   repeated string sidebar_order = 38;
-  float volume = 39;
+  reserved 39; // was volume, which PlayerState carries
   float volume_scroll_step = 40;
   uint32 crossfade_seconds = 41;
   map<string, CustomTheme> custom_themes = 42;
@@ -1877,7 +1877,7 @@ message Config {
   bool lyrics_depth_blur = 67;
   uint32 lyrics_depth_blur_strength = 68;
   ReplayGainSettings replay_gain = 70;
-  bool muted = 71;
+  reserved 71; // was muted, which PlayerState carries
   StreamQuality stream_quality = 72;
   bool autoplay_radio = 73;
   bool skip_explicit = 74;

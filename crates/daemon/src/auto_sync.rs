@@ -540,7 +540,7 @@ mod tests {
         assert_eq!(count.load(Ordering::SeqCst), 1);
     }
 
-    /// Volume moves constantly; a timer reset by every config write would never fire.
+    /// Settings move often; a timer reset by every config write would never fire.
     #[tokio::test(start_paused = true)]
     async fn an_unrelated_config_write_neither_rechecks_nor_delays_the_timer() {
         let (tx, rx) = watch::channel(config_every(60));
@@ -551,7 +551,7 @@ mod tests {
         settle().await;
         pass(minutes(30)).await;
 
-        tx.send_modify(|config| config.volume = 0.3);
+        tx.send_modify(|config| config.crossfade_seconds = 3);
         settle().await;
         assert_eq!(count.load(Ordering::SeqCst), 1);
         pass(minutes(31)).await;

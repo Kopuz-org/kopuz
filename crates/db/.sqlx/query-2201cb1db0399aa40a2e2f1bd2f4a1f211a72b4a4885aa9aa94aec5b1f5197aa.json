@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT source_explicitly_set, volume, muted, discord_presence_paused, fullscreen_tabs_collapsed, sort_order, album_view_mode, artist_album_view_mode, artists_view_mode, artist_view_order, listen_now_style, hero_height FROM app_state WHERE id = 1",
+  "query": "SELECT source_explicitly_set, fullscreen_tabs_collapsed, sort_order, album_view_mode, artist_album_view_mode, artists_view_mode, artist_view_order, listen_now_style, hero_height FROM app_state WHERE id = 1",
   "describe": {
     "columns": [
       {
@@ -9,58 +9,43 @@
         "type_info": "Integer"
       },
       {
-        "name": "volume",
-        "ordinal": 1,
-        "type_info": "Float"
-      },
-      {
-        "name": "muted",
-        "ordinal": 2,
-        "type_info": "Integer"
-      },
-      {
-        "name": "discord_presence_paused",
-        "ordinal": 3,
-        "type_info": "Integer"
-      },
-      {
         "name": "fullscreen_tabs_collapsed",
-        "ordinal": 4,
+        "ordinal": 1,
         "type_info": "Integer"
       },
       {
         "name": "sort_order",
-        "ordinal": 5,
+        "ordinal": 2,
         "type_info": "Text"
       },
       {
         "name": "album_view_mode",
-        "ordinal": 6,
+        "ordinal": 3,
         "type_info": "Text"
       },
       {
         "name": "artist_album_view_mode",
-        "ordinal": 7,
+        "ordinal": 4,
         "type_info": "Text"
       },
       {
         "name": "artists_view_mode",
-        "ordinal": 8,
+        "ordinal": 5,
         "type_info": "Text"
       },
       {
         "name": "artist_view_order",
-        "ordinal": 9,
+        "ordinal": 6,
         "type_info": "Text"
       },
       {
         "name": "listen_now_style",
-        "ordinal": 10,
+        "ordinal": 7,
         "type_info": "Text"
       },
       {
         "name": "hero_height",
-        "ordinal": 11,
+        "ordinal": 8,
         "type_info": "Integer"
       }
     ],
@@ -71,9 +56,6 @@
       false,
       false,
       false,
-      true,
-      false,
-      false,
       false,
       false,
       false,
@@ -82,5 +64,5 @@
       false
     ]
   },
-  "hash": "9fc1f7218953fc9d20064dce1550471482c017bb5d3e9e8c88bcf6a74f790dc7"
+  "hash": "2201cb1db0399aa40a2e2f1bd2f4a1f211a72b4a4885aa9aa94aec5b1f5197aa"
 }

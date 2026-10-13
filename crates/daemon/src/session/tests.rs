@@ -356,16 +356,33 @@ fn harness_with_services(
     provider: FactoryOverride,
     recorder: Option<Arc<dyn PlaybackRecorder>>,
 ) -> Harness {
-    let sink = FakeSinkHandle::default();
-    let player =
-        Player::try_with_sink(Box::new(FakeSink(sink.clone()))).expect("headless player starts");
-    let engine_events = player.subscribe();
     let mut services = PlaybackServices {
         recorder,
         ..Default::default()
     };
     services.config.crossfade_seconds = 0;
     configure(&mut services.config);
+    spawn_harness(services, provider)
+}
+
+fn harness_at_volume(volume: f32, muted: bool) -> Harness {
+    let mut services = PlaybackServices {
+        volume,
+        muted,
+        ..Default::default()
+    };
+    services.config.crossfade_seconds = 0;
+    spawn_harness(
+        services,
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    )
+}
+
+fn spawn_harness(services: PlaybackServices, provider: FactoryOverride) -> Harness {
+    let sink = FakeSinkHandle::default();
+    let player =
+        Player::try_with_sink(Box::new(FakeSink(sink.clone()))).expect("headless player starts");
+    let engine_events = player.subscribe();
     let session =
         SessionHandle::spawn_with_factory(Arc::new(StubLibrary), player, services, provider);
     Harness {
@@ -408,7 +425,6 @@ fn replay_gain_harness(provider: FactoryOverride) -> Harness {
     let engine_events = player.subscribe();
     let mut services = PlaybackServices::default();
     services.config.crossfade_seconds = 0;
-    services.config.volume = 1.0;
     services.config.replay_gain.mode = config::ReplayGainMode::Auto;
     let session =
         SessionHandle::spawn_with_factory(Arc::new(GainLibrary), player, services, provider);
@@ -472,7 +488,7 @@ async fn replay_gain_auto_follows_shuffle_and_queue_edits() {
 
 #[tokio::test]
 async fn muting_silences_output_and_unmuting_restores_the_level() {
-    let harness = harness(|config| config.volume = 1.0);
+    let harness = harness(|_| {});
     harness.api.set_queue(replace(&["a"])).await.unwrap();
     wait_committed(&harness.api).await;
     wait_replay_gain(&harness, 0.0).await;
@@ -527,19 +543,8 @@ async fn muting_silences_output_and_unmuting_restores_the_level() {
 }
 
 #[tokio::test]
-async fn a_session_starts_muted_when_the_config_says_so() {
-    let harness = harness(|config| {
-        config.volume = 0.7;
-        config.muted = true;
-    });
-    let state = harness.api.player_state().await.unwrap();
-    assert!(state.muted);
-    assert_eq!(state.volume, 0.7);
-}
-
-#[tokio::test]
 async fn replay_gain_settings_reach_playing_audio_through_config_api() {
-    let mut harness = harness(|config| config.volume = 1.0);
+    let mut harness = harness(|_| {});
     let dir = tempfile::tempdir().unwrap();
     let database = db::init(&dir.path().join("test.db")).await.unwrap();
     let config = harness.api.session.config_rx.borrow().clone();
@@ -2517,53 +2522,66 @@ async fn refreshing_a_local_playlist_keeps_its_entries() {
     assert_eq!(playlist.track_keys, keys);
 }
 
-/// The core debounces a volume change by 750 ms so that a slider drag is one
-/// database write. Closing inside that window leaves the newest value held
-/// only by the engine, and the config service is what a whole-config write
-/// reads volume back from, so the shutdown flush is what has to carry it.
-#[tokio::test]
-async fn the_shutdown_flush_persists_the_volume_the_debounce_still_holds() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let database = db::init(&dir.path().join("volume.db")).await.expect("db");
-    let service = crate::ConfigService::new(
-        database.clone(),
-        dir.path().join("settings.toml"),
-        config::AppConfig {
-            volume: 0.8,
-            ..Default::default()
-        },
-    );
-    let sink = FakeSinkHandle::default();
-    let player =
-        Player::try_with_sink(Box::new(FakeSink(sink.clone()))).expect("headless player starts");
-    let session = SessionHandle::spawn_with_factory(
+/// A session spawned the way boot spawns it, from the playback state the database holds.
+async fn session_from_database(database: &db::Db) -> SessionHandle {
+    let (volume, muted) = database.playback_state().await.expect("playback state");
+    let player = Player::try_with_sink(Box::new(FakeSink(FakeSinkHandle::default())))
+        .expect("headless player starts");
+    SessionHandle::spawn_with_factory(
         Arc::new(StubLibrary),
         player,
-        PlaybackServices::default(),
+        PlaybackServices {
+            volume,
+            muted,
+            ..Default::default()
+        },
         Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
-    );
-    service
-        .mutate_state(&[], |_| {})
+    )
+}
+
+/// A close inside the 750 ms debounce leaves the newest volume and mute held only by the engine, so the shutdown flush carries them, the level to return to included, to the next start.
+#[tokio::test]
+async fn volume_and_mute_survive_a_restart_through_the_shutdown_flush() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database = db::init(&dir.path().join("volume.db")).await.expect("db");
+    database
+        .set_playback_state(0.8, false)
         .await
         .expect("seed the database");
-    LocalApi::new(session.clone())
-        .player_command(api::PlayerCommand::SetVolume { volume: 0.2 })
+
+    let session = session_from_database(&database).await;
+    let state = session.state();
+    assert_eq!((state.volume, state.muted), (0.8, false));
+    let local = LocalApi::new(session.clone());
+    local
+        .player_command(PlayerCommand::SetVolume { volume: 0.2 })
         .await
         .expect("set volume");
+    local
+        .player_command(PlayerCommand::SetMuted { muted: true })
+        .await
+        .expect("mute");
+    wait_state(&local, "muted at the new level", |state| {
+        state.muted && state.volume == 0.2
+    })
+    .await;
 
     session.persist_now().await;
     assert_eq!(
-        stored_volume(&database).await,
-        0.8,
-        "the queue flush alone leaves the debounced volume behind"
+        database.playback_state().await.expect("load"),
+        (0.8, false),
+        "the queue flush alone leaves the debounced playback state behind"
     );
 
-    crate::boot::flush_volume(&session, &service).await;
+    crate::boot::flush_playback_state(&session, &database).await;
+    assert_eq!(database.playback_state().await.expect("load"), (0.2, true));
 
+    let restarted = session_from_database(&database).await;
+    let state = restarted.state();
     assert_eq!(
-        stored_volume(&database).await,
-        0.2,
-        "the engine's volume reaches the database"
+        (state.volume, state.muted),
+        (0.2, true),
+        "the next session seeds from what was flushed"
     );
 }
 
@@ -2571,46 +2589,19 @@ async fn the_shutdown_flush_persists_the_volume_the_debounce_still_holds() {
 async fn the_shutdown_flush_persists_mute_without_touching_the_volume() {
     let dir = tempfile::tempdir().expect("tempdir");
     let database = db::init(&dir.path().join("mute.db")).await.expect("db");
-    let service = crate::ConfigService::new(
-        database.clone(),
-        dir.path().join("settings.toml"),
-        config::AppConfig {
-            volume: 0.8,
-            ..Default::default()
-        },
-    );
-    let player = Player::try_with_sink(Box::new(FakeSink(FakeSinkHandle::default())))
-        .expect("headless player starts");
-    let session = SessionHandle::spawn_with_factory(
-        Arc::new(StubLibrary),
-        player,
-        PlaybackServices {
-            config: config::AppConfig {
-                volume: 0.8,
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
-    );
-    service
-        .mutate_state(&[], |_| {})
+    database
+        .set_playback_state(0.8, false)
         .await
         .expect("seed the database");
+    let session = session_from_database(&database).await;
     LocalApi::new(session.clone())
         .player_command(api::PlayerCommand::SetMuted { muted: true })
         .await
         .expect("mute");
 
-    crate::boot::flush_volume(&session, &service).await;
+    crate::boot::flush_playback_state(&session, &database).await;
 
-    let stored = database
-        .load_config()
-        .await
-        .expect("load")
-        .expect("stored config");
-    assert!(stored.muted);
-    assert_eq!(stored.volume, 0.8);
+    assert_eq!(database.playback_state().await.expect("load"), (0.8, true));
 }
 
 /// Concurrent writers each save then hand the session a config; the session must end on the one saved last, and every save moves the revision.
@@ -2658,15 +2649,6 @@ async fn config_changes_reach_the_session_in_the_order_they_were_saved() {
         "the session holds what was saved last"
     );
     assert_eq!(service.view().await.expect("view").revision, first + 20);
-}
-
-async fn stored_volume(database: &db::Db) -> f32 {
-    database
-        .load_config()
-        .await
-        .expect("load")
-        .expect("stored config")
-        .volume
 }
 
 /// Like `drive_until`, keeping every sample, plus `tail` more pulls.
@@ -4356,7 +4338,7 @@ async fn wait_output(harness: &Harness, audible: bool) {
 
 #[tokio::test]
 async fn muting_silences_the_engine_and_keeps_the_level() {
-    let harness = harness(|config| config.volume = 0.5);
+    let harness = harness_at_volume(0.5, false);
     harness
         .api
         .set_queue(replace(&["track-0"]))
@@ -4387,28 +4369,20 @@ async fn muting_silences_the_engine_and_keeps_the_level() {
     wait_output(&harness, true).await;
 }
 
-/// Touching the level means wanting to hear it, so a `SetVolume` while muted unmutes; a level set from config does not.
+/// Touching the level means wanting to hear it, so a `SetVolume` while muted unmutes; starting muted at a stored level does not.
 #[tokio::test]
 async fn setting_a_level_while_muted_unmutes_and_muting_leaves_the_level() {
-    let harness = harness(|config| config.volume = 0.5);
+    let harness = harness_at_volume(0.5, true);
     let api = &harness.api;
     let mute = |muted| api.player_command(PlayerCommand::SetMuted { muted });
 
-    mute(true).await.expect("mute");
+    let state = api.player_state().await.expect("state");
+    assert!(state.muted, "a stored mute is kept at spawn");
+    assert_eq!(state.volume, 0.5);
     mute(true).await.expect("muting again changes nothing");
     let state = api.player_state().await.expect("state");
     assert!(state.muted);
     assert_eq!(state.volume, 0.5);
-
-    harness.api.session.set_config(
-        config::AppConfig {
-            volume: 0.9,
-            ..Default::default()
-        },
-        vec!["volume".into()],
-    );
-    let state = wait_state(api, "the configured level", |state| state.volume == 0.9).await;
-    assert!(state.muted, "a stored level is not a request to hear it");
 
     api.player_command(PlayerCommand::SetVolume { volume: 0.3 })
         .await
@@ -4419,44 +4393,6 @@ async fn setting_a_level_while_muted_unmutes_and_muting_leaves_the_level() {
 
     mute(false).await.expect("unmuting what is not muted");
     assert_eq!(api.player_state().await.unwrap().volume, 0.3);
-}
-
-/// What persistence stores is the level to return to, so a restart after muting does not come back silent at zero.
-#[tokio::test]
-async fn muting_does_not_change_the_volume_that_is_persisted() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let database = db::init(&dir.path().join("volume.db")).await.expect("db");
-    let service = crate::ConfigService::new(
-        database.clone(),
-        dir.path().join("settings.toml"),
-        config::AppConfig {
-            volume: 0.8,
-            ..Default::default()
-        },
-    );
-    let player = Player::try_with_sink(Box::new(FakeSink(FakeSinkHandle::default())))
-        .expect("headless player starts");
-    let session = SessionHandle::spawn_with_factory(
-        Arc::new(StubLibrary),
-        player,
-        PlaybackServices::default(),
-        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
-    );
-    service
-        .mutate_state(&[], |_| {})
-        .await
-        .expect("seed the database");
-    let api = LocalApi::new(session.clone());
-    api.player_command(PlayerCommand::SetVolume { volume: 0.2 })
-        .await
-        .expect("set volume");
-    api.player_command(PlayerCommand::SetMuted { muted: true })
-        .await
-        .expect("mute");
-
-    crate::boot::flush_volume(&session, &service).await;
-
-    assert_eq!(stored_volume(&database).await, 0.2);
 }
 
 #[tokio::test]

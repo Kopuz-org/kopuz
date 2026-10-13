@@ -17,8 +17,7 @@ pub async fn load_config(
 ) -> Result<Option<AppConfig>, DbError> {
     let layers = config::store::FileLayers::read(settings_path);
     let state = sqlx::query!(
-        "SELECT source_explicitly_set, volume, muted, discord_presence_paused, \
-                fullscreen_tabs_collapsed, sort_order, album_view_mode, artist_album_view_mode, \
+        "SELECT source_explicitly_set, fullscreen_tabs_collapsed, sort_order, album_view_mode, artist_album_view_mode, \
                 artists_view_mode, artist_view_order, listen_now_style, hero_height \
            FROM app_state WHERE id = 1"
     )
@@ -32,9 +31,6 @@ pub async fn load_config(
 
     if let Some(state) = state {
         cfg.source_explicitly_set = state.source_explicitly_set != 0;
-        cfg.volume = state.volume as f32;
-        cfg.muted = state.muted != 0;
-        cfg.discord_presence_paused = state.discord_presence_paused.map(|paused| paused != 0);
         cfg.fullscreen_tabs_collapsed = state.fullscreen_tabs_collapsed != 0;
         read_variant(&state.sort_order, &mut cfg.sort_order);
         read_variant(&state.album_view_mode, &mut cfg.album_view_mode);
@@ -300,25 +296,89 @@ pub async fn save_config(
     write_settings(cfg, settings_path)
 }
 
-/// The app_state row's own columns; a first write also stamps a fresh device id and the default source, which have writers of their own.
+/// The volume a fresh state row starts at, before the engine saved one.
+const DEFAULT_VOLUME: f32 = 1.0;
+
+/// The volume and mute stored for the engine.
+pub async fn playback_state(pool: &SqlitePool) -> Result<(f32, bool), DbError> {
+    let row: Option<(f64, bool)> =
+        sqlx::query_as("SELECT volume, muted FROM app_state WHERE id = 1")
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.map_or((DEFAULT_VOLUME, false), |(volume, muted)| {
+        (volume as f32, muted)
+    }))
+}
+
+pub async fn set_playback_state(
+    pool: &SqlitePool,
+    volume: f32,
+    muted: bool,
+) -> Result<(), DbError> {
+    let mut tx = super::begin_immediate(pool).await?;
+    write_playback_state(&mut tx, volume, muted).await?;
+    tx.commit().await
+}
+
+/// Set the stored volume and mute, creating the state row if it is missing.
+pub(crate) async fn write_playback_state(
+    conn: &mut sqlx::SqliteConnection,
+    volume: f32,
+    muted: bool,
+) -> Result<(), DbError> {
+    ensure_state_row(conn).await?;
+    sqlx::query("UPDATE app_state SET volume = ?1, muted = ?2 WHERE id = 1")
+        .bind(f64::from(volume.clamp(0.0, 1.0)))
+        .bind(muted)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+pub async fn discord_presence_paused(pool: &SqlitePool) -> Result<Option<bool>, DbError> {
+    let paused: Option<Option<bool>> =
+        sqlx::query_scalar("SELECT discord_presence_paused FROM app_state WHERE id = 1")
+            .fetch_optional(pool)
+            .await?;
+    Ok(paused.flatten())
+}
+
+pub async fn set_discord_presence_paused(pool: &SqlitePool, paused: bool) -> Result<(), DbError> {
+    let mut tx = super::begin_immediate(pool).await?;
+    write_discord_presence_paused(&mut tx, Some(paused)).await?;
+    tx.commit().await
+}
+
+pub(crate) async fn write_discord_presence_paused(
+    conn: &mut sqlx::SqliteConnection,
+    paused: Option<bool>,
+) -> Result<(), DbError> {
+    ensure_state_row(conn).await?;
+    sqlx::query("UPDATE app_state SET discord_presence_paused = ?1 WHERE id = 1")
+        .bind(paused)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+/// The app_state row's own columns; a first write also stamps a fresh device id, the default source and the default playback state, which have writers of their own.
 async fn write_state_row(
     conn: &mut sqlx::SqliteConnection,
     cfg: &AppConfig,
     on_conflict: &str,
 ) -> Result<(), DbError> {
     let sql = format!(
-        "INSERT INTO app_state (id, device_id, active_source, source_explicitly_set, volume, \
-           discord_presence_paused, fullscreen_tabs_collapsed, sort_order, album_view_mode, \
-           artist_album_view_mode, artists_view_mode, artist_view_order, listen_now_style, hero_height, muted) \
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
+        "INSERT INTO app_state (id, device_id, active_source, volume, source_explicitly_set, \
+           fullscreen_tabs_collapsed, sort_order, album_view_mode, artist_album_view_mode, \
+           artists_view_mode, artist_view_order, listen_now_style, hero_height) \
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
          ON CONFLICT(id) {on_conflict}"
     );
     sqlx::query(&sql)
         .bind(uuid::Uuid::new_v4().to_string())
         .bind(Source::default().as_str())
+        .bind(f64::from(DEFAULT_VOLUME))
         .bind(cfg.source_explicitly_set)
-        .bind(f64::from(cfg.volume))
-        .bind(cfg.discord_presence_paused)
         .bind(cfg.fullscreen_tabs_collapsed)
         .bind(variant(&cfg.sort_order)?)
         .bind(variant(&cfg.album_view_mode)?)
@@ -327,16 +387,15 @@ async fn write_state_row(
         .bind(variant(&cfg.artist_view_order)?)
         .bind(variant(&cfg.listen_now_style)?)
         .bind(i64::from(cfg.hero_height))
-        .bind(cfg.muted)
         .execute(&mut *conn)
         .await?;
     Ok(())
 }
 
-const UPDATE_STATE: &str = "DO UPDATE SET source_explicitly_set = ?3, volume = ?4, \
-    discord_presence_paused = ?5, fullscreen_tabs_collapsed = ?6, sort_order = ?7, \
-    album_view_mode = ?8, artist_album_view_mode = ?9, artists_view_mode = ?10, \
-    artist_view_order = ?11, listen_now_style = ?12, hero_height = ?13, muted = ?14";
+const UPDATE_STATE: &str = "DO UPDATE SET source_explicitly_set = ?4, \
+    fullscreen_tabs_collapsed = ?5, sort_order = ?6, album_view_mode = ?7, \
+    artist_album_view_mode = ?8, artists_view_mode = ?9, artist_view_order = ?10, \
+    listen_now_style = ?11, hero_height = ?12";
 
 /// Create the app_state row with the defaults if nothing has written it yet.
 async fn ensure_state_row(conn: &mut sqlx::SqliteConnection) -> Result<(), DbError> {

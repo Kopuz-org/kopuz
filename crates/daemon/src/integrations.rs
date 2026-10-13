@@ -312,6 +312,7 @@ pub fn spawn_discord_presence(
     session: &SessionHandle,
     config: watch::Receiver<config::AppConfig>,
     sources: watch::Receiver<Arc<server::sources::Sources>>,
+    mut paused: watch::Receiver<bool>,
 ) -> tokio::task::JoinHandle<()> {
     let mut events = session.subscribe();
     let session = session.clone();
@@ -339,6 +340,7 @@ pub fn spawn_discord_presence(
         let mut last_state: Option<(Box<PlayerState>, Instant)> = None;
         let mut keepalive = tokio::time::interval(Duration::from_secs(DISCORD_TICK_SECS));
         keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut pause_open = true;
 
         loop {
             tokio::select! {
@@ -347,7 +349,8 @@ pub fn spawn_discord_presence(
                     let Some(state) = state else { continue };
                     let received = Instant::now();
                     let service = sources.borrow().active_service();
-                    project(&presence, &config.borrow(), service, &state, received, &mut discord, &session, &cover_tx);
+                    let options = PresenceOptions::of(&config.borrow(), &paused);
+                    project(&presence, options, service, &state, received, &mut discord, &session, &cover_tx);
                     last_state = Some((state, received));
                 }
                 resolved = cover_rx.recv() => {
@@ -358,8 +361,21 @@ pub fn spawn_discord_presence(
                         discord.cover_sent = false;
                         if let Some((state, received)) = &last_state {
                             let service = sources.borrow().active_service();
-                            project(&presence, &config.borrow(), service, state, *received, &mut discord, &session, &cover_tx);
+                            let options = PresenceOptions::of(&config.borrow(), &paused);
+                            project(&presence, options, service, state, *received, &mut discord, &session, &cover_tx);
                         }
+                    }
+                }
+                changed = paused.changed(), if pause_open => {
+                    // A dropped sender would make every later `changed` return at once.
+                    if changed.is_err() {
+                        pause_open = false;
+                        continue;
+                    }
+                    if let Some((state, received)) = &last_state {
+                        let service = sources.borrow().active_service();
+                        let options = PresenceOptions::of(&config.borrow(), &paused);
+                        project(&presence, options, service, state, *received, &mut discord, &session, &cover_tx);
                     }
                 }
                 _ = keepalive.tick(), if discord.last_enabled => {
@@ -370,9 +386,27 @@ pub fn spawn_discord_presence(
     })
 }
 
+/// What the presence card shows: the two settings, and the pause toggle the daemon keeps beside them.
+#[derive(Clone, Copy)]
+struct PresenceOptions {
+    enabled: bool,
+    paused: bool,
+    source: bool,
+}
+
+impl PresenceOptions {
+    fn of(config: &config::AppConfig, paused: &watch::Receiver<bool>) -> Self {
+        Self {
+            enabled: config.discord_presence.unwrap_or(true),
+            paused: *paused.borrow(),
+            source: config.discord_presence_source.unwrap_or(true),
+        }
+    }
+}
+
 fn project(
     presence: &discord_presence::Presence,
-    config: &config::AppConfig,
+    options: PresenceOptions,
     service: Option<config::MusicService>,
     state: &PlayerState,
     received: Instant,
@@ -380,9 +414,9 @@ fn project(
     session: &SessionHandle,
     cover_tx: &tokio::sync::mpsc::UnboundedSender<(String, Option<String>)>,
 ) {
-    let enabled = config.discord_presence.unwrap_or(true);
-    let paused_enabled = config.discord_presence_paused.unwrap_or(true);
-    let source_name = config.discord_presence_source.unwrap_or(true).then(|| {
+    let enabled = options.enabled;
+    let paused_enabled = options.paused;
+    let source_name = options.source.then(|| {
         service
             .map_or("Local", |service| service.display_name())
             .to_string()
@@ -535,7 +569,7 @@ fn secret_field(key: &str, label: Text, placeholder: &str) -> FieldSpec {
     }
 }
 
-fn discord(config: &config::AppConfig) -> IntegrationInfo {
+fn discord(config: &config::AppConfig, paused: bool) -> IntegrationInfo {
     let presence = config.discord_presence.unwrap_or(true);
     IntegrationInfo {
         id: DISCORD.to_string(),
@@ -545,11 +579,11 @@ fn discord(config: &config::AppConfig) -> IntegrationInfo {
         connect: ConnectKind::None,
         fields: vec![
             toggle_field(PRESENCE, "discord_presence", presence),
-            toggle_field(
-                PAUSED,
-                "discord_presence_paused",
-                config.discord_presence_paused.unwrap_or(true),
-            ),
+            // Runtime state rather than a setting, so no settings layer can lock it.
+            FieldSpec {
+                config_key: None,
+                ..toggle_field(PAUSED, "discord_presence_paused", paused)
+            },
             toggle_field(
                 PRESENCE_SOURCE,
                 "discord_presence_source",
@@ -615,11 +649,15 @@ fn librefm(credentials: &Credentials) -> IntegrationInfo {
 }
 
 /// What this build publishes, in the order a settings page lists it.
-fn all(config: &config::AppConfig, credentials: &Credentials) -> Vec<IntegrationInfo> {
+fn all(
+    config: &config::AppConfig,
+    credentials: &Credentials,
+    paused: bool,
+) -> Vec<IntegrationInfo> {
     let mut published = Vec::new();
     // Android has no Discord client to talk to, so the row is not offered there.
     if !cfg!(target_os = "android") {
-        published.push(discord(config));
+        published.push(discord(config, paused));
     }
     published.push(listenbrainz(credentials));
     published.push(lastfm(credentials));
@@ -631,8 +669,9 @@ fn info_of(
     id: &str,
     config: &config::AppConfig,
     credentials: &Credentials,
+    paused: bool,
 ) -> Result<IntegrationInfo, ApiError> {
-    all(config, credentials)
+    all(config, credentials, paused)
         .into_iter()
         .find(|info| info.id == id)
         .ok_or_else(|| ApiError::not_found("no such integration"))
@@ -669,7 +708,6 @@ fn set_toggle(values: &[FieldValue], key: &str, stored: &mut Option<bool>) {
 
 fn apply_presence(values: &[FieldValue], config: &mut config::AppConfig) {
     set_toggle(values, PRESENCE, &mut config.discord_presence);
-    set_toggle(values, PAUSED, &mut config.discord_presence_paused);
     set_toggle(values, PRESENCE_SOURCE, &mut config.discord_presence_source);
 }
 
@@ -698,8 +736,42 @@ fn clear_credentials(id: &str, credentials: &mut Credentials) {
     }
 }
 
-fn credential_error(error: db::DbError) -> ApiError {
+fn database_error(error: db::DbError) -> ApiError {
     ApiError::internal(format!("database error: {error}"))
+}
+
+/// Whether Discord presence stays up while playback is paused; stored before the presence task sees it.
+#[derive(Clone)]
+pub struct PresencePause {
+    db: db::Db,
+    held: Arc<watch::Sender<bool>>,
+    writer: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl PresencePause {
+    pub async fn load(db: &db::Db) -> Result<Self, db::DbError> {
+        let paused = db.discord_presence_paused().await?.unwrap_or(true);
+        Ok(Self {
+            db: db.clone(),
+            held: Arc::new(watch::channel(paused).0),
+            writer: Arc::new(tokio::sync::Mutex::new(())),
+        })
+    }
+
+    pub fn get(&self) -> bool {
+        *self.held.borrow()
+    }
+
+    pub fn watch(&self) -> watch::Receiver<bool> {
+        self.held.subscribe()
+    }
+
+    pub async fn set(&self, paused: bool) -> Result<(), db::DbError> {
+        let _writing = self.writer.lock().await;
+        self.db.set_discord_presence_paused(paused).await?;
+        self.held.send_replace(paused);
+        Ok(())
+    }
 }
 
 /// Scrobbling, metadata and presence accounts.
@@ -711,21 +783,28 @@ fn credential_error(error: db::DbError) -> ApiError {
 pub struct IntegrationService {
     config: Arc<crate::config_service::ConfigService>,
     credentials: CredentialStore,
+    presence_pause: PresencePause,
 }
 
 impl IntegrationService {
     pub fn new(
         config: Arc<crate::config_service::ConfigService>,
         credentials: CredentialStore,
+        presence_pause: PresencePause,
     ) -> Arc<Self> {
         Arc::new(Self {
             config,
             credentials,
+            presence_pause,
         })
     }
 
     pub async fn list(&self) -> Vec<IntegrationInfo> {
-        all(&self.config.snapshot().await, &self.credentials.snapshot())
+        all(
+            &self.config.snapshot().await,
+            &self.credentials.snapshot(),
+            self.presence_pause.get(),
+        )
     }
 
     async fn info(&self, id: &str) -> Result<IntegrationInfo, ApiError> {
@@ -733,6 +812,7 @@ impl IntegrationService {
             id,
             &self.config.snapshot().await,
             &self.credentials.snapshot(),
+            self.presence_pause.get(),
         )
     }
 
@@ -746,17 +826,28 @@ impl IntegrationService {
         let info = self.info(id).await?;
         self.config.ensure_unlocked(&write_keys(&info, &values))?;
         if id == DISCORD {
-            self.config
-                .mutate_state(&[INTEGRATIONS_KEY], move |config| {
-                    apply_presence(&values, config)
-                })
-                .await?;
+            if let Some(paused) = value_of(&values, PAUSED) {
+                self.presence_pause
+                    .set(paused == "true")
+                    .await
+                    .map_err(database_error)?;
+            }
+            if [PRESENCE, PRESENCE_SOURCE]
+                .iter()
+                .any(|key| value_of(&values, key).is_some())
+            {
+                self.config
+                    .mutate_state(&[INTEGRATIONS_KEY], move |config| {
+                        apply_presence(&values, config)
+                    })
+                    .await?;
+            }
         } else {
             let target = id.to_string();
             self.credentials
                 .update(move |credentials| apply_credentials(&target, &values, credentials))
                 .await
-                .map_err(credential_error)?;
+                .map_err(database_error)?;
         }
         self.info(id).await
     }
@@ -776,7 +867,7 @@ impl IntegrationService {
             self.credentials
                 .update(move |credentials| clear_credentials(&target, credentials))
                 .await
-                .map_err(credential_error)?;
+                .map_err(database_error)?;
         }
         Ok(())
     }
@@ -816,7 +907,7 @@ impl IntegrationService {
                 }
             })
             .await
-            .map_err(credential_error)?;
+            .map_err(database_error)?;
         self.info(id).await
     }
 
@@ -852,7 +943,7 @@ impl IntegrationService {
         self.credentials
             .update(move |credentials| credentials.musicbrainz_token = token)
             .await
-            .map_err(credential_error)?;
+            .map_err(database_error)?;
         self.info(id).await
     }
 }
@@ -969,5 +1060,57 @@ mod tests {
         let mut local = youtube("SAPISID=abc", false);
         local.active = config::Source::LocalLibrary("local".into());
         assert!(!youtube_signed_in(&local));
+    }
+
+    fn answer(key: &str, value: &str) -> FieldValue {
+        FieldValue {
+            key: key.to_string(),
+            value: value.to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pause_toggle_reaches_the_presence_task_and_the_database() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let database = db::init(&dir.path().join("presence.db")).await.expect("db");
+        let config = Arc::new(crate::config_service::ConfigService::new(
+            database.clone(),
+            dir.path().join("settings.toml"),
+            config::AppConfig::default(),
+        ));
+        let credentials = CredentialStore::load(&database).await.expect("credentials");
+        let pause = PresencePause::load(&database).await.expect("pause");
+        assert!(pause.get(), "presence stays up while paused by default");
+        let mut presence_task = pause.watch();
+        let service = IntegrationService::new(config.clone(), credentials, pause.clone());
+
+        let info = service
+            .set_settings(DISCORD, vec![answer(PAUSED, "false")])
+            .await
+            .expect("toggle");
+
+        presence_task
+            .changed()
+            .await
+            .expect("the presence task hears it");
+        assert!(!*presence_task.borrow());
+        let field = info
+            .fields
+            .iter()
+            .find(|field| field.key == PAUSED)
+            .expect("paused field");
+        assert_eq!(field.value.as_deref(), Some("false"));
+        assert_eq!(field.config_key, None);
+        assert_eq!(
+            database.discord_presence_paused().await.expect("stored"),
+            Some(false)
+        );
+        let reloaded = PresencePause::load(&database).await.expect("reload");
+        assert!(!reloaded.get(), "the toggle survives a restart");
+        assert_eq!(
+            config.snapshot().await.discord_presence,
+            Some(true),
+            "the presence setting is left alone"
+        );
     }
 }

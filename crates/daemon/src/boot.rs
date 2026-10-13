@@ -33,8 +33,7 @@ pub struct Core {
     pub artwork: Arc<crate::ArtworkService>,
     pub db: db::Db,
     pub config: config::AppConfig,
-    /// The authority on the running config, as opposed to the `config`
-    /// snapshot above. A host needs it to flush the volume on the way out.
+    /// The authority on the running config, as opposed to the `config` snapshot above.
     pub config_service: Arc<ConfigService>,
     pub library: Arc<LibraryService>,
     pub jobs: Arc<JobRunner>,
@@ -115,6 +114,8 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let credentials = crate::CredentialStore::load(&database).await?;
     let offline = crate::OfflineIndex::load(&database).await?;
     let downloads_pruned = offline.pruned();
+    let (volume, muted) = database.playback_state().await?;
+    let presence_pause = crate::integrations::PresencePause::load(&database).await?;
 
     let settings_path =
         config::store::settings_path_for(db_path.parent().unwrap_or_else(|| Path::new(".")));
@@ -143,6 +144,8 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let scrobbler = crate::Scrobbler::new(database.clone(), credentials.clone());
     let services = PlaybackServices {
         config: config.clone(),
+        volume,
+        muted,
         sources: sources.clone(),
         active_source: Some(active_source.clone()),
         station_registry: station_registry.clone(),
@@ -185,7 +188,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     favorites.spawn_reconciler();
     let playlists = crate::PlaylistService::new(database.clone(), session.clone());
     playlists.attach_favorites(favorites.clone());
-    spawn_volume_persistence(&session, config_service.clone());
+    spawn_playback_state_persistence(&session, database.clone());
     crate::os_media::spawn(&session);
     crate::integrations::spawn_jellyfin_reporter(
         &session,
@@ -202,6 +205,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         &session,
         session.config_watch(),
         session.sources_watch(),
+        presence_pause.watch(),
     );
     let restored_source = session.sources().active.clone();
     match queue_store.load(&restored_source).await {
@@ -321,6 +325,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .with_integrations(crate::IntegrationService::new(
                 config_service_for_api,
                 credentials,
+                presence_pause,
             )),
     );
 
@@ -340,49 +345,62 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     })
 }
 
-/// Persist volume changes the engine made. Volume arrives as a player
-/// command from whichever frontend is attached, so the daemon has to be the
-/// one that remembers it; the debounce keeps a drag off the database.
-fn spawn_volume_persistence(session: &SessionHandle, config: Arc<ConfigService>) {
-    let mut events = session.subscribe();
+/// How long a volume or mute change waits for the next one before it is written, so a slider drag is one write.
+const PLAYBACK_STATE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(750);
+
+fn playback_state(session: &SessionHandle) -> (f32, bool) {
     let state = session.state();
-    let mut last = (state.volume, state.muted);
+    (state.volume, state.muted)
+}
+
+/// Persist the volume and mute the engine moved to; a frontend only sends commands, so the daemon remembers them.
+fn spawn_playback_state_persistence(session: &SessionHandle, database: db::Db) {
+    let mut events = session.subscribe();
+    let mut last = playback_state(session);
+    let session = session.clone();
     tokio::spawn(async move {
         loop {
-            let (volume, muted) = match events.recv().await {
+            let next = match events.recv().await {
                 Ok(api::ApiEvent::PlayerState(state)) => (state.volume, state.muted),
                 Ok(_) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             };
-            if (volume - last.0).abs() < f32::EPSILON && muted == last.1 {
+            if (next.0 - last.0).abs() < f32::EPSILON && next.1 == last.1 {
                 continue;
             }
-            last = (volume, muted);
-            tokio::time::sleep(std::time::Duration::from_millis(750)).await;
-            if let Err(error) = config.set_volume(last.0, last.1).await {
-                tracing::warn!(%error, "volume persist failed");
+            tokio::time::sleep(PLAYBACK_STATE_DEBOUNCE).await;
+            // What arrived during the wait is older than the state read below.
+            while !matches!(
+                events.try_recv(),
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty
+                    | tokio::sync::broadcast::error::TryRecvError::Closed)
+            ) {}
+            last = playback_state(&session);
+            if let Err(error) = database.set_playback_state(last.0, last.1).await {
+                tracing::warn!(%error, "persisting the volume and mute failed");
             }
         }
     });
 }
 
-/// Persist the volume the engine is at right now, ahead of the debounce.
-///
-/// [`spawn_volume_persistence`] holds a change for 750 ms so that dragging a
-/// slider is one write instead of fifty, so a close inside that window leaves
-/// the newest value with nothing but the engine holding it. The service is
-/// also where a whole-config write reads volume back from, which is why the
-/// frontend's own copy cannot stand in for this.
-pub async fn flush_volume(session: &SessionHandle, config: &ConfigService) {
-    let state = session.state();
-    if let Err(error) = config.set_volume(state.volume, state.muted).await {
-        tracing::warn!(%error, "flushing the volume on shutdown failed");
+/// Persist the volume and mute the engine is at right now, ahead of the debounce a close can land inside.
+pub async fn flush_playback_state(session: &SessionHandle, database: &db::Db) {
+    let (volume, muted) = playback_state(session);
+    // An unchanged state writes nothing, so a never-configured library stays without a state row.
+    if let Ok((stored, stored_muted)) = database.playback_state().await
+        && (stored - volume).abs() < f32::EPSILON
+        && stored_muted == muted
+    {
+        return;
+    }
+    if let Err(error) = database.set_playback_state(volume, muted).await {
+        tracing::warn!(%error, "flushing the volume and mute on shutdown failed");
     }
 }
 
 /// Flush what the core owns. Callers that bound a socket unlink it themselves.
 pub async fn shutdown(core: Core) {
-    flush_volume(&core.session, &core.config_service).await;
+    flush_playback_state(&core.session, &core.db).await;
     core.session.persist_now().await;
 }

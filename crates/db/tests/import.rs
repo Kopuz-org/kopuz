@@ -42,6 +42,7 @@ async fn imports_synthetic_fixture() {
         r#"{
             "theme": "dark",
             "volume": 0.8,
+            "discord_presence_paused": false,
             "active_source": "Server",
             "listen_counts": { "ytmusic:VID1:urlhex_deadbeef": 5, "/music/a.flac": 2 },
             "server": {
@@ -180,6 +181,8 @@ async fn imports_synthetic_fixture() {
         .await
         .unwrap();
     assert_eq!(active, "srv-1");
+    assert_eq!(db.playback_state().await.unwrap(), (0.8, false));
+    assert_eq!(db.discord_presence_paused().await.unwrap(), Some(false));
     let settings = std::fs::read_to_string(config::store::settings_path_for(&dir)).unwrap();
     assert!(
         !settings.contains("SECRET_COOKIE"),

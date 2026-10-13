@@ -417,6 +417,12 @@ pub trait ReadStore: Send + Sync {
         &self,
     ) -> Result<std::collections::HashMap<String, String>, DbError>;
 
+    /// The volume and mute the engine was left at, or full and unmuted before anything saved them.
+    async fn playback_state(&self) -> Result<(f32, bool), DbError>;
+
+    /// Whether Discord presence stays up while playback is paused; `None` until it was toggled.
+    async fn discord_presence_paused(&self) -> Result<Option<bool>, DbError>;
+
     /// Store one server's credentials on their own, whether or not it is active.
     async fn set_server_credentials(
         &self,
@@ -495,6 +501,10 @@ pub trait Storage: ReadStore {
 
     /// Store one integration credential; an empty value clears it.
     async fn set_integration_credential(&self, key: &str, value: &str) -> Result<(), DbError>;
+
+    async fn set_playback_state(&self, volume: f32, muted: bool) -> Result<(), DbError>;
+
+    async fn set_discord_presence_paused(&self, paused: bool) -> Result<(), DbError>;
 
     /// One-shot import of the legacy `*.json` store at `config_dir` into the DB,
     /// then rename each imported file to `*.json.bak` and drop a sentinel. No-op

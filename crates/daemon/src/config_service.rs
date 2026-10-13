@@ -164,39 +164,19 @@ impl ConfigService {
         self.publish(&mut held, changed.clone());
         Ok((self.view_of(&held), updated, changed))
     }
-
-    /// Persist the engine's own volume and mute, which the session owns, so they skip the locked-key and daemon-owned machinery of [`Self::set`].
-    pub async fn set_volume(&self, volume: f32, muted: bool) -> Result<(), ApiError> {
-        let mut held = self.current.write().await;
-        let volume = volume.clamp(0.0, 1.0);
-        if (held.config.volume - volume).abs() < f32::EPSILON && held.config.muted == muted {
-            return Ok(());
-        }
-        let mut next = held.config.clone();
-        next.volume = volume;
-        next.muted = muted;
-        // Saved under the guard: a snapshot saved after it drops could undo a server added meanwhile.
-        self.save(&next).await?;
-        held.config = next;
-        held.revision += 1;
-        Ok(())
-    }
 }
 
-/// Keep what the daemon owns (the volume and mute the session moves, and the settings it publishes as field lists of its own), so a stale whole-config write cannot roll them back.
+/// Keep the settings the daemon publishes as field lists of its own, so a stale whole-config write cannot roll them back.
 fn with_daemon_owned_fields(
     mut incoming: config::AppConfig,
     current: &config::AppConfig,
 ) -> config::AppConfig {
-    incoming.volume = current.volume;
-    incoming.muted = current.muted;
     incoming.auto_fetch_covers = current.auto_fetch_covers;
     incoming.cover_fetch_strategy = current.cover_fetch_strategy;
     incoming.local_sources = current.local_sources.clone();
     incoming.spotify_browser = current.spotify_browser.clone();
     incoming.spotify_prefer_active_device = current.spotify_prefer_active_device;
     incoming.discord_presence = current.discord_presence;
-    incoming.discord_presence_paused = current.discord_presence_paused;
     incoming.discord_presence_source = current.discord_presence_source;
     incoming.downloader_output_dir = current.downloader_output_dir.clone();
     incoming.downloader_options = current.downloader_options.clone();
@@ -206,8 +186,6 @@ fn with_daemon_owned_fields(
 /// The daemon-owned fields left at their defaults for a caller, except the ones it reads truthfully though it cannot write them.
 fn stripped(config: &config::AppConfig) -> config::AppConfig {
     let mut view = with_daemon_owned_fields(config.clone(), &config::AppConfig::default());
-    view.volume = config.volume;
-    view.muted = config.muted;
     view.auto_fetch_covers = config.auto_fetch_covers;
     view.cover_fetch_strategy = config.cover_fetch_strategy;
     view.local_sources = config.local_sources.clone();
@@ -344,74 +322,27 @@ mod tests {
         assert_eq!(changed, vec!["crossfade_seconds".to_string()]);
     }
 
+    /// A frontend's whole-config write saves the state row too, and must not reset the playback state the session persists beside it.
     #[tokio::test]
-    async fn set_volume_persists_without_touching_the_rest_of_the_config() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("vol.db");
-        let database = db::init(&path).await.expect("db");
-        database
-            .set_integration_credential("lastfm_session_key", "secret")
-            .await
-            .expect("seed credential");
-        let seeded = config::AppConfig {
-            crossfade_seconds: 7,
-            ..Default::default()
-        };
-        let service = ConfigService::new(
-            database.clone(),
-            dir.path().join("settings.toml"),
-            seeded.clone(),
-        );
-
-        service.set_volume(0.42, false).await.expect("set volume");
-
-        let stored = database
-            .load_config()
-            .await
-            .expect("load")
-            .expect("stored config");
-        assert_eq!(stored.volume, 0.42);
-        assert_eq!(stored.crossfade_seconds, 7);
-        let credentials = database
-            .integration_credentials()
-            .await
-            .expect("credentials");
-        assert_eq!(
-            credentials.get("lastfm_session_key").map(String::as_str),
-            Some("secret")
-        );
-        assert_eq!(service.view().await.expect("view").config.volume, 0.42);
-    }
-
-    /// A frontend reads the whole settings surface once and writes it back on
-    /// every change, while volume moves separately through `set_volume`. Its
-    /// copy is therefore stale by design, and must not roll the engine back.
-    #[tokio::test]
-    async fn a_whole_config_write_cannot_roll_the_volume_back() {
+    async fn a_whole_config_write_leaves_the_playback_state_alone() {
         let dir = tempfile::tempdir().expect("tempdir");
         let database = db::init(&dir.path().join("vol-stale.db"))
             .await
             .expect("db");
-        let seeded = config::AppConfig {
-            volume: 0.8,
-            ..Default::default()
-        };
-        let service =
-            ConfigService::new(database.clone(), dir.path().join("settings.toml"), seeded);
-        let snapshot = service.view().await.expect("view").config;
-
-        service.set_volume(0.2, false).await.expect("set volume");
-        let (view, updated, changed) = service.set(snapshot).await.expect("set");
-
-        assert_eq!(view.config.volume, 0.2, "the view reports the live volume");
-        assert_eq!(updated.volume, 0.2);
-        assert!(!changed.iter().any(|key| key == "volume"));
-        let stored = database
-            .load_config()
+        let service = ConfigService::new(
+            database.clone(),
+            dir.path().join("settings.toml"),
+            config::AppConfig::default(),
+        );
+        database
+            .set_playback_state(0.2, true)
             .await
-            .expect("load")
-            .expect("stored config");
-        assert_eq!(stored.volume, 0.2);
+            .expect("playback state");
+        let mut snapshot = service.view().await.expect("view").config;
+        snapshot.theme = "nord".to_string();
+        service.set(snapshot).await.expect("set");
+
+        assert_eq!(database.playback_state().await.expect("load"), (0.2, true));
     }
 
     /// `ArtworkApi` publishes the cover-lookup keys as a field list of its own

@@ -369,6 +369,14 @@ impl ReadStore for Native {
         cfg_store::integration_credentials(&self.pool()).await
     }
 
+    async fn playback_state(&self) -> Result<(f32, bool), DbError> {
+        cfg_store::playback_state(&self.pool()).await
+    }
+
+    async fn discord_presence_paused(&self) -> Result<Option<bool>, DbError> {
+        cfg_store::discord_presence_paused(&self.pool()).await
+    }
+
     async fn set_server_credentials(
         &self,
         id: &str,
@@ -455,6 +463,14 @@ impl Storage for Native {
     async fn set_integration_credential(&self, key: &str, value: &str) -> Result<(), DbError> {
         let mut conn = self.pool().acquire().await?;
         cfg_store::write_integration_credential(&mut conn, key, value).await
+    }
+
+    async fn set_playback_state(&self, volume: f32, muted: bool) -> Result<(), DbError> {
+        cfg_store::set_playback_state(&self.pool(), volume, muted).await
+    }
+
+    async fn set_discord_presence_paused(&self, paused: bool) -> Result<(), DbError> {
+        cfg_store::set_discord_presence_paused(&self.pool(), paused).await
     }
 
     async fn import_legacy_json(&self, config_dir: &Path) -> Result<crate::ImportReport, DbError> {

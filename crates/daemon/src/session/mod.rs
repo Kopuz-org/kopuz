@@ -82,6 +82,9 @@ pub trait PlaybackRecorder: Send + Sync {
 /// lifecycle extraction do.
 pub struct PlaybackServices {
     pub config: config::AppConfig,
+    /// The level and mute the engine was left at, as the database stored them.
+    pub volume: f32,
+    pub muted: bool,
     pub sources: Arc<server::sources::Sources>,
     pub active_source: Option<server::source::ActiveSource>,
     pub station_registry: Arc<radio::registry::StationRegistry>,
@@ -95,6 +98,8 @@ impl Default for PlaybackServices {
     fn default() -> Self {
         Self {
             config: config::AppConfig::default(),
+            volume: 1.0,
+            muted: false,
             sources: Arc::default(),
             active_source: None,
             station_registry: Arc::new(radio::registry::StationRegistry::default()),
@@ -307,10 +312,8 @@ impl SessionHandle {
         let (config_tx, config_rx) = watch::channel(services.config.clone());
         let (sources_tx, sources_rx) = watch::channel(services.sources.clone());
         let engine_events = player.subscribe();
-        player.set_volume(match services.config.muted {
-            true => 0.0,
-            false => services.config.volume,
-        });
+        let volume = services.volume.clamp(0.0, 1.0);
+        player.set_volume(if services.muted { 0.0 } else { volume });
         player.set_channel_mode(services.config.channel_mode);
         player.set_equalizer(services.config.equalizer.clone());
         player.set_replay_gain(services.config.replay_gain);
@@ -345,8 +348,8 @@ impl SessionHandle {
             error: None,
             rev: 0,
             queue_rev: 0,
-            volume: services.config.volume,
-            muted: services.config.muted,
+            volume,
+            muted: services.muted,
             origin: None,
             epoch: Instant::now(),
             events: events.clone(),
@@ -1664,14 +1667,6 @@ impl Session {
     ) {
         for key in &changed {
             match key.as_str() {
-                "volume" => {
-                    self.volume = config.volume.clamp(0.0, 1.0);
-                    self.player.set_volume(self.output_volume());
-                }
-                "muted" => {
-                    self.muted = config.muted;
-                    self.player.set_volume(self.output_volume());
-                }
                 "equalizer" => self.player.set_equalizer(config.equalizer.clone()),
                 "replay_gain" => self.player.set_replay_gain(config.replay_gain),
                 "channel_mode" => self.player.set_channel_mode(config.channel_mode),
