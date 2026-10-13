@@ -27,7 +27,7 @@ pub(crate) fn failure_text(error: &api::ApiError) -> String {
     if error.code == api::ErrorCode::SourceAuthExpired {
         return i18n::t("source_anon_discover");
     }
-    i18n::t_with("discover_failed", &[("error", error.to_string())])
+    i18n::t_with("discover_failed", &[("error", error.to_string().into())])
 }
 
 fn keys_of(tracks: &[TrackInfo]) -> Vec<String> {

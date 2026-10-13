@@ -85,13 +85,7 @@ pub fn SearchGenreDetail(
                             p {
                                 class: "text-sm mb-3",
                                 style: "color: rgba(255,255,255,0.45);",
-                                {
-                                    if genre_tracks.len() == 1 {
-                                        i18n::t("track_count_singular").to_string()
-                                    } else {
-                                        i18n::t_with("track_count", &[("count", genre_tracks.len().to_string())])
-                                    }
-                                }
+                                {i18n::t_with("track_count", &[("count", genre_tracks.len().into())])}
                             }
                             div { class: "flex items-center gap-2 flex-wrap",
                                 if !genre_tracks.is_empty() {
@@ -147,13 +141,7 @@ pub fn SearchGenreDetail(
                              h2 { class: "text-sm font-bold text-white/60 mb-2", "{i18n::t(\"genre\")}" }
                              h1 { class: "text-5xl font-bold text-white mb-4", "{genre}" }
                              p { class: "text-slate-400",
-                                 {
-                                     if genre_tracks.len() == 1 {
-                                         i18n::t("track_count_singular").to_string()
-                                     } else {
-                                         i18n::t_with("track_count", &[("count", genre_tracks.len().to_string())])
-                                     }
-                                 }
+                                 {i18n::t_with("track_count", &[("count", genre_tracks.len().into())])}
                              }
                          }
                     }

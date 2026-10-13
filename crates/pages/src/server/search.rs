@@ -129,10 +129,9 @@ pub fn CatalogSearch(
     let filtered = all.as_deref() != Some(filter.read().as_str());
     let query_text = search_query.read().trim().to_string();
     let results = shelves.read().clone();
-    let corrected_note = correction
-        .read()
-        .clone()
-        .map(|corrected| i18n::t_with("search_showing_results_for", &[("query", corrected)]));
+    let corrected_note = correction.read().clone().map(|corrected| {
+        i18n::t_with("search_showing_results_for", &[("query", corrected.into())])
+    });
 
     rsx! {
         div { class: "p-8 max-w-[1600px] mx-auto",
@@ -183,7 +182,7 @@ pub fn CatalogSearch(
             } else if results.iter().all(|shelf| shelf.items.is_empty()) {
                 div { class: "py-24 flex flex-col items-center justify-center text-slate-600",
                     i { class: "fa-regular fa-folder-open text-4xl mb-4" }
-                    p { class: "text-lg", "{i18n::t_with(\"discover_results_for\", &[(\"query\", query_text.clone())])}" }
+                    p { class: "text-lg", "{i18n::t_with(\"discover_results_for\", &[(\"query\", query_text.clone().into())])}" }
                     p { class: "text-sm mt-1", "{i18n::t(\"discover_no_results_hint\")}" }
                 }
             } else {

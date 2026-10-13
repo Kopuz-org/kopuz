@@ -224,8 +224,8 @@ pub fn session_label(session: &api::BrowserSession) -> String {
     i18n::t_with(
         "browser_session_name",
         &[
-            ("browser", session.browser.clone()),
-            ("profile", session.profile.clone()),
+            ("browser", session.browser.clone().into()),
+            ("profile", session.profile.clone().into()),
         ],
     )
 }
@@ -252,7 +252,7 @@ pub fn BrowserSignInPopup(
                 aria_modal: "true",
                 onclick: |e| e.stop_propagation(),
 
-                h2 { "{i18n::t_with(\"login_to_service\", &[(\"service\", service_name.clone())])}" }
+                h2 { "{i18n::t_with(\"login_to_service\", &[(\"service\", service_name.clone().into())])}" }
 
                 if let Some(err) = error() {
                     p { class: "error", "{err}" }
@@ -296,8 +296,10 @@ pub fn LoginPopup(
     let login_text = i18n::t("login").to_string();
     let username_placeholder = i18n::t("username").to_string();
     let password_placeholder = i18n::t("password").to_string();
-    let login_to_service_text =
-        i18n::t_with("login_to_service", &[("service", service_name.clone())]);
+    let login_to_service_text = i18n::t_with(
+        "login_to_service",
+        &[("service", service_name.clone().into())],
+    );
 
     rsx! {
         div {

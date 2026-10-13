@@ -159,7 +159,7 @@ pub fn AlbumActionsMenu(props: AlbumActionsMenuProps) -> Element {
         DotsMenu {
             actions,
             is_open,
-            aria_label: i18n::t_with("more_actions_for", &[("name", props.album_title.clone())]),
+            aria_label: i18n::t_with("more_actions_for", &[("name", props.album_title.clone().into())]),
             button_class: props.button_class.clone(),
             anchor: props.anchor.clone(),
             placement: props.placement.clone(),

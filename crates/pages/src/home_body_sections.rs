@@ -222,7 +222,7 @@ fn ServerHeroBanner(
                     }
                     h1 { class: "text-3xl md:text-5xl font-semibold tracking-tight text-white mb-4 leading-tight break-words", style: "overflow: hidden; text-overflow:ellipsis;white-space: nowrap;", "{hero_title}" }
                     if !hero_artist.is_empty() {
-                        p { class: "text-base md:text-lg text-white/60 mb-8 font-medium line-clamp-1 max-w-md", "{i18n::t_with(\"by_artist_full\", &[(\"artist\", hero_artist.clone())])}" }
+                        p { class: "text-base md:text-lg text-white/60 mb-8 font-medium line-clamp-1 max-w-md", "{i18n::t_with(\"by_artist_full\", &[(\"artist\", hero_artist.clone().into())])}" }
                     }
                     div { class: "flex items-center gap-4",
                         button {
@@ -807,7 +807,7 @@ fn render_playlists(
                                                 is_open: is_menu_open,
                                                 on_open: move |_| active_card_menu.set(Some(open_key.clone())),
                                                 on_close: move |_| active_card_menu.set(None),
-                                                aria_label: i18n::t_with("more_actions_for", &[("name", name.clone())]),
+                                                aria_label: i18n::t_with("more_actions_for", &[("name", name.clone().into())]),
                                                 button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
                                                 anchor: "right".to_string(),
                                                 on_action: move |_: usize| {
@@ -824,7 +824,7 @@ fn render_playlists(
                                     h3 { class: "text-white font-bold truncate text-sm md:text-base px-1 group-hover:text-indigo-400 transition-colors", "{name}" }
                                     p { class: "text-xs md:text-sm text-white/40 truncate px-1 font-semibold mt-1",
                                         {
-                                            let track_text = i18n::t_with("music_playlist_count", &[("count", track_count.to_string())]);
+                                            let track_text = i18n::t_with("music_playlist_count", &[("count", track_count.into())]);
                                             rsx! { "{track_text}" }
                                         }
                                     }

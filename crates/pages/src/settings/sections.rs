@@ -80,9 +80,9 @@ fn IntegrationRows(integration: api::IntegrationInfo, changed: Signal<u64>) -> E
                             hooks::integrations::authenticate(connect_id.clone(), changed);
                         },
                         if integration.configured {
-                            "{i18n::t_with(\"integration_connected\", &[(\"name\", name.clone())])}"
+                            "{i18n::t_with(\"integration_connected\", &[(\"name\", name.clone().into())])}"
                         } else {
-                            "{i18n::t_with(\"integration_connect\", &[(\"name\", name.clone())])}"
+                            "{i18n::t_with(\"integration_connect\", &[(\"name\", name.clone().into())])}"
                         }
                     }
                 },
@@ -116,8 +116,8 @@ fn BrowserConnectRow(id: String, name: String, changed: Signal<u64>) -> Element 
                 i18n::t_with(
                     "integration_browser_profile",
                     &[
-                        ("name", profile.name.clone()),
-                        ("browser", profile.browser.clone()),
+                        ("name", profile.name.clone().into()),
+                        ("browser", profile.browser.clone().into()),
                     ],
                 ),
             )
@@ -151,7 +151,7 @@ fn BrowserConnectRow(id: String, name: String, changed: Signal<u64>) -> Element 
                             if busy() {
                                 "{i18n::t(\"integration_connecting\")}"
                             } else {
-                                "{i18n::t_with(\"integration_connect\", &[(\"name\", name.clone())])}"
+                                "{i18n::t_with(\"integration_connect\", &[(\"name\", name.clone().into())])}"
                             }
                         }
                     }

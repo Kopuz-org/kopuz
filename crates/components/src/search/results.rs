@@ -208,7 +208,7 @@ pub fn SearchResults(
 
             if tracks.is_empty() && albums.is_empty() {
                 div { class: "text-center py-12 text-slate-500",
-                    p { "{i18n::t_with(\"no_results_found\", &[(\"query\", search_query.to_string())])}" }
+                    p { "{i18n::t_with(\"no_results_found\", &[(\"query\", search_query.to_string().into())])}" }
                 }
             }
         }

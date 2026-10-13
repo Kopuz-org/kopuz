@@ -162,9 +162,37 @@ loading_lyrics = Se încarcă versurile...
 lyrics_not_found = Versurile nu au fost găsite
 instrumental_break = Instrumental
 no_previous_songs = Nu există piese anterioare
-playlist_track_count = { $count } piese
-music_playlist_count = Muzică • { $count } piese
-showcase_song_count = { $count } piese
+playlist_track_count =
+    { $count ->
+        [one] { $count } piesă
+        [few] { $count } piese
+       *[other] { $count } de piese
+    }
+playlist_folder_count =
+    { $count ->
+        [one] { $count } listă de redare
+        [few] { $count } liste de redare
+       *[other] { $count } de liste de redare
+    }
+playlists_synced_count =
+    { $count ->
+        [one] { $count } listă de redare sincronizată
+        [few] { $count } liste de redare sincronizate
+       *[other] { $count } de liste de redare sincronizate
+    }
+playlists_loading_tracks = Se încarcă piesele — liste de redare { $done } / { $count } ({ $remaining } rămase)
+music_playlist_count =
+    { $count ->
+        [one] Muzică • { $count } piesă
+        [few] Muzică • { $count } piese
+       *[other] Muzică • { $count } de piese
+    }
+showcase_song_count =
+    { $count ->
+        [one] { $count } piesă
+        [few] { $count } piese
+       *[other] { $count } de piese
+    }
 
 # Modal Titles
 add_playlist = Adaugă listă de redare
@@ -221,8 +249,12 @@ title = Titlu
 time = Timp
 genre = Gen
 plays = Redări
-track_count = { $count } piese
-track_count_singular = 1 piesă
+track_count =
+    { $count ->
+        [one] { $count } piesă
+        [few] { $count } piese
+       *[other] { $count } de piese
+    }
 songs = piese
 min = min
 
@@ -257,8 +289,18 @@ unknown_genre = Gen Necunoscut
 no_tracks_in_library = Nu s-au găsit piese în biblioteca ta.
 no_songs_here = Nu sunt piese aici.
 syncing_with_server = Se sincronizează cu serverul...
-yt_syncing_progress = Se sincronizează — { $count } piese încărcate până acum
-yt_synced_total = { $count } piese preferate sincronizate
+yt_syncing_progress =
+    { $count ->
+        [one] Se sincronizează — { $count } piesă încărcată până acum
+        [few] Se sincronizează — { $count } piese încărcate până acum
+       *[other] Se sincronizează — { $count } de piese încărcate până acum
+    }
+yt_synced_total =
+    { $count ->
+        [one] { $count } piesă preferată sincronizată
+        [few] { $count } piese preferate sincronizate
+       *[other] { $count } de piese preferate sincronizate
+    }
 refresh = Reîmprospătează
 most_played_tracks = Cele mai ascultate piese.
 no_more_songs = Nu mai sunt piese în coadă
@@ -707,7 +749,11 @@ waiting_for_browser = Waiting for your browser…
 signed_in = Signed in
 metadata_number_invalid = Enter a number, or leave it empty to clear the tag.
 metadata_batch_keep = Leave unchanged
-metadata_batch_count = Editing { $count } tracks
+metadata_batch_count =
+    { $count ->
+        [one] Editing { $count } track
+       *[other] Editing { $count } tracks
+    }
 interface_font = Interface font
 interface_font_description = The font family to draw the interface with.
 interface_font_placeholder = Theme default
@@ -853,11 +899,19 @@ discover_clear_search = Clear search
 discover_results_for = Results for "{ $query }"
 discover_no_results_hint = Try fewer words, or switch source and look again.
 discover_show_less = Show less
-discover_genre_count = { $count } genres
+discover_genre_count =
+    { $count ->
+        [one] { $count } genre
+       *[other] { $count } genres
+    }
 discover_read_failed = Couldn't load your library: { $error }
 palette_all_results = All results for "{ $query }" in Discover
 
-library_count = { $count } items
+library_count =
+    { $count ->
+        [one] { $count } item
+       *[other] { $count } items
+    }
 library_filter_placeholder = Filter the library…
 library_chip_downloaded = Downloaded
 library_chip_years = Years
@@ -880,7 +934,11 @@ library_tile_medium = Medium
 library_tile_large = Large
 library_default_view = Grids open as
 library_default_view_description = Whether albums, artists and playlists start as tiles or as rows.
-library_artist_tracks = { $count } tracks
+library_artist_tracks =
+    { $count ->
+        [one] { $count } track
+       *[other] { $count } tracks
+    }
 library_selected = { $count } selected
 library_whole_selection = Everything that matches
 library_read_failed = Could not read the library
@@ -919,7 +977,11 @@ downloader_history = URL downloads
 interface_skin = Skin
 interface_skin_description = The shape of the interface: how round things are, how tall a row sits.
 
-home_plays = { $count } plays
+home_plays =
+    { $count ->
+        [one] { $count } play
+       *[other] { $count } plays
+    }
 
 interface_ambient = Ambient light
 interface_ambient_description = Let the current cover cast its colour across the window.
@@ -946,7 +1008,11 @@ clippsly_help = Create an App Password at clippsly.app, then sign in with your C
 cloud_storage_usage = Cloud storage: { $used } of { $total } used
 upload_music = Upload music
 uploading_music = Uploading { $name }…
-music_uploaded = Uploaded { $count } file(s).
+music_uploaded =
+    { $count ->
+        [one] Uploaded { $count } file.
+       *[other] Uploaded { $count } files.
+    }
 music_upload_too_large = Audio files must be no larger than 500 MiB.
 cloud_storage_loading = Loading storage usage…
 

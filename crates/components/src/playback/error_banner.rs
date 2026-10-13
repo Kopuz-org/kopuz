@@ -11,7 +11,6 @@ enum Fix {
 }
 
 fn advice(code: Option<api::ErrorCode>, source: &str) -> Option<(String, Fix)> {
-    let args = [("source", source.to_string())];
     let key_fix = match code? {
         api::ErrorCode::SourceAuthExpired => ("playback_error_session_expired", Fix::SignIn),
         api::ErrorCode::SourceChallenged => ("playback_error_challenged", Fix::Retry),
@@ -20,7 +19,10 @@ fn advice(code: Option<api::ErrorCode>, source: &str) -> Option<(String, Fix)> {
         api::ErrorCode::ItemUnavailable => ("playback_error_unavailable", Fix::Skip),
         _ => return None,
     };
-    Some((i18n::t_with(key_fix.0, &args), key_fix.1))
+    Some((
+        i18n::t_with(key_fix.0, &[("source", source.into())]),
+        key_fix.1,
+    ))
 }
 
 /// The bar under the title bar that says why a track did not play, and what

@@ -1457,11 +1457,11 @@ fn App() -> Element {
                                 None => rsx! {
                                     i { class: "fa-solid fa-download text-xs" }
                                     span { class: "font-medium", "{i18n::t(\"update_available\")} - " }
-                                    span { "{i18n::t_with(\"update_banner_message\", &[(\"version\", update.version.clone())])}" }
+                                    span { "{i18n::t_with(\"update_banner_message\", &[(\"version\", update.version.clone().into())])}" }
                                 },
                                 Some(updates::InstallProgress::Downloading { done, total }) => rsx! {
                                     i { class: "fa-solid fa-circle-notch fa-spin text-xs" }
-                                    span { "{i18n::t_with(\"update_downloading\", &[(\"version\", update.version.clone())])}" }
+                                    span { "{i18n::t_with(\"update_downloading\", &[(\"version\", update.version.clone().into())])}" }
                                     if let Some(total) = total.filter(|total| *total > 0) {
                                         span { class: "tabular-nums opacity-80", "{done * 100 / total}%" }
                                     }
@@ -1472,7 +1472,7 @@ fn App() -> Element {
                                 },
                                 Some(updates::InstallProgress::Failed) => rsx! {
                                     i { class: "fa-solid fa-triangle-exclamation text-xs" }
-                                    span { "{i18n::t_with(\"update_failed\", &[(\"version\", update.version.clone())])}" }
+                                    span { "{i18n::t_with(\"update_failed\", &[(\"version\", update.version.clone().into())])}" }
                                 },
                             }
                             if let (Some(plan), None | Some(updates::InstallProgress::Failed)) = (update.install.clone(), update_progress_state.clone()) {

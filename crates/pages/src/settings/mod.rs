@@ -767,7 +767,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                                 registry_toggle_error.set(None);
                                             }
                                             Err(e) => {
-                                                registry_toggle_error.set(Some(i18n::t_with("radio_registry_enable_failed", &[("error", e.to_string())])));
+                                                registry_toggle_error.set(Some(i18n::t_with("radio_registry_enable_failed", &[("error", e.to_string().into())])));
                                             }
                                         }
                                     });
@@ -1013,7 +1013,7 @@ fn sync_interval_label(minutes: u32) -> String {
         m if m % 60 == 0 => ("sync_interval_hours", m / 60),
         m => ("sync_interval_minutes", m),
     };
-    i18n::t_with(key, &[("count", count.to_string())])
+    i18n::t_with(key, &[("count", count.into())])
 }
 
 /// The presets, plus the current value when a settings file set one that is not among them.

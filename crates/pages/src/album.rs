@@ -646,7 +646,7 @@ fn RemoteAlbumDetail(
                                 span { class: "uppercase tracking-wide text-xs font-semibold text-white/40", "{kind}" }
                                 span { class: "text-white/30", "•" }
                             }
-                            span { "{i18n::t_with(\"showcase_song_count\", &[(\"count\", song_count.to_string())])}" }
+                            span { {i18n::t_with("showcase_song_count", &[("count", song_count.into())])} }
                             if let Some(minutes) = dur_min {
                                 span { class: "text-white/30", "•" }
                                 span { "{minutes} {i18n::t(\"min\")}" }

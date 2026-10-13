@@ -3,7 +3,6 @@
 
 use fluent_bundle::concurrent::FluentBundle;
 use fluent_bundle::{FluentArgs, FluentResource, FluentValue};
-use std::borrow::Cow;
 use std::sync::{OnceLock, RwLock};
 use unic_langid::LanguageIdentifier;
 
@@ -101,13 +100,11 @@ pub fn t(key: &str) -> String {
         .translate(key, None)
 }
 
-pub fn t_with(key: &str, args: &[(&str, String)]) -> String {
-    let mut fluent_args: FluentArgs<'static> = FluentArgs::new();
-    for (k, v) in args {
-        fluent_args.set(
-            Cow::Owned(k.to_string()),
-            FluentValue::String(Cow::Owned(v.clone())),
-        );
+/// Formats `key` with named arguments; pass a count as a number (`n.into()`) so its plural variants select.
+pub fn t_with(key: &str, args: &[(&str, FluentValue<'_>)]) -> String {
+    let mut fluent_args = FluentArgs::new();
+    for (name, value) in args {
+        fluent_args.set(*name, value.clone());
     }
     state()
         .read()
@@ -121,4 +118,53 @@ pub fn available_languages() -> &'static [(&'static str, &'static str)] {
 
 pub fn is_rtl() -> bool {
     t("is_rtl") == "true"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plain(text: String) -> String {
+        text.replace(['\u{2068}', '\u{2069}'], "")
+    }
+
+    #[test]
+    fn a_count_selects_the_plural_variant() {
+        let count = |n: usize| plain(t_with("track_count", &[("count", n.into())]));
+        assert_eq!(count(1), "1 track");
+        assert_eq!(count(2), "2 tracks");
+    }
+
+    #[test]
+    fn a_string_argument_is_passed_as_text() {
+        let text = plain(t_with("artist_load_failed", &[("error", "gone".into())]));
+        assert_eq!(text, "Couldn't load this artist: gone");
+    }
+
+    #[test]
+    fn a_count_follows_the_locale_plural_rules() {
+        let ru = I18nState::new("ru");
+        let format = |key: &str, count: usize| {
+            let mut args = FluentArgs::new();
+            args.set("count", FluentValue::from(count));
+            plain(ru.translate(key, Some(&args)))
+        };
+        assert_eq!(format("showcase_song_count", 1), "1 песня");
+        assert_eq!(format("showcase_song_count", 3), "3 песни");
+        assert_eq!(format("showcase_song_count", 5), "5 песен");
+        assert_eq!(format("track_count", 21), "21 трек");
+        assert_eq!(format("track_count", 22), "22 трека");
+        assert_eq!(format("track_count", 25), "25 треков");
+        assert_eq!(format("playlist_folder_count", 5), "5 плейлистов");
+    }
+
+    #[test]
+    fn every_locale_parses_without_errors() {
+        for (code, _) in AVAILABLE_LANGUAGES {
+            let content = get_ftl_content(code).expect("locale content");
+            if let Err((_, errors)) = FluentResource::try_new(content.to_string()) {
+                panic!("{code}: {errors:?}");
+            }
+        }
+    }
 }

@@ -149,10 +149,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                         style: "color: var(--color-white); opacity: 0.45;",
                         {
                             let count = props.tracks.len();
-                            let song_text = i18n::t_with(
-                                "showcase_song_count",
-                                &[("count", count.to_string())],
-                            );
+                            let song_text = i18n::t_with("showcase_song_count", &[("count", count.into())]);
                             let release_year = props
                                 .release_year
                                 .map(|year| format!(" · {year}"))

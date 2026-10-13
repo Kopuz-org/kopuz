@@ -86,7 +86,7 @@ pub fn RemotePlaylistMenu(
         DotsMenu {
             actions,
             is_open: open(),
-            aria_label: i18n::t_with("more_actions_for", &[("name", name.clone())]),
+            aria_label: i18n::t_with("more_actions_for", &[("name", name.clone().into())]),
             title: name.clone(),
             icon: "fa-solid fa-ellipsis".to_string(),
             button_class: "w-14! h-14! text-xl!".to_string(),
@@ -133,13 +133,13 @@ pub fn RemotePlaylistMenu(
                 let (title, body, confirm) = if owned {
                     (
                         i18n::t("playlist_delete_title"),
-                        i18n::t_with("playlist_delete_body", &[("name", name.clone()), ("service", service.clone())]),
+                        i18n::t_with("playlist_delete_body", &[("name", name.clone().into()), ("service", service.clone().into())]),
                         i18n::t("delete_playlist"),
                     )
                 } else {
                     (
                         i18n::t("playlist_unsave_title"),
-                        i18n::t_with("playlist_unsave_body", &[("name", name.clone()), ("service", service.clone())]),
+                        i18n::t_with("playlist_unsave_body", &[("name", name.clone().into()), ("service", service.clone().into())]),
                         i18n::t("catalog_unsave"),
                     )
                 };

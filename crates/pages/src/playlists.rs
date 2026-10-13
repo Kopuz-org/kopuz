@@ -361,10 +361,12 @@ fn PlaylistsGrid(
                             div { class: "flex items-center gap-2",
                                 if syncing {
                                     i { class: "fa-solid fa-arrows-rotate fa-spin text-indigo-300" }
-                                    span { "Loading tracks — {done} / {total} playlists ({remaining} left)" }
+                                    span {
+                                        {i18n::t_with("playlists_loading_tracks", &[("done", done.into()), ("count", total.into()), ("remaining", remaining.into())])}
+                                    }
                                 } else if total > 0 {
                                     i { class: "fa-solid fa-check text-emerald-400" }
-                                    span { "{total} playlists synced" }
+                                    span { {i18n::t_with("playlists_synced_count", &[("count", total.into())])} }
                                 }
                             }
                             button {
@@ -374,7 +376,7 @@ fn PlaylistsGrid(
                                     hooks::jobs::start(hooks::JobKind::PlaylistSync);
                                 },
                                 i { class: "fa-solid fa-arrows-rotate mr-1" }
-                                "Refresh"
+                                {i18n::t("refresh")}
                             }
                         }
                     }
@@ -426,7 +428,7 @@ fn PlaylistsGrid(
                                 div { class: "flex items-start justify-between gap-2",
                                     div { class: "min-w-0 flex-1",
                                         h3 { class: "text-xl font-bold text-white mb-1 truncate", "{playlist.name}" }
-                                        p { class: "text-sm text-slate-400", "Server • {playlist.track_keys.len()} tracks" }
+                                        p { class: "text-sm text-slate-400", {i18n::t_with("playlist_track_count", &[("count", playlist.track_keys.len().into())])} }
                                     }
                                     if can_radio {
                                         {
@@ -440,7 +442,7 @@ fn PlaylistsGrid(
                                                         is_open: is_menu_open,
                                                         on_open: move |_| active_menu.set(Some(pid_menu.clone())),
                                                         on_close: move |_| active_menu.set(None),
-                                                        aria_label: i18n::t_with("more_actions_for", &[("name", playlist.name.clone())]),
+                                                        aria_label: i18n::t_with("more_actions_for", &[("name", playlist.name.clone().into())]),
                                                         button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
                                                         anchor: "right".to_string(),
                                                         on_action: move |_: usize| {
@@ -625,7 +627,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                     div { class: "min-w-0 flex-1",
                         h3 { class: "text-xl font-bold text-white mb-1 truncate", "{name}" }
                         {
-                            let track_text = i18n::t_with("playlist_track_count", &[("count", count.to_string())]);
+                            let track_text = i18n::t_with("playlist_track_count", &[("count", count.into())]);
                             rsx! { p { class: "text-sm text-slate-400", "{track_text}" } }
                         }
                     }
@@ -635,7 +637,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                             is_open: is_menu_open,
                             on_open: move |_| active_menu.set(Some(pid_menu.clone())),
                             on_close: move |_| active_menu.set(None),
-                            aria_label: i18n::t_with("more_actions_for", &[("name", name.clone())]),
+                            aria_label: i18n::t_with("more_actions_for", &[("name", name.clone().into())]),
                             button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
                             anchor: "right".to_string(),
                             on_action: move |idx: usize| {
@@ -804,7 +806,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                             div { class: "flex items-start justify-between gap-2",
                                                 div { class: "min-w-0 flex-1",
                                                     h3 { class: "text-xl font-bold text-white mb-1 truncate", "{fname}" }
-                                                    p { class: "text-sm text-slate-400", "{count} playlists" }
+                                                    p { class: "text-sm text-slate-400", {i18n::t_with("playlist_folder_count", &[("count", count.into())])} }
                                                 }
                                                 div { onclick: move |evt| evt.stop_propagation(),
                                                     DotsMenu {
@@ -812,7 +814,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                                         is_open: is_menu_open,
                                                         on_open: move |_| active_menu.set(Some(fid_menu.clone())),
                                                         on_close: move |_| active_menu.set(None),
-                                                        aria_label: i18n::t_with("more_actions_for", &[("name", fname.clone())]),
+                                                        aria_label: i18n::t_with("more_actions_for", &[("name", fname.clone().into())]),
                                                         button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
                                                         anchor: "right".to_string(),
                                                         on_action: move |idx: usize| {
