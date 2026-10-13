@@ -192,8 +192,7 @@ pub fn init(log_dir: &Path) {
     // outcome lands in the log, flush guards, then exit with the
     // conventional 130.
     let _ = ctrlc::set_handler(|| {
-        crate::exit_flush::flush_stashed_blocking();
-        shutdown();
+        crate::exit_flush::finish_with_stashed();
         std::process::exit(130);
     });
 

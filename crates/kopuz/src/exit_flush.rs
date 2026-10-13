@@ -1,4 +1,4 @@
-//! What the app has not sent yet, stashed for the SIGINT path, which runs on the ctrlc thread where no signal can be read.
+//! What the app has not sent yet, stashed for the exit paths that run where no signal can be read.
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -74,20 +74,50 @@ pub fn persist_on_fresh_thread(
     .join();
 }
 
-/// SIGINT path: persist whatever the app last stashed, then flush the core. A
-/// no-op before the startup loads complete, so an early Ctrl+C cannot wipe
-/// saved state.
-pub fn flush_stashed_blocking() {
-    let edits = match STASHED.lock() {
-        Ok(stashed) => stashed.clone(),
-        Err(_) => return,
-    };
-    let prefs = match STASHED_PREFS.lock() {
-        Ok(stashed) => stashed.clone(),
-        Err(_) => None,
-    };
-    if crate::backend::core().is_some() {
-        persist_on_fresh_thread(edits, prefs);
+/// Persist unsent edits, flush the core, drop its socket and close the logs; whichever exit path arrives first runs it and the rest wait.
+pub fn finish(edits: Option<Vec<config::SettingsEdit>>, prefs: Option<Vec<api::PrefEntry>>) {
+    static FINISHED: Mutex<bool> = Mutex::new(false);
+    run_once(&FINISHED, || {
+        if crate::backend::core().is_some() {
+            persist_on_fresh_thread(edits, prefs);
+        }
+        crate::backend::shutdown();
+        crate::logging::shutdown();
+    });
+}
+
+fn run_once(done: &Mutex<bool>, work: impl FnOnce()) {
+    let mut done = done.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if !*done {
+        *done = true;
+        work();
     }
-    crate::backend::shutdown();
+}
+
+/// Finish with the last stash, for the signal thread and the window teardown, where no signal can be read.
+pub fn finish_with_stashed() {
+    let edits = STASHED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let prefs = STASHED_PREFS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    finish(edits, prefs);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::run_once;
+    use std::sync::Mutex;
+
+    #[test]
+    fn every_exit_path_after_the_first_is_a_no_op() {
+        let done = Mutex::new(false);
+        let mut runs = 0;
+        run_once(&done, || runs += 1);
+        run_once(&done, || runs += 1);
+        assert_eq!(runs, 1);
+    }
 }

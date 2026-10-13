@@ -499,21 +499,17 @@ fn App() -> Element {
                 }
             ) && !*close_hides_window.peek();
         if shutting_down {
-            if backend::core().is_some() {
-                // Library/playlists/favorites need no flush — every mutation
-                // already committed as a targeted write when it happened. The
-                // queue is the core's: it owns the store and persists on the
-                // way out, so only the config surface is ours to push.
-                let unsent = (*config_loaded_ok.peek()).then(|| settings_handle.unsent());
-                exit_flush::persist_on_fresh_thread(unsent, Some(ui_prefs.unsent()));
-            }
-            backend::shutdown();
-            // After the persists, so they (and any failure warnings) land in
-            // latest.log and the trace. Idempotent across CloseRequested/
-            // LoopDestroyed; Ctrl+C is covered by the SIGINT handler.
-            crate::logging::shutdown();
+            // Library/playlists/favorites need no flush — every mutation
+            // already committed as a targeted write when it happened. The
+            // queue is the core's: it owns the store and persists on the
+            // way out, so only the config surface is ours to push.
+            let unsent = (*config_loaded_ok.peek()).then(|| settings_handle.unsent());
+            exit_flush::finish(unsent, Some(ui_prefs.unsent()));
         }
     });
+    // `window().close()` (the title bar's ×, the tray's Quit) tears the window down without a CloseRequested event.
+    #[cfg(not(target_os = "android"))]
+    use_drop(exit_flush::finish_with_stashed);
 
     #[cfg(target_os = "macos")]
     use_effect(move || {
@@ -649,7 +645,10 @@ fn App() -> Element {
     });
 
     #[cfg(not(target_os = "android"))]
-    use_effect(move || exit_flush::stash_config(settings_handle.unsent_tracked()));
+    use_effect(move || {
+        let unsent = config_loaded_ok().then(|| settings_handle.unsent_tracked());
+        exit_flush::stash_config(unsent.unwrap_or_default());
+    });
     #[cfg(not(target_os = "android"))]
     use_effect(move || exit_flush::stash_prefs(ui_prefs.unsent_tracked()));
 
