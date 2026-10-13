@@ -759,13 +759,13 @@ impl SubsonicClient {
             .timeout(timeout)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(redacted)?;
 
         if !resp.status().is_success() {
             return Err(format!("Subsonic request failed: {}", resp.status()));
         }
 
-        let parsed: SubsonicEnvelope<T> = resp.json().await.map_err(|e| e.to_string())?;
+        let parsed: SubsonicEnvelope<T> = resp.json().await.map_err(redacted)?;
 
         if parsed.response.status.eq_ignore_ascii_case("ok") {
             return Ok(parsed.response.data);
@@ -782,9 +782,50 @@ impl SubsonicClient {
     }
 }
 
+/// A request error as text without its URL, whose query carries the user name, token and salt.
+fn redacted(error: reqwest::Error) -> String {
+    error.without_url().to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_no_credentials(error: &str) {
+        for secret in ["someone", "u=", "t=", "s="] {
+            assert!(!error.contains(secret), "{secret} in {error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_call_keeps_the_credentials_out_of_its_error() {
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let address = closed.local_addr().expect("address");
+        drop(closed);
+        let unreachable = SubsonicClient::new(&format!("http://{address}"), "someone", "hunter2");
+        let error = unreachable.ping().await.expect_err("nothing listens");
+        assert_no_credentials(&error);
+
+        let server = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = server.local_addr().expect("address");
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            if let Ok((mut stream, _)) = server.accept().await {
+                let mut request = [0u8; 4096];
+                let _ = stream.read(&mut request).await;
+                let _ = stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nnot",
+                    )
+                    .await;
+            }
+        });
+        let garbled = SubsonicClient::new(&format!("http://{address}"), "someone", "hunter2");
+        let error = garbled.ping().await.expect_err("not json");
+        assert_no_credentials(&error);
+    }
 
     fn parse<T: DeserializeOwned + Default>(body: serde_json::Value) -> T {
         let envelope: SubsonicEnvelope<T> =

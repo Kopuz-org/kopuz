@@ -78,11 +78,13 @@ pub async fn get_auth_token(api_key: &str) -> Result<String, reqwest::Error> {
             ("format", "json"),
         ])
         .send()
-        .await?;
+        .await
+        .map_err(reqwest::Error::without_url)?;
 
-    resp.error_for_status_ref()?;
+    resp.error_for_status_ref()
+        .map_err(reqwest::Error::without_url)?;
 
-    let body: AuthTokenResponse = resp.json().await?;
+    let body: AuthTokenResponse = resp.json().await.map_err(reqwest::Error::without_url)?;
 
     Ok(body.token)
 }

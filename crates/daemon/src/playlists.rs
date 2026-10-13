@@ -415,8 +415,7 @@ impl PlaylistService {
                 )
                 .await
         {
-            // Only the code: a Subsonic error's text holds the request URL, token and salt included.
-            tracing::warn!(code = ?error.code, "favorites pull before the playlist sync failed");
+            tracing::warn!(%error, "favorites pull before the playlist sync failed");
         }
         let existing = self
             .db
