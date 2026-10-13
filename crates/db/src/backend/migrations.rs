@@ -371,8 +371,8 @@ async fn fill_state(pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(
     .bind(&data.device_id)
     .bind(data.active_source.as_str())
     .bind(cfg.source_explicitly_set)
-    .bind(f64::from(cfg.volume))
-    .bind(cfg.discord_presence_paused)
+    .bind(f64::from(data.volume))
+    .bind(data.discord_presence_paused)
     .bind(cfg.fullscreen_tabs_collapsed)
     .bind(name(serde_json::to_value(&cfg.sort_order)?)?)
     .bind(name(serde_json::to_value(cfg.album_view_mode)?)?)
@@ -1023,6 +1023,8 @@ async fn import_config(
     }
     super::cfg_store::write_source_state(tx, Some(&data.active_source), Some(&data.device_id))
         .await?;
+    super::cfg_store::write_playback_state(tx, data.volume, false).await?;
+    super::cfg_store::write_discord_presence_paused(tx, data.discord_presence_paused).await?;
     for (server, folders) in &data.server_folders {
         super::cfg_store::write_server_folders(tx, server, folders).await?;
     }
@@ -1590,7 +1592,7 @@ struct LegacyQueue {
     shuffle_enabled: bool,
 }
 
-/// The library data, source state and credentials an old config blob or `config.json` held beside its settings.
+/// The library data, source state, runtime state and credentials an old config blob or `config.json` held beside its settings.
 #[derive(Deserialize)]
 #[serde(default)]
 struct LegacyData {
@@ -1601,6 +1603,8 @@ struct LegacyData {
     server_folders: HashMap<String, Vec<String>>,
     active_source: config::Source,
     device_id: String,
+    volume: f32,
+    discord_presence_paused: Option<bool>,
     musicbrainz_token: String,
     lastfm_api_key: String,
     lastfm_api_secret: String,
@@ -1630,6 +1634,8 @@ impl Default for LegacyData {
             server_folders: HashMap::new(),
             active_source: config::Source::default(),
             device_id: uuid::Uuid::new_v4().to_string(),
+            volume: 1.0,
+            discord_presence_paused: Some(true),
             musicbrainz_token: String::new(),
             lastfm_api_key: String::new(),
             lastfm_api_secret: String::new(),
@@ -1923,7 +1929,7 @@ mod row_fill_tests {
         .await
         .unwrap();
         sqlx::raw_sql(
-            r#"INSERT INTO app_config (id, json) VALUES (1, '{"theme":"dark","volume":0.3,"active_source":{"Server":"yt-1"},"album_sort":[{"field":"Year","direction":"Desc"}],"lastfm_session_key":"sk","offline_tracks":{"t1":"/c/t1.flac"},"pinned_stations":["{\"id\":\"moe\"}", "not json"]}');
+            r#"INSERT INTO app_config (id, json) VALUES (1, '{"theme":"dark","volume":0.3,"discord_presence_paused":false,"active_source":{"Server":"yt-1"},"album_sort":[{"field":"Year","direction":"Desc"}],"lastfm_session_key":"sk","offline_tracks":{"t1":"/c/t1.flac"},"pinned_stations":["{\"id\":\"moe\"}", "not json"]}');
                INSERT INTO servers (id, name, url, service, updated_at) VALUES ('yt-1', 'yt', '', 'YtMusic', 0);
                INSERT INTO kv (name, kind, value) VALUES
                  ('yt_sync', 'timestamps', '{"last_yt_sync_at":1700000000,"last_yt_playlists_sync_at":null}'),
@@ -1973,14 +1979,15 @@ mod row_fill_tests {
             .await
             .unwrap();
         assert_eq!(pins, ["moe"], "an unreadable pin is dropped");
-        let state: (String, f64) =
-            sqlx::query_as("SELECT active_source, volume FROM app_state WHERE id = 1")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let state: (String, f64, Option<bool>, bool) = sqlx::query_as(
+            "SELECT active_source, volume, discord_presence_paused, muted FROM app_state WHERE id = 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(
             state,
-            ("yt-1".into(), f64::from(0.3f32)),
+            ("yt-1".into(), f64::from(0.3f32), Some(false), false),
             "the blob's state is rows now"
         );
         let sort: (String, String, String) =
@@ -2002,6 +2009,7 @@ mod row_fill_tests {
             .unwrap();
         assert_eq!(written["theme"].as_str(), Some("dark"));
         assert!(!written.contains_key("volume") && !written.contains_key("lastfm_session_key"));
+        assert!(!written.contains_key("discord_presence_paused"));
 
         let kv: Vec<(String, String, String)> =
             sqlx::query_as("SELECT name, kind, value FROM kv ORDER BY kind, name")

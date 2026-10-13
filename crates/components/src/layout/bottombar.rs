@@ -17,7 +17,6 @@ pub fn Bottombar(
     current_song_title: Signal<String>,
     current_song_artist: Signal<String>,
     volume: Signal<f32>,
-    persisted_volume: Signal<f32>,
     is_rightbar_open: Signal<bool>,
     is_devices_open: Signal<bool>,
 ) -> Element {
@@ -34,7 +33,7 @@ pub fn Bottombar(
                 config, is_playing, is_fullscreen,
                 current_song_duration, current_song_progress, queue, current_queue_index,
                 current_song_title, current_song_artist,
-                volume, persisted_volume, is_rightbar_open, is_devices_open,
+                volume, is_rightbar_open, is_devices_open,
             }
         },
         UiStyle::Vaxry => rsx! {
@@ -42,7 +41,7 @@ pub fn Bottombar(
                 config, is_playing, is_fullscreen,
                 current_song_duration, current_song_progress, queue, current_queue_index,
                 current_song_title, current_song_artist,
-                volume, persisted_volume, is_rightbar_open, is_devices_open,
+                volume, is_rightbar_open, is_devices_open,
             }
         },
     }

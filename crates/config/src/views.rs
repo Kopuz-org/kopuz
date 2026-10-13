@@ -1,7 +1,6 @@
 use crate::{
-    AppConfig, ArtistViewOrder, BackBehavior, Browser, ChannelMode, EqualizerSettings,
-    FetchStrategy, HomeSection, ListenNowStyle, MusicServer, MusicService, PlayerBarPosition,
-    ReplayGainSettings, SettingsLayout, SortOrder, TitlebarMode, UiStyle,
+    AppConfig, ArtistViewOrder, Browser, FetchStrategy, HomeSection, ListenNowStyle, MusicServer,
+    MusicService, PlayerBarPosition, SettingsLayout, SortOrder, TitlebarMode, UiStyle,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,17 +15,6 @@ pub enum ServerAuth {
         user_id: Option<String>,
         anonymous: bool,
     },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PlaybackConfig {
-    pub volume: f32,
-    pub volume_scroll_step: f32,
-    pub crossfade_seconds: u8,
-    pub back_behavior: BackBehavior,
-    pub channel_mode: ChannelMode,
-    pub equalizer: EqualizerSettings,
-    pub replay_gain: ReplayGainSettings,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -72,18 +60,6 @@ impl MusicServer {
 }
 
 impl AppConfig {
-    pub fn playback(&self) -> PlaybackConfig {
-        PlaybackConfig {
-            volume: self.volume,
-            volume_scroll_step: self.volume_scroll_step,
-            crossfade_seconds: self.crossfade_seconds,
-            back_behavior: self.back_behavior,
-            channel_mode: self.channel_mode,
-            equalizer: self.equalizer.clone(),
-            replay_gain: self.replay_gain,
-        }
-    }
-
     pub fn ui(&self) -> UiConfig {
         UiConfig {
             theme: self.theme.clone(),

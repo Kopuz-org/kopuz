@@ -116,18 +116,13 @@ pub fn api() -> std::sync::Arc<dyn api::KopuzApi> {
         .expect("the core is started before anything asks it for something")
 }
 
-/// Flush what the core owns. The socket is released with the listener that
-/// bound it, so this only has to make the library durable.
-///
-/// The volume goes first, because the core debounces it: a close moments
-/// after a slider drag would otherwise persist the value from before the
-/// drag, whatever the window handed over in its config snapshot.
+/// Flush what the core owns; the volume and mute go first, since a close right after a slider drag lands inside their debounce.
 pub fn shutdown() {
     let Some(core) = CORE.get() else {
         return;
     };
     let session = core.session.clone();
-    let config = core.config_service.clone();
+    let database = core.db.clone();
     // Dioxus forbids block_on inside its runtime, so the flush gets a thread.
     let flush = std::thread::spawn(move || {
         let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
@@ -137,7 +132,7 @@ pub fn shutdown() {
             return;
         };
         runtime.block_on(async move {
-            daemon::boot::flush_volume(&session, &config).await;
+            daemon::boot::flush_playback_state(&session, &database).await;
             session.persist_now().await;
         });
     });

@@ -26,7 +26,6 @@ pub fn Fullscreen(
     current_song_bitrate: Signal<u16>,
     current_song_album: Signal<String>,
     volume: Signal<f32>,
-    persisted_volume: Signal<f32>,
     palette: Signal<Option<Vec<utils::color::Color>>>,
 ) -> Element {
     if !*is_fullscreen.read() {
@@ -74,7 +73,6 @@ pub fn Fullscreen(
                 items,
                 lyrics,
                 volume,
-                persisted_volume,
                 background_style,
                 cover_background,
             }

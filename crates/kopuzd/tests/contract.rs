@@ -178,7 +178,11 @@ async fn spawn_pair() -> Pair {
         session.sources(),
     );
     sources.watch_active(session.sources_watch());
-    let integrations = daemon::IntegrationService::new(config_service.clone(), credentials);
+    let presence_pause = daemon::PresencePause::load(&database)
+        .await
+        .expect("presence pause");
+    let integrations =
+        daemon::IntegrationService::new(config_service.clone(), credentials, presence_pause);
     let downloader =
         daemon::UrlDownloadService::new(database.clone(), config_service.clone(), sources.clone());
     let prefs = daemon::PrefsService::new(database.clone(), session.clone());

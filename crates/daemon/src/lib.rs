@@ -46,6 +46,7 @@ pub use downloads::DownloadsService;
 pub use external::{ExternalPlayer, ExternalReport};
 pub use favorites::FavoritesService;
 pub use integrations::IntegrationService;
+pub use integrations::PresencePause;
 pub use integrations::SourceRecorder;
 pub use jobs::JobRunner;
 pub use library::LibraryService;

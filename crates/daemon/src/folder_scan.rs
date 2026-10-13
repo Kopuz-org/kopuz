@@ -161,7 +161,7 @@ mod tests {
         settle().await;
         assert_eq!(count.load(Ordering::SeqCst), 1, "startup scan");
 
-        tx.send_modify(|config| config.volume = 0.5);
+        tx.send_modify(|config| config.crossfade_seconds = 5);
         settle().await;
         assert_eq!(count.load(Ordering::SeqCst), 1, "unrelated change");
 
@@ -336,7 +336,7 @@ mod tests {
         spawn_with(start, rx, events_rx, true);
         pass(Duration::from_millis(1)).await;
         pass(minutes(30)).await;
-        tx.send_modify(|config| config.volume = 0.2);
+        tx.send_modify(|config| config.crossfade_seconds = 2);
         pass(minutes(31)).await;
         assert_eq!(count.load(Ordering::SeqCst), 2);
     }

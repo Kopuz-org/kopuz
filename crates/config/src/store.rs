@@ -39,9 +39,6 @@ const NIX_STORE_PREFIX: &str = "/nix/store";
 /// What the app changes by being used rather than through its settings: the DB keeps it, and no settings layer holds it.
 pub const STATE_KEYS: &[&str] = &[
     "source_explicitly_set",
-    "volume",
-    "muted",
-    "discord_presence_paused",
     "fullscreen_tabs_collapsed",
     "sort_order",
     "album_sort",
@@ -488,10 +485,7 @@ fn json_to_toml(value: &JsonValue) -> Option<TomlValue> {
     })
 }
 
-/// `serde_json` widens the config's `f32` fields to `f64`, so `volume = 0.05`
-/// would land in the file as `0.05000000074505806`. A value that survives a
-/// round trip through `f32` came from one, so write the short form a human
-/// would have typed; anything genuinely `f64` keeps full precision.
+/// `serde_json` widens `f32` to `f64` (`0.05` → `0.05000000074505806`), so a value that survives an `f32` round trip is written short.
 fn shorten_f32(f: f64) -> f64 {
     let narrow = f as f32;
     if f64::from(narrow) != f {
@@ -684,7 +678,6 @@ mod tests {
         let defaults = AppConfig::default();
         assert_eq!(restored.theme, defaults.theme);
         assert_eq!(restored.local_sources, defaults.local_sources);
-        assert_eq!(restored.volume, defaults.volume);
         assert_eq!(restored.home_sections, defaults.home_sections);
         assert_eq!(restored.equalizer, defaults.equalizer);
         assert_eq!(restored.radio_registries, defaults.radio_registries);
@@ -727,7 +720,7 @@ mod tests {
             spotify_prefer_active_device: false,
             theme: "custom-one".into(),
             discord_presence: Some(false),
-            discord_presence_paused: None,
+            discord_presence_source: None,
             sort_order: SortOrder::Album,
             album_sort: vec![
                 SortCriterion::new(AlbumSortField::Year, SortDirection::Desc),
@@ -738,7 +731,6 @@ mod tests {
             cover_art_darkening: 42,
             custom_font_path: "/fonts/Inter.ttf".into(),
             sidebar_order: vec!["home".into(), "albums".into()],
-            volume: 0.33,
             crossfade_seconds: 7,
             custom_themes: HashMap::from([(
                 "custom-one".to_string(),
@@ -836,8 +828,8 @@ mod tests {
         assert_eq!(restored.sync_interval_minutes, cfg.sync_interval_minutes);
 
         assert_eq!(
-            restored.volume,
-            AppConfig::default().volume,
+            restored.hero_height,
+            AppConfig::default().hero_height,
             "state stays in the DB"
         );
     }
@@ -876,7 +868,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
         let cfg = AppConfig {
-            volume: 0.2,
+            hero_height: 200,
             ..Default::default()
         };
         let cfg_json = serde_json::to_value(&cfg).unwrap();
@@ -889,13 +881,13 @@ mod tests {
         }
 
         // A file an older build wrote still holds them; no layer may hand them back.
-        std::fs::write(&path, "volume = 0.9\ntheme = \"nord\"\n").unwrap();
-        let env = [("KOPUZ_CONFIG_VOLUME".to_string(), "0.1".to_string())].into_iter();
+        std::fs::write(&path, "hero_height = 900\ntheme = \"nord\"\n").unwrap();
+        let env = [("KOPUZ_CONFIG_HERO_HEIGHT".to_string(), "100".to_string())].into_iter();
         let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, env);
         let mut base = serde_json::json!({});
         layers.apply(&mut base);
         assert_eq!(base, serde_json::json!({ "theme": "nord" }));
-        assert!(!layers.is_locked("volume"));
+        assert!(!layers.is_locked("hero_height"));
     }
 
     #[test]
@@ -910,11 +902,11 @@ mod tests {
 
         let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, env.into_iter());
 
-        let mut base = serde_json::json!({ "theme": "default", "volume": 0.5 });
+        let mut base = serde_json::json!({ "theme": "default", "crossfade_seconds": 5 });
         layers.apply(&mut base);
         assert_eq!(base["theme"], "gruvbox");
         assert_eq!(base["language"], "de");
-        assert_eq!(base["volume"], 0.5);
+        assert_eq!(base["crossfade_seconds"], 5);
         // A writable main file doesn't lock; drop-ins and env do.
         assert!(layers.is_locked("theme"));
         assert!(!layers.is_locked("language"));
@@ -1033,7 +1025,7 @@ mod tests {
         let hand_written = format!("# mine\n{}", std::fs::read_to_string(&path).unwrap());
         std::fs::write(&path, &hand_written).unwrap();
 
-        cfg.volume = 0.5;
+        cfg.hero_height += 1;
         let saved = save_settings_file(
             &path,
             &serde_json::to_value(&cfg).unwrap(),
@@ -1133,7 +1125,7 @@ mod tests {
         std::fs::write(&path, "theme = \"nord\"\n").unwrap();
 
         let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
-        let base = serde_json::json!({ "volume": { "not": "a number" } });
+        let base = serde_json::json!({ "hero_height": { "not": "a number" } });
 
         assert!(
             layers.merge_and_parse(base).is_err(),

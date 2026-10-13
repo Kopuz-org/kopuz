@@ -12,7 +12,7 @@ pub use source::{
     Browser, BrowserEngine, DEFAULT_LOCAL_ID, DEFAULT_LOCAL_NAME, JellyfinServer, MusicServer,
     MusicService, SavedLocalSource, SavedServer, Source,
 };
-pub use views::{LibraryConfig, PlaybackConfig, ServerAuth, UiConfig};
+pub use views::{LibraryConfig, ServerAuth, UiConfig};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum FetchStrategy {
@@ -771,8 +771,6 @@ pub struct AppConfig {
     pub live_theme_path: String,
     #[serde(default = "default_discord_presence")]
     pub discord_presence: Option<bool>,
-    #[serde(default = "default_discord_presence_paused")]
-    pub discord_presence_paused: Option<bool>,
     #[serde(default = "default_discord_presence_source")]
     pub discord_presence_source: Option<bool>,
     #[serde(default = "default_sort_order")]
@@ -842,10 +840,6 @@ pub struct AppConfig {
     pub show_row_images: bool,
     #[serde(default = "default_sidebar_order")]
     pub sidebar_order: Vec<String>,
-    #[serde(default = "default_volume")]
-    pub volume: f32,
-    #[serde(default)]
-    pub muted: bool,
     #[serde(default = "default_volume_scroll_step")]
     pub volume_scroll_step: f32,
     #[serde(default = "default_crossfade_seconds")]
@@ -927,10 +921,6 @@ fn default_discord_presence() -> Option<bool> {
     Some(true)
 }
 
-fn default_discord_presence_paused() -> Option<bool> {
-    Some(true)
-}
-
 fn default_discord_presence_source() -> Option<bool> {
     Some(true)
 }
@@ -991,10 +981,6 @@ pub fn default_sidebar_order() -> Vec<String> {
     ]
 }
 
-fn default_volume() -> f32 {
-    1.0
-}
-
 fn default_volume_scroll_step() -> f32 {
     0.05
 }
@@ -1041,7 +1027,6 @@ impl Default for AppConfig {
             theme: default_theme(),
             live_theme_path: String::new(),
             discord_presence: Some(true),
-            discord_presence_paused: Some(true),
             discord_presence_source: Some(true),
             sort_order: default_sort_order(),
             album_sort: default_album_sort(),
@@ -1067,8 +1052,6 @@ impl Default for AppConfig {
             show_source_toggle: default_show_source_toggle(),
             show_row_images: true,
             sidebar_order: default_sidebar_order(),
-            volume: default_volume(),
-            muted: false,
             volume_scroll_step: default_volume_scroll_step(),
             crossfade_seconds: default_crossfade_seconds(),
             custom_themes: HashMap::new(),
@@ -1161,8 +1144,8 @@ impl AppConfig {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppConfig, BackBehavior, Browser, EqualizerSettings, MusicServer, ReplayGainInfo,
-        ReplayGainMode, ReplayGainSettings, ServerAuth, SettingsLayout, loudness_gain,
+        AppConfig, Browser, EqualizerSettings, MusicServer, ReplayGainInfo, ReplayGainMode,
+        ReplayGainSettings, ServerAuth, SettingsLayout, loudness_gain,
     };
 
     fn tagged() -> ReplayGainInfo {
@@ -1423,24 +1406,6 @@ mod tests {
 
         assert_eq!(default_config.settings_layout, SettingsLayout::Cd);
         assert_eq!(top_bar_config.settings_layout, SettingsLayout::TopBar);
-    }
-
-    #[test]
-    fn playback_view_projects_playback_fields() {
-        let mut config = AppConfig {
-            volume: 0.4,
-            crossfade_seconds: 5,
-            back_behavior: BackBehavior::AlwaysPrev,
-            ..AppConfig::default()
-        };
-        config.equalizer.enabled = true;
-
-        let playback = config.playback();
-
-        assert_eq!(playback.volume, 0.4);
-        assert_eq!(playback.crossfade_seconds, 5);
-        assert_eq!(playback.back_behavior, BackBehavior::AlwaysPrev);
-        assert!(playback.equalizer.enabled);
     }
 
     #[test]

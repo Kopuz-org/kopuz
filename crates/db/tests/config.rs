@@ -324,7 +324,7 @@ async fn a_save_writes_the_settings_file_and_a_hand_edit_wins_on_load() {
 async fn managed_settings_file_is_never_written_but_still_applies() {
     let db_path = unique_db();
     let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
-    std::fs::write(&settings_path, "theme = \"nord\"\nvolume = 0.25\n").unwrap();
+    std::fs::write(&settings_path, "theme = \"nord\"\nhero_height = 250\n").unwrap();
     let mut perms = std::fs::metadata(&settings_path).unwrap().permissions();
     perms.set_readonly(true);
     std::fs::set_permissions(&settings_path, perms).unwrap();
@@ -338,30 +338,30 @@ async fn managed_settings_file_is_never_written_but_still_applies() {
         .unwrap()
         .expect("file layers present");
     assert_eq!(loaded.theme, "nord");
-    assert_eq!(loaded.volume, AppConfig::default().volume);
+    assert_eq!(loaded.hero_height, AppConfig::default().hero_height);
 
     // The immutable file is left alone; what it leaves unset goes beside it, and state to the DB.
     let mut cfg = loaded;
     cfg.theme = "dracula".into();
     cfg.crossfade_seconds = 4;
-    cfg.volume = 0.25;
+    cfg.hero_height = 250;
     db.save_config(&cfg).await.unwrap();
     assert_eq!(
         std::fs::read_to_string(&settings_path).unwrap(),
-        "theme = \"nord\"\nvolume = 0.25\n"
+        "theme = \"nord\"\nhero_height = 250\n"
     );
     let local: toml::Table = std::fs::read_to_string(config::store::local_path_for(&settings_path))
         .expect("local settings written")
         .parse()
         .unwrap();
-    assert!(!local.contains_key("theme") && !local.contains_key("volume"));
+    assert!(!local.contains_key("theme") && !local.contains_key("hero_height"));
     let reloaded = db.load_config().await.unwrap().expect("config present");
     assert_eq!(reloaded.theme, "nord", "the managed key wins");
     assert_eq!(
         reloaded.crossfade_seconds, 4,
         "an unmanaged setting persists"
     );
-    assert_eq!(reloaded.volume, 0.25, "state persists in the DB");
+    assert_eq!(reloaded.hero_height, 250, "state persists in the DB");
 
     let mut perms = std::fs::metadata(&settings_path).unwrap().permissions();
     perms.set_readonly(false);
@@ -395,7 +395,7 @@ async fn layered_overrides_are_not_persisted_as_base_config() {
 
     // Change something unrelated while the override is in force.
     let mut cfg = loaded;
-    cfg.volume = 0.42;
+    cfg.hero_height = 342;
     db.save_config(&cfg).await.unwrap();
 
     let written: toml::Table = std::fs::read_to_string(&settings_path)
@@ -414,7 +414,7 @@ async fn layered_overrides_are_not_persisted_as_base_config() {
         reloaded.theme, "midnight",
         "removing the drop-in must restore the configured theme"
     );
-    assert_eq!(reloaded.volume, 0.42, "unpinned key persists");
+    assert_eq!(reloaded.hero_height, 342, "unpinned key persists");
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
@@ -430,7 +430,7 @@ async fn hand_written_layers_apply_in_order_and_survive_bad_keys() {
         theme: "midnight".into(),
         language: "en".into(),
         crossfade_seconds: 3,
-        volume: 0.8,
+        hero_height: 380,
         ..Default::default()
     };
     db.save_config(&cfg).await.unwrap();
@@ -451,7 +451,7 @@ async fn hand_written_layers_apply_in_order_and_survive_bad_keys() {
     let loaded = db.load_config().await.unwrap().expect("config present");
     assert_eq!(loaded.theme, "dracula", "the drop-in out-ranks the file");
     assert_eq!(loaded.language, "tr");
-    assert_eq!(loaded.volume, 0.8, "state comes from the DB");
+    assert_eq!(loaded.hero_height, 380, "state comes from the DB");
     assert_eq!(
         loaded.crossfade_seconds,
         AppConfig::default().crossfade_seconds,
@@ -469,7 +469,26 @@ async fn hand_written_layers_apply_in_order_and_survive_bad_keys() {
         .unwrap();
     assert_eq!(written["theme"].as_str(), Some("nord"));
     assert_eq!(written["language"].as_str(), Some("de"));
-    assert!(!written.contains_key("volume"));
+    assert!(!written.contains_key("hero_height"));
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn playback_state_and_presence_pause_survive_a_reopen_and_a_config_save() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    assert_eq!(db.playback_state().await.unwrap(), (1.0, false));
+    assert_eq!(db.discord_presence_paused().await.unwrap(), None);
+
+    db.set_playback_state(0.35, true).await.unwrap();
+    db.set_discord_presence_paused(false).await.unwrap();
+    db.save_config(&AppConfig::default()).await.unwrap();
+    drop(db);
+
+    let db = db::init(&db_path).await.unwrap();
+    assert_eq!(db.playback_state().await.unwrap(), (0.35, true));
+    assert_eq!(db.discord_presence_paused().await.unwrap(), Some(false));
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

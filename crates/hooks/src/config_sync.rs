@@ -3,9 +3,6 @@
 use dioxus::prelude::*;
 use serde_json::{Map, Value};
 
-/// Volume and mute ride the player state, so the settings copy never takes them from here.
-const SKIPPED: &[&str] = &["volume", "muted"];
-
 /// The config this app last sent or adopted and the daemon revision it matches, which tells the echo of its own write from another writer's change.
 #[derive(Clone, Copy)]
 pub struct ConfigBaseline(Signal<Option<(config::AppConfig, u64)>>);
@@ -76,7 +73,7 @@ fn moved(
     let (mut local, mut baseline) = (fields(local)?, fields(baseline)?);
     let mut changed = false;
     for (key, value) in fields(daemon)? {
-        if SKIPPED.contains(&key.as_str()) || baseline.get(&key) == Some(&value) {
+        if baseline.get(&key) == Some(&value) {
             continue;
         }
         local.insert(key.clone(), value.clone());
@@ -136,15 +133,5 @@ mod tests {
         daemon.local_sources.push(added.clone());
         let (next, _) = moved(&baseline, &baseline, &daemon).expect("folders moved");
         assert_eq!(next.local_sources.last(), Some(&added));
-    }
-
-    #[test]
-    fn volume_never_comes_from_the_settings_copy() {
-        let baseline = config(4, false);
-        let daemon = config::AppConfig {
-            volume: 0.1,
-            ..baseline.clone()
-        };
-        assert!(moved(&baseline, &baseline, &daemon).is_none());
     }
 }
