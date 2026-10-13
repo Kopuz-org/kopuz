@@ -76,7 +76,7 @@ pub fn add_registry(
                 Err(error) => {
                     registry_error.set(Some(i18n::t_with(
                         "radio_registry_import_failed",
-                        &[("error", error.to_string())],
+                        &[("error", error.to_string().into())],
                     )));
                 }
             }
@@ -112,7 +112,7 @@ async fn authenticate_with(
     match api.authenticate_source(server_id).await {
         Ok(_) => error.set(None),
         Err(failure) => {
-            let message = i18n::t_with("signin_failed", &[("error", failure.to_string())]);
+            let message = i18n::t_with("signin_failed", &[("error", failure.to_string().into())]);
             error.set(Some(message.clone()));
             playback_error.set(Some(message));
         }
@@ -280,7 +280,7 @@ pub fn login_with_password(
             Err(error) => {
                 login_error.set(Some(i18n::t_with(
                     "login_failed",
-                    &[("error", error.to_string())],
+                    &[("error", error.to_string().into())],
                 )));
             }
         }

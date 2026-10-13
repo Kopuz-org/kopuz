@@ -188,9 +188,32 @@ loading_lyrics = Carregando letras...
 lyrics_not_found = Letras não encontradas
 instrumental_break = Instrumental
 no_previous_songs = Nenhuma música anterior
-playlist_track_count = { $count } faixas
-music_playlist_count = Música • { $count } faixas
-showcase_song_count = { $count } músicas
+playlist_track_count =
+    { $count ->
+        [one] { $count } faixa
+       *[other] { $count } faixas
+    }
+playlist_folder_count =
+    { $count ->
+        [one] { $count } playlist
+       *[other] { $count } playlists
+    }
+playlists_synced_count =
+    { $count ->
+        [one] { $count } playlist sincronizada
+       *[other] { $count } playlists sincronizadas
+    }
+playlists_loading_tracks = Carregando faixas — playlists { $done } / { $count } ({ $remaining } restantes)
+music_playlist_count =
+    { $count ->
+        [one] Música • { $count } faixa
+       *[other] Música • { $count } faixas
+    }
+showcase_song_count =
+    { $count ->
+        [one] { $count } música
+       *[other] { $count } músicas
+    }
 
 # Modal Titles
 add_playlist = Adicionar playlist
@@ -247,8 +270,11 @@ title = Título
 time = Tempo
 genre = Gênero
 plays = Reproduções
-track_count = { $count } faixas
-track_count_singular = 1 faixa
+track_count =
+    { $count ->
+        [one] { $count } faixa
+       *[other] { $count } faixas
+    }
 songs = músicas
 min = min
 
@@ -283,8 +309,16 @@ unknown_genre = Desconhecido
 no_tracks_in_library = Nenhuma faixa encontrada na sua biblioteca.
 no_songs_here = Nenhuma música aqui.
 syncing_with_server = Sincronizando com o servidor...
-yt_syncing_progress = Sincronizando — { $count } faixas carregadas até agora
-yt_synced_total = { $count } faixas curtidas sincronizadas
+yt_syncing_progress =
+    { $count ->
+        [one] Sincronizando — { $count } faixa carregada até agora
+       *[other] Sincronizando — { $count } faixas carregadas até agora
+    }
+yt_synced_total =
+    { $count ->
+        [one] { $count } faixa curtida sincronizada
+       *[other] { $count } faixas curtidas sincronizadas
+    }
 refresh = Atualizar
 most_played_tracks = Suas faixas mais reproduzidas.
 no_more_songs = Não há mais músicas na fila
@@ -646,7 +680,11 @@ waiting_for_browser = Waiting for your browser…
 signed_in = Signed in
 metadata_number_invalid = Enter a number, or leave it empty to clear the tag.
 metadata_batch_keep = Leave unchanged
-metadata_batch_count = Editing { $count } tracks
+metadata_batch_count =
+    { $count ->
+        [one] Editing { $count } track
+       *[other] Editing { $count } tracks
+    }
 interface_font = Interface font
 interface_font_description = The font family to draw the interface with.
 interface_font_placeholder = Theme default
@@ -792,11 +830,19 @@ discover_clear_search = Clear search
 discover_results_for = Results for "{ $query }"
 discover_no_results_hint = Try fewer words, or switch source and look again.
 discover_show_less = Show less
-discover_genre_count = { $count } genres
+discover_genre_count =
+    { $count ->
+        [one] { $count } genre
+       *[other] { $count } genres
+    }
 discover_read_failed = Couldn't load your library: { $error }
 palette_all_results = All results for "{ $query }" in Discover
 
-library_count = { $count } items
+library_count =
+    { $count ->
+        [one] { $count } item
+       *[other] { $count } items
+    }
 library_filter_placeholder = Filter the library…
 library_chip_downloaded = Downloaded
 library_chip_years = Years
@@ -819,7 +865,11 @@ library_tile_medium = Medium
 library_tile_large = Large
 library_default_view = Grids open as
 library_default_view_description = Whether albums, artists and playlists start as tiles or as rows.
-library_artist_tracks = { $count } tracks
+library_artist_tracks =
+    { $count ->
+        [one] { $count } track
+       *[other] { $count } tracks
+    }
 library_selected = { $count } selected
 library_whole_selection = Everything that matches
 library_read_failed = Could not read the library
@@ -858,7 +908,11 @@ downloader_history = URL downloads
 interface_skin = Skin
 interface_skin_description = The shape of the interface: how round things are, how tall a row sits.
 
-home_plays = { $count } plays
+home_plays =
+    { $count ->
+        [one] { $count } play
+       *[other] { $count } plays
+    }
 
 interface_ambient = Ambient light
 interface_ambient_description = Let the current cover cast its colour across the window.
@@ -885,7 +939,11 @@ clippsly_help = Create an App Password at clippsly.app, then sign in with your C
 cloud_storage_usage = Cloud storage: { $used } of { $total } used
 upload_music = Upload music
 uploading_music = Uploading { $name }…
-music_uploaded = Uploaded { $count } file(s).
+music_uploaded =
+    { $count ->
+        [one] Uploaded { $count } file.
+       *[other] Uploaded { $count } files.
+    }
 music_upload_too_large = Audio files must be no larger than 500 MiB.
 cloud_storage_loading = Loading storage usage…
 

@@ -201,7 +201,7 @@ pub fn QuickSearch(
                 } else if has_query && *results_ready.read() {
                     div {
                         class: "px-5 py-6 text-sm text-white/40",
-                        {i18n::t_with("no_results_found", &[("query", query.read().clone())])}
+                        {i18n::t_with("no_results_found", &[("query", query.read().clone().into())])}
                     }
                 }
             }

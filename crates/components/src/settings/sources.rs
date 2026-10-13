@@ -162,7 +162,7 @@ pub fn SourceSettings(
                                         }
                                     }
                                 }
-                                p { class: "text-xs text-white/60", "{i18n::t_with(\"service\", &[(\"name\", service_name.clone())])}" }
+                                p { class: "text-xs text-white/60", "{i18n::t_with(\"service\", &[(\"name\", service_name.clone().into())])}" }
                                 p { class: "text-xs text-white/60 truncate", "{url}" }
                                 if is_active && srv.needs_network {
                                     match conn() {
@@ -263,7 +263,7 @@ fn CloudStorage(source_id: String, uploads: bool) -> Element {
                 Some(Ok(value)) => {
                     let used = format!("{:.1} MiB", value.used_bytes as f64 / 1_048_576.0);
                     let total = format!("{:.1} MiB", value.quota_bytes as f64 / 1_048_576.0);
-                    rsx! { p { class: "text-xs text-white/60", "{i18n::t_with(\"cloud_storage_usage\", &[(\"used\", used.clone()), (\"total\", total.clone())])}" } }
+                    rsx! { p { class: "text-xs text-white/60", "{i18n::t_with(\"cloud_storage_usage\", &[(\"used\", used.clone().into()), (\"total\", total.clone().into())])}" } }
                 }
                 Some(Err(error)) => rsx! { p { class: "text-xs text-red-400", "{error}" } },
                 None => rsx! { p { class: "text-xs text-white/60", "{i18n::t(\"cloud_storage_loading\")}" } },
@@ -309,7 +309,7 @@ fn CloudStorage(source_id: String, uploads: bool) -> Element {
                                     uploaded += 1;
                                 }
                                 if uploaded > 0 {
-                                    hooks::toast::toast(&i18n::t_with("music_uploaded", &[("count", uploaded.to_string())]));
+                                    hooks::toast::toast(&i18n::t_with("music_uploaded", &[("count", uploaded.into())]));
                                     match api.sources().await {
                                         Ok(sources) if sources.iter().any(|source| source.id == id && source.active) => {
                                             if let Err(error) = api.start_job(api::JobKind::LibrarySync).await {
@@ -330,7 +330,7 @@ fn CloudStorage(source_id: String, uploads: bool) -> Element {
                 }
             }
             if uploading() {
-                p { class: "text-xs text-white/60", "{i18n::t_with(\"uploading_music\", &[(\"name\", current_file())])}" }
+                p { class: "text-xs text-white/60", "{i18n::t_with(\"uploading_music\", &[(\"name\", current_file().into())])}" }
             }
         }
     }

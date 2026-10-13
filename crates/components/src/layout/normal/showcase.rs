@@ -162,7 +162,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                      div { class: if cfg!(target_os = "android") { "flex items-center justify-center gap-4 text-slate-400" } else { "flex items-center gap-6 text-slate-400" },
                          {
                             let count = props.tracks.len();
-                            let song_text = i18n::t_with("showcase_song_count", &[("count", count.to_string())]);
+                            let song_text = i18n::t_with("showcase_song_count", &[("count", count.into())]);
                             rsx! {
                                 p { "{song_text}" }
                             }

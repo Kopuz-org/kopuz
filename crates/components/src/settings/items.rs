@@ -72,13 +72,15 @@ fn cite_lock(by: &config::store::LockSource) -> String {
         }
         LockSource::Managed(path) => i18n::t_with(
             "setting_locked_by_file",
-            &[("path", path.display().to_string())],
+            &[("path", path.display().to_string().into())],
         ),
         LockSource::DropIn(path) => i18n::t_with(
             "setting_locked_by_dropin",
-            &[("path", path.display().to_string())],
+            &[("path", path.display().to_string().into())],
         ),
-        LockSource::Env(var) => i18n::t_with("setting_locked_by_env", &[("var", var.clone())]),
+        LockSource::Env(var) => {
+            i18n::t_with("setting_locked_by_env", &[("var", var.clone().into())])
+        }
     }
 }
 
@@ -694,7 +696,7 @@ pub fn RadioRegistryDropdown(
                         {
                             let enabled_count = registries.iter().filter(|r| r.enabled).count();
                             let total = registries.len();
-                            i18n::t_with("radio_registries_active", &[("enabled_count", enabled_count.to_string()), ("total", total.to_string())])
+                            i18n::t_with("radio_registries_active", &[("enabled_count", enabled_count.into()), ("total", total.into())])
                         }
                     }
                 }

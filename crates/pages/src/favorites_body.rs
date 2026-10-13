@@ -339,12 +339,12 @@ pub fn FavoritesBody(
                                 if syncing {
                                     i { class: "fa-solid fa-arrows-rotate fa-spin text-indigo-300" }
                                     span {
-                                        "{i18n::t_with(\"yt_syncing_progress\", &[(\"count\", synced.to_string())])}"
+                                        "{i18n::t_with(\"yt_syncing_progress\", &[(\"count\", synced.into())])}"
                                     }
                                 } else if total > 0 {
                                     i { class: "fa-solid fa-check text-emerald-400" }
                                     span {
-                                        "{i18n::t_with(\"yt_synced_total\", &[(\"count\", total.to_string())])}"
+                                        "{i18n::t_with(\"yt_synced_total\", &[(\"count\", total.into())])}"
                                     }
                                 }
                             }
@@ -382,7 +382,7 @@ pub fn FavoritesBody(
                         let add_hint = i18n::t("heart_track_to_add");
                         let no_results = i18n::t_with(
                             "no_results_found",
-                            &[("query", search_query.read().trim().to_string())],
+                            &[("query", search_query.read().trim().to_string().into())],
                         );
                         rsx! {
                             div {

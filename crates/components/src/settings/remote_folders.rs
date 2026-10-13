@@ -93,7 +93,7 @@ pub fn RemoteFolderPicker(settings: RemoteFolderSettings) -> Element {
                             },
                             Some(Err(e)) => rsx! {
                                 p { class: "text-xs text-red-400",
-                                    "{i18n::t_with(\"folder_browse_failed\", &[(\"error\", e.clone())])}"
+                                    "{i18n::t_with(\"folder_browse_failed\", &[(\"error\", e.clone().into())])}"
                                 }
                             },
                             Some(Ok(dirs)) if dirs.is_empty() => rsx! {
