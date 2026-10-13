@@ -310,20 +310,20 @@ impl Drop for DiscordState {
 /// resolution keyed by song so a late result never stamps the wrong track.
 pub fn spawn_discord_presence(
     session: &SessionHandle,
-    config: watch::Receiver<config::Settings>,
+    mut config: watch::Receiver<config::Settings>,
     sources: watch::Receiver<Arc<server::sources::Sources>>,
     mut paused: watch::Receiver<bool>,
 ) -> tokio::task::JoinHandle<()> {
     let mut events = session.subscribe();
     let session = session.clone();
     tokio::spawn(async move {
-        let presence = match discord_presence::Presence::new(DISCORD_APP_ID) {
-            Ok(presence) => Arc::new(presence),
-            Err(error) => {
-                tracing::info!(%error, "discord presence unavailable");
-                return;
-            }
-        };
+        let mut presence = None;
+        if !hold_connection(
+            &mut presence,
+            PresenceOptions::of(&config.borrow(), &paused).enabled,
+        ) {
+            return;
+        }
         let (cover_tx, mut cover_rx) =
             tokio::sync::mpsc::unbounded_channel::<(String, Option<String>)>();
         let mut discord = DiscordState {
@@ -341,6 +341,7 @@ pub fn spawn_discord_presence(
         let mut keepalive = tokio::time::interval(Duration::from_secs(DISCORD_TICK_SECS));
         keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut pause_open = true;
+        let mut config_open = true;
 
         loop {
             tokio::select! {
@@ -350,7 +351,9 @@ pub fn spawn_discord_presence(
                     let received = Instant::now();
                     let service = sources.borrow().active_service();
                     let options = PresenceOptions::of(&config.borrow(), &paused);
-                    project(&presence, options, service, &state, received, &mut discord, &session, &cover_tx);
+                    if !present(&mut presence, options, service, &state, received, &mut discord, &session, &cover_tx) {
+                        break;
+                    }
                     last_state = Some((state, received));
                 }
                 resolved = cover_rx.recv() => {
@@ -362,7 +365,9 @@ pub fn spawn_discord_presence(
                         if let Some((state, received)) = &last_state {
                             let service = sources.borrow().active_service();
                             let options = PresenceOptions::of(&config.borrow(), &paused);
-                            project(&presence, options, service, state, *received, &mut discord, &session, &cover_tx);
+                            if !present(&mut presence, options, service, state, *received, &mut discord, &session, &cover_tx) {
+                                break;
+                            }
                         }
                     }
                 }
@@ -375,15 +380,93 @@ pub fn spawn_discord_presence(
                     if let Some((state, received)) = &last_state {
                         let service = sources.borrow().active_service();
                         let options = PresenceOptions::of(&config.borrow(), &paused);
-                        project(&presence, options, service, state, *received, &mut discord, &session, &cover_tx);
+                        if !present(&mut presence, options, service, state, *received, &mut discord, &session, &cover_tx) {
+                            break;
+                        }
+                    }
+                }
+                changed = config.changed(), if config_open => {
+                    if changed.is_err() {
+                        config_open = false;
+                        continue;
+                    }
+                    let options = PresenceOptions::of(&config.borrow(), &paused);
+                    if options.enabled == presence.is_some() {
+                        continue;
+                    }
+                    let kept = match &last_state {
+                        Some((state, received)) => {
+                            let service = sources.borrow().active_service();
+                            present(&mut presence, options, service, state, *received, &mut discord, &session, &cover_tx)
+                        }
+                        None => hold_connection(&mut presence, options.enabled),
+                    };
+                    if !kept {
+                        break;
                     }
                 }
                 _ = keepalive.tick(), if discord.last_enabled => {
-                    presence.tick();
+                    if let Some(presence) = &presence {
+                        presence.tick();
+                    }
                 }
             }
         }
     })
+}
+
+/// Hold the Discord IPC connection only while presence is enabled; answers false when presence cannot exist on this platform.
+fn hold_connection(slot: &mut Option<Arc<discord_presence::Presence>>, enabled: bool) -> bool {
+    match (enabled, slot.is_some()) {
+        (true, false) => match discord_presence::Presence::new(DISCORD_APP_ID) {
+            Ok(presence) => {
+                *slot = Some(Arc::new(presence));
+                true
+            }
+            Err(error) => {
+                tracing::info!(%error, "discord presence unavailable");
+                false
+            }
+        },
+        (false, true) => {
+            if let Some(presence) = slot.take()
+                && let Err(error) = presence.disconnect()
+            {
+                tracing::debug!(%error, "closing the discord connection failed");
+            }
+            true
+        }
+        _ => true,
+    }
+}
+
+/// Project `state` over a connection opened for it, clearing the card before a disable closes the connection.
+#[allow(clippy::too_many_arguments)]
+fn present(
+    slot: &mut Option<Arc<discord_presence::Presence>>,
+    options: PresenceOptions,
+    service: Option<config::MusicService>,
+    state: &PlayerState,
+    received: Instant,
+    discord: &mut DiscordState,
+    session: &SessionHandle,
+    cover_tx: &tokio::sync::mpsc::UnboundedSender<(String, Option<String>)>,
+) -> bool {
+    if options.enabled && !hold_connection(slot, true) {
+        return false;
+    }
+    match slot.as_deref() {
+        Some(presence) => project(
+            presence, options, service, state, received, discord, session, cover_tx,
+        ),
+        None => {
+            discord.cancel_cover_lookup();
+            discord.cover_lookup_attempted = false;
+            discord.was_playing = state.phase == Phase::Playing;
+            discord.last_enabled = false;
+        }
+    }
+    hold_connection(slot, options.enabled)
 }
 
 /// What the presence card shows: the two settings, and the pause toggle the daemon keeps beside them.
@@ -1073,6 +1156,16 @@ mod tests {
             key: key.to_string(),
             value: value.to_string(),
         }
+    }
+
+    #[test]
+    fn a_disabled_presence_opens_no_connection() {
+        let mut slot = None;
+        assert!(hold_connection(&mut slot, false));
+        assert!(
+            slot.is_none(),
+            "nothing dials Discord while presence is off"
+        );
     }
 
     #[tokio::test]
