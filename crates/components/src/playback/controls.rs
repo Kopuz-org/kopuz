@@ -6,7 +6,8 @@ use hooks::use_player_controller::{BufferedRange, LoopMode, PlayerController};
 pub struct SeekDrag {
     pub display_progress: u64,
     pub progress_percent: f64,
-    pub is_radio: bool,
+    /// No known length to seek within: a radio stream, or a track whose source gave none.
+    pub no_length: bool,
     pub on_commit: Callback<FormEvent>,
     pub on_input: Callback<FormEvent>,
 }
@@ -86,7 +87,7 @@ pub fn use_seek_drag(
         0.0
     };
 
-    let is_radio = *current_song_duration.read() == u64::MAX;
+    let no_length = *current_song_duration.read() == u64::MAX;
 
     let on_commit = use_callback(move |evt: FormEvent| {
         if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
@@ -106,7 +107,7 @@ pub fn use_seek_drag(
     SeekDrag {
         display_progress,
         progress_percent,
-        is_radio,
+        no_length,
         on_commit,
         on_input,
     }
@@ -312,12 +313,12 @@ pub fn SeekSlider(
     let seek = use_seek_drag(current_song_duration, current_song_progress);
     let display_progress = seek.display_progress;
     let progress_percent = seek.progress_percent;
-    let is_radio = seek.is_radio;
+    let no_length = seek.no_length;
     let on_commit = seek.on_commit;
     let on_input = seek.on_input;
     let is_loading = *ctrl.is_loading.read();
     let buffered_ranges = ctrl.buffered_ranges.read().clone();
-    let can_seek = !is_radio && !is_loading;
+    let can_seek = !no_length && !is_loading;
 
     match variant {
         ControlsVariant::Fullscreen => rsx! {

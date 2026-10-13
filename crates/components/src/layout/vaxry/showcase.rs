@@ -13,8 +13,9 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let _nav_ctrl = use_context::<NavigationController>();
 
-    let total_seconds: u64 = props.tracks.iter().filter_map(|t| t.duration_secs()).sum();
-    let duration_min = total_seconds / 60;
+    let duration = api::total_duration_secs(&props.tracks)
+        .map(|secs| format!(" · {} {}", secs / 60, i18n::t("min")))
+        .unwrap_or_default();
 
     // Per-track cover resolver (source dispatch + album lookup live in the
     // source layer; no partition decision here).
@@ -156,7 +157,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                 .release_year
                                 .map(|year| format!(" · {year}"))
                                 .unwrap_or_default();
-                            rsx! { "{song_text} · {duration_min} {i18n::t(\"min\")}{release_year}" }
+                            rsx! { "{song_text}{duration}{release_year}" }
                         }
                     }
 

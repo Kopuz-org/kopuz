@@ -96,8 +96,7 @@ pub fn TrackRow(
         }
     };
 
-    let fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
-    let duration_str = fmt_dur(track.duration_secs().unwrap_or_default());
+    let duration_str = duration_label(&track);
 
     // The container a file is in, which the daemon works out: a row
     // that came from a service names no file, so it has none.
@@ -173,8 +172,10 @@ pub fn TrackRow(
                     }
                     span { class: "text-[11px] text-white/45 truncate leading-tight",
                         span { dir: "auto", "{track.artist}" }
-                        " • "
-                        span { dir: "ltr", "{duration_str}" }
+                        if !duration_str.is_empty() {
+                            " • "
+                            span { dir: "ltr", "{duration_str}" }
+                        }
                     }
                 }
 
@@ -738,4 +739,25 @@ pub fn share_track(track: Track) {
             _ => toast("Couldn't find a page for this track"),
         }
     });
+}
+
+/// A row's duration as m:ss, blank when the source gave none (YouTube Music's artist Top songs).
+fn duration_label(track: &Track) -> String {
+    track
+        .duration_secs()
+        .map(|secs| format!("{}:{:02}", secs / 60, secs % 60))
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unknown_duration_is_left_blank_not_zero() {
+        let mut track = Track::default();
+        assert_eq!(duration_label(&track), "");
+        track.duration_ms = Some(225_000);
+        assert_eq!(duration_label(&track), "3:45");
+    }
 }

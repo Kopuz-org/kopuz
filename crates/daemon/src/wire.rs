@@ -23,7 +23,7 @@ pub(crate) fn track_info(track: &Track, offline: &OfflineIndex) -> TrackInfo {
         artist: track.artist.clone(),
         album: track.album.clone(),
         album_id: track.album_id.clone(),
-        duration_ms: (!radio).then(|| track.duration.saturating_mul(1000)),
+        duration_ms: (!radio && track.duration > 0).then(|| track.duration.saturating_mul(1000)),
         khz: track.khz,
         bitrate: track.bitrate,
         track_number: track.track_number,

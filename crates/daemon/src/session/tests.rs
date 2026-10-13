@@ -1346,6 +1346,17 @@ fn radio_sentinel_becomes_wire_kind() {
     assert!(!now.seekable);
 }
 
+#[test]
+fn an_unknown_duration_goes_out_as_none() {
+    let track = Track {
+        duration: 0,
+        ..test_track(&"a-0".to_string())
+    };
+    let now = track_info(&track, &crate::offline::OfflineIndex::default());
+    assert_eq!(now.duration_ms, None);
+    assert_eq!(now.duration_secs(), None);
+}
+
 /// A server track's key and uid are different strings, and a consumer that
 /// matches the wrong one silently works on local tracks (where they are
 /// equal) while missing every server track.

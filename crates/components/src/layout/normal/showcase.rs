@@ -25,8 +25,7 @@ struct ShowcaseDerived {
 pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let _nav_ctrl = use_context::<NavigationController>();
-    let total_seconds: u64 = props.tracks.iter().filter_map(|t| t.duration_secs()).sum();
-    let duration_min = total_seconds / 60;
+    let duration_min = api::total_duration_secs(&props.tracks).map(|secs| secs / 60);
 
     // Per-track cover resolver (source dispatch + album lookup live in the
     // source layer; no partition decision here).
@@ -168,8 +167,10 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                 p { "{song_text}" }
                             }
                          }
-                         span { "•" }
-                         p { "{duration_min} {i18n::t(\"min\")}" }
+                         if let Some(minutes) = duration_min {
+                             span { "•" }
+                             p { "{minutes} {i18n::t(\"min\")}" }
+                         }
                          if let Some(year) = props.release_year {
                              span { "•" }
                              p { "{year}" }
