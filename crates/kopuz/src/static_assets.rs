@@ -35,5 +35,20 @@ pub fn head() -> String {
         head.push_str(css);
         head.push_str("</style>");
     }
+    head.push_str(&cover_fallback_script());
     head
+}
+
+// Keyed on the failing src, not a one-shot flag: a reused img (the player bar's) fails again next track.
+fn cover_fallback_script() -> String {
+    format!(
+        r#"<script>document.addEventListener('error',function(e){{
+            var t=e.target, fallback='{}';
+            var src=t.getAttribute&&t.getAttribute('src');
+            if(t.tagName==='IMG'&&src&&src!==fallback){{
+                t.src=fallback;
+            }}
+        }},true);</script>"#,
+        utils::DEFAULT_COVER_SVG.replace('\'', "%27"),
+    )
 }
