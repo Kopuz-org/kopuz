@@ -303,12 +303,11 @@ pub struct SearchSuggestion {
 }
 
 impl TrackInfo {
-    /// Whole seconds, which is how a duration is shown. A radio stream has
-    /// none: it plays until it is stopped.
+    /// Whole seconds, which is how a duration is shown; `None` for a radio stream and for a track whose source gave none.
     pub fn duration_secs(&self) -> Option<u64> {
         match self.kind {
             TrackKind::Radio => None,
-            TrackKind::Normal => Some(self.duration_ms.unwrap_or_default() / 1000),
+            TrackKind::Normal => self.duration_ms.map(|ms| ms / 1000),
         }
     }
 
@@ -317,9 +316,31 @@ impl TrackInfo {
     }
 }
 
+/// The summed seconds of the tracks whose duration is known; `None` when none is.
+pub fn total_duration_secs<'a>(tracks: impl IntoIterator<Item = &'a TrackInfo>) -> Option<u64> {
+    tracks
+        .into_iter()
+        .filter_map(TrackInfo::duration_secs)
+        .reduce(u64::saturating_add)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ArtistCredit, TrackInfo};
+    use super::{ArtistCredit, TrackInfo, total_duration_secs};
+
+    #[test]
+    fn a_total_skips_unknown_durations_and_is_none_without_any() {
+        let known = |ms| TrackInfo {
+            duration_ms: Some(ms),
+            ..Default::default()
+        };
+        let unknown = TrackInfo::default();
+        assert_eq!(
+            total_duration_secs(&[known(60_000), unknown.clone(), known(30_000)]),
+            Some(90)
+        );
+        assert_eq!(total_duration_secs(&[unknown.clone(), unknown]), None);
+    }
 
     fn track(artist: &str, credits: &[(&str, &str)]) -> TrackInfo {
         TrackInfo {

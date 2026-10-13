@@ -39,7 +39,7 @@ pub use library::{
     AlbumInfo, AlbumPage, AlbumQuery, ArtistCredit, ArtistDetail, ArtistInfo, ArtistPage,
     ArtistQuery, DEFAULT_PAGE_LIMIT, LyricChunkView, LyricLineView, LyricsView, Page,
     SearchRequest, SearchResults, SearchSuggestion, StatsView, TrackCounterpart, TrackFilter,
-    TrackInfo, TrackPage, TrackSort, TrackVersion,
+    TrackInfo, TrackPage, TrackSort, TrackVersion, total_duration_secs,
 };
 pub use mutations::{ArtworkChange, ArtworkUpload, TrackMetadataPatch};
 pub use player::{

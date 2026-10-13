@@ -581,8 +581,7 @@ fn RemoteAlbumDetail(
     let mut show_playlist_modal = use_signal(|| false);
     let mut playlist_track = use_signal(|| None::<String>);
 
-    let total: u64 = tracks.iter().filter_map(|t| t.duration_secs()).sum();
-    let dur_min = total / 60;
+    let dur_min = api::total_duration_secs(&tracks).map(|secs| secs / 60);
     let song_count = tracks.len();
     let artist_name = artist;
     let names_artist = artist_key.is_some();
@@ -648,8 +647,10 @@ fn RemoteAlbumDetail(
                                 span { class: "text-white/30", "•" }
                             }
                             span { "{i18n::t_with(\"showcase_song_count\", &[(\"count\", song_count.to_string())])}" }
-                            span { class: "text-white/30", "•" }
-                            span { "{dur_min} {i18n::t(\"min\")}" }
+                            if let Some(minutes) = dur_min {
+                                span { class: "text-white/30", "•" }
+                                span { "{minutes} {i18n::t(\"min\")}" }
+                            }
                             if let Some(y) = year {
                                 span { class: "text-white/30", "•" }
                                 span { "{y}" }
