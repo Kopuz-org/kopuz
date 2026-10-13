@@ -387,7 +387,7 @@ fn App() -> Element {
         use_signal(std::collections::HashMap::new);
     // Set by the source switcher's "Manage sources" to scroll Settings to a
     // section (an element id) instead of restoring its last scroll position.
-    let mut settings_anchor: Signal<Option<String>> = use_signal(|| None);
+    let settings_anchor: Signal<Option<String>> = use_signal(|| None);
     let cache_dir = use_memo(move || {
         // Android: external/ProjectDirs paths aren't writable; use the app-internal files
         // dir (getFilesDir via JNI) so saves don't fail with EACCES.
@@ -872,20 +872,6 @@ fn App() -> Element {
         let _ = dioxus::document::eval(&format!(
             "let el = document.getElementById('main-scroll-area'); if (el) el.scrollTop = {pos};"
         ));
-    });
-
-    // Scroll Settings to a requested section once the page is on screen, then
-    // clear the request. Subscribes to the anchor so setting it (from any page)
-    // drives the scroll; the restore effect above stands down while it's set.
-    use_effect(move || {
-        let anchor = settings_anchor.read().clone();
-        if let Some(id) = anchor {
-            let _ = dioxus::document::eval(&format!(
-                "requestAnimationFrame(() => {{ const el = document.getElementById('{id}'); \
-                 if (el) el.scrollIntoView({{ block: 'start' }}); }});"
-            ));
-            settings_anchor.set(None);
-        }
     });
 
     provide_context(ctrl);
