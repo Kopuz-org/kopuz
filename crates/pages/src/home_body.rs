@@ -23,6 +23,35 @@ fn is_unknown_album(value: &str) -> bool {
     normalized.is_empty() || normalized == "unknown album"
 }
 
+/// The album a recently played track features in the hero, if it is filed under a known one.
+fn featured_album(
+    track: &Track,
+    album_by_id: &HashMap<&str, &Album>,
+) -> Option<(Track, Option<Album>, Option<String>)> {
+    if track.album_id.trim().is_empty() {
+        return None;
+    }
+    let album = album_by_id.get(track.album_id.as_str()).copied().cloned();
+    let title = album
+        .as_ref()
+        .map_or(track.album.as_str(), |a| a.title.as_str());
+    if is_unknown_album(title) {
+        return None;
+    }
+    let cover = track_cover_url(track);
+    Some((track.clone(), album, cover))
+}
+
+/// The hero's headline: the featured album's title and its billed artist.
+fn featured_album_billing(track: &Track, album: Option<&Album>) -> (String, String) {
+    let title = album.map_or(track.album.clone(), |a| a.title.clone());
+    let artist = album
+        .map(|a| a.artist.clone())
+        .filter(|artist| !is_unknown_artist(artist))
+        .unwrap_or_else(|| track.artist.clone());
+    (title, artist)
+}
+
 fn section_label(key: &str) -> String {
     let i18n_key = match key {
         "hero" => "home_section_hero",
@@ -279,15 +308,9 @@ pub fn HomeBody(
         let album_by_id: HashMap<&str, &Album> =
             recent_albums.iter().map(|a| (a.id.as_str(), a)).collect();
 
-        for track in recent_tracks.iter() {
-            if track.title.trim().is_empty() {
-                continue;
-            }
-            let album = album_by_id.get(track.album_id.as_str()).copied().cloned();
-            let cover = track_cover_url(track);
-            return Some((track.clone(), album, cover));
-        }
-        None
+        recent_tracks
+            .iter()
+            .find_map(|track| featured_album(track, &album_by_id))
     });
 
     let made_for_you = use_memo(move || -> (String, Vec<AlbumCard>) {
@@ -525,3 +548,48 @@ pub fn HomeBody(
 #[path = "home_body_sections.rs"]
 mod sections;
 use sections::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track(title: &str, album: &str, album_id: &str) -> Track {
+        Track {
+            title: title.to_string(),
+            artist: "Ado".to_string(),
+            album: album.to_string(),
+            album_id: album_id.to_string(),
+            ..Track::default()
+        }
+    }
+
+    #[test]
+    fn the_hero_headline_is_the_album_not_the_track() {
+        let album = Album {
+            id: "a1".to_string(),
+            title: "Kyougen".to_string(),
+            artist: "Ado".to_string(),
+            ..Album::default()
+        };
+        let played = track("Usseewa", "Kyougen", "a1");
+        let albums = HashMap::from([("a1", &album)]);
+        let (_, featured, _) = featured_album(&played, &albums).expect("an album");
+        let (title, artist) = featured_album_billing(&played, featured.as_ref());
+        assert_eq!(title, "Kyougen");
+        assert_eq!(artist, "Ado");
+    }
+
+    #[test]
+    fn the_hero_falls_back_to_the_track_album_name_before_albums_load() {
+        let played = track("Usseewa", "Kyougen", "a1");
+        let (title, _) = featured_album_billing(&played, None);
+        assert_eq!(title, "Kyougen");
+    }
+
+    #[test]
+    fn a_track_under_no_album_is_never_featured() {
+        let albums = HashMap::new();
+        assert!(featured_album(&track("Link", "", ""), &albums).is_none());
+        assert!(featured_album(&track("Link", "Unknown Album", "dir1"), &albums).is_none());
+    }
+}
