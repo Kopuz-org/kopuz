@@ -186,11 +186,15 @@ pub fn ThemeEditorPage(settings: Signal<Settings>, #[props(default)] embedded: b
             div { class: "flex-1 flex flex-col gap-5",
                 div { class: "bg-white/5 rounded-xl p-5",
                     label { class: "block text-xs text-slate-400 mb-1", "{i18n::t(\"theme_name\")}" }
-                    input {
-                        class: "bg-white/5 border border-white/10 rounded px-3 py-1.5 text-sm text-white w-full focus:outline-none focus:border-white/30",
-                        placeholder: "{i18n::t(\"my_custom_theme\")}",
-                        value: "{editing_name}",
-                        oninput: move |e| editing_name.set(e.value()),
+                    // Uncontrolled, since echoing `value` back over the bridge overwrote keys typed meanwhile; keyed to remount per theme.
+                    for theme_key in std::iter::once(format!("{:?}", selected_id.read())) {
+                        input {
+                            key: "{theme_key}",
+                            class: "bg-white/5 border border-white/10 rounded px-3 py-1.5 text-sm text-white w-full focus:outline-none focus:border-white/30",
+                            placeholder: "{i18n::t(\"my_custom_theme\")}",
+                            initial_value: "{editing_name}",
+                            oninput: move |e| editing_name.set(e.value()),
+                        }
                     }
                 }
 

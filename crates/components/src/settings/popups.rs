@@ -377,9 +377,10 @@ pub fn AddRegistryPopup(
                     p { class: "error", "{err}" }
                 }
 
+                // Uncontrolled: echoing `value` back over the bridge overwrote keys typed meanwhile.
                 input {
                     placeholder: "{url_placeholder}",
-                    value: "{registry_url()}",
+                    initial_value: "{registry_url()}",
                     oninput: move |e| registry_url.set(e.value()),
                     onkeydown: move |e| e.stop_propagation(),
                     disabled: loading()
