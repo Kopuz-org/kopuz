@@ -83,13 +83,16 @@ fn state(core: &Core) -> Arc<GrpcState> {
     })
 }
 
-/// Bind the socket and serve the core on it until the server stops. The
-/// address is released with the listener, so a path that could not be
-/// bound is never touched.
-pub async fn listen(core: &Core, socket: &Path) -> std::io::Result<()> {
+/// Bind the socket, then hand back the future that serves the core on it
+/// until the server stops. The address is released with the listener, so a
+/// path that could not be bound is never touched.
+pub fn listen(
+    core: &Core,
+    socket: &Path,
+) -> std::io::Result<impl std::future::Future<Output = std::io::Result<()>> + use<>> {
     let listener = bind_socket(socket)?;
     tracing::info!(path = %socket.display(), "kopuzd listening");
-    serve(listener, state(core)).await
+    Ok(serve(listener, state(core)))
 }
 
 /// Bind the port and settle the token that guards it. A port beyond
