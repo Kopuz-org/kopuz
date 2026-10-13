@@ -23,6 +23,7 @@ use crate::playback::network_factory;
 use crate::queue_model::{NextOutcome, QueueModel};
 
 mod load;
+mod origin;
 mod radio_feed;
 mod reconciler;
 
@@ -45,6 +46,7 @@ pub(crate) struct QueueMirrorSnapshot {
     pub shuffle_order: Vec<usize>,
     pub position: usize,
     pub shuffle: bool,
+    pub context: Option<QueueContext>,
 }
 
 /// Resolves a wire queue context into concrete tracks daemon-side.
@@ -325,6 +327,7 @@ impl SessionHandle {
             queue_rev: 0,
             volume: services.config.volume,
             muted: services.config.muted,
+            origin: None,
             epoch: Instant::now(),
             events: events.clone(),
             materializer: materializer.clone(),
@@ -680,8 +683,11 @@ struct Session {
     error: Option<api::ErrorBody>,
     rev: u64,
     queue_rev: u64,
+    /// The level unmuting returns to; the engine plays at zero while `muted`.
     volume: f32,
     muted: bool,
+    /// The container the queue was built from; None for a raw track list.
+    origin: Option<QueueContext>,
     epoch: Instant,
     events: broadcast::Sender<ApiEvent>,
     materializer: Arc<dyn QueueMaterializer>,
@@ -844,6 +850,7 @@ impl Session {
                     shuffle_order,
                     position: self.model.current_position(),
                     shuffle: self.model.shuffle(),
+                    context: self.origin.clone(),
                 });
             }
             SessionCmd::Persist(reply) => {
@@ -1129,6 +1136,11 @@ impl Session {
                 "queue materialization timed out",
             )
         })??;
+        let origin = request
+            .context
+            .names_container()
+            .then(|| request.context.clone());
+        let was_empty = self.model.is_empty();
         match request.mode {
             QueueMode::Replace => {
                 let mut candidate = self.model.clone();
@@ -1149,10 +1161,12 @@ impl Session {
                     let idx = candidate.jump_to(start.min(len - 1));
                     self.start_immediate_load(candidate, idx)?;
                     self.set_radio_feed(more);
+                    self.origin = origin.clone();
                 } else {
                     self.model = candidate;
                     self.stop_playback();
                     self.set_radio_feed(None);
+                    self.origin = None;
                 }
             }
             // Appending lands past every existing position, so a pending
@@ -1170,6 +1184,10 @@ impl Session {
         }
         if request.mode != QueueMode::Replace {
             self.rearm_gapless();
+        }
+        // Adding to a queue is an edit that keeps its origin; only an empty one becomes what was added.
+        if request.mode != QueueMode::Replace && was_empty && !self.model.is_empty() {
+            self.origin = origin;
         }
         Ok(self.publish(state_tx, true))
     }
@@ -1313,6 +1331,10 @@ impl Session {
             track: None,
             artwork: None,
             completed_key: None,
+        });
+        // An integration starts at its own level, so it learns ours (and a mute) as it takes over.
+        self.dispatch_external(PlayerCommand::SetVolume {
+            volume: self.output_volume(),
         });
     }
 
@@ -1641,6 +1663,11 @@ impl Session {
             snapshot.shuffle_order,
             snapshot.shuffle_enabled,
         );
+        self.origin = snapshot
+            .origin
+            .as_deref()
+            .filter(|_| !self.model.is_empty())
+            .and_then(origin::decode);
         if let Some(position) = restored
             && let Some(track) = self.model.track_at(position).cloned()
         {
@@ -1680,6 +1707,7 @@ impl Session {
             shuffle_order: self.model.shuffle_order().to_vec(),
             shuffle_enabled: self.model.shuffle(),
             radio_cursor: self.radio_cursor(),
+            origin: self.origin.as_ref().and_then(origin::encode),
         }
     }
 

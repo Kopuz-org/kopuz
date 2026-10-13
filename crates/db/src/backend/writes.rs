@@ -1293,16 +1293,17 @@ async fn write_queue_position(
     let shuffle_on = snap.shuffle_enabled as i64;
     let radio_cursor = snap.radio_cursor.as_deref();
     sqlx::query!(
-        "INSERT INTO queue_state (source, version, current_queue_index, progress_secs, shuffle_enabled, radio_cursor) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+        "INSERT INTO queue_state (source, version, current_queue_index, progress_secs, shuffle_enabled, radio_cursor, origin) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
          ON CONFLICT(source) DO UPDATE SET version = ?2, current_queue_index = ?3, \
-           progress_secs = ?4, shuffle_enabled = ?5, radio_cursor = ?6",
+           progress_secs = ?4, shuffle_enabled = ?5, radio_cursor = ?6, origin = ?7",
         source,
         version,
         current,
         progress,
         shuffle_on,
-        radio_cursor
+        radio_cursor,
+        snap.origin
     )
     .execute(&mut *conn)
     .await?;

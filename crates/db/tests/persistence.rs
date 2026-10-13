@@ -553,6 +553,7 @@ async fn queue_round_trips() {
         shuffle_order: vec![0],
         shuffle_enabled: true,
         radio_cursor: None,
+        origin: None,
     };
     db.save_queue(&Source::default(), &snap).await.unwrap();
     let q = db.load_queue(&Source::default()).await.unwrap();

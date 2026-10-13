@@ -173,6 +173,7 @@ pub fn queue_snapshot_to_proto(value: &api::QueueSnapshot) -> QueueSnapshot {
         shuffle_order: value.shuffle_order.clone(),
         position: value.position,
         shuffle: value.shuffle,
+        context: value.context.as_ref().map(queue_context_to_proto),
     }
 }
 
@@ -183,6 +184,7 @@ pub fn queue_snapshot_from_proto(value: &QueueSnapshot) -> api::QueueSnapshot {
         shuffle_order: value.shuffle_order.clone(),
         position: value.position,
         shuffle: value.shuffle,
+        context: value.context.as_ref().and_then(queue_context_from_proto),
     }
 }
 
@@ -207,5 +209,42 @@ mod tests {
         let edit = api::QueueEdit::Move { from: 1, to: 3 };
         let back = queue_edit_from_proto(&queue_edit_to_proto(&edit)).expect("edit survives");
         assert_eq!(edit, back);
+    }
+
+    #[test]
+    fn a_snapshot_keeps_where_it_was_built_from() {
+        let origins = [
+            None,
+            Some(api::QueueContext::Album { id: "a".into() }),
+            Some(api::QueueContext::Artist {
+                artist: "UC-x".into(),
+            }),
+            Some(api::QueueContext::Genre { name: "g".into() }),
+            Some(api::QueueContext::Playlist { id: "p".into() }),
+            Some(api::QueueContext::Filter {
+                filter: api::TrackFilter {
+                    favorite: Some(true),
+                    ..Default::default()
+                },
+            }),
+            Some(api::QueueContext::Radio {
+                station_id: "s".into(),
+                stream_id: "st".into(),
+            }),
+            Some(api::QueueContext::TrackRadio { key: "k".into() }),
+            Some(api::QueueContext::PlaylistRadio { id: "p".into() }),
+        ];
+        for context in origins {
+            let snapshot = api::QueueSnapshot {
+                rev: 3,
+                context: context.clone(),
+                ..Default::default()
+            };
+            assert_eq!(
+                queue_snapshot_from_proto(&queue_snapshot_to_proto(&snapshot)),
+                snapshot,
+                "{context:?}"
+            );
+        }
     }
 }

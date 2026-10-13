@@ -307,6 +307,7 @@ impl api::PlayerApi for LocalApi {
                 .collect(),
             position: (!mirror.tracks.is_empty()).then_some(mirror.position as u32),
             shuffle: mirror.shuffle,
+            context: mirror.context,
         })
     }
 

@@ -213,6 +213,7 @@ fn remote_queue_to_adopt(
         shuffle_order: Vec::new(),
         shuffle_enabled: false,
         radio_cursor: None,
+        origin: None,
     })
 }
 

@@ -159,6 +159,7 @@ impl Session {
                 index: (!self.model.is_empty()).then(|| self.model.current_position() as u32),
                 shuffle: self.model.shuffle(),
                 loop_mode: self.model.loop_mode(),
+                context: self.origin.clone(),
             },
             volume: self.volume,
             muted: self.muted,

@@ -177,6 +177,7 @@ message SetVolume {
   float volume = 1;
 }
 
+// Silences output while PlayerState.volume stays the level to return to.
 message SetMuted {
   bool muted = 1;
 }
@@ -294,6 +295,7 @@ message PlayerState {
   optional uint64 output_latency_ms = 13;
   // What is playing, the same row the queue holds.
   optional TrackInfo row = 14;
+  // Output is silenced; `volume` is still the level unmuting returns to.
   bool muted = 15;
 }
 
@@ -368,6 +370,8 @@ message QueueSummary {
   optional uint32 index = 3;
   bool shuffle = 4;
   LoopMode loop = 5;
+  // The container the queue was built from; absent for a raw track list.
+  optional QueueContext context = 6;
 }
 
 // ---------------- queue ----------------
@@ -472,6 +476,8 @@ message QueueSnapshot {
   repeated uint32 shuffle_order = 3;
   optional uint32 position = 4;
   bool shuffle = 5;
+  // As QueueSummary.context.
+  optional QueueContext context = 6;
 }
 
 // ---------------- library ----------------
