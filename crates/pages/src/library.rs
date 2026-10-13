@@ -231,11 +231,11 @@ pub fn LibraryPage(
                                 );
                             },
                             on_download: caps().downloads.then(|| EventHandler::new(move |_| {
-                                if !is_downloaded {
-                                    active_menu_track.set(None);
-                                    hooks::downloads::start(
-                                        vec![item_id_dl.clone()],
-                                    );
+                                active_menu_track.set(None);
+                                if is_downloaded {
+                                    hooks::downloads::remove(vec![item_id_dl.clone()]);
+                                } else {
+                                    hooks::downloads::start(vec![item_id_dl.clone()]);
                                 }
                             })),
                             on_play: move |_| {
