@@ -366,6 +366,45 @@ pub async fn upsert_albums(
     Ok(())
 }
 
+/// The artist an unlinked album is billed to when every track credits several of the same artist rows, matched by row, never by name.
+async fn credited_album_artist(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    src: &str,
+    album_id: &str,
+) -> Result<Option<i64>, DbError> {
+    let credits: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT c.track_pk, c.artist_pk FROM track_credits c \
+         JOIN tracks t ON t.rowid_pk = c.track_pk \
+         WHERE t.source = ?1 AND t.source_album_id = ?2 ORDER BY c.track_pk, c.position",
+    )
+    .bind(src)
+    .bind(album_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(album_artist_among(&credits))
+}
+
+/// `credits` are `(track_pk, artist_pk)` rows in track then credit order.
+fn album_artist_among(credits: &[(i64, i64)]) -> Option<i64> {
+    let first_track = credits.first()?.0;
+    let mut tracks: Vec<i64> = credits.iter().map(|(track, _)| *track).collect();
+    tracks.dedup();
+    let shared: Vec<i64> = credits
+        .iter()
+        .filter(|(track, _)| *track == first_track)
+        .map(|(_, artist)| *artist)
+        .filter(|artist| {
+            tracks.iter().all(|track| {
+                credits
+                    .iter()
+                    .any(|(other, credited)| other == track && credited == artist)
+            })
+        })
+        .collect();
+    // A single shared artist may sit under someone else's byline (Various Artists over one track); several are the byline itself.
+    (shared.len() > 1).then(|| shared[0])
+}
+
 async fn upsert_album(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     src: &str,
@@ -378,9 +417,18 @@ async fn upsert_album(
         .as_ref()
         .map(|p| p.to_string_lossy().into_owned());
     let billed = a.artist.trim();
-    let artist_pk = match billed.is_empty() {
-        true => None,
-        false => Some(file_artist(tx, src, billed, a.artist_id.as_deref()).await?),
+    let artist_id = a
+        .artist_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty());
+    let artist_pk = match (billed.is_empty(), artist_id) {
+        (true, _) => None,
+        (false, Some(id)) => Some(file_artist(tx, src, billed, Some(id)).await?),
+        (false, None) => match credited_album_artist(tx, src, &a.id).await? {
+            Some(pk) => Some(pk),
+            None => Some(file_artist(tx, src, billed, None).await?),
+        },
     };
     // The artist is replaced with its name, so an album rebilled to nobody drops the old row.
     sqlx::query!(

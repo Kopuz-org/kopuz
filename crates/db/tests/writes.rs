@@ -375,3 +375,83 @@ async fn a_derived_album_follows_its_track_once_the_credit_is_linked() {
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
+
+#[tokio::test]
+async fn a_joined_album_artist_is_billed_to_the_artists_its_tracks_credit() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let source = Source::default();
+    let track = |path: &str, album_id: &str, artist: &str, artists: &[&str]| Track {
+        album_id: album_id.into(),
+        artist: artist.into(),
+        artists: artists.iter().map(|name| name.to_string()).collect(),
+        ..local(path, "Song")
+    };
+    let album = |id: &str, artist: &str| Album {
+        id: id.into(),
+        title: id.into(),
+        artist: artist.into(),
+        genre: String::new(),
+        year: 0,
+        cover_path: None,
+        manual_cover: false,
+        artist_id: None,
+        artist_key: None,
+    };
+    db.upsert_tracks(
+        &source,
+        &[
+            track(
+                "/m/k/1.flac",
+                "duo",
+                "Cartoon, Jéja feat. Coleman Trapp",
+                &["Cartoon", "Jéja", "Coleman Trapp"],
+            ),
+            track(
+                "/m/k/2.flac",
+                "duo",
+                "Cartoon, JÉJA, Futuristik",
+                &["Cartoon", "JÉJA", "Futuristik"],
+            ),
+            track("/m/v/1.flac", "va", "Janji", &["Janji"]),
+            track("/m/v/2.flac", "va", "DEAF KEV", &["DEAF KEV"]),
+        ],
+    )
+    .await
+    .unwrap();
+    db.upsert_albums(
+        &source,
+        &[
+            album("duo", "Cartoon, Jéja"),
+            album("va", "Various Artists"),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let names: Vec<String> = db
+        .artists(&source)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.name)
+        .collect();
+    assert!(!names.contains(&"Cartoon, Jéja".to_string()), "{names:?}");
+    assert!(
+        names.contains(&"Various Artists".to_string()),
+        "no shared credit keeps the byline"
+    );
+    let duo = db.album(&source, "duo").await.unwrap().unwrap();
+    assert_eq!(
+        duo.artist, "Cartoon, Jéja",
+        "the byline still reads as tagged"
+    );
+    let billed = db
+        .artist(&source, duo.artist_key.as_deref().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(billed.name, "Cartoon");
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
