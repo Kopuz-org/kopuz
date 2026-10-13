@@ -89,7 +89,10 @@ pub fn Search(
                     selected_track_for_playlist,
                 }
             } else {
-                SearchBar { search_query: data.search_query }
+                // A one-item keyed list remounts the uncontrolled input, empty, when a source switch resets the query.
+                for source_key in std::iter::once(source()) {
+                    SearchBar { key: "{source_key}", search_query: data.search_query }
+                }
 
                 if let Some(Some((tracks, albums))) = data.search_results.cloned() {
                     SearchResults {
