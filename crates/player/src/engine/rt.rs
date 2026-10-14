@@ -28,6 +28,8 @@ pub(crate) struct RtSession {
     pub gain: Arc<AtomicU32>,
     /// An empty ring with this set is the end of the track, not an underrun.
     pub eof: Arc<AtomicBool>,
+    /// Raised when a block wanted more than the ring held before the end; the actor clears it.
+    pub starved: Arc<AtomicBool>,
     pub applied_gain: GainRamp,
 }
 
@@ -200,6 +202,13 @@ impl RtState {
             }
             read
         };
+
+        if read < data.len()
+            && let Some(active) = &self.active
+            && !active.eof.load(Ordering::Acquire)
+        {
+            active.starved.store(true, Ordering::Relaxed);
+        }
 
         if read > 0 {
             self.eq.process_in_place(&mut data[..read]);
@@ -562,6 +571,7 @@ mod tests {
                 gain: Arc::new(AtomicU32::new(target.to_bits())),
                 applied_gain: GainRamp::new(initial),
                 eof: Arc::new(AtomicBool::new(true)),
+                starved: Arc::new(AtomicBool::new(false)),
             }
         };
         let outgoing = session(1.0, 0.5);
@@ -594,6 +604,47 @@ mod tests {
         assert_eq!(outgoing_played.load(Ordering::Relaxed), 8);
         assert_eq!(incoming_played.load(Ordering::Relaxed), 8);
         assert!(matches!(retire_rx.try_recv(), Ok(Retired::Advanced(_, 2))));
+    }
+
+    #[test]
+    fn a_ring_that_runs_dry_before_its_end_is_starved() {
+        for (eof, starved) in [(false, true), (true, false)] {
+            let (cmd_tx, cmd_rx) = mpsc::channel();
+            let (retire_tx, _retire_rx) = mpsc::channel();
+            let mut state = RtState::new(
+                cmd_rx,
+                retire_tx,
+                Arc::new(AtomicU32::new(1.0_f32.to_bits())),
+                Arc::new(AtomicBool::new(false)),
+                2,
+                80,
+                EqualizerSettings::default(),
+                ChannelMode::Stereo,
+            );
+            let (mut producer, consumer) = rtrb::RingBuffer::new(8);
+            for _ in 0..4 {
+                producer.push(1.0).unwrap();
+            }
+            let flag = Arc::new(AtomicBool::new(false));
+            cmd_tx
+                .send(RtCmd::Swap {
+                    session: RtSession {
+                        consumer,
+                        played: Arc::new(AtomicU64::new(0)),
+                        gain: Arc::new(AtomicU32::new(1.0_f32.to_bits())),
+                        applied_gain: GainRamp::new(1.0),
+                        eof: Arc::new(AtomicBool::new(eof)),
+                        starved: flag.clone(),
+                    },
+                    fade: None,
+                })
+                .unwrap();
+
+            state.process(&mut [0.0; 4]);
+            assert!(!flag.load(Ordering::Relaxed), "a full block is no underrun");
+            state.process(&mut [0.0; 4]);
+            assert_eq!(flag.load(Ordering::Relaxed), starved, "eof {eof}");
+        }
     }
 
     #[test]

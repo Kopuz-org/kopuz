@@ -21,6 +21,19 @@ impl Session {
         state_tx: &watch::Sender<PlayerState>,
     ) {
         match event {
+            EngineEvent::Stalled { token } => {
+                self.stalled = Some(token);
+                if token == self.visible_token() {
+                    self.publish_position_anchor(state_tx, Some(token), None, false);
+                }
+            }
+            EngineEvent::Resumed { token } if self.stalled == Some(token) => {
+                self.stalled = None;
+                if token == self.visible_token() {
+                    let playing = self.phase == ApiPhase::Playing;
+                    self.publish_position_anchor(state_tx, Some(token), None, playing);
+                }
+            }
             EngineEvent::PhaseChanged {
                 token,
                 phase: phase @ (EnginePhase::Playing | EnginePhase::Paused),

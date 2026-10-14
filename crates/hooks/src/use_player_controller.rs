@@ -277,10 +277,11 @@ impl PlayerController {
     /// Seek the current track. All progress-bar and lyric scrubbers route here.
     pub fn seek(&mut self, time: Duration) {
         self.current_song_progress.set(time.as_secs());
+        // Held until the daemon's anchor says the audio moves again; a stream rebuffers after a seek.
         self.engine_anchor.set(Some((
             time.as_millis() as u64,
             std::time::Instant::now(),
-            *self.is_playing.peek(),
+            false,
         )));
         self.command(api::PlayerCommand::Seek {
             position_ms: time.as_millis() as u64,
