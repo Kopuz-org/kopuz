@@ -33,12 +33,20 @@ tokio = { workspace = true, features = ["rt", "sync"] }
 arc-swap = { workspace = true }
 directories = { workspace = true }
 sha2 = { workspace = true }
+icu_collator = { workspace = true }
+icu_locale_core = { workspace = true }
 
 # Android has no XDG layout — the writable per-app directory has to come from
 # the Activity, so `config_dir` asks it over JNI.
 [target.'cfg(target_os = "android")'.dependencies]
 jni = { workspace = true }
 ndk-context = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { workspace = true, features = ["NSLocale", "NSString"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Globalization"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }

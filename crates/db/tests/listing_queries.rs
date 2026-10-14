@@ -612,3 +612,36 @@ async fn tracks_run_backwards_when_asked() {
         "a window is cut after the order flips"
     );
 }
+
+/// Tracks order by the locale collation like albums and artists, so an accented title sorts beside its letter rather than after z.
+#[tokio::test]
+async fn tracks_sort_accents_beside_their_letter() {
+    let dir = tempfile::tempdir().unwrap();
+    let database = db::init(&dir.path().join("collate.db")).await.unwrap();
+    let source = Source::default();
+    let tracks = [
+        track("/z.flac", "Zebra", "Zoë", "al-z"),
+        track("/e.flac", "Étoile", "Émile", "al-e"),
+        track("/a.flac", "apple", "ada", "al-a"),
+    ];
+    database.upsert_tracks(&source, &tracks).await.unwrap();
+
+    for sort in [TrackSort::Title, TrackSort::ArtistAlbum] {
+        let filter = TrackFilter {
+            sort,
+            ..TrackFilter::new(source.clone())
+        };
+        assert_eq!(
+            keys(&database, &filter).await,
+            ["/a.flac", "/e.flac", "/z.flac"]
+        );
+    }
+    let corpus: Vec<String> = database
+        .search_corpus(&source)
+        .await
+        .unwrap()
+        .iter()
+        .map(key_of)
+        .collect();
+    assert_eq!(corpus, ["/a.flac", "/e.flac", "/z.flac"]);
+}

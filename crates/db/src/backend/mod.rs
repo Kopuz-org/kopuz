@@ -12,6 +12,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, S
 use crate::{DbError, ReadStore, Storage};
 
 mod cfg_store;
+mod collation;
 mod dump;
 mod frontend_prefs;
 mod migrations;
@@ -126,18 +127,12 @@ async fn open_pool(path: &Path) -> Result<SqlitePool, DbError> {
         .synchronous(SqliteSynchronous::Normal)
         .busy_timeout(std::time::Duration::from_secs(5))
         .foreign_keys(true)
-        .collation("FOLDED", folded_cmp);
+        .collation(collation::NAME, collation::compare);
     SqlitePoolOptions::new()
         .max_connections(5)
         .connect_with(opts)
         .await
         .map_err(Into::into)
-}
-
-/// Listing sort order: Unicode case folding and no surrounding space, where NOCASE folds ASCII only.
-pub(crate) fn folded_cmp(a: &str, b: &str) -> std::cmp::Ordering {
-    let fold = |text: &str| text.trim().to_lowercase();
-    fold(a).cmp(&fold(b))
 }
 
 fn with_ext(path: &Path, suffix: &str) -> std::path::PathBuf {
@@ -814,16 +809,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_folded_collation_sorts_past_ascii() {
+    async fn the_locale_collation_sorts_accents_beside_their_letter() {
         let (_dir, pool) = file_pool().await;
         let names: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM (SELECT 'Zebra' AS name UNION ALL SELECT 'İbrahim' UNION ALL SELECT ' apple' UNION ALL SELECT 'Étoile' UNION ALL SELECT 'élan')
-             ORDER BY name COLLATE FOLDED",
+             ORDER BY name COLLATE LOCALE",
         )
         .fetch_all(&pool)
         .await
         .expect("sorted");
-        assert_eq!(names, [" apple", "İbrahim", "Zebra", "élan", "Étoile"]);
+        assert_eq!(names, [" apple", "élan", "Étoile", "İbrahim", "Zebra"]);
     }
 
     /// sqlx does not know about a transaction it did not begin, so the guard

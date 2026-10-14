@@ -100,6 +100,8 @@ mpris-server = "0.10.0"
 # pulls in. Bumping this again means porting that file first.
 jni = "0.21"
 ndk-context = "0.1"
+icu_collator = "2.2"
+icu_locale_core = "2.2"
 thiserror = "2.0"
 tokio-tungstenite = "0.30.0"
 futures-util = "0.3.30"

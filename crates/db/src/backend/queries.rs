@@ -76,9 +76,9 @@ const TRACKS_FROM: &str = "FROM tracks t LEFT JOIN albums a \
 type Term = (&'static str, bool);
 
 fn order_terms(sort: &TrackSort) -> Vec<Term> {
-    const TITLE: Term = ("t.title COLLATE NOCASE", false);
-    const ARTIST: Term = ("t.artist COLLATE NOCASE", false);
-    const ALBUM: Term = ("t.album COLLATE NOCASE", false);
+    const TITLE: Term = ("t.title COLLATE LOCALE", false);
+    const ARTIST: Term = ("t.artist COLLATE LOCALE", false);
+    const ALBUM: Term = ("t.album COLLATE LOCALE", false);
     const DISC: Term = ("t.disc_number", false);
     const TRACK: Term = ("t.track_number", false);
     match sort {
@@ -97,9 +97,9 @@ fn order_terms(sort: &TrackSort) -> Vec<Term> {
                 let desc = criterion.direction == config::SortDirection::Desc;
                 // Date added falls back to insertion order, and each column needs its own direction.
                 let fields: &[&'static str] = match criterion.field {
-                    config::TrackSortField::Title => &["t.title COLLATE NOCASE"],
-                    config::TrackSortField::Artist => &["t.artist COLLATE NOCASE"],
-                    config::TrackSortField::Album => &["t.album COLLATE NOCASE"],
+                    config::TrackSortField::Title => &["t.title COLLATE LOCALE"],
+                    config::TrackSortField::Artist => &["t.artist COLLATE LOCALE"],
+                    config::TrackSortField::Album => &["t.album COLLATE LOCALE"],
                     config::TrackSortField::Duration => &["t.duration"],
                     config::TrackSortField::DateAdded => &["t.added_at", "t.rowid_pk"],
                 };
@@ -264,25 +264,16 @@ pub async fn album_tracks(
     source: &Source,
     album_id: &str,
 ) -> Result<Vec<Track>, DbError> {
-    let src = source.as_str();
-    let rows = sqlx::query_as!(
-        TrackRow,
-        r#"SELECT t.rowid_pk AS "rowid_pk!", t.track_key, t.service,
-                  COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
-                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
-                  t.track_number, t.disc_number,
-                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
-                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, t.explicit, t.plays
-             FROM tracks t
-             LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
-             LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
-            WHERE t.source = ?1 AND t.source_album_id = ?2
-            ORDER BY t.disc_number, t.track_number, t.title COLLATE NOCASE"#,
-        src,
-        album_id
-    )
-    .fetch_all(pool)
-    .await?;
+    let sql = format!(
+        "SELECT {TRACK_COLUMNS} {TRACKS_FROM} \
+          WHERE t.source = ?1 AND t.source_album_id = ?2 \
+          ORDER BY t.disc_number, t.track_number, t.title COLLATE LOCALE"
+    );
+    let rows = sqlx::query_as::<_, TrackRow>(&sql)
+        .bind(source.as_str())
+        .bind(album_id)
+        .fetch_all(pool)
+        .await?;
     with_credits(pool, rows).await
 }
 
@@ -293,31 +284,22 @@ pub async fn artist_tracks(
     artist: &str,
     limit: Option<u32>,
 ) -> Result<Vec<Track>, DbError> {
-    let src = source.as_str();
     // SQLite reads a negative LIMIT as none.
     let limit = limit.map_or(-1, i64::from);
-    let rows = sqlx::query_as!(
-        TrackRow,
-        r#"SELECT t.rowid_pk AS "rowid_pk!", t.track_key, t.service,
-                  COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
-                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
-                  t.track_number, t.disc_number,
-                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
-                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, t.explicit, t.plays
-             FROM tracks t
-             LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
-             LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
-            WHERE t.source = ?1 AND t.rowid_pk IN (
-                  SELECT track_pk FROM artist_credit_rows
-                   WHERE source = ?1 AND artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2))
-            ORDER BY t.album COLLATE NOCASE, t.disc_number, t.track_number, t.title COLLATE NOCASE
-            LIMIT ?3"#,
-        src,
-        artist,
-        limit
-    )
-    .fetch_all(pool)
-    .await?;
+    let sql = format!(
+        "SELECT {TRACK_COLUMNS} {TRACKS_FROM} \
+          WHERE t.source = ?1 AND t.rowid_pk IN ( \
+                SELECT track_pk FROM artist_credit_rows \
+                 WHERE source = ?1 AND artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2)) \
+          ORDER BY t.album COLLATE LOCALE, t.disc_number, t.track_number, t.title COLLATE LOCALE \
+          LIMIT ?3"
+    );
+    let rows = sqlx::query_as::<_, TrackRow>(&sql)
+        .bind(source.as_str())
+        .bind(artist)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
     with_credits(pool, rows).await
 }
 
@@ -326,25 +308,16 @@ pub async fn genre_tracks(
     source: &Source,
     genre: &str,
 ) -> Result<Vec<Track>, DbError> {
-    let src = source.as_str();
-    let rows = sqlx::query_as!(
-        TrackRow,
-        r#"SELECT t.rowid_pk AS "rowid_pk!", t.track_key, t.service,
-                  COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
-                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
-                  t.track_number, t.disc_number,
-                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
-                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, t.explicit, t.plays
-             FROM tracks t
-             JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
-             LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
-            WHERE t.source = ?1 AND a.genre = ?2
-            ORDER BY t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.disc_number, t.track_number"#,
-        src,
-        genre
-    )
-    .fetch_all(pool)
-    .await?;
+    let sql = format!(
+        "SELECT {TRACK_COLUMNS} {TRACKS_FROM} \
+          WHERE t.source = ?1 AND a.genre = ?2 \
+          ORDER BY t.artist COLLATE LOCALE, t.album COLLATE LOCALE, t.disc_number, t.track_number"
+    );
+    let rows = sqlx::query_as::<_, TrackRow>(&sql)
+        .bind(source.as_str())
+        .bind(genre)
+        .fetch_all(pool)
+        .await?;
     with_credits(pool, rows).await
 }
 
@@ -389,16 +362,8 @@ pub async fn artist_sample_tracks(
     source: &Source,
     limit: u32,
 ) -> Result<Vec<Track>, DbError> {
-    let src = source.as_str();
-    let limit = i64::from(limit);
-    let rows = sqlx::query_as!(
-        TrackRow,
-        r#"SELECT t.rowid_pk AS "rowid_pk!", t.track_key, t.service,
-                  COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
-                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
-                  t.track_number, t.disc_number,
-                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
-                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, t.explicit, t.plays
+    let sql = format!(
+        r#"SELECT {TRACK_COLUMNS}
              FROM tracks t
              JOIN (SELECT MIN(s.rowid_pk) AS track_pk,
                           COALESCE(
@@ -413,13 +378,14 @@ pub async fn artist_sample_tracks(
              JOIN artists ar ON ar.id = first.billed
              LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
              LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
-            ORDER BY ar.name COLLATE NOCASE
-            LIMIT ?2"#,
-        src,
-        limit
-    )
-    .fetch_all(pool)
-    .await?;
+            ORDER BY ar.name COLLATE LOCALE
+            LIMIT ?2"#
+    );
+    let rows = sqlx::query_as::<_, TrackRow>(&sql)
+        .bind(source.as_str())
+        .bind(i64::from(limit))
+        .fetch_all(pool)
+        .await?;
     with_credits(pool, rows).await
 }
 
@@ -441,24 +407,14 @@ pub async fn top_genre(pool: &SqlitePool, source: &Source) -> Result<Option<Stri
 /// Unicode-aware matching can't be SQLite `LIKE` (ASCII-only case folding).
 /// Runs only when a query is typed — never on page mount.
 pub async fn search_corpus(pool: &SqlitePool, source: &Source) -> Result<Vec<Track>, DbError> {
-    let src = source.as_str();
-    let rows = sqlx::query_as!(
-        TrackRow,
-        r#"SELECT t.rowid_pk AS "rowid_pk!", t.track_key, t.service,
-                  COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
-                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
-                  t.track_number, t.disc_number,
-                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
-                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, t.explicit, t.plays
-             FROM tracks t
-             LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
-             LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
-            WHERE t.source = ?1
-            ORDER BY t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.disc_number, t.track_number"#,
-        src
-    )
-    .fetch_all(pool)
-    .await?;
+    let sql = format!(
+        "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = ?1 \
+          ORDER BY t.artist COLLATE LOCALE, t.album COLLATE LOCALE, t.disc_number, t.track_number"
+    );
+    let rows = sqlx::query_as::<_, TrackRow>(&sql)
+        .bind(source.as_str())
+        .fetch_all(pool)
+        .await?;
     with_credits(pool, rows).await
 }
 
@@ -616,14 +572,14 @@ pub async fn artists_page(
         .iter()
         .map(|sort| {
             let col = match sort.field {
-                config::ArtistSortField::Name => "ar.name COLLATE FOLDED",
+                config::ArtistSortField::Name => "ar.name COLLATE LOCALE",
                 config::ArtistSortField::Tracks => "n_tracks",
                 config::ArtistSortField::Albums => "n_albums",
             };
             format!("{col} {}", direction(sort.direction))
         })
         .collect();
-    order.push("ar.name COLLATE FOLDED ASC".into());
+    order.push("ar.name COLLATE LOCALE ASC".into());
     order.push("ar.key ASC".into());
     let (limit_n, offset_n) = c.page_slots();
     let sql = format!(
@@ -777,12 +733,11 @@ pub async fn artist_album_cover(
 }
 
 pub async fn genres(pool: &SqlitePool, source: &Source) -> Result<Vec<String>, DbError> {
-    let src = source.as_str();
-    Ok(sqlx::query_scalar!(
+    Ok(sqlx::query_scalar::<_, String>(
         "SELECT DISTINCT genre FROM albums WHERE source = ?1 AND genre != '' \
-         ORDER BY genre COLLATE NOCASE",
-        src
+         ORDER BY genre COLLATE LOCALE",
     )
+    .bind(source.as_str())
     .fetch_all(pool)
     .await?)
 }
@@ -808,16 +763,14 @@ pub async fn album(
 }
 
 pub async fn albums(pool: &SqlitePool, source: &Source) -> Result<Vec<Album>, DbError> {
-    let src = source.as_str();
-    let rows = sqlx::query_as!(
-        AlbumRow,
-        r#"SELECT al.source_album_id, al.title, al.artist, al.genre, al.year, al.cover_path, al.manual_cover,
-                  ar.key AS "artist_key?", ar.source_artist_id AS "artist_source_id?"
-             FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_pk
-            WHERE al.source = ?1
-            ORDER BY al.artist COLLATE NOCASE, al.title COLLATE NOCASE"#,
-        src
+    let rows = sqlx::query_as::<_, AlbumRow>(
+        "SELECT al.source_album_id, al.title, al.artist, al.genre, al.year, al.cover_path, \
+                al.manual_cover, ar.key AS artist_key, ar.source_artist_id AS artist_source_id \
+           FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_pk \
+          WHERE al.source = ?1 \
+          ORDER BY al.artist COLLATE LOCALE, al.title COLLATE LOCALE",
     )
+    .bind(source.as_str())
     .fetch_all(pool)
     .await?;
     Ok(rows.into_iter().map(Into::into).collect())
@@ -884,10 +837,10 @@ pub async fn albums_page(
     for sort in &query.sort {
         let dir = direction(sort.direction);
         match sort.field {
-            config::AlbumSortField::Title => order.push(format!("al.title COLLATE FOLDED {dir}")),
-            config::AlbumSortField::Artist => order.push(format!("al.artist COLLATE FOLDED {dir}")),
+            config::AlbumSortField::Title => order.push(format!("al.title COLLATE LOCALE {dir}")),
+            config::AlbumSortField::Artist => order.push(format!("al.artist COLLATE LOCALE {dir}")),
             config::AlbumSortField::Year => order.push(format!("al.year {dir}")),
-            config::AlbumSortField::Genre => order.push(format!("al.genre COLLATE FOLDED {dir}")),
+            config::AlbumSortField::Genre => order.push(format!("al.genre COLLATE LOCALE {dir}")),
             config::AlbumSortField::RecentlyAdded => {
                 order.push(format!("COALESCE(tc.added_at, 0) {dir}"));
                 order.push(format!("COALESCE(tc.last_pk, 0) {dir}"));
@@ -895,8 +848,8 @@ pub async fn albums_page(
             config::AlbumSortField::TrackCount => order.push(format!("COALESCE(tc.n, 0) {dir}")),
         }
     }
-    order.push("al.artist COLLATE FOLDED ASC".into());
-    order.push("al.title COLLATE FOLDED ASC".into());
+    order.push("al.artist COLLATE LOCALE ASC".into());
+    order.push("al.title COLLATE LOCALE ASC".into());
     order.push("al.rowid_pk ASC".into());
     let (limit_n, offset_n) = c.page_slots();
     let sql = format!(
@@ -980,7 +933,10 @@ mod tests {
         let options = "sqlite::memory:"
             .parse::<sqlx::sqlite::SqliteConnectOptions>()
             .unwrap()
-            .collation("FOLDED", super::super::folded_cmp);
+            .collation(
+                super::super::collation::NAME,
+                super::super::collation::compare,
+            );
         let pool = SqlitePool::connect_with(options).await.unwrap();
         crate::backend::migrations::run_migrations(&pool, None)
             .await
