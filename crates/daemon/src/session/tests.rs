@@ -1341,6 +1341,128 @@ async fn seek_during_crossfade_is_guarded_to_the_visible_token() {
     assert_eq!(state.position.map(|position| position.ms), Some(1_500));
 }
 
+/// A track's bytes as a stream that has delivered only so many of them yet; reading further blocks until more arrive.
+struct Trickle {
+    bytes: Cursor<Vec<u8>>,
+    arrived: Arc<(Mutex<u64>, Condvar)>,
+}
+
+impl std::io::Read for Trickle {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let at = self.bytes.position();
+        let len = self.bytes.get_ref().len() as u64;
+        // The probe looks for tags at the end, which a server answers with a range request.
+        if at >= len.saturating_sub(TRICKLE_TAIL) {
+            return self.bytes.read(buf);
+        }
+        let (lock, more) = &*self.arrived;
+        let mut arrived = lock.lock().expect("trickle lock");
+        while *arrived <= at {
+            arrived = more.wait(arrived).expect("trickle wait");
+        }
+        let room = usize::try_from(*arrived - at).unwrap_or(usize::MAX);
+        drop(arrived);
+        let len = buf.len().min(room);
+        self.bytes.read(&mut buf[..len])
+    }
+}
+
+impl std::io::Seek for Trickle {
+    fn seek(&mut self, to: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.bytes.seek(to)
+    }
+}
+
+/// One second of audio and the header have arrived.
+const FIRST_SECOND: u64 = 44 + 44_100 * 4;
+const TRICKLE_TAIL: u64 = 64 * 1024;
+
+fn trickle_harness() -> (Harness, Arc<(Mutex<u64>, Condvar)>) {
+    let arrived = Arc::new((Mutex::new(FIRST_SECOND), Condvar::new()));
+    let provider = arrived.clone();
+    let harness = harness_with_provider(
+        |_| {},
+        Arc::new(move |track| {
+            let stream = Trickle {
+                bytes: Cursor::new(wav_bytes(track.duration.min(6))),
+                arrived: provider.clone(),
+            };
+            Some(Box::new(move || Ok(player::decoder::from_stream(stream))) as SourceFactory)
+        }),
+    );
+    (harness, arrived)
+}
+
+fn arrive_all(arrived: &(Mutex<u64>, Condvar)) {
+    *arrived.0.lock().expect("trickle lock") = u64::MAX;
+    arrived.1.notify_all();
+}
+
+/// A rebuffering stream stops the audio, so a client counting on would run ahead of it.
+#[tokio::test]
+async fn a_stream_that_runs_dry_holds_the_anchor_until_audio_flows_again() {
+    let (harness, arrived) = trickle_harness();
+    harness
+        .api
+        .set_queue(replace(&["track-0"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+
+    let held = drive_until(&harness, "the stream runs dry", |state| {
+        state
+            .position
+            .is_some_and(|anchor| !anchor.playing && anchor.ms >= 500)
+    })
+    .await;
+    assert_eq!(held.phase, ApiPhase::Playing, "a stall is not a pause");
+    let stopped_at = held.position.expect("anchor").ms;
+    assert!(stopped_at <= 1_000, "{stopped_at}");
+
+    arrive_all(&arrived);
+    let running = drive_until(&harness, "the audio flows again", |state| {
+        state.position.is_some_and(|anchor| anchor.playing)
+    })
+    .await;
+    assert!(running.position.expect("anchor").ms >= stopped_at);
+}
+
+/// A seek past what a stream has delivered waits on it, so its anchor holds at the target.
+#[tokio::test]
+async fn a_seek_into_what_has_not_arrived_holds_the_anchor_at_the_target() {
+    let (harness, arrived) = trickle_harness();
+    harness
+        .api
+        .set_queue(replace(&["track-0"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+    drive_until(&harness, "the audio flows", |state| {
+        state.position.is_some_and(|anchor| anchor.playing)
+    })
+    .await;
+
+    harness
+        .api
+        .player_command(PlayerCommand::Seek { position_ms: 4_000 })
+        .await
+        .expect("seek");
+    let held = drive_until(&harness, "the seek waits on the stream", |state| {
+        state
+            .position
+            .is_some_and(|anchor| !anchor.playing && anchor.ms == 4_000)
+    })
+    .await;
+    assert_eq!(held.phase, ApiPhase::Playing);
+
+    arrive_all(&arrived);
+    let running = drive_until(&harness, "the audio passes the target", |state| {
+        state.position.is_some_and(|anchor| anchor.playing)
+    })
+    .await;
+    assert!(running.position.expect("anchor").ms >= 4_000);
+}
+
 #[tokio::test]
 async fn radio_tracks_reject_seek_commands() {
     let harness = harness(|_| {});

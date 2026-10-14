@@ -130,6 +130,14 @@ pub enum Event {
     Ended {
         token: u64,
     },
+    /// The device asked for audio the decoder had not delivered yet (a stream rebuffering, a seek loading), so the position stands still.
+    Stalled {
+        token: u64,
+    },
+    /// Audio flows again after a `Stalled`.
+    Resumed {
+        token: u64,
+    },
     /// A crossfade finished, or a gapless session took over at the last sample
     /// of the one before it, and the outgoing session was torn down. `token` is
     /// the now-sole (incoming) session; `from_token` the retired outgoing one.

@@ -346,6 +346,7 @@ impl SessionHandle {
             phase: ApiPhase::Idle,
             position: None,
             position_token: None,
+            stalled: None,
             buffered: Vec::new(),
             error: None,
             rev: 0,
@@ -740,6 +741,8 @@ struct Session {
     phase: ApiPhase,
     position: Option<PositionAnchor>,
     position_token: Option<u64>,
+    /// The session the engine reports stalled: its anchor stands still until audio flows again.
+    stalled: Option<u64>,
     buffered: Vec<BufferedRange>,
     error: Option<api::ErrorBody>,
     rev: u64,

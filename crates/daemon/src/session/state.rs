@@ -72,6 +72,7 @@ impl Session {
     ) {
         let token = token.unwrap_or_else(|| self.visible_token());
         let position = position.unwrap_or_else(|| self.displayed_position());
+        let playing = playing && self.stalled != Some(token);
         let anchor = PositionAnchor {
             ms: position.as_millis() as u64,
             at_ms: self.now_ms(),
