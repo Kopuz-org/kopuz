@@ -4,8 +4,7 @@ use config::{ListenNowStyle, Settings, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{
     use_active_source, use_album_tracks, use_albums, use_albums_window, use_artist_sample_tracks,
-    use_artists, use_downloaded_tracks, use_favorites, use_playlists, use_recently_added_albums,
-    use_top_genre,
+    use_artists, use_downloaded_tracks, use_favorites, use_playlists, use_top_genre,
 };
 use rand::rng;
 use rand::seq::SliceRandom;
@@ -127,28 +126,42 @@ pub fn HomeBody(
     // cannot hold hook state of their own.
     let active_card_menu = use_signal(|| None::<String>);
 
+    // Offline every shelf holds only what has a downloaded copy.
+    let offline = use_memo(move || caps().downloads && *is_offline.read());
+    let downloaded = move || offline().then_some(true);
     let albums_query = use_memo(move || {
         Some(hooks::AlbumQuery {
             sort: vec![config::SortCriterion::new(
                 config::AlbumSortField::Title,
                 config::SortDirection::Asc,
             )],
-            downloaded: (caps().downloads && *is_offline.read()).then_some(true),
+            downloaded: downloaded(),
             ..Default::default()
         })
     });
     let albums_res = use_albums(source, albums_query);
-    let new_releases_query = use_memo(|| {
+    let new_releases_query = use_memo(move || {
         Some(hooks::AlbumQuery {
             sort: vec![config::SortCriterion::new(
                 config::AlbumSortField::Year,
                 config::SortDirection::Desc,
             )],
+            downloaded: downloaded(),
             ..Default::default()
         })
     });
     let new_releases_res = use_albums_window(source, new_releases_query, SHELF_WINDOW);
-    let recently_added_res = use_recently_added_albums(source, SHELF_WINDOW);
+    let recently_added_query = use_memo(move || {
+        Some(hooks::AlbumQuery {
+            sort: vec![config::SortCriterion::new(
+                config::AlbumSortField::RecentlyAdded,
+                config::SortDirection::Desc,
+            )],
+            downloaded: downloaded(),
+            ..Default::default()
+        })
+    });
+    let recently_added_res = use_albums_window(source, recently_added_query, SHELF_WINDOW);
     let artists_query = use_memo(hooks::ArtistQuery::default);
     let artists_res = use_artists(source, artists_query);
     // Photos by artist key, so the Top Artists row shows the picture the daemon holds for each.
@@ -166,15 +179,31 @@ pub fn HomeBody(
             .collect::<HashMap<String, utils::CoverUrl>>()
     });
     let playlists_res = use_playlists();
-    let offline_tracks_res =
-        use_downloaded_tracks(source, move || caps().downloads && *is_offline.read());
+    let offline_tracks_res = use_downloaded_tracks(source, move || *offline.read());
     // Recently-played for the active source (each source keeps its own history).
-    let recent_tracks_res = hooks::use_db_queries::use_recently_played(source);
+    let played_res = hooks::use_db_queries::use_recently_played(source);
+    let recent_tracks = use_memo(move || {
+        let played = played_res.read().clone().unwrap_or_default();
+        if !offline() {
+            return played;
+        }
+        let downloaded: std::collections::HashSet<String> = offline_tracks_res
+            .read()
+            .iter()
+            .flatten()
+            .flatten()
+            .map(|track| track.key.clone())
+            .collect();
+        played
+            .into_iter()
+            .filter(|track| downloaded.contains(&track.key))
+            .collect::<Vec<_>>()
+    });
     // Only the albums the recent tracks are filed under, for the hero and Continue Listening.
     let recent_albums_query = use_memo(move || {
-        let recent = recent_tracks_res.read();
+        let recent = recent_tracks.read();
         let mut ids: Vec<String> = Vec::new();
-        for track in recent.iter().flatten() {
+        for track in recent.iter() {
             if !track.album_id.trim().is_empty() && !ids.contains(&track.album_id) {
                 ids.push(track.album_id.clone());
             }
@@ -190,6 +219,7 @@ pub fn HomeBody(
         let genre = top_genre_res.read().clone().flatten()?;
         Some(hooks::AlbumQuery {
             genre: Some(genre),
+            downloaded: downloaded(),
             ..Default::default()
         })
     });
@@ -258,7 +288,12 @@ pub fn HomeBody(
 
     // Newest first, from the daemon.
     let recently_added = use_memo(move || -> Vec<AlbumCard> {
-        shelf(&recently_added_res.read().clone().unwrap_or_default())
+        let albums = recently_added_res
+            .read()
+            .clone()
+            .and_then(Result::ok)
+            .unwrap_or_default();
+        shelf(&albums)
     });
 
     let recent_albums = use_memo(move || {
@@ -270,7 +305,7 @@ pub fn HomeBody(
     });
 
     let continue_listening = use_memo(move || {
-        let recent_tracks = recent_tracks_res.read().clone().unwrap_or_default();
+        let recent_tracks = recent_tracks();
         let recent_albums = recent_albums();
         let album_by_id: HashMap<&str, &Album> =
             recent_albums.iter().map(|a| (a.id.as_str(), a)).collect();
@@ -303,7 +338,7 @@ pub fn HomeBody(
     });
 
     let hero_entry = use_memo(move || {
-        let recent_tracks = recent_tracks_res.read().clone().unwrap_or_default();
+        let recent_tracks = recent_tracks();
         let recent_albums = recent_albums();
         let album_by_id: HashMap<&str, &Album> =
             recent_albums.iter().map(|a| (a.id.as_str(), a)).collect();
@@ -326,7 +361,7 @@ pub fn HomeBody(
     });
 
     let source_artists = use_memo(move || {
-        let tracks = if caps().downloads && *is_offline.read() {
+        let tracks = if offline() {
             // By artist, from the daemon.
             offline_tracks_res
                 .read()
@@ -368,7 +403,7 @@ pub fn HomeBody(
 
     let recent_playlists = use_memo(move || {
         let store = playlists_res.read().clone().unwrap_or_default();
-        let offline = caps().downloads && *is_offline.read();
+        let offline = offline();
         let downloaded: std::collections::HashSet<String> = offline_tracks_res
             .read()
             .iter()
