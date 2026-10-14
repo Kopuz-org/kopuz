@@ -325,7 +325,10 @@ impl SourceService {
         *held = next.clone();
         self.session
             .set_active_source(Some(self.build_active(&next)));
-        self.session.set_sources(next.clone());
+        let adopted = self.session.adopt_sources(next.clone());
+        drop(held);
+        // A caller told of the change reads it back at once, so the library reads have to have moved first.
+        let _ = adopted.await;
         Ok(next)
     }
 
@@ -2076,15 +2079,9 @@ mod tests {
         }
     }
 
-    async fn reaches_the_session(session: &SessionHandle, active: &config::Source) {
-        let mut sources = session.sources_watch();
-        tokio::time::timeout(
-            Duration::from_secs(5),
-            sources.wait_for(|s| s.active == *active),
-        )
-        .await
-        .expect("the session adopts the change")
-        .expect("the session is running");
+    /// A caller told of a change reads it back straight away, so the session has to hold it by then.
+    fn reached_the_session(session: &SessionHandle, active: &config::Source) {
+        assert_eq!(session.sources_watch().borrow().active, *active);
     }
 
     #[tokio::test]
@@ -2122,10 +2119,18 @@ mod tests {
         );
         let b = config::Source::LocalLibrary("local:b".into());
 
+        let local_b = b.clone();
+        service
+            .mutate(move |sources| sources.set_active_local(local_b))
+            .await
+            .expect("switch");
+        reached_the_session(&session, &b);
+        service.mutate(Sources::clear_active).await.expect("back");
+
         let info = service.switch_source("local:b").await.expect("switch");
         assert!(info.active);
         assert_eq!(database.load_sources().await.expect("load").active, b);
-        reaches_the_session(&session, &b).await;
+        reached_the_session(&session, &b);
 
         service.delete_source("local:b").await.expect("delete");
         let fallback = config::Source::default();
@@ -2142,6 +2147,6 @@ mod tests {
                 .iter()
                 .any(|saved| saved.id == "local:b")
         );
-        reaches_the_session(&session, &fallback).await;
+        reached_the_session(&session, &fallback);
     }
 }
