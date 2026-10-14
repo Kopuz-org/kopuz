@@ -277,9 +277,6 @@ const GATE_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Some plain URLs are gated behind a PO token the response never asks for:
 /// ranges past the first megabyte get 403, at random, so a repeat request
 /// usually returns a clean URL. `again` must reuse the original extras.
-///
-/// A URL still gated after the retries is an error: googlevideo refuses a
-/// plain GET of it too, so streaming it sequentially reads zero bytes.
 async fn recheck_gated<F, Fut>(info: YtStreamInfo, mut again: F) -> Result<YtStreamInfo, String>
 where
     F: FnMut() -> Fut,
