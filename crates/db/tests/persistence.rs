@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use config::{AppConfig, MusicServer, MusicService, SavedServer};
+use config::{MusicServer, MusicService, SavedServer};
 use db::{QueueSnapshot, Source, TrackFilter};
 use reader::models::{Track, TrackId};
 
@@ -50,7 +50,7 @@ fn server_track(id: &str, title: &str) -> Track {
 }
 
 async fn seed_active_server(db: &db::Db, id: &str) {
-    db.save_config(&AppConfig::default()).await.unwrap();
+    db.ensure_app_state().await.unwrap();
     db.save_server(&SavedServer {
         id: id.into(),
         name: "yt".into(),

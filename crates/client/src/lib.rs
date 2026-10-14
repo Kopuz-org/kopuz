@@ -737,11 +737,11 @@ impl api::ConfigApi for GrpcApi {
         Ok(convert::config_view_from_proto(view.get_ref()))
     }
 
-    async fn set_config(&self, config: config::AppConfig) -> Result<ConfigView, ApiError> {
+    async fn set_config(&self, settings: config::Settings) -> Result<ConfigView, ApiError> {
         let view = self
             .client()
             .set_config(Request::new(proto::SetConfigRequest {
-                config: Some(convert::config_to_proto(&config)),
+                config: Some(convert::config_to_proto(&settings)),
             }))
             .await
             .map_err(wire_error)?;

@@ -357,7 +357,11 @@ async fn fill_state(pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(
         .map(config::store::FileLayers::read)
         .unwrap_or_default();
     // The file's settings win over the blob's mirror of them, as every load already applied them.
-    let cfg: config::AppConfig = layers.merge_and_parse(blob)?;
+    let base = config::store::table_from_json(&blob)
+        .ok_or_else(|| DbError::Serde("the app_config blob is not an object".to_owned()))?;
+    let settings = layers
+        .merge_and_parse(base)
+        .map_err(|error| DbError::Serde(error.to_string()))?;
     let name = |value: serde_json::Value| match value {
         serde_json::Value::String(name) => Ok(name),
         other => Err(DbError::Serde(format!("{other} is not a unit variant"))),
@@ -459,7 +463,7 @@ async fn fill_state(pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(
     tx.commit().await?;
 
     if let Some(path) = settings_path {
-        config::store::save_settings_file(path, &serde_json::to_value(&cfg)?, &layers.locked_keys)
+        config::store::save_settings_file(path, &settings, &layers.locked_keys)
             .map_err(|error| DbError::Io(format!("{}: {error}", path.display())))?;
     }
     Ok(())
@@ -663,7 +667,7 @@ pub async fn run_json_import(
     let server_src = active_server_id.clone();
 
     // --- app_config blob (minus servers/creds/listen_counts) + listen_counts -
-    let (imported_config, imported_source) =
+    let (imported_settings, imported_source) =
         import_config(&mut tx, &cfg_val, &active_server_id).await?;
     import_listen_counts(&mut tx, &cfg_val, active_server_id.as_deref()).await?;
     import_recently_played(&mut tx, &cfg_val, &active_server_id).await?;
@@ -842,7 +846,7 @@ pub async fn run_json_import(
     }
 
     tx.commit().await?;
-    super::cfg_store::write_settings(&imported_config, settings_path)?;
+    super::cfg_store::write_settings(&imported_settings, settings_path)?;
 
     let report = ImportReport {
         ran: true,
@@ -990,12 +994,12 @@ fn legacy_options(yt_browser: Option<&str>, yt_anonymous: bool) -> Vec<(&'static
 /// The frontends whose UI state the importer seeds, as `ui_state_prefs.sql` seeds them from the tables.
 const UI_FRONTENDS: [&str; 2] = ["kopuz", "gpui"];
 
-/// The legacy config as an `AppConfig` and its active source, its state and credentials written to their tables; the caller writes its settings file after commit.
+/// The legacy config's settings and its active source, its state and credentials written to their tables; the caller writes its settings file after commit.
 async fn import_config(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     cfg: &serde_json::Value,
     active_server_id: &Option<String>,
-) -> Result<(config::AppConfig, config::Source), DbError> {
+) -> Result<(config::Settings, config::Source), DbError> {
     let mut legacy = if cfg.is_null() {
         serde_json::json!({})
     } else {
@@ -1022,11 +1026,11 @@ async fn import_config(
             config::UiPrefs::default()
         }
     };
-    let config: config::AppConfig = match serde_json::from_value(legacy) {
-        Ok(config) => config,
+    let settings: config::Settings = match serde_json::from_value(legacy) {
+        Ok(settings) => settings,
         Err(error) => {
             tracing::warn!(%error, "legacy config.json is unreadable; importing defaults");
-            config::AppConfig::default()
+            config::Settings::default()
         }
     };
     for frontend in UI_FRONTENDS {
@@ -1061,7 +1065,7 @@ async fn import_config(
         };
         super::writes::pin_station(tx, &id, manifest).await?;
     }
-    Ok((config, data.active_source))
+    Ok((settings, data.active_source))
 }
 
 /// `listen_counts` map → its own table, keyed by the source-qualified id

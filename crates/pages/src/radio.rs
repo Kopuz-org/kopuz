@@ -17,7 +17,7 @@ use std::time::Duration;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct RadioProps {
-    pub config: Signal<config::AppConfig>,
+    pub settings: Signal<config::Settings>,
 }
 
 /// Pin or unpin, moving the check mark first and putting it back on failure; the daemon announces the new list.
@@ -75,8 +75,8 @@ fn matches_query(station: &RadioStationInfo, query: &str) -> bool {
 #[component]
 pub fn Radio(props: RadioProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-    let config = props.config;
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let settings = props.settings;
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
     // A phone has no room for the description column, so a row is the
     // station and its play controls.
     let phone = cfg!(target_os = "android");

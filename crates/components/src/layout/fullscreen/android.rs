@@ -2,14 +2,14 @@ use super::metadata::TrackMetadata;
 use crate::lyrics_view::LyricsView;
 use crate::player_controls::{ControlsVariant, SeekSlider, TransportButtons};
 use crate::queue_list_view::QueueListView;
-use config::AppConfig;
+use config::Settings;
 use dioxus::prelude::*;
 
 #[component]
 pub(crate) fn FullscreenAndroid(
     is_playing: Signal<bool>,
     mut is_fullscreen: Signal<bool>,
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     current_song_duration: Signal<u64>,
     current_song_progress: Signal<u64>,
     current_song_title: Signal<String>,
@@ -37,7 +37,7 @@ pub(crate) fn FullscreenAndroid(
         if *closing.peek() {
             return;
         }
-        if config.peek().reduce_animations {
+        if settings.peek().ui.reduce_animations {
             is_fullscreen.set(false);
             return;
         }
@@ -196,7 +196,7 @@ pub(crate) fn FullscreenAndroid(
                 } else if tab == 1 {
                     QueueListView {
                         items,
-                        config,
+                        settings,
                         current_queue_index,
                         layout: crate::queue_list_view::LayoutMode::Fullscreen,
                     }
@@ -204,7 +204,7 @@ pub(crate) fn FullscreenAndroid(
                     LyricsView {
                         lyrics,
                         current_song_progress,
-                        config,
+                        settings,
                         layout: crate::lyrics_view::LayoutMode::Fullscreen,
                     }
                 }

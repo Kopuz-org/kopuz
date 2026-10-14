@@ -77,7 +77,7 @@ impl RadioService {
     /// whenever the registry list or the pins change, so a settings toggle
     /// takes effect without a restart.
     pub async fn reload(&self) -> Result<(), ApiError> {
-        let registries = self.config.snapshot().await.radio_registries;
+        let registries = self.config.snapshot().await.integrations.radio_registries;
         let pins =
             self.db.pinned_stations().await.map_err(|error| {
                 ApiError::internal(format!("pinned stations unreadable: {error}"))
@@ -102,7 +102,7 @@ impl RadioService {
     /// takes effect without a restart. Pins reload themselves through `pin`,
     /// which is why the key ignores them: re-importing every registry for a
     /// pin would cost a round of network for nothing.
-    pub fn watch_config(self: &Arc<Self>, mut config: watch::Receiver<config::AppConfig>) {
+    pub fn watch_config(self: &Arc<Self>, mut config: watch::Receiver<config::Settings>) {
         let service = self.clone();
         tokio::spawn(async move {
             let mut current = registry_key(&config.borrow());
@@ -225,8 +225,9 @@ impl RadioService {
 }
 
 /// What the registry is built from: the enabled registry URLs, in order.
-fn registry_key(config: &config::AppConfig) -> String {
+fn registry_key(config: &config::Settings) -> String {
     config
+        .integrations
         .radio_registries
         .iter()
         .filter(|entry| entry.enabled)

@@ -163,8 +163,9 @@ impl SpotifySink {
     fn adopt(self: &Arc<Self>, device_id: String) {
         let wanted = self
             .session
-            .config_watch()
+            .settings_watch()
             .borrow()
+            .spotify
             .spotify_prefer_active_device;
         let adopt = self.with_state(|state| {
             let prefer = wanted && !state.chosen && state.selected.is_none();
@@ -263,7 +264,13 @@ impl SpotifySink {
             self.with_state(|state| state.starting = false);
             return;
         };
-        let browser = self.session.config_watch().borrow().spotify_browser.clone();
+        let browser = self
+            .session
+            .settings_watch()
+            .borrow()
+            .spotify
+            .spotify_browser
+            .clone();
         let sink = self.clone();
         tokio::spawn(async move {
             match SpotifyHost::start(access, browser).await {

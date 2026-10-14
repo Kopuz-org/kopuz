@@ -1,9 +1,9 @@
-//! Config persistence: settings in the settings file (`config::store`) and state in tables, hydrated into one `AppConfig`; credentials and library data have tables of their own.
+//! App state persistence: the state row and its tables; settings live in the settings file (`config::store`), and credentials and library data have tables of their own.
 
 use std::collections::HashMap;
 use std::path::Path;
 
-use config::{AppConfig, Browser, MusicServer, MusicService, SavedServer, Source};
+use config::{Browser, MusicServer, MusicService, SavedServer, Settings, Source};
 use sqlx::SqlitePool;
 
 use crate::DbError;
@@ -11,23 +11,11 @@ use crate::DbError;
 /// How many recent entries to keep per source.
 const RECENT_LIMIT: i64 = 50;
 
-pub async fn load_config(
-    pool: &SqlitePool,
-    settings_path: &Path,
-) -> Result<Option<AppConfig>, DbError> {
-    let layers = config::store::FileLayers::read(settings_path);
+pub async fn has_app_state(pool: &SqlitePool) -> Result<bool, DbError> {
     let state: Option<i64> = sqlx::query_scalar("SELECT id FROM app_state WHERE id = 1")
         .fetch_optional(pool)
         .await?;
-    // Nothing saved and no settings file either: never configured.
-    if state.is_none() && !layers.has_overrides() {
-        return Ok(None);
-    }
-    let mut cfg: AppConfig = layers.merge_and_parse(serde_json::json!({}))?;
-    // The in-memory shape migration the legacy file load used to run.
-    cfg.migrate_registry_paths();
-
-    Ok(Some(cfg))
+    Ok(state.is_some())
 }
 
 pub async fn load_sources(pool: &SqlitePool) -> Result<crate::StoredSources, DbError> {
@@ -200,17 +188,11 @@ pub(crate) async fn write_integration_credential(
     Ok(())
 }
 
-#[tracing::instrument(name = "config.save", skip_all)]
-pub async fn save_config(
-    pool: &SqlitePool,
-    cfg: &AppConfig,
-    settings_path: &Path,
-) -> Result<(), DbError> {
+pub async fn ensure_app_state(pool: &SqlitePool) -> Result<(), DbError> {
     // It can read before it writes, and a deferred BEGIN then fails at once against a write that landed meanwhile.
     let mut tx = super::begin_immediate(pool).await?;
     ensure_state_row(&mut tx).await?;
-    tx.commit().await?;
-    write_settings(cfg, settings_path)
+    tx.commit().await
 }
 
 /// The volume a fresh state row starts at, before the engine saved one.
@@ -428,11 +410,9 @@ pub async fn delete_server(pool: &SqlitePool, id: &str) -> Result<(), DbError> {
     tx.commit().await
 }
 
-/// The settings go to the settings file, which is only rewritten when one of them changed.
-pub(crate) fn write_settings(cfg: &AppConfig, settings_path: &Path) -> Result<(), DbError> {
-    let layers = config::store::FileLayers::read(settings_path);
-    let settings = serde_json::to_value(cfg)?;
-    config::store::save_settings_file(settings_path, &settings, &layers.locked_keys)
+/// The legacy importers' settings go to the settings file, which is only rewritten when one of them changed.
+pub(crate) fn write_settings(settings: &Settings, settings_path: &Path) -> Result<(), DbError> {
+    config::store::save_settings(settings_path, settings)
         .map_err(|error| DbError::Io(format!("{}: {error}", settings_path.display())))?;
     Ok(())
 }

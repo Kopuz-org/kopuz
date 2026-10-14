@@ -575,7 +575,7 @@ impl api::ConfigApi for LocalApi {
         }
     }
 
-    async fn set_config(&self, config: config::AppConfig) -> Result<api::ConfigView, ApiError> {
+    async fn set_config(&self, config: config::Settings) -> Result<api::ConfigView, ApiError> {
         let Some(service) = &self.config else {
             return Err(ApiError::unsupported(
                 "this daemon runs without a config service",

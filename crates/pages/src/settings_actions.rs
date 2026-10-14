@@ -6,7 +6,7 @@
 //! near this process: a form is filled in here, and what comes back is
 //! whether the source ended up authenticated.
 
-use config::AppConfig;
+use config::Settings;
 use dioxus::prelude::*;
 use tracing::Instrument;
 
@@ -19,7 +19,7 @@ pub(crate) async fn ensure_host_access(mut host_access: Signal<bool>) -> Option<
 }
 
 pub fn add_registry(
-    mut config: Signal<AppConfig>,
+    mut settings: Signal<Settings>,
     mut registry_url: Signal<String>,
     mut registry_error: Signal<Option<String>>,
     mut registry_loading: Signal<bool>,
@@ -31,7 +31,13 @@ pub fn add_registry(
         return;
     }
 
-    if config.read().radio_registries.iter().any(|r| r.url == url) {
+    if settings
+        .read()
+        .integrations
+        .radio_registries
+        .iter()
+        .any(|r| r.url == url)
+    {
         registry_error.set(Some(i18n::t("radio_registry_exists").to_string()));
         return;
     }
@@ -44,13 +50,21 @@ pub fn add_registry(
         async move {
             match api.validate_radio_registry(url.clone()).await {
                 Ok(_) => {
-                    let mut current_config = config.write();
-                    if !current_config.radio_registries.iter().any(|r| r.url == url) {
-                        current_config.radio_registries.push(config::RegistryEntry {
-                            url,
-                            enabled: true,
-                            is_default: false,
-                        });
+                    let mut current_config = settings.write();
+                    if !current_config
+                        .integrations
+                        .radio_registries
+                        .iter()
+                        .any(|r| r.url == url)
+                    {
+                        current_config
+                            .integrations
+                            .radio_registries
+                            .push(config::RegistryEntry {
+                                url,
+                                enabled: true,
+                                is_default: false,
+                            });
                     }
                     registry_url.set(String::new());
                     registry_error.set(None);

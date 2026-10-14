@@ -4,7 +4,7 @@ use components::selection_bar::SelectionBar;
 use components::showcase::{self, SortField};
 use components::track_row::TrackRow;
 use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
-use config::{AppConfig, UiStyle};
+use config::{Settings, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{use_active_source, use_favorites, use_tracks_by_keys};
 use hooks::use_player_controller::PlayerController;
@@ -19,7 +19,7 @@ const ITEM_HEIGHT: f64 = 60.0;
 /// remote-sync/download affordances gated on [`Capabilities`].
 #[component]
 pub fn FavoritesBody(
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     mut queue: Signal<Vec<api::TrackInfo>>,
     search_query: Signal<String>,
 ) -> Element {
@@ -101,7 +101,7 @@ pub fn FavoritesBody(
 
     let displayed_tracks_for_selection = sorted_displayed_tracks.clone();
     let is_empty = displayed_tracks.is_empty();
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
 
     // Window the rows: only the visible slice (plus buffer) exists in the
     // DOM — the full 800+ row list made every scroll frame repaint a huge

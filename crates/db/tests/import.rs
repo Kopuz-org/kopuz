@@ -340,7 +340,7 @@ async fn finalize_is_inert_when_no_import_ran() {
     let db = db::init(&db_path).await.unwrap();
     // Simulate "import failed, runtime wrote data anyway": no import, but the
     // DB becomes non-empty.
-    db.save_config(&config::AppConfig::default()).await.unwrap();
+    db.ensure_app_state().await.unwrap();
 
     let renamed = db.finalize_migration(&dir).await.unwrap();
     assert_eq!(

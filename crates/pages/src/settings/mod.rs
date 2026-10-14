@@ -16,7 +16,6 @@ use components::settings_items::{
 };
 use components::settings_popups::{AddRegistryPopup, AddSourcePopup, LoginPopup};
 use components::settings_remote_folders::RemoteFolderSettings;
-use config::AppConfig;
 use dioxus::prelude::*;
 
 use crate::DebugPanel;
@@ -54,7 +53,7 @@ fn BuildInfoCard() -> Element {
 }
 
 #[component]
-pub fn Settings(config: Signal<AppConfig>) -> Element {
+pub fn Settings(settings: Signal<config::Settings>) -> Element {
     let ctrl = use_context::<PlayerController>();
     // The sources are the daemon's: it holds their credentials, so the config
     // this page reads never carries them.
@@ -136,7 +135,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
     let handle_add_registry = move |_| {
         crate::settings_actions::add_registry(
-            config,
+            settings,
             registry_url,
             registry_error,
             registry_loading,
@@ -207,10 +206,10 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
     let is_android = cfg!(target_os = "android");
     let showing_index = is_android && subpage.is_none_or(|subpage| subpage.read().is_none());
-    let is_material3 = config.read().ui_style == config::UiStyle::Material3;
+    let is_material3 = settings.read().ui.ui_style == config::UiStyle::Material3;
 
     rsx! {
-        div { class: if is_android { "px-3 pt-2 pb-6 w-full max-w-7xl mx-auto" } else if is_material3 || config.read().settings_layout == config::SettingsLayout::TopBar { "settings-page settings-layout-topbar px-6 py-7 w-full max-w-7xl mx-auto" } else { "settings-page settings-layout-cd px-6 py-7 w-full max-w-7xl mx-auto" },
+        div { class: if is_android { "px-3 pt-2 pb-6 w-full max-w-7xl mx-auto" } else if is_material3 || settings.read().ui.settings_layout == config::SettingsLayout::TopBar { "settings-page settings-layout-topbar px-6 py-7 w-full max-w-7xl mx-auto" } else { "settings-page settings-layout-cd px-6 py-7 w-full max-w-7xl mx-auto" },
             if !is_android {
                 h1 { class: "text-2xl font-semibold tracking-tight text-white mb-5 px-1", "{i18n::t(\"settings\")}" }
             }
@@ -224,7 +223,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
             if showing_index {
                 SettingsIndex {
-                    config,
+                    settings,
                     active_source: all_sources().into_iter().find(|source| source.active),
                     on_select: open_category,
                 }
@@ -247,9 +246,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             config_key: "theme",
                             control: rsx! {
                                 ThemeSelector {
-                                    current_theme: config.read().theme.clone(),
+                                    current_theme: settings.read().ui.theme.clone(),
                                     on_change: move |theme| {
-                                        config.write().theme = theme;
+                                        settings.write().ui.theme = theme;
                                     }
                                 }
                             }
@@ -259,9 +258,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             config_key: "language",
                             control: rsx! {
                                 LanguageSelector {
-                                    current_language: config.read().language.clone(),
+                                    current_language: settings.read().ui.language.clone(),
                                     on_change: move |lang: String| {
-                                        config.write().language = lang.clone();
+                                        settings.write().ui.language = lang.clone();
                                         i18n::set_locale(&lang);
                                     }
                                 }
@@ -269,7 +268,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         }
 
                         if cfg!(not(target_os = "android"))
-                            && config.read().theme == utils::live_theme::THEME_ID
+                            && settings.read().ui.theme == utils::live_theme::THEME_ID
                         {
                             SettingItem {
                                 title: i18n::t("live_theme_file").to_string(),
@@ -278,12 +277,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     div { class: "flex items-center gap-2",
                                         span {
                                             class: "text-xs text-white/50 font-mono max-w-[220px] truncate",
-                                            "{utils::live_theme::resolve_path(&config.read().live_theme_path).display()}"
+                                            "{utils::live_theme::resolve_path(&settings.read().ui.live_theme_path).display()}"
                                         }
-                                        if !config.read().live_theme_path.is_empty() {
+                                        if !settings.read().ui.live_theme_path.is_empty() {
                                             button {
                                                 class: "app-button-tonal app-button-danger px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-red-300 text-sm transition-colors",
-                                                onclick: move |_| config.write().live_theme_path = String::new(),
+                                                onclick: move |_| settings.write().ui.live_theme_path = String::new(),
                                                 "{i18n::t(\"remove\")}"
                                             }
                                         }
@@ -297,7 +296,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                                         .pick_file()
                                                         .await
                                                     {
-                                                        config.write().live_theme_path =
+                                                        settings.write().ui.live_theme_path =
                                                             file.path().display().to_string();
                                                     }
                                                 });
@@ -314,14 +313,14 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 config_key: "custom_font_path",
                                 control: rsx! {
                                     div { class: "flex items-center gap-2",
-                                        if !config.read().custom_font_path.is_empty() {
+                                        if !settings.read().ui.custom_font_path.is_empty() {
                                             span {
                                                 class: "text-xs text-white/50 font-mono max-w-[220px] truncate",
-                                                "{config.read().custom_font_path}"
+                                                "{settings.read().ui.custom_font_path}"
                                             }
                                             button {
                                                 class: "app-button-tonal app-button-danger px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-red-300 text-sm transition-colors",
-                                                onclick: move |_| config.write().custom_font_path = String::new(),
+                                                onclick: move |_| settings.write().ui.custom_font_path = String::new(),
                                                 "{i18n::t(\"remove\")}"
                                             }
                                         }
@@ -335,7 +334,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                                         .pick_file()
                                                         .await
                                                     {
-                                                        config.write().custom_font_path =
+                                                        settings.write().ui.custom_font_path =
                                                             file.path().display().to_string();
                                                     }
                                                 });
@@ -353,8 +352,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             config_key: "cover_art_background",
                             control: rsx! {
                                 ToggleSetting {
-                                    enabled: config.read().cover_art_background,
-                                    on_change: move |val| config.write().cover_art_background = val,
+                                    enabled: settings.read().background.cover_art_background,
+                                    on_change: move |val| settings.write().background.cover_art_background = val,
                                 }
                             }
                         }
@@ -364,14 +363,14 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 config_key: "custom_background_path",
                                 control: rsx! {
                                     div { class: "flex items-center gap-2",
-                                        if !config.read().custom_background_path.is_empty() {
+                                        if !settings.read().background.custom_background_path.is_empty() {
                                             span {
                                                 class: "text-xs text-white/50 font-mono max-w-[220px] truncate",
-                                                "{config.read().custom_background_path}"
+                                                "{settings.read().background.custom_background_path}"
                                             }
                                             button {
                                                 class: "app-button-tonal app-button-danger px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-red-300 text-sm transition-colors",
-                                                onclick: move |_| config.write().custom_background_path = String::new(),
+                                                onclick: move |_| settings.write().background.custom_background_path = String::new(),
                                                 "{i18n::t(\"remove\")}"
                                             }
                                         }
@@ -385,7 +384,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                                         .pick_file()
                                                         .await
                                                     {
-                                                        config.write().custom_background_path =
+                                                        settings.write().background.custom_background_path =
                                                             file.path().display().to_string();
                                                     }
                                                 });
@@ -396,8 +395,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                        if config.read().cover_art_background
-                            || !config.read().custom_background_path.is_empty()
+                        if settings.read().background.cover_art_background
+                            || !settings.read().background.custom_background_path.is_empty()
                         {
                                 SettingItem {
                                     title: i18n::t("cover_art_darkening").to_string(),
@@ -410,18 +409,18 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                                 min: "0",
                                                 max: "95",
                                                 step: "5",
-                                                value: format!("{}", config.read().cover_art_darkening),
+                                                value: format!("{}", settings.read().background.cover_art_darkening),
                                                 class: "w-40",
-                                                style: components::settings::items::range_style(f64::from(config.read().cover_art_darkening), 0.0, 95.0),
+                                                style: components::settings::items::range_style(f64::from(settings.read().background.cover_art_darkening), 0.0, 95.0),
                                                 oninput: move |evt| {
                                                     if let Ok(value) = evt.value().parse::<u8>() {
-                                                        config.write().cover_art_darkening = value.min(95);
+                                                        settings.write().background.cover_art_darkening = value.min(95);
                                                     }
                                                 }
                                             }
                                             span {
                                                 class: "text-xs font-mono text-white/80 w-16 text-right",
-                                                "{config.read().cover_art_darkening}%"
+                                                "{settings.read().background.cover_art_darkening}%"
                                             }
                                         }
                                     }
@@ -437,18 +436,18 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                                 min: "0",
                                                 max: "100",
                                                 step: "5",
-                                                value: format!("{}", config.read().cover_art_blur),
+                                                value: format!("{}", settings.read().background.cover_art_blur),
                                                 class: "w-40",
-                                                style: components::settings::items::range_style(f64::from(config.read().cover_art_blur), 0.0, 100.0),
+                                                style: components::settings::items::range_style(f64::from(settings.read().background.cover_art_blur), 0.0, 100.0),
                                                 oninput: move |evt| {
                                                     if let Ok(value) = evt.value().parse::<u8>() {
-                                                        config.write().cover_art_blur = value.min(100);
+                                                        settings.write().background.cover_art_blur = value.min(100);
                                                     }
                                                 }
                                             }
                                             span {
                                                 class: "text-xs font-mono text-white/80 w-16 text-right",
-                                                "{config.read().cover_art_blur}px"
+                                                "{settings.read().background.cover_art_blur}px"
                                             }
                                         }
                                     }
@@ -461,12 +460,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             config_key: "lyrics_depth_blur",
                             control: rsx! {
                                 ToggleSetting {
-                                    enabled: config.read().lyrics_depth_blur,
-                                    on_change: move |val| config.write().lyrics_depth_blur = val,
+                                    enabled: settings.read().lyrics.lyrics_depth_blur,
+                                    on_change: move |val| settings.write().lyrics.lyrics_depth_blur = val,
                                 }
                             }
                         }
-                        if config.read().lyrics_depth_blur {
+                        if settings.read().lyrics.lyrics_depth_blur {
                             SettingItem {
                                 title: i18n::t("lyrics_depth_blur_strength").to_string(),
                                 config_key: "lyrics_depth_blur_strength",
@@ -478,18 +477,18 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                             min: "10",
                                             max: "200",
                                             step: "10",
-                                            value: format!("{}", config.read().lyrics_depth_blur_strength),
+                                            value: format!("{}", settings.read().lyrics.lyrics_depth_blur_strength),
                                             class: "w-40",
-                                            style: components::settings::items::range_style(f64::from(config.read().lyrics_depth_blur_strength), 10.0, 200.0),
+                                            style: components::settings::items::range_style(f64::from(settings.read().lyrics.lyrics_depth_blur_strength), 10.0, 200.0),
                                             oninput: move |evt| {
                                                 if let Ok(value) = evt.value().parse::<u8>() {
-                                                    config.write().lyrics_depth_blur_strength = value.clamp(10, 200);
+                                                    settings.write().lyrics.lyrics_depth_blur_strength = value.clamp(10, 200);
                                                 }
                                             }
                                         }
                                         span {
                                             class: "text-xs font-mono text-white/80 w-16 text-right",
-                                            "{config.read().lyrics_depth_blur_strength}%"
+                                            "{settings.read().lyrics.lyrics_depth_blur_strength}%"
                                         }
                                     }
                                 }
@@ -502,8 +501,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             config_key: "reduce_animations",
                             control: rsx! {
                                 ToggleSetting {
-                                    enabled: config.read().reduce_animations,
-                                    on_change: move |val| config.write().reduce_animations = val,
+                                    enabled: settings.read().ui.reduce_animations,
+                                    on_change: move |val| settings.write().ui.reduce_animations = val,
                                 }
                             }
                         }
@@ -513,8 +512,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 config_key: "fullscreen_use_player_bar",
                                 control: rsx! {
                                     ToggleSetting {
-                                        enabled: config.read().fullscreen_use_player_bar,
-                                        on_change: move |val| config.write().fullscreen_use_player_bar = val,
+                                        enabled: settings.read().ui.fullscreen_use_player_bar,
+                                        on_change: move |val| settings.write().ui.fullscreen_use_player_bar = val,
                                     }
                                 }
                             }
@@ -524,8 +523,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             config_key: "show_source_toggle",
                                 control: rsx! {
                                 ToggleSetting {
-                                    enabled: config.read().show_source_toggle,
-                                    on_change: move |val| config.write().show_source_toggle = val,
+                                    enabled: settings.read().ui.show_source_toggle,
+                                    on_change: move |val| settings.write().ui.show_source_toggle = val,
                                 }
                             }
                         }
@@ -534,8 +533,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             config_key: "show_row_images",
                             control: rsx! {
                                 ToggleSetting {
-                                    enabled: config.read().show_row_images,
-                                    on_change: move |val| config.write().show_row_images = val,
+                                    enabled: settings.read().ui.show_row_images,
+                                    on_change: move |val| settings.write().ui.show_row_images = val,
                                 }
                             }
                         }
@@ -545,14 +544,14 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 config_key: "titlebar_mode",
                                 control: rsx! {
                                     {
-                                        let current_mode = config.read().titlebar_mode;
+                                        let current_mode = settings.read().ui.titlebar_mode;
                                         rsx! {
                                             AppSelect {
                                                 class: "settings-select",
                                                 value: match current_mode { config::TitlebarMode::System => "system", config::TitlebarMode::Off => "off", config::TitlebarMode::Custom => "custom" }.to_string(),
                                                 options: vec![("custom".into(), i18n::t("titlebar_custom")), ("system".into(), i18n::t("titlebar_system")), ("off".into(), i18n::t("titlebar_off"))],
                                                 on_change: move |value: String| {
-                                                    config.write().titlebar_mode = match value.as_str() {
+                                                    settings.write().ui.titlebar_mode = match value.as_str() {
                                                         "system" => config::TitlebarMode::System,
                                                         "off" => config::TitlebarMode::Off,
                                                         _ => config::TitlebarMode::Custom,
@@ -569,14 +568,14 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             config_key: "ui_style",
                             control: rsx! {
                                 {
-                                    let current_style = config.read().ui_style;
+                                    let current_style = settings.read().ui.ui_style;
                                     rsx! {
                                         AppSelect {
                                             class: "settings-select",
                                             value: current_style.as_str().to_string(),
                                             options: vec![("normal".into(), i18n::t("ui_normal")), ("vaxry".into(), i18n::t("ui_vaxry")), ("material3".into(), i18n::t("ui_material3"))],
                                             on_change: move |value: String| {
-                                                config.write().ui_style = match value.as_str() {
+                                                settings.write().ui.ui_style = match value.as_str() {
                                                     "vaxry" => config::UiStyle::Vaxry,
                                                     "material3" => config::UiStyle::Material3,
                                                     _ => config::UiStyle::Normal,
@@ -592,14 +591,14 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             config_key: "player_bar_position",
                             control: rsx! {
                                 {
-                                    let current_position = config.read().player_bar_position;
+                                    let current_position = settings.read().ui.player_bar_position;
                                     rsx! {
                                         AppSelect {
                                             class: "settings-select",
                                             value: (if current_position == config::PlayerBarPosition::Top { "top" } else { "bottom" }).to_string(),
                                             options: vec![("bottom".into(), i18n::t("position_bottom")), ("top".into(), i18n::t("position_top"))],
                                             on_change: move |value: String| {
-                                                config.write().player_bar_position = match value.as_str() {
+                                                settings.write().ui.player_bar_position = match value.as_str() {
                                                     "top" => config::PlayerBarPosition::Top,
                                                     _ => config::PlayerBarPosition::Bottom,
                                                 };
@@ -615,14 +614,14 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 config_key: "settings_layout",
                                 control: rsx! {
                                     {
-                                        let current_layout = config.read().settings_layout;
+                                        let current_layout = settings.read().ui.settings_layout;
                                         rsx! {
                                             AppSelect {
                                                 class: "settings-select",
                                                 value: (if current_layout == config::SettingsLayout::TopBar { "topbar" } else { "cd" }).to_string(),
                                                 options: vec![("cd".into(), i18n::t("settings_layout_cd")), ("topbar".into(), i18n::t("settings_layout_topbar"))],
                                                 on_change: move |value: String| {
-                                                    config.write().settings_layout = match value.as_str() {
+                                                    settings.write().ui.settings_layout = match value.as_str() {
                                                         "topbar" => config::SettingsLayout::TopBar,
                                                         _ => config::SettingsLayout::Cd,
                                                     };
@@ -637,12 +636,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
                     if active_category() == SettingsCategory::Library {
                         RadioRegistryDropdown {
-                            registries: config.read().radio_registries.clone(),
+                            registries: settings.read().integrations.radio_registries.clone(),
                             error: registry_toggle_error,
                             on_toggle: move |index: usize| {
                                 let (is_enabling, url) = {
-                                    let cfg = config.read();
-                                    let entry = cfg.radio_registries.get(index);
+                                    let cfg = settings.read();
+                                    let entry = cfg.integrations.radio_registries.get(index);
                                     (
                                         entry.map(|e| !e.enabled).unwrap_or(false),
                                         entry.map(|e| e.url.clone()).unwrap_or_default(),
@@ -655,9 +654,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     spawn(async move {
                                         match api.validate_radio_registry(url.clone()).await {
                                             Ok(_) => {
-                                                let mut cfg = config.write();
+                                                let mut cfg = settings.write();
                                                 if let Some(entry) = cfg
-                                                .radio_registries
+                                                .integrations.radio_registries
                                                 .iter_mut()
                                                 .find(|entry| entry.url == url)
                                                 {
@@ -671,8 +670,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                         }
                                     });
                                 } else {
-                                    let mut cfg = config.write();
-                                    if let Some(entry) = cfg.radio_registries.get_mut(index) {
+                                    let mut cfg = settings.write();
+                                    if let Some(entry) = cfg.integrations.radio_registries.get_mut(index) {
                                         entry.enabled = false;
                                     }
                                     registry_toggle_error.set(None);
@@ -680,11 +679,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             },
                             on_add: move |_| show_add_registry.set(true),
                             on_delete: move |index: usize| {
-                                let mut cfg = config.write();
-                                if index < cfg.radio_registries.len()
-                                    && !cfg.radio_registries[index].is_default
+                                let mut cfg = settings.write();
+                                if index < cfg.integrations.radio_registries.len()
+                                    && !cfg.integrations.radio_registries[index].is_default
                                 {
-                                    cfg.radio_registries.remove(index);
+                                    cfg.integrations.radio_registries.remove(index);
                                 }
                             }
                         }
@@ -695,11 +694,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             control: rsx! {
                                 AppSelect {
                                     class: "settings-select",
-                                    value: config.read().sync_interval_minutes.to_string(),
-                                    options: sync_interval_options(config.read().sync_interval_minutes),
+                                    value: settings.read().library.sync_interval_minutes.to_string(),
+                                    options: sync_interval_options(settings.read().library.sync_interval_minutes),
                                     on_change: move |value: String| {
                                         if let Ok(minutes) = value.parse::<u32>() {
-                                            config.write().sync_interval_minutes = minutes;
+                                            settings.write().library.sync_interval_minutes = minutes;
                                         }
                                     },
                                 }
@@ -730,8 +729,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             config_key: "auto_check_updates",
                             control: rsx! {
                                 ToggleSetting {
-                                    enabled: config.read().auto_check_updates,
-                                    on_change: move |val| config.write().auto_check_updates = val,
+                                    enabled: settings.read().system.auto_check_updates,
+                                    on_change: move |val| settings.write().system.auto_check_updates = val,
                                 }
                             }
                         }
@@ -741,8 +740,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 config_key: "minimize_to_tray",
                                 control: rsx! {
                                     ToggleSetting {
-                                        enabled: config.read().minimize_to_tray,
-                                        on_change: move |val| config.write().minimize_to_tray = val,
+                                        enabled: settings.read().system.minimize_to_tray,
+                                        on_change: move |val| settings.write().system.minimize_to_tray = val,
                                     }
                                 }
                             }
@@ -752,8 +751,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             config_key: "back_behavior",
                             control: rsx! {
                                 BackBehaviorSelector {
-                                    current: config.read().back_behavior,
-                                    on_change: move |val| config.write().back_behavior = val,
+                                    current: settings.read().playback.back_behavior,
+                                    on_change: move |val| settings.write().playback.back_behavior = val,
                                 }
                             }
                         }
@@ -764,26 +763,26 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     BuildInfoCard {}
                 }
                 if active_category() == SettingsCategory::Customization {
-                    {theme_editor_section(config)}
+                    {theme_editor_section(settings)}
                 }
                 if active_category() == SettingsCategory::Connectivity {
                     ConnectivitySection {}
                 }
                 if active_category() == SettingsCategory::Downloads {
-                    DownloadsSection { config }
+                    DownloadsSection { settings }
                 }
                 if active_category() == SettingsCategory::Metadata {
-                    MetadataSection { config }
+                    MetadataSection { settings }
                 }
                 if active_category() == SettingsCategory::Player {
-                    PlayerSection { config }
+                    PlayerSection { settings }
                 }
                 if active_category() == SettingsCategory::Equalizer {
-                    EqualizerSection { config }
+                    EqualizerSection { settings }
                 }
                 if active_category() == SettingsCategory::Tools {
                     div { class: "space-y-8",
-                        {logs_section(config)}
+                        {logs_section(settings)}
                         // The app fills this in debug builds; it is the only
                         // crate that still holds a write-capable database.
                         if let Some(panel) = try_consume_context::<DebugPanel>() {

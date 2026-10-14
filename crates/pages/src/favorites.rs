@@ -1,12 +1,12 @@
 use components::search_bar::SearchBar;
-use config::{AppConfig, UiStyle};
+use config::{Settings, UiStyle};
 use dioxus::prelude::*;
 
 use crate::favorites_body::FavoritesBody;
 
 #[component]
 pub fn FavoritesPage(
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     mut is_playing: Signal<bool>,
     mut current_playing: Signal<u64>,
     mut current_song_title: Signal<String>,
@@ -16,7 +16,7 @@ pub fn FavoritesPage(
     mut queue: Signal<Vec<api::TrackInfo>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
     let search_query = use_signal(String::new);
 
     rsx! {
@@ -48,7 +48,7 @@ pub fn FavoritesPage(
 
             SearchBar { search_query }
             FavoritesBody {
-                config,
+                settings,
                 queue,
                 search_query,
             }

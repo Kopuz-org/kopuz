@@ -1,0 +1,104 @@
+auto_check_updates = true
+auto_fetch_covers = true
+back_behavior = "RewindThenPrev"
+channel_mode = "Stereo"
+cover_art_background = false
+cover_art_blur = 0
+cover_art_darkening = 45
+cover_fetch_strategy = "LastFmFirst"
+crossfade_seconds = 6
+custom_background_path = "/home/me/Pictures/wall.png"
+custom_font_path = ""
+device_change_behavior = "Pause"
+discord_presence = false
+discord_presence_source = true
+enable_musixmatch_lyrics = false
+fullscreen_use_player_bar = false
+language = "tr"
+live_theme_path = ""
+lyrics_depth_blur = true
+lyrics_depth_blur_strength = 80
+lyrics_offset_auto = true
+lyrics_offset_ms = 1000
+minimize_to_tray = false
+offline_quality = "Kbps256"
+player_bar_position = "Bottom"
+prefer_local_lyrics = false
+reduce_animations = false
+sample_rate_mode = "System"
+settings_layout = "Cd"
+show_row_images = true
+show_source_toggle = true
+spotify_browser = "brave"
+spotify_prefer_active_device = true
+sync_interval_minutes = 90
+theme = "nord"
+titlebar_mode = "System"
+tracing_enabled = false
+ui_style = "Vaxry"
+volume_scroll_step = 0.1
+ytdlp_output_dir = "/home/me/Downloads/kopuz"
+
+[custom_themes.ember]
+name = "Ember"
+
+[custom_themes.ember.vars]
+--color-bg = "#1a0f0a"
+
+[custom_themes.ocean]
+name = "Ocean"
+
+[custom_themes.ocean.vars]
+--color-bg = "#0b1d2a"
+--color-fg = "#d8e6f0"
+
+[equalizer]
+bands = [
+    -6.0,
+    -3.5,
+    0.0,
+    1.5,
+    3.0,
+    4.5,
+    6.0,
+    -1.0,
+    -2.0,
+    12.0,
+]
+enabled = true
+preamp_db = -2.5
+preset = "Custom"
+
+[[local_sources]]
+directories = ["/home/me/Music"]
+id = "local"
+name = "Local Library"
+
+[[local_sources]]
+directories = [
+    "/mnt/archive/flac",
+    "/mnt/archive/mp3",
+]
+id = "local:archive"
+name = "Archive"
+
+[[radio_registries]]
+enabled = true
+is_default = true
+url = "https://raw.githubusercontent.com/Kopuz-org/kopuz/refs/heads/master/radio-registry/index.json"
+
+[[radio_registries]]
+enabled = false
+is_default = false
+url = "https://example.org/stations/index.json"
+
+[replay_gain]
+mode = "Track"
+preamp_db = 1.5
+
+[ytdlp_options]
+embed_metadata = true
+embed_thumbnail = true
+organize_by_album = false
+overwrite_existing = false
+write_thumbnail = true

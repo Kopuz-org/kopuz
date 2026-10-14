@@ -1,5 +1,4 @@
-//! Configuration management for Kopuz: loads, saves, and migrates user settings
-//! (audio, theme, media servers, shortcuts) from a JSON config file.
+//! Kopuz's user settings, grouped into topic sections that the TOML layers in [`store`] read and write.
 
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
@@ -8,13 +7,11 @@ use std::path::PathBuf;
 mod source;
 pub mod store;
 mod ui_prefs;
-mod views;
 pub use source::{
     Browser, BrowserEngine, DEFAULT_LOCAL_ID, DEFAULT_LOCAL_NAME, JellyfinServer, MusicServer,
     MusicService, SavedLocalSource, SavedServer, Source,
 };
 pub use ui_prefs::UiPrefs;
-pub use views::ServerAuth;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum FetchStrategy {
@@ -745,79 +742,36 @@ pub fn default_home_sections() -> Vec<HomeSection> {
         .collect()
 }
 
+/// Every setting, grouped by topic; each section is flattened, so the stored keys stay top-level.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Settings {
+    #[serde(flatten)]
+    pub playback: Playback,
+    #[serde(flatten)]
+    pub ui: Ui,
+    #[serde(flatten)]
+    pub background: Background,
+    #[serde(flatten)]
+    pub lyrics: Lyrics,
+    #[serde(flatten)]
+    pub library: Library,
+    #[serde(flatten)]
+    pub integrations: Integrations,
+    #[serde(flatten)]
+    pub downloads: Downloads,
+    #[serde(flatten)]
+    pub spotify: Spotify,
+    #[serde(flatten)]
+    pub system: System,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AppConfig {
-    /// Isolated filesystem libraries; the one under `DEFAULT_LOCAL_ID` is the install's own.
-    #[serde(default)]
-    pub local_sources: Vec<SavedLocalSource>,
-    /// Browser id used to host Spotify playback (`chrome`/`edge`/`brave`/
-    /// `chromium`/`vivaldi`/`safari`); `None` picks the first available.
-    #[serde(default)]
-    pub spotify_browser: Option<String>,
-    /// When Spotify is active and another Connect device is already playing,
-    /// adopt that device on connect (`true`, default) instead of starting
-    /// playback on this app's in-app device.
-    #[serde(default = "default_true")]
-    pub spotify_prefer_active_device: bool,
-    #[serde(default = "default_theme")]
-    pub theme: String,
-    /// Palette file matugen or pywal writes, polled for changes while the live
-    /// theme is active. Empty means whichever default location exists.
-    #[serde(default)]
-    pub live_theme_path: String,
-    #[serde(default = "default_discord_presence")]
-    pub discord_presence: Option<bool>,
-    #[serde(default = "default_discord_presence_source")]
-    pub discord_presence_source: Option<bool>,
-    #[serde(default = "default_language")]
-    pub language: String,
-    #[serde(default)]
-    pub reduce_animations: bool,
-    /// When enabled, fullscreen mode hides its own transport controls and lets
-    /// the player bar act as the multimedia controller instead.
-    #[serde(default)]
-    pub fullscreen_use_player_bar: bool,
-    /// Use the current track's cover as the app background, overriding the
-    /// active theme's background (including the album-art gradient).
-    #[serde(default)]
-    pub cover_art_background: bool,
-    /// How strongly the cover art background is darkened, in percent (0-95).
-    #[serde(default = "default_cover_art_darkening")]
-    pub cover_art_darkening: u8,
-    /// Blur radius of the cover art background, in pixels (0 = sharp).
-    #[serde(default)]
-    pub cover_art_blur: u8,
-    /// Absolute path to a user-chosen image used as the app background,
-    /// overriding both the theme background and the cover art background.
-    /// Empty = unset. Shares the darkening/blur treatment with cover art.
-    #[serde(default)]
-    pub custom_background_path: String,
-    /// Absolute path to a user-chosen font file (ttf/otf/woff/woff2) applied
-    /// as the app's UI font, overriding the default JetBrains Mono stack.
-    /// Empty = unset.
-    #[serde(default)]
-    pub custom_font_path: String,
-    /// Opt-in chrome/Perfetto performance trace. Read at startup (the
-    /// subscriber is built once), so a change needs a restart. Adds runtime
-    /// overhead — surfaced with a warning in settings.
-    #[serde(default)]
-    pub tracing_enabled: bool,
-    #[serde(default = "default_auto_check_updates")]
-    pub auto_check_updates: bool,
-    /// Desktop-only: when enabled, closing the window hides it to the system
-    /// tray instead of quitting, so playback keeps running in the background.
-    #[serde(default)]
-    pub minimize_to_tray: bool,
-    #[serde(default = "default_show_source_toggle")]
-    pub show_source_toggle: bool,
-    #[serde(default = "default_true")]
-    pub show_row_images: bool,
+#[serde(default)]
+pub struct Playback {
     #[serde(default = "default_volume_scroll_step")]
     pub volume_scroll_step: f32,
     #[serde(default = "default_crossfade_seconds")]
     pub crossfade_seconds: u8,
-    #[serde(default)]
-    pub custom_themes: HashMap<String, CustomTheme>,
     #[serde(default)]
     pub back_behavior: BackBehavior,
     #[serde(default)]
@@ -830,27 +784,108 @@ pub struct AppConfig {
     pub device_change_behavior: DeviceChangeBehavior,
     #[serde(default)]
     pub sample_rate_mode: SampleRateMode,
-    /// Stored under the names the yt-dlp downloader gave these, so existing settings carry over.
-    #[serde(default, rename = "ytdlp_output_dir")]
-    pub downloader_output_dir: String,
-    #[serde(default, rename = "ytdlp_options")]
-    pub downloader_options: DownloaderOptions,
+}
+
+impl Default for Playback {
+    fn default() -> Self {
+        Self {
+            volume_scroll_step: default_volume_scroll_step(),
+            crossfade_seconds: default_crossfade_seconds(),
+            back_behavior: BackBehavior::RewindThenPrev,
+            channel_mode: ChannelMode::Stereo,
+            equalizer: EqualizerSettings::default(),
+            replay_gain: ReplayGainSettings::default(),
+            device_change_behavior: DeviceChangeBehavior::Pause,
+            sample_rate_mode: SampleRateMode::System,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Ui {
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    /// Palette file matugen or pywal writes, polled while the live theme is active; empty means whichever default location exists.
+    #[serde(default)]
+    pub live_theme_path: String,
+    #[serde(default)]
+    pub custom_themes: HashMap<String, CustomTheme>,
+    #[serde(default = "default_language")]
+    pub language: String,
+    #[serde(default)]
+    pub reduce_animations: bool,
+    /// Fullscreen hides its own transport controls and lets the player bar act as the controller.
+    #[serde(default)]
+    pub fullscreen_use_player_bar: bool,
+    #[serde(default = "default_show_source_toggle")]
+    pub show_source_toggle: bool,
+    #[serde(default = "default_true")]
+    pub show_row_images: bool,
     #[serde(default)]
     pub titlebar_mode: TitlebarMode,
-    #[serde(default)]
-    pub offline_quality: OfflineQuality,
     #[serde(default)]
     pub player_bar_position: PlayerBarPosition,
     #[serde(default)]
     pub ui_style: UiStyle,
     #[serde(default)]
     pub settings_layout: SettingsLayout,
+    /// User-chosen font file (ttf/otf/woff/woff2) replacing the default JetBrains Mono stack; empty means unset.
     #[serde(default)]
-    pub auto_fetch_covers: bool,
+    pub custom_font_path: String,
+}
+
+impl Default for Ui {
+    fn default() -> Self {
+        Self {
+            theme: default_theme(),
+            live_theme_path: String::new(),
+            custom_themes: HashMap::new(),
+            language: default_language(),
+            reduce_animations: false,
+            fullscreen_use_player_bar: false,
+            show_source_toggle: default_show_source_toggle(),
+            show_row_images: true,
+            titlebar_mode: TitlebarMode::Custom,
+            player_bar_position: PlayerBarPosition::Bottom,
+            ui_style: UiStyle::Normal,
+            settings_layout: SettingsLayout::Cd,
+            custom_font_path: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Background {
+    /// Use the current track's cover as the app background, overriding the theme's (album-art gradient included).
     #[serde(default)]
-    pub cover_fetch_strategy: FetchStrategy,
-    #[serde(default = "default_radio_registries")]
-    pub radio_registries: Vec<RegistryEntry>,
+    pub cover_art_background: bool,
+    /// How strongly the cover art background is darkened, in percent (0-95).
+    #[serde(default = "default_cover_art_darkening")]
+    pub cover_art_darkening: u8,
+    /// Blur radius of the cover art background, in pixels (0 = sharp).
+    #[serde(default)]
+    pub cover_art_blur: u8,
+    /// User-chosen background image over both the theme and the cover art, sharing their darkening and blur; empty means unset.
+    #[serde(default)]
+    pub custom_background_path: String,
+}
+
+impl Default for Background {
+    fn default() -> Self {
+        Self {
+            cover_art_background: false,
+            cover_art_darkening: default_cover_art_darkening(),
+            cover_art_blur: 0,
+            custom_background_path: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Lyrics {
     #[serde(default)]
     pub prefer_local_lyrics: bool,
     #[serde(default)]
@@ -861,16 +896,151 @@ pub struct AppConfig {
     /// Take the offset from the backend's playback timestamp instead.
     #[serde(default = "default_true")]
     pub lyrics_offset_auto: bool,
-    /// Apple Music style depth-of-field: blur lines by distance from the
-    /// active one instead of just dimming them.
+    /// Apple Music style depth-of-field: blur lines by distance from the active one instead of just dimming them.
     #[serde(default = "default_true")]
     pub lyrics_depth_blur: bool,
     /// Scales the depth-of-field ramp, in percent (100 = the built-in ramp).
     #[serde(default = "default_depth_blur_strength")]
     pub lyrics_depth_blur_strength: u8,
+}
+
+impl Default for Lyrics {
+    fn default() -> Self {
+        Self {
+            prefer_local_lyrics: false,
+            enable_musixmatch_lyrics: false,
+            lyrics_offset_ms: 0,
+            lyrics_offset_auto: true,
+            lyrics_depth_blur: true,
+            lyrics_depth_blur_strength: default_depth_blur_strength(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Library {
+    /// Isolated filesystem libraries; the one under `DEFAULT_LOCAL_ID` is the install's own.
+    pub local_sources: Vec<SavedLocalSource>,
+    #[serde(default)]
+    pub auto_fetch_covers: bool,
+    #[serde(default)]
+    pub cover_fetch_strategy: FetchStrategy,
+    #[serde(default)]
+    pub offline_quality: OfflineQuality,
     /// Minutes between the daemon's own library syncs and folder rescans; 0 turns them off.
     #[serde(default = "default_sync_interval_minutes")]
     pub sync_interval_minutes: u32,
+}
+
+impl Default for Library {
+    fn default() -> Self {
+        Self {
+            local_sources: vec![SavedLocalSource::default_library(vec![
+                default_music_directory(),
+            ])],
+            auto_fetch_covers: false,
+            cover_fetch_strategy: FetchStrategy::default(),
+            offline_quality: OfflineQuality::default(),
+            sync_interval_minutes: default_sync_interval_minutes(),
+        }
+    }
+}
+
+impl Library {
+    pub fn remove_local_source(&mut self, id: &str) {
+        self.local_sources.retain(|source| source.id != id);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Integrations {
+    #[serde(default = "default_discord_presence")]
+    pub discord_presence: Option<bool>,
+    #[serde(default = "default_discord_presence_source")]
+    pub discord_presence_source: Option<bool>,
+    #[serde(default = "default_radio_registries")]
+    pub radio_registries: Vec<RegistryEntry>,
+}
+
+impl Default for Integrations {
+    fn default() -> Self {
+        Self {
+            discord_presence: Some(true),
+            discord_presence_source: Some(true),
+            radio_registries: default_radio_registries(),
+        }
+    }
+}
+
+impl Integrations {
+    /// Put the default registry entry back when it is missing.
+    pub fn migrate_registry_paths(&mut self) {
+        if !self.radio_registries.iter().any(|r| r.is_default) {
+            self.radio_registries.insert(
+                0,
+                RegistryEntry {
+                    url: DEFAULT_REGISTRY_URL.to_string(),
+                    enabled: true,
+                    is_default: true,
+                },
+            );
+        }
+    }
+}
+
+/// Stored under the names the yt-dlp downloader gave these, so existing settings carry over.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Downloads {
+    #[serde(default, rename = "ytdlp_output_dir")]
+    pub downloader_output_dir: String,
+    #[serde(default, rename = "ytdlp_options")]
+    pub downloader_options: DownloaderOptions,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Spotify {
+    /// Browser id hosting Spotify playback (`chrome`/`edge`/`brave`/`chromium`/`vivaldi`/`safari`); `None` picks the first available.
+    #[serde(default)]
+    pub spotify_browser: Option<String>,
+    /// Adopt a Connect device that is already playing (default) instead of starting on this app's own device.
+    #[serde(default = "default_true")]
+    pub spotify_prefer_active_device: bool,
+}
+
+impl Default for Spotify {
+    fn default() -> Self {
+        Self {
+            spotify_browser: None,
+            spotify_prefer_active_device: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct System {
+    /// Opt-in chrome/Perfetto trace, read once at startup so a change needs a restart.
+    #[serde(default)]
+    pub tracing_enabled: bool,
+    #[serde(default = "default_auto_check_updates")]
+    pub auto_check_updates: bool,
+    /// Desktop-only: closing the window hides it to the tray instead of quitting, so playback keeps running.
+    #[serde(default)]
+    pub minimize_to_tray: bool,
+}
+
+impl Default for System {
+    fn default() -> Self {
+        Self {
+            tracing_enabled: false,
+            auto_check_updates: default_auto_check_updates(),
+            minimize_to_tray: false,
+        }
+    }
 }
 
 pub const DEFAULT_SYNC_INTERVAL_MINUTES: u32 = 24 * 60;
@@ -953,85 +1123,11 @@ fn default_music_directory() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("./assets"))
 }
 
-impl Default for AppConfig {
-    fn default() -> Self {
-        let music_directory = default_music_directory();
-        Self {
-            local_sources: vec![SavedLocalSource::default_library(vec![music_directory])],
-            spotify_browser: None,
-            spotify_prefer_active_device: true,
-            theme: default_theme(),
-            live_theme_path: String::new(),
-            discord_presence: Some(true),
-            discord_presence_source: Some(true),
-            language: default_language(),
-            reduce_animations: false,
-            fullscreen_use_player_bar: false,
-            cover_art_background: false,
-            cover_art_darkening: default_cover_art_darkening(),
-            cover_art_blur: 0,
-            custom_background_path: String::new(),
-            custom_font_path: String::new(),
-            tracing_enabled: false,
-            auto_check_updates: default_auto_check_updates(),
-            minimize_to_tray: false,
-            show_source_toggle: default_show_source_toggle(),
-            show_row_images: true,
-            volume_scroll_step: default_volume_scroll_step(),
-            crossfade_seconds: default_crossfade_seconds(),
-            custom_themes: HashMap::new(),
-            back_behavior: BackBehavior::RewindThenPrev,
-            channel_mode: ChannelMode::Stereo,
-            equalizer: EqualizerSettings::default(),
-            replay_gain: ReplayGainSettings::default(),
-            device_change_behavior: DeviceChangeBehavior::Pause,
-            sample_rate_mode: SampleRateMode::System,
-            downloader_output_dir: String::new(),
-            downloader_options: DownloaderOptions::default(),
-            titlebar_mode: TitlebarMode::Custom,
-            offline_quality: OfflineQuality::default(),
-            player_bar_position: PlayerBarPosition::Bottom,
-            ui_style: UiStyle::Normal,
-            settings_layout: SettingsLayout::Cd,
-            auto_fetch_covers: false,
-            cover_fetch_strategy: FetchStrategy::default(),
-            radio_registries: default_radio_registries(),
-            prefer_local_lyrics: false,
-            enable_musixmatch_lyrics: false,
-            lyrics_offset_ms: 0,
-            lyrics_offset_auto: true,
-            lyrics_depth_blur: true,
-            lyrics_depth_blur_strength: default_depth_blur_strength(),
-            sync_interval_minutes: default_sync_interval_minutes(),
-        }
-    }
-}
-
-impl AppConfig {
-    pub fn remove_local_source(&mut self, id: &str) {
-        self.local_sources.retain(|source| source.id != id);
-    }
-
-    pub fn migrate_registry_paths(&mut self) {
-        // Ensure the default registry entry is always present
-        if !self.radio_registries.iter().any(|r| r.is_default) {
-            self.radio_registries.insert(
-                0,
-                RegistryEntry {
-                    url: DEFAULT_REGISTRY_URL.to_string(),
-                    enabled: true,
-                    is_default: true,
-                },
-            );
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        AppConfig, Browser, EqualizerSettings, MusicServer, ReplayGainInfo, ReplayGainMode,
-        ReplayGainSettings, ServerAuth, SettingsLayout, loudness_gain,
+        EqualizerSettings, ReplayGainInfo, ReplayGainMode, ReplayGainSettings, Settings,
+        SettingsLayout, loudness_gain,
     };
 
     fn tagged() -> ReplayGainInfo {
@@ -1286,42 +1382,28 @@ mod tests {
 
     #[test]
     fn settings_layout_is_backward_compatible_and_deserializes_top_bar() {
-        let default_config: AppConfig = serde_json::from_str("{}").unwrap();
-        let top_bar_config: AppConfig =
+        let default_settings: Settings = serde_json::from_str("{}").unwrap();
+        let top_bar_settings: Settings =
             serde_json::from_str(r#"{"settings_layout":"TopBar"}"#).unwrap();
 
-        assert_eq!(default_config.settings_layout, SettingsLayout::Cd);
-        assert_eq!(top_bar_config.settings_layout, SettingsLayout::TopBar);
-    }
-
-    #[test]
-    fn browser_signin_server_auth_is_typed() {
-        let mut server = MusicServer::new_with_service(
-            "yt".to_string(),
-            "https://music.youtube.com".to_string(),
-            super::MusicService::YtMusic,
-        );
-        server.yt_browser = Some(Browser::Brave);
-        server.yt_anonymous = true;
-
-        assert_eq!(
-            server.auth(),
-            ServerAuth::Browser {
-                browser: Some(Browser::Brave),
-                token: None,
-                user_id: None,
-                anonymous: true,
-            }
-        );
+        assert_eq!(default_settings.ui.settings_layout, SettingsLayout::Cd);
+        assert_eq!(top_bar_settings.ui.settings_layout, SettingsLayout::TopBar);
     }
 
     /// Settings saved before the key existed keep syncing daily rather than never.
     #[test]
     fn a_settings_file_without_a_sync_interval_reads_as_a_day() {
-        let config: AppConfig = serde_json::from_str("{}").expect("empty settings parse");
-        assert_eq!(config.sync_interval_minutes, 24 * 60);
-        let never: AppConfig =
+        let settings: Settings = serde_json::from_str("{}").expect("empty settings parse");
+        assert_eq!(settings.library.sync_interval_minutes, 24 * 60);
+        let never: Settings =
             serde_json::from_str(r#"{"sync_interval_minutes":0}"#).expect("explicit zero parses");
-        assert_eq!(never.sync_interval_minutes, 0);
+        assert_eq!(never.library.sync_interval_minutes, 0);
+    }
+
+    /// Nothing stored reads as the defaults, the default folder source and its music folder included.
+    #[test]
+    fn an_empty_document_reads_as_the_defaults() {
+        let settings: Settings = serde_json::from_str("{}").expect("empty settings parse");
+        assert_eq!(settings, Settings::default());
     }
 }

@@ -1500,7 +1500,7 @@ message SetFrontendPrefsRequest {
 
 // ---------------- config ----------------
 
-// A source is a folder library or a server; the id carries the namespace as AppConfig holds it.
+// A source is a folder library or a server; the id carries the namespace as config::Source holds it.
 message SourceRef {
   reserved 1, 2;
   oneof kind {
@@ -1548,8 +1548,7 @@ message ReplayGainSettings {
   optional bool normalize_loudness = 5;
 }
 
-// The settings surface, mirroring config::AppConfig minus the keys the
-// daemon never sends: credentials and machine-local path state.
+// The settings the TOML layers hold, flat as config::Settings serializes them.
 message Config {
   repeated SavedFolderSource folder_sources = 69;
   reserved 3, 14 to 22, 27, 38, 56 to 58; // were the UI state each frontend now keeps in its own prefs

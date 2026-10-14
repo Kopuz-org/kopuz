@@ -5,7 +5,7 @@ use crate::queue_drag::{
     set_dragged_queue_tracks,
 };
 use api::TrackInfo as Track;
-use config::{AppConfig, UiStyle};
+use config::{Settings, UiStyle};
 use dioxus::prelude::*;
 use hooks::consume_api;
 use hooks::toast::toast;
@@ -47,10 +47,10 @@ pub fn TrackRow(
     #[props(default = Vec::new())] selected_queue_tracks: Vec<Track>,
     #[props(default = None)] row_num: Option<usize>,
 ) -> Element {
-    let config = use_context::<Signal<AppConfig>>();
+    let settings = use_context::<Signal<Settings>>();
     let nav_ctrl = use_context::<NavigationController>();
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
-    let show_row_images = config.read().show_row_images;
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
+    let show_row_images = settings.read().ui.show_row_images;
     let show_selection_highlight = is_selection_mode && is_selected;
     let selection_shadow = if show_selection_highlight {
         "inset 0 0 0 9999px rgba(255,255,255,0.07)"

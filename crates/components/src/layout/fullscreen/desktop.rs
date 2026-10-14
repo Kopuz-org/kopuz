@@ -2,14 +2,14 @@ use super::metadata::TrackMetadata;
 use super::tabs::Tabs;
 use crate::player_controls::{ControlsVariant, SeekSlider, TransportButtons, VolumeSlider};
 use crate::titlebar::Titlebar;
-use config::AppConfig;
+use config::Settings;
 use dioxus::prelude::*;
 
 #[component]
 pub(crate) fn FullscreenDesktop(
     is_playing: Signal<bool>,
     mut is_fullscreen: Signal<bool>,
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     current_song_duration: Signal<u64>,
     current_song_progress: Signal<u64>,
     current_song_title: Signal<String>,
@@ -23,7 +23,7 @@ pub(crate) fn FullscreenDesktop(
     background_style: Memo<String>,
     cover_background: Memo<Option<String>>,
 ) -> Element {
-    let use_player_bar = config.read().fullscreen_use_player_bar;
+    let use_player_bar = settings.read().ui.fullscreen_use_player_bar;
     let mut prefs = hooks::ui_prefs::use_ui_prefs();
     let tabs_collapsed = prefs.read().fullscreen_tabs_collapsed;
     let active_tab = use_signal(|| 0usize);
@@ -43,7 +43,7 @@ pub(crate) fn FullscreenDesktop(
 
             div {
                 class: if use_player_bar {
-                    match config.read().player_bar_position {
+                    match settings.read().ui.player_bar_position {
                         config::PlayerBarPosition::Top => "flex flex-1 overflow-hidden pt-24",
                         config::PlayerBarPosition::Bottom => "flex flex-1 overflow-hidden pb-24",
                     }
@@ -78,13 +78,13 @@ pub(crate) fn FullscreenDesktop(
 
                         TransportButtons { is_playing, variant: ControlsVariant::Fullscreen }
 
-                        VolumeSlider { config, volume, variant: ControlsVariant::Fullscreen }
+                        VolumeSlider { settings, volume, variant: ControlsVariant::Fullscreen }
                     }
                 }
 
                 if !tabs_collapsed {
                     Tabs {
-                        config,
+                        settings,
                         items,
                         current_queue_index,
                         lyrics,

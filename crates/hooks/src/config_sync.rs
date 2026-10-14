@@ -3,9 +3,9 @@
 use dioxus::prelude::*;
 use serde_json::{Map, Value};
 
-/// The config this app last sent or adopted and the daemon revision it matches, which tells the echo of its own write from another writer's change.
+/// The settings this app last sent or adopted and the daemon revision it matches, which tells the echo of its own write from another writer's change.
 #[derive(Clone, Copy)]
-pub struct ConfigBaseline(Signal<Option<(config::AppConfig, u64)>>);
+pub struct ConfigBaseline(Signal<Option<(config::Settings, u64)>>);
 
 pub fn use_config_baseline_provider() -> ConfigBaseline {
     use_context_provider(|| ConfigBaseline(Signal::new(None)))
@@ -18,17 +18,17 @@ pub fn use_config_baseline() -> ConfigBaseline {
 impl ConfigBaseline {
     /// Start from the view the app loaded.
     pub fn loaded(mut self, view: &api::ConfigView) {
-        self.0.set(Some((view.config.clone(), view.revision)));
+        self.0.set(Some((view.settings.clone(), view.revision)));
     }
 
-    /// Note the config this app just sent, before adopting the view its write answered with.
-    pub fn sent(mut self, config: config::AppConfig) {
+    /// Note the settings this app just sent, before adopting the view its write answered with.
+    pub fn sent(mut self, settings: config::Settings) {
         let revision = self.0.peek().as_ref().map_or(0, |(_, revision)| *revision);
-        self.0.set(Some((config, revision)));
+        self.0.set(Some((settings, revision)));
     }
 
     /// Take into `local` every field a newer `view` moved since the baseline, keeping edits not yet sent.
-    pub fn adopt(mut self, mut local: Signal<config::AppConfig>, view: &api::ConfigView) {
+    pub fn adopt(mut self, mut local: Signal<config::Settings>, view: &api::ConfigView) {
         let Some((baseline, revision)) = self.0.peek().clone() else {
             return;
         };
@@ -37,7 +37,7 @@ impl ConfigBaseline {
             return;
         }
         let current = local.peek().clone();
-        match moved(&current, &baseline, &view.config) {
+        match moved(&current, &baseline, &view.settings) {
             Some((next_local, next_baseline)) => {
                 self.0.set(Some((next_baseline, view.revision)));
                 local.set(next_local);
@@ -47,8 +47,8 @@ impl ConfigBaseline {
     }
 }
 
-fn fields(config: &config::AppConfig) -> Option<Map<String, Value>> {
-    match serde_json::to_value(config) {
+fn fields(settings: &config::Settings) -> Option<Map<String, Value>> {
+    match serde_json::to_value(settings) {
         Ok(Value::Object(map)) => Some(map),
         Ok(_) => None,
         Err(error) => {
@@ -58,7 +58,7 @@ fn fields(config: &config::AppConfig) -> Option<Map<String, Value>> {
     }
 }
 
-fn rebuild(map: Map<String, Value>) -> Option<config::AppConfig> {
+fn rebuild(map: Map<String, Value>) -> Option<config::Settings> {
     serde_json::from_value(Value::Object(map))
         .map_err(|error| tracing::warn!(%error, "settings did not deserialize"))
         .ok()
@@ -66,10 +66,10 @@ fn rebuild(map: Map<String, Value>) -> Option<config::AppConfig> {
 
 /// `daemon`'s fields that differ from `baseline`, laid over `local` and over `baseline`; `None` when none moved.
 fn moved(
-    local: &config::AppConfig,
-    baseline: &config::AppConfig,
-    daemon: &config::AppConfig,
-) -> Option<(config::AppConfig, config::AppConfig)> {
+    local: &config::Settings,
+    baseline: &config::Settings,
+    daemon: &config::Settings,
+) -> Option<(config::Settings, config::Settings)> {
     let (mut local, mut baseline) = (fields(local)?, fields(baseline)?);
     let mut changed = false;
     for (key, value) in fields(daemon)? {
@@ -90,48 +90,53 @@ fn moved(
 mod tests {
     use super::moved;
 
-    fn config(crossfade: u8, lyrics: bool) -> config::AppConfig {
-        config::AppConfig {
-            crossfade_seconds: crossfade,
-            prefer_local_lyrics: lyrics,
-            ..Default::default()
-        }
+    fn settings(crossfade: u8, lyrics: bool) -> config::Settings {
+        let mut settings = config::Settings::default();
+        settings.playback.crossfade_seconds = crossfade;
+        settings.lyrics.prefer_local_lyrics = lyrics;
+        settings
     }
 
     #[test]
     fn the_echo_of_a_write_does_not_undo_an_edit_made_since() {
-        let sent = config(4, false);
-        let local = config(5, false);
+        let sent = settings(4, false);
+        let local = settings(5, false);
         assert!(moved(&local, &sent, &sent).is_none());
     }
 
     #[test]
     fn another_writers_change_lands_beside_an_unsent_edit() {
-        let baseline = config(4, false);
-        let local = config(5, false);
-        let daemon = config(4, true);
+        let baseline = settings(4, false);
+        let local = settings(5, false);
+        let daemon = settings(4, true);
         let (next, base) = moved(&local, &baseline, &daemon).expect("a field moved");
         assert_eq!(
-            (next.crossfade_seconds, next.prefer_local_lyrics),
+            (
+                next.playback.crossfade_seconds,
+                next.lyrics.prefer_local_lyrics
+            ),
             (5, true)
         );
         assert_eq!(
-            (base.crossfade_seconds, base.prefer_local_lyrics),
+            (
+                base.playback.crossfade_seconds,
+                base.lyrics.prefer_local_lyrics
+            ),
             (4, true)
         );
     }
 
     #[test]
     fn a_field_only_the_daemon_writes_reaches_the_copy() {
-        let baseline = config(4, false);
+        let baseline = settings(4, false);
         let mut daemon = baseline.clone();
         let added = config::SavedLocalSource {
             id: "local:a".into(),
             name: "a".into(),
             directories: vec!["/music".into()],
         };
-        daemon.local_sources.push(added.clone());
+        daemon.library.local_sources.push(added.clone());
         let (next, _) = moved(&baseline, &baseline, &daemon).expect("folders moved");
-        assert_eq!(next.local_sources.last(), Some(&added));
+        assert_eq!(next.library.local_sources.last(), Some(&added));
     }
 }

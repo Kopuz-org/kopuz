@@ -63,12 +63,10 @@ pub use sources::{
     SignInKind, SourceCapabilities, SourceDraft, SourceFolderEntry, SourceInfo, SourceLoginRequest,
 };
 
-/// The config view: the layered config with credential keys
-/// stripped, plus the keys a managed settings file pins (rendered locked in
-/// settings UIs).
+/// The config view: the layered settings with the daemon-owned keys defaulted, plus the keys a managed settings file pins (rendered locked in settings UIs).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ConfigView {
-    pub config: config::AppConfig,
+    pub settings: config::Settings,
     pub locked_keys: Vec<String>,
     /// Rises with every saved change, so a client can tell an older view from a newer one.
     pub revision: u64,
@@ -505,7 +503,7 @@ pub trait ConfigApi: Send + Sync {
     /// want, send it back. Credential fields are ignored (the daemon keeps
     /// its own), and a locked key whose value actually differs is refused
     /// with `invalid_input`.
-    async fn set_config(&self, config: config::AppConfig) -> Result<ConfigView, ApiError>;
+    async fn set_config(&self, settings: config::Settings) -> Result<ConfigView, ApiError>;
 
     /// Hear an equalizer setting without keeping it. The engine applies it
     /// live; nothing is written, so cancelling a preview is doing nothing.
@@ -614,7 +612,7 @@ mod handshake_tests {
         async fn config(&self) -> Result<ConfigView, ApiError> {
             unreachable!()
         }
-        async fn set_config(&self, _: config::AppConfig) -> Result<ConfigView, ApiError> {
+        async fn set_config(&self, _: config::Settings) -> Result<ConfigView, ApiError> {
             unreachable!()
         }
         async fn preview_equalizer(&self, _: config::EqualizerSettings) -> Result<(), ApiError> {

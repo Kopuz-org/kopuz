@@ -1,10 +1,8 @@
-//! Config persistence round-trip (issue #347, step 4): the in-memory `AppConfig`
-//! survives save→load, creds live in the `servers` table (never the blob), and
-//! play counts live in `listen_counts`.
+//! Config persistence round-trip (issue #347, step 4): settings survive save→load beside the database, creds live in the `servers` table (never the file), and play counts live in `listen_counts`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use config::{AppConfig, MusicServer, MusicService, SavedLocalSource, SavedServer, Source};
+use config::{MusicServer, MusicService, SavedLocalSource, SavedServer, Settings, Source};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, SqliteConnection};
 
@@ -141,6 +139,22 @@ async fn webview_upgrade_after_server_split_keeps_current_credentials() {
     }
 }
 
+fn settings_path(db_path: &Path) -> PathBuf {
+    config::store::settings_path_for(db_path.parent().unwrap())
+}
+
+/// What the daemon's settings service does on a save: make sure of the state row, then write the file.
+async fn save(db: &db::Db, db_path: &Path, settings: &Settings) {
+    db.ensure_app_state().await.unwrap();
+    config::store::save_settings(&settings_path(db_path), settings).unwrap();
+}
+
+fn load(db_path: &Path) -> Settings {
+    config::store::FileLayers::read(&settings_path(db_path))
+        .settings()
+        .unwrap()
+}
+
 #[tokio::test]
 async fn config_round_trips_with_creds_in_servers_table() {
     let db_path = unique_db();
@@ -168,12 +182,10 @@ async fn config_round_trips_with_creds_in_servers_table() {
             apple_music_language: "en".into(),
         },
     ];
-    let cfg = AppConfig {
-        theme: "midnight".into(),
-        ..Default::default()
-    };
+    let mut cfg = Settings::default();
+    cfg.ui.theme = "midnight".into();
 
-    db.save_config(&cfg).await.unwrap();
+    save(&db, &db_path, &cfg).await;
     for server in &servers {
         db.save_server(server).await.unwrap();
     }
@@ -207,8 +219,8 @@ async fn config_round_trips_with_creds_in_servers_table() {
             .unwrap();
     }
 
-    let loaded = db.load_config().await.unwrap().expect("config present");
-    assert_eq!(loaded.theme, "midnight");
+    let loaded = load(&db_path);
+    assert_eq!(loaded.ui.theme, "midnight");
     let sources = db.load_sources().await.unwrap();
     assert_eq!(sources.active.server_id(), Some("srv-b"));
     assert_eq!(sources.servers.len(), 2);
@@ -221,7 +233,7 @@ async fn config_round_trips_with_creds_in_servers_table() {
     assert_eq!(counts.get("/music/a.flac"), Some(&3));
 
     // The settings file carries settings only: no creds, servers, counts or state.
-    let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
+    let settings_path = settings_path(&db_path);
     let written = std::fs::read_to_string(&settings_path).expect("settings file written");
     assert!(
         !written.contains("TOPSECRET_COOKIE"),
@@ -238,8 +250,8 @@ async fn config_round_trips_with_creds_in_servers_table() {
         .unwrap();
     assert_eq!(active, "srv-b");
 
-    // A config save leaves the sources alone; deleting a server drops its row.
-    db.save_config(&loaded).await.unwrap();
+    // A settings save leaves the sources alone; deleting a server drops its row.
+    save(&db, &db_path, &loaded).await;
     assert_eq!(db.load_sources().await.unwrap(), sources);
     db.delete_server("srv-a").await.unwrap();
     let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM servers")
@@ -260,28 +272,26 @@ async fn named_local_source_round_trips_as_active() {
         name: "Work music".into(),
         directories: vec![PathBuf::from("/music/work")],
     };
-    let cfg = AppConfig {
-        local_sources: vec![local.clone()],
-        ..Default::default()
-    };
+    let mut cfg = Settings::default();
+    cfg.library.local_sources = vec![local.clone()];
     let active = Source::LocalLibrary(local.id.clone());
 
-    db.save_config(&cfg).await.unwrap();
+    save(&db, &db_path, &cfg).await;
     db.set_active_source(&active).await.unwrap();
     db.bump_listen_count(&active, "/music/work/a.flac")
         .await
         .unwrap();
-    let loaded = db.load_config().await.unwrap().expect("config present");
+    let loaded = load(&db_path);
     let sources = db.load_sources().await.unwrap();
 
     assert_eq!(sources.active, active);
     assert_eq!(
-        loaded.local_sources.len(),
+        loaded.library.local_sources.len(),
         2,
         "the default folder source is kept alongside"
     );
-    assert_eq!(loaded.local_sources[0].id, config::DEFAULT_LOCAL_ID);
-    assert_eq!(loaded.local_sources[1], local);
+    assert_eq!(loaded.library.local_sources[0].id, config::DEFAULT_LOCAL_ID);
+    assert_eq!(loaded.library.local_sources[1], local);
     assert!(sources.server.is_none());
     assert_eq!(
         db.listen_counts()
@@ -295,14 +305,12 @@ async fn named_local_source_round_trips_as_active() {
 #[tokio::test]
 async fn a_save_writes_the_settings_file_and_a_hand_edit_wins_on_load() {
     let db_path = unique_db();
-    let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
+    let settings_path = settings_path(&db_path);
     let db = db::init(&db_path).await.unwrap();
 
-    let cfg = AppConfig {
-        theme: "midnight".into(),
-        ..Default::default()
-    };
-    db.save_config(&cfg).await.unwrap();
+    let mut cfg = Settings::default();
+    cfg.ui.theme = "midnight".into();
+    save(&db, &db_path, &cfg).await;
 
     let text = std::fs::read_to_string(&settings_path).expect("settings file written");
     let mut written: toml::Table = text.parse().unwrap();
@@ -311,19 +319,17 @@ async fn a_save_writes_the_settings_file_and_a_hand_edit_wins_on_load() {
     // The file is where settings live, so a hand edit is what loads.
     written.insert("theme".into(), "nord".into());
     std::fs::write(&settings_path, written.to_string()).unwrap();
-    let loaded = db.load_config().await.unwrap().expect("config present");
-    assert_eq!(loaded.theme, "nord");
+    assert_eq!(load(&db_path).ui.theme, "nord");
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
 
-// The allow is for cleanup only: re-enabling write on our own temp file so the
-// temp dir can be removed.
+// The allow is for cleanup only: re-enabling write on our own temp file so the temp dir can be removed.
 #[allow(clippy::permissions_set_readonly_false)]
 #[tokio::test]
 async fn managed_settings_file_is_never_written_but_still_applies() {
     let db_path = unique_db();
-    let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
+    let settings_path = settings_path(&db_path);
     std::fs::write(&settings_path, "theme = \"nord\"\n").unwrap();
     let mut perms = std::fs::metadata(&settings_path).unwrap().permissions();
     perms.set_readonly(true);
@@ -332,18 +338,17 @@ async fn managed_settings_file_is_never_written_but_still_applies() {
     let db = db::init(&db_path).await.unwrap();
 
     // Nothing saved yet: the file alone configures the app.
-    let loaded = db
-        .load_config()
-        .await
-        .unwrap()
-        .expect("file layers present");
-    assert_eq!(loaded.theme, "nord");
+    assert!(!db.has_app_state().await.unwrap());
+    let layers = config::store::FileLayers::read(&settings_path);
+    assert!(layers.has_overrides(), "file layers present");
+    let loaded = layers.settings().unwrap();
+    assert_eq!(loaded.ui.theme, "nord");
 
     // The immutable file is left alone; what it leaves unset goes beside it.
     let mut cfg = loaded;
-    cfg.theme = "dracula".into();
-    cfg.crossfade_seconds = 4;
-    db.save_config(&cfg).await.unwrap();
+    cfg.ui.theme = "dracula".into();
+    cfg.playback.crossfade_seconds = 4;
+    save(&db, &db_path, &cfg).await;
     assert_eq!(
         std::fs::read_to_string(&settings_path).unwrap(),
         "theme = \"nord\"\n"
@@ -353,10 +358,10 @@ async fn managed_settings_file_is_never_written_but_still_applies() {
         .parse()
         .unwrap();
     assert!(!local.contains_key("theme"));
-    let reloaded = db.load_config().await.unwrap().expect("config present");
-    assert_eq!(reloaded.theme, "nord", "the managed key wins");
+    let reloaded = load(&db_path);
+    assert_eq!(reloaded.ui.theme, "nord", "the managed key wins");
     assert_eq!(
-        reloaded.crossfade_seconds, 4,
+        reloaded.playback.crossfade_seconds, 4,
         "an unmanaged setting persists"
     );
 
@@ -366,34 +371,28 @@ async fn managed_settings_file_is_never_written_but_still_applies() {
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
 
-/// A value a higher layer pins is not the user's choice, so a save must not
-/// bake it into the blob or the settings file: removing the layer has to
-/// restore what was configured before. Uses a drop-in rather than
-/// `KOPUZ_CONFIG_THEME` — same locked-key path, without mutating the process
-/// environment out from under the other tests in this binary.
+/// A value a higher layer pins is not the user's choice, so a save must not bake it into the settings file; uses a drop-in, which takes the env's locked-key path without mutating the process environment.
 #[tokio::test]
 async fn layered_overrides_are_not_persisted_as_base_config() {
     let db_path = unique_db();
-    let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
+    let settings_path = settings_path(&db_path);
     let db = db::init(&db_path).await.unwrap();
 
-    let cfg = AppConfig {
-        theme: "midnight".into(),
-        ..Default::default()
-    };
-    db.save_config(&cfg).await.unwrap();
+    let mut cfg = Settings::default();
+    cfg.ui.theme = "midnight".into();
+    save(&db, &db_path, &cfg).await;
 
     let dropin_dir = config::store::dropin_dir_for(&settings_path);
     std::fs::create_dir_all(&dropin_dir).unwrap();
     std::fs::write(dropin_dir.join("10-theme.toml"), "theme = \"nord\"\n").unwrap();
 
-    let loaded = db.load_config().await.unwrap().expect("config present");
-    assert_eq!(loaded.theme, "nord", "the drop-in applies");
+    let loaded = load(&db_path);
+    assert_eq!(loaded.ui.theme, "nord", "the drop-in applies");
 
     // Change something unrelated while the override is in force.
     let mut cfg = loaded;
-    cfg.cover_art_darkening = 42;
-    db.save_config(&cfg).await.unwrap();
+    cfg.background.cover_art_darkening = 42;
+    save(&db, &db_path, &cfg).await;
 
     let written: toml::Table = std::fs::read_to_string(&settings_path)
         .unwrap()
@@ -406,12 +405,15 @@ async fn layered_overrides_are_not_persisted_as_base_config() {
     );
 
     std::fs::remove_dir_all(&dropin_dir).unwrap();
-    let reloaded = db.load_config().await.unwrap().expect("config present");
+    let reloaded = load(&db_path);
     assert_eq!(
-        reloaded.theme, "midnight",
+        reloaded.ui.theme, "midnight",
         "removing the drop-in must restore the configured theme"
     );
-    assert_eq!(reloaded.cover_art_darkening, 42, "unpinned key persists");
+    assert_eq!(
+        reloaded.background.cover_art_darkening, 42,
+        "unpinned key persists"
+    );
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
@@ -420,16 +422,14 @@ async fn layered_overrides_are_not_persisted_as_base_config() {
 #[tokio::test]
 async fn hand_written_layers_apply_in_order_and_survive_bad_keys() {
     let db_path = unique_db();
-    let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
+    let settings_path = settings_path(&db_path);
     let db = db::init(&db_path).await.unwrap();
 
-    let cfg = AppConfig {
-        theme: "midnight".into(),
-        language: "en".into(),
-        crossfade_seconds: 3,
-        ..Default::default()
-    };
-    db.save_config(&cfg).await.unwrap();
+    let mut cfg = Settings::default();
+    cfg.ui.theme = "midnight".into();
+    cfg.ui.language = "en".into();
+    cfg.playback.crossfade_seconds = 3;
+    save(&db, &db_path, &cfg).await;
 
     std::fs::write(
         &settings_path,
@@ -444,20 +444,20 @@ async fn hand_written_layers_apply_in_order_and_survive_bad_keys() {
     )
     .unwrap();
 
-    let loaded = db.load_config().await.unwrap().expect("config present");
-    assert_eq!(loaded.theme, "dracula", "the drop-in out-ranks the file");
-    assert_eq!(loaded.language, "tr");
+    let loaded = load(&db_path);
+    assert_eq!(loaded.ui.theme, "dracula", "the drop-in out-ranks the file");
+    assert_eq!(loaded.ui.language, "tr");
     assert_eq!(
-        loaded.crossfade_seconds,
-        AppConfig::default().crossfade_seconds,
+        loaded.playback.crossfade_seconds,
+        Settings::default().playback.crossfade_seconds,
         "a bad value falls back to the default"
     );
-    assert_eq!(loaded.ui_style, config::UiStyle::default());
+    assert_eq!(loaded.ui.ui_style, config::UiStyle::default());
 
     // Saving on top of that doesn't corrupt the hand-written file: the pinned drop-in key keeps the file's own value.
     let mut cfg = loaded;
-    cfg.language = "de".into();
-    db.save_config(&cfg).await.unwrap();
+    cfg.ui.language = "de".into();
+    save(&db, &db_path, &cfg).await;
     let written: toml::Table = std::fs::read_to_string(&settings_path)
         .unwrap()
         .parse()
@@ -477,7 +477,7 @@ async fn playback_state_and_presence_pause_survive_a_reopen_and_a_config_save() 
 
     db.set_playback_state(0.35, true).await.unwrap();
     db.set_discord_presence_paused(false).await.unwrap();
-    db.save_config(&AppConfig::default()).await.unwrap();
+    save(&db, &db_path, &Settings::default()).await;
     drop(db);
 
     let db = db::init(&db_path).await.unwrap();

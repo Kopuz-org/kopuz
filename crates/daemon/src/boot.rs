@@ -32,8 +32,8 @@ pub struct Core {
     pub session: SessionHandle,
     pub artwork: Arc<crate::ArtworkService>,
     pub db: db::Db,
-    pub config: config::AppConfig,
-    /// The authority on the running config, as opposed to the `config` snapshot above.
+    pub settings: config::Settings,
+    /// The authority on the running settings, as opposed to the `settings` snapshot above.
     pub config_service: Arc<ConfigService>,
     pub library: Arc<LibraryService>,
     pub jobs: Arc<JobRunner>,
@@ -109,7 +109,9 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     if using_default_database {
         db::legacy::migrate_json_store(&database, &db::config_dir()).await;
     }
-    let config = database.load_config().await?.unwrap_or_default();
+    let settings_path =
+        config::store::settings_path_for(db_path.parent().unwrap_or_else(|| Path::new(".")));
+    let settings = crate::config_service::load_settings(&settings_path)?;
     let sources = Arc::new(crate::sources::load(&database).await?);
     let credentials = crate::CredentialStore::load(&database).await?;
     let offline = crate::OfflineIndex::load(&database).await?;
@@ -117,12 +119,10 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let (volume, muted) = database.playback_state().await?;
     let presence_pause = crate::integrations::PresencePause::load(&database).await?;
 
-    let settings_path =
-        config::store::settings_path_for(db_path.parent().unwrap_or_else(|| Path::new(".")));
     let config_service = Arc::new(ConfigService::new(
         database.clone(),
         settings_path,
-        config.clone(),
+        settings.clone(),
     ));
     let station_registry = Arc::new(radio::registry::StationRegistry::default());
     let cover_cache = directories::ProjectDirs::from("moe", "kopuz", "kopuz")
@@ -143,7 +143,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let queue_store: Arc<dyn QueueStore> = Arc::new(DbQueueStore::new(database.clone()));
     let scrobbler = crate::Scrobbler::new(database.clone(), credentials.clone());
     let services = PlaybackServices {
-        config: config.clone(),
+        settings: settings.clone(),
         volume,
         muted,
         sources: sources.clone(),
@@ -202,7 +202,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     );
     crate::integrations::spawn_discord_presence(
         &session,
-        session.config_watch(),
+        session.settings_watch(),
         session.sources_watch(),
         presence_pause.watch(),
     );
@@ -264,14 +264,14 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         library.clone(),
         playlists.clone(),
         favorites.clone(),
-        session.config_watch(),
+        session.settings_watch(),
         session.sources_watch(),
     );
-    // A failed settings read aborts boot above, so reaching here means the config is real.
+    // A failed settings read aborts boot above, so reaching here means the settings are real.
     crate::folder_scan::spawn(
         jobs.clone(),
         library.clone(),
-        session.config_watch(),
+        session.settings_watch(),
         session.subscribe(),
         true,
     );
@@ -289,7 +289,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     artwork.attach_radio(radio_service.clone());
     // The registry starts empty and is built from config here, rather than
     // by whichever frontend happened to be open.
-    radio_service.watch_config(session.config_watch());
+    radio_service.watch_config(session.settings_watch());
     let radio_boot = radio_service.clone();
     tokio::spawn(async move {
         if let Err(error) = radio_boot.reload().await {
@@ -332,7 +332,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         session,
         artwork,
         db: database,
-        config,
+        settings,
         config_service,
         library,
         jobs,

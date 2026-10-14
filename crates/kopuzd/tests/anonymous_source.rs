@@ -29,7 +29,7 @@ async fn an_anonymous_youtube_music_source_is_usable_without_a_credential() {
     let config = Arc::new(ConfigService::new(
         database.clone(),
         dir.path().join("settings.toml"),
-        config::AppConfig::default(),
+        config::Settings::default(),
     ));
     let player = Player::try_with_sink(Box::new(NullSink::new())).expect("headless player starts");
     let provider: FactoryOverride = Arc::new(|_| None);

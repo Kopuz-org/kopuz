@@ -1,11 +1,11 @@
 use crate::lyrics_view::LyricsView;
 use crate::queue_list_view::QueueListView;
-use config::AppConfig;
+use config::Settings;
 use dioxus::prelude::*;
 
 #[component]
 pub(crate) fn Tabs(
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     items: Vec<api::TrackInfo>,
     current_queue_index: Signal<usize>,
     lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
@@ -56,7 +56,7 @@ pub(crate) fn Tabs(
             if *active_tab.read() == 0 {
                 QueueListView {
                     items,
-                    config,
+                    settings,
                     current_queue_index,
                     layout: crate::queue_list_view::LayoutMode::Fullscreen,
                 }
@@ -64,7 +64,7 @@ pub(crate) fn Tabs(
                 LyricsView {
                     lyrics,
                     current_song_progress,
-                    config,
+                    settings,
                     layout: crate::lyrics_view::LayoutMode::Fullscreen,
                 }
             }

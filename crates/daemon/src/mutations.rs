@@ -42,9 +42,10 @@ fn source_error(error: server::source::SourceError) -> ApiError {
 
 /// The roots the active source may delete inside. A server source has none:
 /// its files are not ours to unlink.
-fn configured_roots<'a>(config: &'a config::AppConfig, active: &config::Source) -> Vec<&'a Path> {
+fn configured_roots<'a>(config: &'a config::Settings, active: &config::Source) -> Vec<&'a Path> {
     match active {
         config::Source::LocalLibrary(id) => config
+            .library
             .local_sources
             .iter()
             .find(|saved| &saved.id == id)
@@ -56,7 +57,7 @@ fn configured_roots<'a>(config: &'a config::AppConfig, active: &config::Source) 
 
 /// Whether a path is genuinely inside a configured root, canonicalized on
 /// both sides so a symlink or `..` cannot walk out of the library.
-fn inside_a_root(config: &config::AppConfig, active: &config::Source, path: &Path) -> bool {
+fn inside_a_root(config: &config::Settings, active: &config::Source, path: &Path) -> bool {
     let Ok(target) = std::fs::canonicalize(path) else {
         return false;
     };
@@ -74,8 +75,8 @@ impl MutationService {
         })
     }
 
-    fn config(&self) -> config::AppConfig {
-        self.session.config_watch().borrow().clone()
+    fn config(&self) -> config::Settings {
+        self.session.settings_watch().borrow().clone()
     }
 
     fn active(&self) -> config::Source {
@@ -101,7 +102,7 @@ impl MutationService {
 
     /// The file behind a track, once it is established that we may write it.
     fn editable_path(
-        config: &config::AppConfig,
+        config: &config::Settings,
         active: &config::Source,
         track: &reader::Track,
     ) -> Result<PathBuf, ApiError> {
@@ -455,11 +456,14 @@ fn validate_image(bytes: &[u8]) -> Result<(), ApiError> {
 mod tests {
     use super::*;
 
-    fn config_with_root(root: &Path) -> config::AppConfig {
-        config::AppConfig {
-            local_sources: vec![config::SavedLocalSource::default_library(vec![
-                root.to_path_buf(),
-            ])],
+    fn config_with_root(root: &Path) -> config::Settings {
+        config::Settings {
+            library: config::Library {
+                local_sources: vec![config::SavedLocalSource::default_library(vec![
+                    root.to_path_buf(),
+                ])],
+                ..Default::default()
+            },
             ..Default::default()
         }
     }

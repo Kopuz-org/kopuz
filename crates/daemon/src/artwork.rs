@@ -642,7 +642,7 @@ mod tests {
 /// without knowing which services exist.
 pub mod settings {
     use api::schema::{ChoiceOption, FieldKind, FieldSpec, FieldValue, Text, value_of};
-    use config::{AppConfig, FetchStrategy};
+    use config::{FetchStrategy, Settings};
 
     pub const AUTO_FETCH: &str = "auto_fetch_covers";
     pub const STRATEGY: &str = "cover_fetch_strategy";
@@ -672,13 +672,13 @@ pub mod settings {
         FetchStrategy::LastFmOnly,
     ];
 
-    pub fn fields(config: &AppConfig) -> Vec<FieldSpec> {
+    pub fn fields(config: &Settings) -> Vec<FieldSpec> {
         vec![
             FieldSpec {
                 key: AUTO_FETCH.to_string(),
                 label: Text::key(AUTO_FETCH),
                 kind: FieldKind::Toggle,
-                value: Some(config.auto_fetch_covers.to_string()),
+                value: Some(config.library.auto_fetch_covers.to_string()),
                 config_key: Some(AUTO_FETCH.to_string()),
                 ..Default::default()
             },
@@ -696,7 +696,7 @@ pub mod settings {
                         .collect(),
                     custom: false,
                 },
-                value: Some(strategy_id(config.cover_fetch_strategy).to_string()),
+                value: Some(strategy_id(config.library.cover_fetch_strategy).to_string()),
                 config_key: Some(STRATEGY.to_string()),
                 ..Default::default()
             },
@@ -716,12 +716,12 @@ pub mod settings {
     }
 
     /// Fold answers in. An absent key is left alone.
-    pub fn apply(values: &[FieldValue], config: &mut AppConfig) {
+    pub fn apply(values: &[FieldValue], config: &mut Settings) {
         if let Some(on) = value_of(values, AUTO_FETCH) {
-            config.auto_fetch_covers = on == "true";
+            config.library.auto_fetch_covers = on == "true";
         }
         if let Some(strategy) = value_of(values, STRATEGY) {
-            config.cover_fetch_strategy = strategy_from_id(strategy);
+            config.library.cover_fetch_strategy = strategy_from_id(strategy);
         }
     }
 }

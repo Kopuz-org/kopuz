@@ -7,7 +7,7 @@ use crate::vaxry::bottombar::BottombarVaxry;
 
 #[component]
 pub fn Bottombar(
-    config: Signal<config::AppConfig>,
+    settings: Signal<config::Settings>,
     is_playing: Signal<bool>,
     is_fullscreen: Signal<bool>,
     current_song_duration: Signal<u64>,
@@ -27,10 +27,10 @@ pub fn Bottombar(
     let c = *is_rightbar_open.read();
     set_queue_drag_enabled(c);
 
-    match config.read().ui_style {
+    match settings.read().ui.ui_style {
         UiStyle::Normal | UiStyle::Material3 => rsx! {
             BottombarNormal {
-                config, is_playing, is_fullscreen,
+                settings, is_playing, is_fullscreen,
                 current_song_duration, current_song_progress, queue, current_queue_index,
                 current_song_title, current_song_artist,
                 volume, is_rightbar_open, is_devices_open,
@@ -38,7 +38,7 @@ pub fn Bottombar(
         },
         UiStyle::Vaxry => rsx! {
             BottombarVaxry {
-                config, is_playing, is_fullscreen,
+                settings, is_playing, is_fullscreen,
                 current_song_duration, current_song_progress, queue, current_queue_index,
                 current_song_title, current_song_artist,
                 volume, is_rightbar_open, is_devices_open,

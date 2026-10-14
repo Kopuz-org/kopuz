@@ -8,14 +8,14 @@ use components::dots_menu::{DotsMenu, MenuAction};
 use components::folder_picker::FolderPickerModal;
 use components::playlist_detail::PlaylistDetail;
 use components::playlist_popups::AddPlaylistPopup;
-use config::{AppConfig, UiStyle};
+use config::{Settings, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::use_playlists;
 
 #[component]
 #[tracing::instrument(name = "render.playlists_page", skip_all)]
 pub fn PlaylistsPage(
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     mut selected_playlist_id: Signal<Option<String>>,
 ) -> Element {
     let nav_ctrl = use_context::<components::NavigationController>();
@@ -74,7 +74,7 @@ pub fn PlaylistsPage(
         last_source.set(active_source.peek().clone());
     }
 
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
 
     rsx! {
         div { class: if cfg!(target_os = "android") { "px-4 pt-2 absolute inset-0 flex flex-col" } else if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },

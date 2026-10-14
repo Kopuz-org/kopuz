@@ -1,5 +1,5 @@
 use config::{
-    AppConfig, BackBehavior, ChannelMode, DeviceChangeBehavior, ReplayGainMode, SampleRateMode,
+    BackBehavior, ChannelMode, DeviceChangeBehavior, ReplayGainMode, SampleRateMode, Settings,
 };
 use dioxus::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -10,9 +10,7 @@ static APP_SELECT_ID: AtomicUsize = AtomicUsize::new(0);
 pub fn SettingItem(
     title: String,
     control: Element,
-    /// The top-level `AppConfig` field this row edits. When the field is
-    /// pinned by a managed config layer (Nix/hjem file, drop-in, env var),
-    /// the row renders locked. Empty = never locked.
+    /// The top-level `Settings` key this row edits, rendered locked when a managed layer (Nix/hjem file, drop-in, env var) pins it; empty is never locked.
     #[props(default)]
     config_key: String,
     /// The other top-level fields a composite control edits (the Last.fm
@@ -337,9 +335,10 @@ pub fn LanguageSelector(current_language: String, on_change: EventHandler<String
 
 #[component]
 pub fn ThemeSelector(current_theme: String, on_change: EventHandler<String>) -> Element {
-    let config = use_context::<Signal<AppConfig>>();
-    let mut custom: Vec<(String, String)> = config
+    let settings = use_context::<Signal<Settings>>();
+    let mut custom: Vec<(String, String)> = settings
         .read()
+        .ui
         .custom_themes
         .iter()
         .map(|(id, ct)| (id.clone(), ct.name.clone()))

@@ -438,13 +438,13 @@ impl UrlDownloadService {
             return Err(ApiError::unsupported("ffmpeg is not installed"));
         }
         let config = self.config.snapshot().await;
-        let output_dir = output_root(&config.downloader_output_dir);
+        let output_dir = output_root(&config.downloads.downloader_output_dir);
         prepare_output(&output_dir)?;
         let request = Request {
             link,
             output_dir,
             format,
-            options: config.downloader_options.clone(),
+            options: config.downloads.downloader_options.clone(),
             downloader: YoutubeDownloader::new(youtube_cookies(&*self.sources.snapshot().await)),
             ffmpeg,
         };
@@ -483,13 +483,13 @@ impl UrlDownloadService {
     /// The downloader's options, with what they currently hold.
     pub async fn settings(&self) -> Vec<FieldSpec> {
         let config = self.config.snapshot().await;
-        let options = &config.downloader_options;
+        let options = &config.downloads.downloader_options;
         vec![
             FieldSpec {
                 key: OUTPUT_DIR.to_string(),
                 label: Text::key("downloader_output_dir_placeholder"),
                 kind: FieldKind::Directory,
-                value: Some(config.downloader_output_dir.clone()),
+                value: Some(config.downloads.downloader_output_dir.clone()),
                 config_key: Some(OUTPUT_DIR_KEY.to_string()),
                 ..Default::default()
             },
@@ -543,9 +543,9 @@ impl UrlDownloadService {
         self.config
             .mutate_state(&keys, move |config| {
                 if let Some(dir) = value_of(&values, OUTPUT_DIR) {
-                    config.downloader_output_dir = dir.trim().to_string();
+                    config.downloads.downloader_output_dir = dir.trim().to_string();
                 }
-                apply_options(&values, &mut config.downloader_options);
+                apply_options(&values, &mut config.downloads.downloader_options);
             })
             .await?;
         Ok(self.settings().await)

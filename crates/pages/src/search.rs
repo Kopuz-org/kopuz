@@ -3,7 +3,7 @@ use components::search_bar::SearchBar;
 use components::search_genre_detail::SearchGenreDetail;
 use components::search_genres::SearchGenres;
 use components::search_results::SearchResults;
-use config::{AppConfig, UiStyle};
+use config::{Settings, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{use_active_source, use_genre_tracks};
 use hooks::use_search_data::use_search_data;
@@ -14,7 +14,7 @@ use hooks::use_search_data::use_search_data;
 /// keyed off the active source rather than a hardcoded source-kind split.
 #[component]
 pub fn Search(
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     search_query: Signal<String>,
     is_playing: Signal<bool>,
     current_playing: Signal<u64>,
@@ -39,7 +39,7 @@ pub fn Search(
 
     let genre_tracks = use_memo(move || genre_tracks_res.read().clone().unwrap_or_default());
 
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
 
     rsx! {
         div {

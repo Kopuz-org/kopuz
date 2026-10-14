@@ -1,4 +1,4 @@
-use config::{AppConfig, CustomTheme};
+use config::{CustomTheme, Settings};
 use dioxus::prelude::*;
 use std::collections::HashMap;
 
@@ -94,7 +94,7 @@ fn sanitize_hex_input(value: &str) -> String {
 }
 
 #[component]
-pub fn ThemeEditorPage(config: Signal<AppConfig>, #[props(default)] embedded: bool) -> Element {
+pub fn ThemeEditorPage(settings: Signal<Settings>, #[props(default)] embedded: bool) -> Element {
     let mut selected_id: Signal<Option<String>> = use_signal(|| None);
     let mut editing_name = use_signal(String::new);
     let mut editing_vars: Signal<HashMap<String, String>> = use_signal(default_vars_map);
@@ -104,8 +104,8 @@ pub fn ThemeEditorPage(config: Signal<AppConfig>, #[props(default)] embedded: bo
         let id = selected_id.read().clone();
         match id {
             Some(ref id) => {
-                let cfg = config.read();
-                if let Some(ct) = cfg.custom_themes.get(id) {
+                let cfg = settings.read();
+                if let Some(ct) = cfg.ui.custom_themes.get(id) {
                     editing_name.set(ct.name.clone());
                     editing_vars.set(ct.vars.clone());
                     editing_hex_inputs.set(ct.vars.clone());
@@ -120,8 +120,9 @@ pub fn ThemeEditorPage(config: Signal<AppConfig>, #[props(default)] embedded: bo
     });
 
     let themes_list: Vec<(String, String)> = {
-        let mut v: Vec<(String, String)> = config
+        let mut v: Vec<(String, String)> = settings
             .read()
+            .ui
             .custom_themes
             .iter()
             .map(|(id, ct)| (id.clone(), ct.name.clone()))
@@ -333,7 +334,7 @@ pub fn ThemeEditorPage(config: Signal<AppConfig>, #[props(default)] embedded: bo
                             let vars = editing_vars.read().clone();
                             let id = selected_id.read().clone().unwrap_or_else(|| {
                                 let slug = format!("custom-{}", name.to_lowercase().replace(' ', "-"));
-                                let existing = &config.read().custom_themes;
+                                let existing = &settings.read().ui.custom_themes;
                                 if !existing.contains_key(&slug) {
                                     slug
                                 } else {
@@ -347,7 +348,7 @@ pub fn ThemeEditorPage(config: Signal<AppConfig>, #[props(default)] embedded: bo
                                     }
                                 }
                             });
-                            config.write().custom_themes.insert(id.clone(), CustomTheme { name, vars });
+                            settings.write().ui.custom_themes.insert(id.clone(), CustomTheme { name, vars });
                             selected_id.set(Some(id));
                         },
                         "{i18n::t(\"save_theme\")}"
@@ -357,10 +358,10 @@ pub fn ThemeEditorPage(config: Signal<AppConfig>, #[props(default)] embedded: bo
                             class: "app-button-tonal app-button-danger px-4 py-2 bg-red-500/20 hover:bg-red-500/30 rounded text-sm text-red-400 transition-colors",
                             onclick: move |_| {
                                 if let Some(id) = selected_id.write().take() {
-                                    let mut cfg = config.write();
-                                    cfg.custom_themes.remove(&id);
-                                    if cfg.theme == id {
-                                        cfg.theme = "default".to_string();
+                                    let mut cfg = settings.write();
+                                    cfg.ui.custom_themes.remove(&id);
+                                    if cfg.ui.theme == id {
+                                        cfg.ui.theme = "default".to_string();
                                     }
                                 }
                             },

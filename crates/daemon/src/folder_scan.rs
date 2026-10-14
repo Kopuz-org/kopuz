@@ -17,8 +17,9 @@ type Roots = Vec<(String, Vec<PathBuf>)>;
 /// Starts one scan job; `Conflict` means one is already running.
 pub type StartScan = Arc<dyn Fn() -> Result<(), ApiError> + Send + Sync>;
 
-fn roots(config: &config::AppConfig) -> Roots {
+fn roots(config: &config::Settings) -> Roots {
     config
+        .library
         .local_sources
         .iter()
         .map(|source| (source.id.clone(), source.directories.clone()))
@@ -42,7 +43,7 @@ fn next_rescan(known: &Roots, every: Option<Duration>, last: Instant) -> Option<
 pub fn spawn(
     jobs: Arc<JobRunner>,
     library: Arc<LibraryService>,
-    config: watch::Receiver<config::AppConfig>,
+    config: watch::Receiver<config::Settings>,
     events: broadcast::Receiver<ApiEvent>,
     config_loaded: bool,
 ) {
@@ -55,7 +56,7 @@ pub fn spawn(
 
 pub(crate) fn spawn_with(
     start: StartScan,
-    mut config: watch::Receiver<config::AppConfig>,
+    mut config: watch::Receiver<config::Settings>,
     mut events: broadcast::Receiver<ApiEvent>,
     config_loaded: bool,
 ) -> tokio::task::JoinHandle<()> {
@@ -129,9 +130,9 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    fn config_with(dirs: &[&str]) -> config::AppConfig {
-        let mut config = config::AppConfig::default();
-        config.local_sources = vec![config::SavedLocalSource::default_library(
+    fn config_with(dirs: &[&str]) -> config::Settings {
+        let mut config = config::Settings::default();
+        config.library.local_sources = vec![config::SavedLocalSource::default_library(
             dirs.iter().map(PathBuf::from).collect(),
         )];
         config
@@ -161,7 +162,7 @@ mod tests {
         settle().await;
         assert_eq!(count.load(Ordering::SeqCst), 1, "startup scan");
 
-        tx.send_modify(|config| config.crossfade_seconds = 5);
+        tx.send_modify(|config| config.playback.crossfade_seconds = 5);
         settle().await;
         assert_eq!(count.load(Ordering::SeqCst), 1, "unrelated change");
 
@@ -169,7 +170,7 @@ mod tests {
         settle().await;
         assert_eq!(count.load(Ordering::SeqCst), 2, "folder list changed");
 
-        tx.send_modify(|config| config.local_sources.clear());
+        tx.send_modify(|config| config.library.local_sources.clear());
         settle().await;
         assert_eq!(count.load(Ordering::SeqCst), 2, "removal needs no scan");
     }
@@ -215,9 +216,9 @@ mod tests {
         assert_eq!(count.load(Ordering::SeqCst), 0);
     }
 
-    fn every(minutes: u32, dirs: &[&str]) -> config::AppConfig {
+    fn every(minutes: u32, dirs: &[&str]) -> config::Settings {
         let mut config = config_with(dirs);
-        config.sync_interval_minutes = minutes;
+        config.library.sync_interval_minutes = minutes;
         config
     }
 
@@ -291,7 +292,7 @@ mod tests {
         pass(Duration::from_secs(7 * 24 * 60 * 60)).await;
         assert_eq!(count.load(Ordering::SeqCst), 1, "startup scan only");
 
-        tx.send_modify(|config| config.sync_interval_minutes = 30);
+        tx.send_modify(|config| config.library.sync_interval_minutes = 30);
         pass(Duration::from_millis(1)).await;
         assert_eq!(
             count.load(Ordering::SeqCst),
@@ -312,7 +313,7 @@ mod tests {
         pass(Duration::from_millis(1)).await;
         pass(minutes(10)).await;
 
-        tx.send_modify(|config| config.sync_interval_minutes = 60);
+        tx.send_modify(|config| config.library.sync_interval_minutes = 60);
         pass(Duration::from_millis(1)).await;
         assert_eq!(
             count.load(Ordering::SeqCst),
@@ -336,7 +337,7 @@ mod tests {
         spawn_with(start, rx, events_rx, true);
         pass(Duration::from_millis(1)).await;
         pass(minutes(30)).await;
-        tx.send_modify(|config| config.crossfade_seconds = 2);
+        tx.send_modify(|config| config.playback.crossfade_seconds = 2);
         pass(minutes(31)).await;
         assert_eq!(count.load(Ordering::SeqCst), 2);
     }
@@ -345,7 +346,7 @@ mod tests {
     async fn with_no_folders_there_is_nothing_to_rescan() {
         let (count, start) = counter();
         let mut config = every(60, &[]);
-        config.local_sources.clear();
+        config.library.local_sources.clear();
         let (_tx, rx) = watch::channel(config);
         let (events, events_rx) = broadcast::channel(8);
         let _keep = events;
