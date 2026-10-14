@@ -8,7 +8,7 @@
 
 use api::schema::{ChoiceOption, FieldKind, FieldSpec, FieldValue, Icon, Problem, Text, value_of};
 use api::{ServiceInfo, ServiceRef, SignInKind, SourceDraft};
-use config::{AppConfig, Browser, MusicService, SavedServer};
+use config::{Browser, MusicService, SavedServer, Settings};
 
 /// The field keys a form and its answers agree on.
 pub const URL: &str = "url";
@@ -421,7 +421,7 @@ fn webview_fields(mut fields: Vec<FieldSpec>) -> Vec<FieldSpec> {
 }
 
 /// The options a configured source has, with the values it currently holds.
-pub fn settings(server: &ServerView<'_>, config: &AppConfig) -> Vec<FieldSpec> {
+pub fn settings(server: &ServerView<'_>, config: &Settings) -> Vec<FieldSpec> {
     let browser = server.browser.map(|browser| browser.id().to_string());
     let fields = match server.service {
         MusicService::YtMusic | MusicService::SoundCloud if !server.anonymous => {
@@ -466,6 +466,7 @@ pub fn settings(server: &ServerView<'_>, config: &AppConfig) -> Vec<FieldSpec> {
                 FieldSpec {
                     value: Some(
                         config
+                            .spotify
                             .spotify_browser
                             .clone()
                             .unwrap_or_else(|| AUTOMATIC.to_string()),
@@ -481,7 +482,7 @@ pub fn settings(server: &ServerView<'_>, config: &AppConfig) -> Vec<FieldSpec> {
                     )
                 },
                 FieldSpec {
-                    value: Some(config.spotify_prefer_active_device.to_string()),
+                    value: Some(config.spotify.spotify_prefer_active_device.to_string()),
                     config_key: Some("spotify_prefer_active_device".to_string()),
                     help: Some(Text::key("prefer_active_device_help")),
                     ..text_field(
@@ -644,15 +645,15 @@ pub fn apply_server_settings(values: &[FieldValue], saved: &mut SavedServer) {
 }
 
 /// The same for the answers that live in the settings rather than on the row.
-pub fn apply_config_settings(service: MusicService, values: &[FieldValue], config: &mut AppConfig) {
+pub fn apply_config_settings(service: MusicService, values: &[FieldValue], config: &mut Settings) {
     if service != MusicService::Spotify {
         return;
     }
     if let Some(host) = value_of(values, PLAYBACK_BROWSER) {
-        config.spotify_browser = (host != AUTOMATIC).then(|| host.to_string());
+        config.spotify.spotify_browser = (host != AUTOMATIC).then(|| host.to_string());
     }
     if let Some(prefer) = value_of(values, PREFER_ACTIVE_DEVICE) {
-        config.spotify_prefer_active_device = prefer == "true";
+        config.spotify.spotify_prefer_active_device = prefer == "true";
     }
 }
 

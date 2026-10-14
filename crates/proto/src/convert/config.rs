@@ -1,10 +1,4 @@
-//! `config::AppConfig` <-> the wire `Config` message.
-//!
-//! The settings surface is a real message, not JSON in a string field: the
-//! config is a closed Rust struct on both ends of one binary, so the schema
-//! can say so. Credential keys and machine-local path state are absent from
-//! the wire entirely -- `config_from_proto` leaves them at their defaults
-//! and the daemon restores what it holds.
+//! `config::Settings` <-> the flat wire `Config` message; the daemon-owned keys it lacks come back as defaults that the daemon restores.
 
 use crate::*;
 
@@ -379,132 +373,158 @@ pub fn replay_gain_from_proto(value: Option<&ReplayGainSettings>) -> config::Rep
     }
 }
 
-pub fn config_to_proto(value: &config::AppConfig) -> Config {
+pub fn config_to_proto(value: &config::Settings) -> Config {
+    let config::Settings {
+        playback,
+        ui,
+        background,
+        lyrics,
+        library,
+        integrations,
+        downloads: _,
+        spotify: _,
+        system,
+    } = value;
     Config {
-        folder_sources: value
+        folder_sources: library
             .local_sources
             .iter()
             .map(saved_folder_source_to_proto)
             .collect(),
-        theme: value.theme.clone(),
-        live_theme_path: value.live_theme_path.clone(),
-        language: value.language.clone(),
-        reduce_animations: value.reduce_animations,
-        fullscreen_use_player_bar: value.fullscreen_use_player_bar,
-        cover_art_background: value.cover_art_background,
-        cover_art_darkening: u32::from(value.cover_art_darkening),
-        cover_art_blur: u32::from(value.cover_art_blur),
-        custom_background_path: value.custom_background_path.clone(),
-        custom_font_path: value.custom_font_path.clone(),
-        tracing_enabled: value.tracing_enabled,
-        auto_check_updates: value.auto_check_updates,
-        minimize_to_tray: value.minimize_to_tray,
-        show_source_toggle: value.show_source_toggle,
-        show_row_images: value.show_row_images,
-        volume_scroll_step: value.volume_scroll_step,
-        crossfade_seconds: u32::from(value.crossfade_seconds),
-        custom_themes: value
+        theme: ui.theme.clone(),
+        live_theme_path: ui.live_theme_path.clone(),
+        language: ui.language.clone(),
+        reduce_animations: ui.reduce_animations,
+        fullscreen_use_player_bar: ui.fullscreen_use_player_bar,
+        cover_art_background: background.cover_art_background,
+        cover_art_darkening: u32::from(background.cover_art_darkening),
+        cover_art_blur: u32::from(background.cover_art_blur),
+        custom_background_path: background.custom_background_path.clone(),
+        custom_font_path: ui.custom_font_path.clone(),
+        tracing_enabled: system.tracing_enabled,
+        auto_check_updates: system.auto_check_updates,
+        minimize_to_tray: system.minimize_to_tray,
+        show_source_toggle: ui.show_source_toggle,
+        show_row_images: ui.show_row_images,
+        volume_scroll_step: playback.volume_scroll_step,
+        crossfade_seconds: u32::from(playback.crossfade_seconds),
+        custom_themes: ui
             .custom_themes
             .iter()
             .map(|(k, v)| (k.clone(), custom_theme_to_proto(v)))
             .collect(),
-        back_behavior: back_behavior_to_proto(value.back_behavior) as i32,
-        channel_mode: channel_mode_to_proto(value.channel_mode) as i32,
-        equalizer: Some(equalizer_to_proto(&value.equalizer)),
-        replay_gain: Some(replay_gain_to_proto(value.replay_gain)),
-        device_change_behavior: device_change_behavior_to_proto(value.device_change_behavior)
+        back_behavior: back_behavior_to_proto(playback.back_behavior) as i32,
+        channel_mode: channel_mode_to_proto(playback.channel_mode) as i32,
+        equalizer: Some(equalizer_to_proto(&playback.equalizer)),
+        replay_gain: Some(replay_gain_to_proto(playback.replay_gain)),
+        device_change_behavior: device_change_behavior_to_proto(playback.device_change_behavior)
             as i32,
-        sample_rate_mode: sample_rate_mode_to_proto(value.sample_rate_mode) as i32,
-        titlebar_mode: titlebar_mode_to_proto(value.titlebar_mode) as i32,
-        offline_quality: offline_quality_to_proto(value.offline_quality) as i32,
-        stream_quality: stream_quality_to_proto(value.stream_quality) as i32,
-        autoplay_radio: value.autoplay_radio,
-        skip_explicit: value.skip_explicit,
-        pause_watch_history: value.pause_watch_history,
-        player_bar_position: player_bar_position_to_proto(value.player_bar_position) as i32,
-        ui_style: ui_style_to_proto(value.ui_style) as i32,
-        settings_layout: settings_layout_to_proto(value.settings_layout) as i32,
-        auto_fetch_covers: value.auto_fetch_covers,
-        cover_fetch_strategy: fetch_strategy_to_proto(value.cover_fetch_strategy) as i32,
-        radio_registries: value
+        sample_rate_mode: sample_rate_mode_to_proto(playback.sample_rate_mode) as i32,
+        titlebar_mode: titlebar_mode_to_proto(ui.titlebar_mode) as i32,
+        offline_quality: offline_quality_to_proto(library.offline_quality) as i32,
+        stream_quality: stream_quality_to_proto(playback.stream_quality) as i32,
+        autoplay_radio: playback.autoplay_radio,
+        skip_explicit: playback.skip_explicit,
+        pause_watch_history: playback.pause_watch_history,
+        player_bar_position: player_bar_position_to_proto(ui.player_bar_position) as i32,
+        ui_style: ui_style_to_proto(ui.ui_style) as i32,
+        settings_layout: settings_layout_to_proto(ui.settings_layout) as i32,
+        auto_fetch_covers: library.auto_fetch_covers,
+        cover_fetch_strategy: fetch_strategy_to_proto(library.cover_fetch_strategy) as i32,
+        radio_registries: integrations
             .radio_registries
             .iter()
             .map(registry_entry_to_proto)
             .collect(),
-        prefer_local_lyrics: value.prefer_local_lyrics,
-        enable_musixmatch_lyrics: value.enable_musixmatch_lyrics,
-        lyrics_offset_ms: value.lyrics_offset_ms,
-        lyrics_offset_auto: value.lyrics_offset_auto,
-        lyrics_depth_blur: value.lyrics_depth_blur,
-        lyrics_depth_blur_strength: u32::from(value.lyrics_depth_blur_strength),
-        sync_interval_minutes: Some(value.sync_interval_minutes),
+        prefer_local_lyrics: lyrics.prefer_local_lyrics,
+        enable_musixmatch_lyrics: lyrics.enable_musixmatch_lyrics,
+        lyrics_offset_ms: lyrics.lyrics_offset_ms,
+        lyrics_offset_auto: lyrics.lyrics_offset_auto,
+        lyrics_depth_blur: lyrics.lyrics_depth_blur,
+        lyrics_depth_blur_strength: u32::from(lyrics.lyrics_depth_blur_strength),
+        sync_interval_minutes: Some(library.sync_interval_minutes),
     }
 }
 
-/// Credential fields and machine-local path state are not on the wire, so
-/// they come back as their defaults here; the daemon overwrites them with
-/// what it already holds before anything is persisted.
-pub fn config_from_proto(value: &Config) -> config::AppConfig {
-    config::AppConfig {
-        local_sources: value
-            .folder_sources
-            .iter()
-            .map(saved_folder_source_from_proto)
-            .collect(),
-        theme: value.theme.clone(),
-        live_theme_path: value.live_theme_path.clone(),
-        language: value.language.clone(),
-        reduce_animations: value.reduce_animations,
-        fullscreen_use_player_bar: value.fullscreen_use_player_bar,
-        cover_art_background: value.cover_art_background,
-        cover_art_darkening: value.cover_art_darkening.min(u32::from(u8::MAX)) as u8,
-        cover_art_blur: value.cover_art_blur.min(u32::from(u8::MAX)) as u8,
-        custom_background_path: value.custom_background_path.clone(),
-        custom_font_path: value.custom_font_path.clone(),
-        tracing_enabled: value.tracing_enabled,
-        auto_check_updates: value.auto_check_updates,
-        minimize_to_tray: value.minimize_to_tray,
-        show_source_toggle: value.show_source_toggle,
-        show_row_images: value.show_row_images,
-        volume_scroll_step: value.volume_scroll_step,
-        crossfade_seconds: value.crossfade_seconds.min(u32::from(u8::MAX)) as u8,
-        custom_themes: value
-            .custom_themes
-            .iter()
-            .map(|(k, v)| (k.clone(), custom_theme_from_proto(v)))
-            .collect(),
-        back_behavior: back_behavior_from_proto(value.back_behavior),
-        channel_mode: channel_mode_from_proto(value.channel_mode),
-        equalizer: equalizer_from_proto(value.equalizer.as_ref()),
-        replay_gain: replay_gain_from_proto(value.replay_gain.as_ref()),
-        device_change_behavior: device_change_behavior_from_proto(value.device_change_behavior),
-        sample_rate_mode: sample_rate_mode_from_proto(value.sample_rate_mode),
-        titlebar_mode: titlebar_mode_from_proto(value.titlebar_mode),
-        offline_quality: offline_quality_from_proto(value.offline_quality),
-        stream_quality: stream_quality_from_proto(value.stream_quality),
-        autoplay_radio: value.autoplay_radio,
-        skip_explicit: value.skip_explicit,
-        pause_watch_history: value.pause_watch_history,
-        player_bar_position: player_bar_position_from_proto(value.player_bar_position),
-        ui_style: ui_style_from_proto(value.ui_style),
-        settings_layout: settings_layout_from_proto(value.settings_layout),
-        auto_fetch_covers: value.auto_fetch_covers,
-        cover_fetch_strategy: fetch_strategy_from_proto(value.cover_fetch_strategy),
-        radio_registries: value
-            .radio_registries
-            .iter()
-            .map(registry_entry_from_proto)
-            .collect(),
-        prefer_local_lyrics: value.prefer_local_lyrics,
-        enable_musixmatch_lyrics: value.enable_musixmatch_lyrics,
-        lyrics_offset_ms: value.lyrics_offset_ms,
-        lyrics_offset_auto: value.lyrics_offset_auto,
-        lyrics_depth_blur: value.lyrics_depth_blur,
-        lyrics_depth_blur_strength: value.lyrics_depth_blur_strength.min(u32::from(u8::MAX)) as u8,
-        sync_interval_minutes: value
-            .sync_interval_minutes
-            .unwrap_or(config::DEFAULT_SYNC_INTERVAL_MINUTES),
-        ..Default::default()
+/// The daemon-owned settings that are not on the wire come back as their defaults here; the daemon restores what it holds before anything is persisted.
+pub fn config_from_proto(value: &Config) -> config::Settings {
+    let defaults = config::Settings::default();
+    config::Settings {
+        playback: config::Playback {
+            volume_scroll_step: value.volume_scroll_step,
+            crossfade_seconds: value.crossfade_seconds.min(u32::from(u8::MAX)) as u8,
+            back_behavior: back_behavior_from_proto(value.back_behavior),
+            channel_mode: channel_mode_from_proto(value.channel_mode),
+            equalizer: equalizer_from_proto(value.equalizer.as_ref()),
+            replay_gain: replay_gain_from_proto(value.replay_gain.as_ref()),
+            device_change_behavior: device_change_behavior_from_proto(value.device_change_behavior),
+            sample_rate_mode: sample_rate_mode_from_proto(value.sample_rate_mode),
+            stream_quality: stream_quality_from_proto(value.stream_quality),
+            autoplay_radio: value.autoplay_radio,
+            skip_explicit: value.skip_explicit,
+            pause_watch_history: value.pause_watch_history,
+        },
+        ui: config::Ui {
+            theme: value.theme.clone(),
+            live_theme_path: value.live_theme_path.clone(),
+            custom_themes: value
+                .custom_themes
+                .iter()
+                .map(|(k, v)| (k.clone(), custom_theme_from_proto(v)))
+                .collect(),
+            language: value.language.clone(),
+            reduce_animations: value.reduce_animations,
+            fullscreen_use_player_bar: value.fullscreen_use_player_bar,
+            show_source_toggle: value.show_source_toggle,
+            show_row_images: value.show_row_images,
+            titlebar_mode: titlebar_mode_from_proto(value.titlebar_mode),
+            player_bar_position: player_bar_position_from_proto(value.player_bar_position),
+            ui_style: ui_style_from_proto(value.ui_style),
+            settings_layout: settings_layout_from_proto(value.settings_layout),
+            custom_font_path: value.custom_font_path.clone(),
+        },
+        background: config::Background {
+            cover_art_background: value.cover_art_background,
+            cover_art_darkening: value.cover_art_darkening.min(u32::from(u8::MAX)) as u8,
+            cover_art_blur: value.cover_art_blur.min(u32::from(u8::MAX)) as u8,
+            custom_background_path: value.custom_background_path.clone(),
+        },
+        lyrics: config::Lyrics {
+            prefer_local_lyrics: value.prefer_local_lyrics,
+            enable_musixmatch_lyrics: value.enable_musixmatch_lyrics,
+            lyrics_offset_ms: value.lyrics_offset_ms,
+            lyrics_offset_auto: value.lyrics_offset_auto,
+            lyrics_depth_blur: value.lyrics_depth_blur,
+            lyrics_depth_blur_strength: value.lyrics_depth_blur_strength.min(u32::from(u8::MAX))
+                as u8,
+        },
+        library: config::Library {
+            local_sources: value
+                .folder_sources
+                .iter()
+                .map(saved_folder_source_from_proto)
+                .collect(),
+            auto_fetch_covers: value.auto_fetch_covers,
+            cover_fetch_strategy: fetch_strategy_from_proto(value.cover_fetch_strategy),
+            offline_quality: offline_quality_from_proto(value.offline_quality),
+            sync_interval_minutes: value
+                .sync_interval_minutes
+                .unwrap_or(config::DEFAULT_SYNC_INTERVAL_MINUTES),
+        },
+        integrations: config::Integrations {
+            radio_registries: value
+                .radio_registries
+                .iter()
+                .map(registry_entry_from_proto)
+                .collect(),
+            ..defaults.integrations
+        },
+        system: config::System {
+            tracing_enabled: value.tracing_enabled,
+            auto_check_updates: value.auto_check_updates,
+            minimize_to_tray: value.minimize_to_tray,
+        },
+        ..defaults
     }
 }
 
@@ -520,15 +540,13 @@ mod tests {
             config::UiStyle::Vaxry,
             config::UiStyle::Material3,
         ] {
-            let original = config::AppConfig {
-                ui_style,
-                theme: "system".into(),
-                ..Default::default()
-            };
+            let mut original = config::Settings::default();
+            original.ui.ui_style = ui_style;
+            original.ui.theme = "system".into();
             let bytes = config_to_proto(&original).encode_to_vec();
             let restored = config_from_proto(&Config::decode(bytes.as_slice()).unwrap());
-            assert_eq!(restored.ui_style, ui_style);
-            assert_eq!(restored.theme, original.theme);
+            assert_eq!(restored.ui.ui_style, ui_style);
+            assert_eq!(restored.ui.theme, original.ui.theme);
         }
         assert_eq!(ui_style_from_proto(1), config::UiStyle::Normal);
         assert_eq!(ui_style_from_proto(2), config::UiStyle::Vaxry);
@@ -537,22 +555,48 @@ mod tests {
     #[test]
     fn playback_settings_survive_the_wire_round_trip() {
         for stream_quality in config::StreamQuality::ALL.iter().copied() {
-            let original = config::AppConfig {
-                stream_quality,
-                autoplay_radio: true,
-                skip_explicit: true,
-                pause_watch_history: true,
-                ..Default::default()
-            };
+            let mut original = config::Settings::default();
+            original.playback.stream_quality = stream_quality;
+            original.playback.autoplay_radio = true;
+            original.playback.skip_explicit = true;
+            original.playback.pause_watch_history = true;
             let bytes = config_to_proto(&original).encode_to_vec();
-            let restored = config_from_proto(&Config::decode(bytes.as_slice()).unwrap());
+            let restored = config_from_proto(&Config::decode(bytes.as_slice()).unwrap()).playback;
             assert_eq!(restored.stream_quality, stream_quality);
             assert!(restored.autoplay_radio && restored.skip_explicit);
             assert!(restored.pause_watch_history);
         }
         // A peer that predates the field sends nothing, which reads as today's behaviour.
-        let restored = config_from_proto(&Config::default());
+        let restored = config_from_proto(&Config::default()).playback;
         assert_eq!(restored.stream_quality, config::StreamQuality::High);
         assert!(!restored.autoplay_radio && !restored.skip_explicit);
+    }
+
+    /// Every wire field lands in its section and comes back; the daemon-owned fields not on the wire read as defaults.
+    #[test]
+    fn every_wire_setting_survives_the_round_trip() {
+        let mut original = config::Settings::default();
+        original.playback.crossfade_seconds = 5;
+        original.playback.volume_scroll_step = 0.1;
+        original.ui.language = "tr".into();
+        original.background.cover_art_blur = 12;
+        original.lyrics.lyrics_offset_ms = -200;
+        original.library.sync_interval_minutes = 30;
+        original.library.auto_fetch_covers = true;
+        original.integrations.radio_registries.clear();
+        original.system.minimize_to_tray = true;
+        let restored = config_from_proto(&config_to_proto(&original));
+        assert_eq!(restored, original);
+
+        original.spotify.spotify_browser = Some("brave".into());
+        original.integrations.discord_presence = Some(false);
+        original.downloads.downloader_output_dir = "/downloads".into();
+        let restored = config_from_proto(&config_to_proto(&original));
+        assert_eq!(restored.spotify, config::Spotify::default());
+        assert_eq!(
+            restored.integrations.discord_presence,
+            config::Integrations::default().discord_presence
+        );
+        assert_eq!(restored.downloads, config::Downloads::default());
     }
 }

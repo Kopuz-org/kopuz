@@ -1,5 +1,5 @@
 use api::TrackInfo as Track;
-use config::AppConfig;
+use config::Settings;
 use dioxus::prelude::*;
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -174,8 +174,8 @@ pub struct ShowcaseProps {
 
 #[component]
 pub fn Showcase(props: ShowcaseProps) -> Element {
-    let config = use_context::<Signal<AppConfig>>();
-    match config.read().ui_style {
+    let settings = use_context::<Signal<Settings>>();
+    match settings.read().ui.ui_style {
         config::UiStyle::Vaxry => rsx! {
             crate::vaxry::showcase::ShowcaseVaxry { ..props }
         },

@@ -45,7 +45,7 @@ pub fn job_status_from_proto(value: &JobStatus) -> api::JobStatus {
 
 pub fn config_view_to_proto(value: &api::ConfigView) -> ConfigView {
     ConfigView {
-        config: Some(config_to_proto(&value.config)),
+        config: Some(config_to_proto(&value.settings)),
         locked_keys: value.locked_keys.clone(),
         revision: value.revision,
     }
@@ -53,7 +53,7 @@ pub fn config_view_to_proto(value: &api::ConfigView) -> ConfigView {
 
 pub fn config_view_from_proto(value: &ConfigView) -> api::ConfigView {
     api::ConfigView {
-        config: config_from_proto(value.config.as_ref().unwrap_or(&Config::default())),
+        settings: config_from_proto(value.config.as_ref().unwrap_or(&Config::default())),
         locked_keys: value.locked_keys.clone(),
         revision: value.revision,
     }
@@ -123,12 +123,12 @@ mod tests {
     #[test]
     fn the_sync_interval_survives_the_wire() {
         for minutes in [0, 15, ::config::DEFAULT_SYNC_INTERVAL_MINUTES, u32::MAX] {
-            let config = ::config::AppConfig {
-                sync_interval_minutes: minutes,
-                ..Default::default()
-            };
+            let mut settings = ::config::Settings::default();
+            settings.library.sync_interval_minutes = minutes;
             assert_eq!(
-                config_from_proto(&config_to_proto(&config)).sync_interval_minutes,
+                config_from_proto(&config_to_proto(&settings))
+                    .library
+                    .sync_interval_minutes,
                 minutes
             );
         }
@@ -139,7 +139,7 @@ mod tests {
     fn an_absent_sync_interval_is_the_default() {
         let old = Config::default();
         assert_eq!(
-            config_from_proto(&old).sync_interval_minutes,
+            config_from_proto(&old).library.sync_interval_minutes,
             ::config::DEFAULT_SYNC_INTERVAL_MINUTES
         );
     }

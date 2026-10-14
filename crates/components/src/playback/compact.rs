@@ -1,4 +1,4 @@
-use config::{AppConfig, UiStyle};
+use config::{Settings, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
@@ -67,8 +67,8 @@ pub fn CompactPlayer() -> Element {
     }
 
     let mut ctrl = use_context::<PlayerController>();
-    let config = use_context::<Signal<AppConfig>>();
-    let skin = skin_for(config.read().ui_style);
+    let settings = use_context::<Signal<Settings>>();
+    let skin = skin_for(settings.read().ui.ui_style);
 
     let mut is_dragging = use_signal(|| false);
     let mut drag_progress = use_signal(|| 0u64);

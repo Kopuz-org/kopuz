@@ -93,7 +93,7 @@ async fn migration_is_idempotent() {
 #[tokio::test]
 async fn migration_imports_servers_and_active_source() {
     let (db, dir) = import(LEGACY_CONFIG).await;
-    assert!(db.load_config().await.unwrap().is_some(), "config present");
+    assert!(db.has_app_state().await.unwrap(), "state present");
     let sources = db.load_sources().await.unwrap();
 
     assert_eq!(sources.servers.len(), 2);

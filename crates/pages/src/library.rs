@@ -12,7 +12,7 @@ use components::sort_control::SortControl;
 use components::stat_card::StatCard;
 use components::track_row::TrackRow;
 use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
-use config::{AppConfig, TrackSortField, UiStyle};
+use config::{Settings, TrackSortField, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{
     WindowRows, use_active_source, use_albums, use_artists, use_playlists, use_tracks_window,
@@ -34,7 +34,7 @@ fn window_padding(total_tracks: usize, window: &WindowRows) -> (f64, f64) {
 
 #[component]
 pub fn LibraryPage(
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     on_rescan: EventHandler,
     mut is_playing: Signal<bool>,
     mut current_playing: Signal<u64>,
@@ -257,7 +257,7 @@ pub fn LibraryPage(
             .collect::<Vec<_>>()
     };
 
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
     rsx! {
         div {
             class: if cfg!(target_os = "android") { "px-3 pt-3 absolute inset-0 flex flex-col overflow-x-hidden" } else if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },

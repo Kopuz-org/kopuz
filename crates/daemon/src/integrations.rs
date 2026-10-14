@@ -195,7 +195,7 @@ pub fn spawn_youtube_reporter(
     session: &SessionHandle,
     db: db::Db,
     sources: watch::Receiver<Arc<server::sources::Sources>>,
-    config: watch::Receiver<config::AppConfig>,
+    settings: watch::Receiver<config::Settings>,
 ) -> tokio::task::JoinHandle<()> {
     let mut events = session.subscribe();
     let session = session.clone();
@@ -221,7 +221,7 @@ pub fn spawn_youtube_reporter(
                     };
                     let received = Instant::now();
                     let signed_in = youtube_signed_in(&sources.borrow());
-                    let history_paused = config.borrow().pause_watch_history;
+                    let history_paused = settings.borrow().playback.pause_watch_history;
                     let live_id = (signed_in
                         && !history_paused
                         && matches!(state.phase, Phase::Playing | Phase::Paused))
@@ -310,7 +310,7 @@ impl Drop for DiscordState {
 /// resolution keyed by song so a late result never stamps the wrong track.
 pub fn spawn_discord_presence(
     session: &SessionHandle,
-    config: watch::Receiver<config::AppConfig>,
+    config: watch::Receiver<config::Settings>,
     sources: watch::Receiver<Arc<server::sources::Sources>>,
     mut paused: watch::Receiver<bool>,
 ) -> tokio::task::JoinHandle<()> {
@@ -395,11 +395,11 @@ struct PresenceOptions {
 }
 
 impl PresenceOptions {
-    fn of(config: &config::AppConfig, paused: &watch::Receiver<bool>) -> Self {
+    fn of(config: &config::Settings, paused: &watch::Receiver<bool>) -> Self {
         Self {
-            enabled: config.discord_presence.unwrap_or(true),
+            enabled: config.integrations.discord_presence.unwrap_or(true),
             paused: *paused.borrow(),
-            source: config.discord_presence_source.unwrap_or(true),
+            source: config.integrations.discord_presence_source.unwrap_or(true),
         }
     }
 }
@@ -569,8 +569,8 @@ fn secret_field(key: &str, label: Text, placeholder: &str) -> FieldSpec {
     }
 }
 
-fn discord(config: &config::AppConfig, paused: bool) -> IntegrationInfo {
-    let presence = config.discord_presence.unwrap_or(true);
+fn discord(config: &config::Settings, paused: bool) -> IntegrationInfo {
+    let presence = config.integrations.discord_presence.unwrap_or(true);
     IntegrationInfo {
         id: DISCORD.to_string(),
         name: Text::key("discord_presence"),
@@ -587,7 +587,7 @@ fn discord(config: &config::AppConfig, paused: bool) -> IntegrationInfo {
             toggle_field(
                 PRESENCE_SOURCE,
                 "discord_presence_source",
-                config.discord_presence_source.unwrap_or(true),
+                config.integrations.discord_presence_source.unwrap_or(true),
             ),
         ],
     }
@@ -649,11 +649,7 @@ fn librefm(credentials: &Credentials) -> IntegrationInfo {
 }
 
 /// What this build publishes, in the order a settings page lists it.
-fn all(
-    config: &config::AppConfig,
-    credentials: &Credentials,
-    paused: bool,
-) -> Vec<IntegrationInfo> {
+fn all(config: &config::Settings, credentials: &Credentials, paused: bool) -> Vec<IntegrationInfo> {
     let mut published = Vec::new();
     // Android has no Discord client to talk to, so the row is not offered there.
     if !cfg!(target_os = "android") {
@@ -667,7 +663,7 @@ fn all(
 
 fn info_of(
     id: &str,
-    config: &config::AppConfig,
+    config: &config::Settings,
     credentials: &Credentials,
     paused: bool,
 ) -> Result<IntegrationInfo, ApiError> {
@@ -706,9 +702,13 @@ fn set_toggle(values: &[FieldValue], key: &str, stored: &mut Option<bool>) {
     }
 }
 
-fn apply_presence(values: &[FieldValue], config: &mut config::AppConfig) {
-    set_toggle(values, PRESENCE, &mut config.discord_presence);
-    set_toggle(values, PRESENCE_SOURCE, &mut config.discord_presence_source);
+fn apply_presence(values: &[FieldValue], config: &mut config::Settings) {
+    set_toggle(values, PRESENCE, &mut config.integrations.discord_presence);
+    set_toggle(
+        values,
+        PRESENCE_SOURCE,
+        &mut config.integrations.discord_presence_source,
+    );
 }
 
 fn apply_credentials(id: &str, values: &[FieldValue], credentials: &mut Credentials) {
@@ -859,7 +859,7 @@ impl IntegrationService {
             // Discord holds no credential, so unconfigured means presence off.
             self.config
                 .mutate_state(&[INTEGRATIONS_KEY], |config| {
-                    config.discord_presence = Some(false)
+                    config.integrations.discord_presence = Some(false)
                 })
                 .await?;
         } else {
@@ -1076,7 +1076,7 @@ mod tests {
         let config = Arc::new(crate::config_service::ConfigService::new(
             database.clone(),
             dir.path().join("settings.toml"),
-            config::AppConfig::default(),
+            config::Settings::default(),
         ));
         let credentials = CredentialStore::load(&database).await.expect("credentials");
         let pause = PresencePause::load(&database).await.expect("pause");
@@ -1108,7 +1108,7 @@ mod tests {
         let reloaded = PresencePause::load(&database).await.expect("reload");
         assert!(!reloaded.get(), "the toggle survives a restart");
         assert_eq!(
-            config.snapshot().await.discord_presence,
+            config.snapshot().await.integrations.discord_presence,
             Some(true),
             "the presence setting is left alone"
         );

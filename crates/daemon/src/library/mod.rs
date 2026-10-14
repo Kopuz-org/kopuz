@@ -26,7 +26,7 @@ pub struct LibraryService {
     cover_cache: PathBuf,
     /// The cover fetcher's Last.fm key.
     credentials: crate::CredentialStore,
-    config_rx: OnceLock<watch::Receiver<config::AppConfig>>,
+    config_rx: OnceLock<watch::Receiver<config::Settings>>,
     sources_rx: OnceLock<watch::Receiver<Arc<server::sources::Sources>>>,
     session: OnceLock<SessionHandle>,
     catalog: OnceLock<Arc<dyn crate::catalog::CatalogQueue>>,
@@ -225,12 +225,12 @@ impl LibraryService {
     /// Late-bound session wiring (the session needs the materializer first):
     /// gives the service live config and the event stream for invalidations.
     pub fn attach_session(&self, session: SessionHandle) {
-        let _ = self.config_rx.set(session.config_watch());
+        let _ = self.config_rx.set(session.settings_watch());
         let _ = self.sources_rx.set(session.sources_watch());
         let _ = self.session.set(session);
     }
 
-    fn current_config(&self) -> config::AppConfig {
+    fn current_config(&self) -> config::Settings {
         self.config_rx
             .get()
             .map(|rx| rx.borrow().clone())
@@ -270,8 +270,9 @@ impl LibraryService {
             .unwrap_or_else(|| self.source.clone())
     }
 
-    fn scan_roots(config: &config::AppConfig) -> Vec<(config::Source, Vec<PathBuf>)> {
+    fn scan_roots(config: &config::Settings) -> Vec<(config::Source, Vec<PathBuf>)> {
         config
+            .library
             .local_sources
             .iter()
             .map(|source| {
@@ -402,8 +403,8 @@ impl LibraryService {
             track.duration,
             track.id.uid(),
         )
-        .prefer_local(config.prefer_local_lyrics)
-        .enable_musixmatch(config.enable_musixmatch_lyrics);
+        .prefer_local(config.lyrics.prefer_local_lyrics)
+        .enable_musixmatch(config.lyrics.enable_musixmatch_lyrics);
         if let Some(server) = &sources.server {
             request = request.with_server(
                 Some(&server.url),

@@ -164,7 +164,7 @@ async fn spawn_pair() -> Pair {
     let config_service = Arc::new(ConfigService::new(
         database.clone(),
         dir.path().join("settings.toml"),
-        config::AppConfig::default(),
+        config::Settings::default(),
     ));
     let credentials = daemon::CredentialStore::load(&database)
         .await
@@ -783,7 +783,7 @@ async fn a_job_says_whether_the_daemons_schedule_started_it_on_every_transport()
 async fn activate_jellyfin(pair: &Pair, minutes: u32) {
     pair.config_service
         .mutate_state(&["sync_interval_minutes"], move |config| {
-            config.sync_interval_minutes = minutes;
+            config.library.sync_interval_minutes = minutes;
         })
         .await
         .expect("config saved");
@@ -810,7 +810,7 @@ fn spawn_auto_sync(pair: &Pair) {
         pair.library.clone(),
         pair.playlists.clone(),
         pair.favorites.clone(),
-        pair.session.config_watch(),
+        pair.session.settings_watch(),
         pair.session.sources_watch(),
     );
 }
@@ -844,8 +844,8 @@ async fn a_zero_sync_interval_starts_no_syncs() {
     assert!(pair.local.jobs().await.expect("jobs").is_empty());
 
     // Raising it from 0 is a change the running schedule must notice.
-    let mut raised = pair.local.config().await.expect("view").config;
-    raised.sync_interval_minutes = 60;
+    let mut raised = pair.local.config().await.expect("view").settings;
+    raised.library.sync_interval_minutes = 60;
     pair.local.set_config(raised).await.expect("interval set");
     assert!(
         wait_job(&pair.wire, api::JobKind::LibrarySync)
@@ -861,7 +861,7 @@ async fn the_daemons_own_folder_scan_is_automatic_and_a_users_is_not() {
     let music = tempfile::tempdir().expect("tempdir");
     pair.config_service
         .mutate_state(&["local_sources"], |config| {
-            config.local_sources = vec![config::SavedLocalSource::default_library(vec![
+            config.library.local_sources = vec![config::SavedLocalSource::default_library(vec![
                 music.path().to_path_buf(),
             ])];
         })
@@ -870,7 +870,7 @@ async fn the_daemons_own_folder_scan_is_automatic_and_a_users_is_not() {
     daemon::folder_scan::spawn(
         pair.jobs.clone(),
         pair.library.clone(),
-        pair.session.config_watch(),
+        pair.session.settings_watch(),
         pair.session.subscribe(),
         true,
     );
@@ -1122,20 +1122,20 @@ async fn config_view_and_set_agree_across_transports() {
     // these to be equal, so this is the guard on every field mapping.
     assert_eq!(local_view, wire_view);
 
-    let mut next = wire_view.config.clone();
-    next.crossfade_seconds = 7;
-    next.theme = "nord".to_string();
-    next.offline_quality = config::OfflineQuality::Kbps160;
+    let mut next = wire_view.settings.clone();
+    next.playback.crossfade_seconds = 7;
+    next.ui.theme = "nord".to_string();
+    next.library.offline_quality = config::OfflineQuality::Kbps160;
     let written = pair.wire.set_config(next).await.expect("set over the wire");
-    assert_eq!(written.config.crossfade_seconds, 7);
-    assert_eq!(written.config.theme, "nord");
+    assert_eq!(written.settings.playback.crossfade_seconds, 7);
+    assert_eq!(written.settings.ui.theme, "nord");
     assert_eq!(
-        written.config.offline_quality,
+        written.settings.library.offline_quality,
         config::OfflineQuality::Kbps160
     );
 
     let local_view = pair.local.config().await.expect("local view after set");
-    assert_eq!(local_view.config, written.config);
+    assert_eq!(local_view.settings, written.settings);
 }
 
 fn pref(key: &str, value: Option<&str>) -> api::PrefEntry {
@@ -1328,19 +1328,26 @@ async fn frontend_prefs_refuse_bad_input_identically_and_store_nothing() {
 async fn playback_settings_and_their_capabilities_agree_across_transports() {
     let pair = spawn_pair().await;
 
-    let mut next = pair.wire.config().await.expect("wire view").config;
-    assert_eq!(next.stream_quality, config::StreamQuality::High);
-    assert!(!next.autoplay_radio && !next.skip_explicit && !next.pause_watch_history);
-    next.stream_quality = config::StreamQuality::Low;
-    next.autoplay_radio = true;
-    next.skip_explicit = true;
-    next.pause_watch_history = true;
+    let mut next = pair.wire.config().await.expect("wire view").settings;
+    assert_eq!(next.playback.stream_quality, config::StreamQuality::High);
+    assert!(
+        !next.playback.autoplay_radio
+            && !next.playback.skip_explicit
+            && !next.playback.pause_watch_history
+    );
+    next.playback.stream_quality = config::StreamQuality::Low;
+    next.playback.autoplay_radio = true;
+    next.playback.skip_explicit = true;
+    next.playback.pause_watch_history = true;
     let written = pair.wire.set_config(next).await.expect("set over the wire");
-    assert_eq!(written.config.stream_quality, config::StreamQuality::Low);
-    assert!(written.config.autoplay_radio && written.config.skip_explicit);
-    assert!(written.config.pause_watch_history);
+    assert_eq!(
+        written.settings.playback.stream_quality,
+        config::StreamQuality::Low
+    );
+    assert!(written.settings.playback.autoplay_radio && written.settings.playback.skip_explicit);
+    assert!(written.settings.playback.pause_watch_history);
     let local = pair.local.config().await.expect("local view after set");
-    assert_eq!(local.config, written.config);
+    assert_eq!(local.settings, written.settings);
 
     let active = |rows: Vec<api::SourceInfo>| {
         rows.into_iter()

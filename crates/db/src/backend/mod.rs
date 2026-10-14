@@ -147,8 +147,8 @@ fn with_ext(path: &Path, suffix: &str) -> std::path::PathBuf {
 
 #[async_trait::async_trait]
 impl ReadStore for Native {
-    async fn load_config(&self) -> Result<Option<config::AppConfig>, DbError> {
-        cfg_store::load_config(&self.pool(), &self.settings_path).await
+    async fn has_app_state(&self) -> Result<bool, DbError> {
+        cfg_store::has_app_state(&self.pool()).await
     }
 
     async fn tracks_page(
@@ -425,8 +425,8 @@ impl ReadStore for Native {
 
 #[async_trait::async_trait]
 impl Storage for Native {
-    async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError> {
-        cfg_store::save_config(&self.pool(), cfg, &self.settings_path).await
+    async fn ensure_app_state(&self) -> Result<(), DbError> {
+        cfg_store::ensure_app_state(&self.pool()).await
     }
 
     async fn purge_source(&self, source: &crate::Source) -> Result<(), DbError> {

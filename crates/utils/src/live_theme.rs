@@ -23,8 +23,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// Theme id the palette is injected under, and the value `AppConfig::theme`
-/// carries while a generator drives the colours.
+/// Theme id the palette is injected under, and the value `Settings::ui.theme` carries while a generator drives the colours.
 pub const THEME_ID: &str = "live";
 
 /// Default matugen target, under the config dir so a template can point at it

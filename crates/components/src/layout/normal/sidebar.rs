@@ -133,7 +133,7 @@ const BOTTOM_MENU: &[SidebarItem] = &[SidebarItem {
 
 #[component]
 pub fn SidebarNormal(props: SidebarProps) -> Element {
-    let config = use_context::<Signal<config::AppConfig>>();
+    let settings = use_context::<Signal<config::Settings>>();
     let mut prefs = hooks::ui_prefs::use_ui_prefs();
     let mut width = use_signal(|| 240);
     let mut is_collapsed = use_signal(|| false);
@@ -284,7 +284,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
             div {
                 class: "flex-1 flex flex-col overflow-y-auto overflow-x-hidden pt-2",
 
-                if !*is_collapsed.read() && config.read().show_source_toggle {
+                if !*is_collapsed.read() && settings.read().ui.show_source_toggle {
                     crate::source_switcher::SourceSwitcher {
                         on_manage: move |_| props.on_navigate.call(Route::Settings),
                     }

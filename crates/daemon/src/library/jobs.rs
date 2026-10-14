@@ -60,7 +60,7 @@ impl LibraryService {
     /// enabled) network cover fetching. The job runner's single-flight
     /// replaces the app's epoch supersession; cancellation is checked between
     /// phases and chunks.
-    pub async fn run_scan(&self, ctx: &JobCtx, config: &config::AppConfig) -> Result<(), ApiError> {
+    pub async fn run_scan(&self, ctx: &JobCtx, config: &config::Settings) -> Result<(), ApiError> {
         let db_error = |error: db::DbError| ApiError::internal(format!("database error: {error}"));
         for (source, configured_dirs) in Self::scan_roots(config) {
             if ctx.cancelled() {
@@ -233,7 +233,7 @@ impl LibraryService {
             self.persist_resolved_covers(ctx, &source, &library.albums, &missing_local)
                 .await;
 
-            if config.auto_fetch_covers && !ctx.cancelled() {
+            if config.library.auto_fetch_covers && !ctx.cancelled() {
                 ctx.progress("fetching covers", None, None, None);
                 let lastfm_key = {
                     let key = self.credentials.snapshot().lastfm_api_key.trim().to_owned();
@@ -241,7 +241,7 @@ impl LibraryService {
                 };
                 let fetcher = reader::cover_fetcher::CoverFetcher::new(
                     self.cover_cache.clone(),
-                    config.cover_fetch_strategy,
+                    config.library.cover_fetch_strategy,
                     lastfm_key,
                     progress.clone(),
                 );

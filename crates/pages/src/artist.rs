@@ -10,7 +10,7 @@ use components::selection_bar::SelectionBar;
 use components::sort_control::SortControl;
 use components::view_mode_toggle::ViewModeToggle;
 use config::{
-    AlbumSortField, AlbumViewMode, AppConfig, ArtistSortField, ArtistViewOrder, SortCriterion,
+    AlbumSortField, AlbumViewMode, ArtistSortField, ArtistViewOrder, Settings, SortCriterion,
     SortDirection,
 };
 use dioxus::prelude::*;
@@ -21,7 +21,7 @@ use std::collections::HashSet;
 
 #[component]
 pub fn Artist(
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     /// The open artist; `None` shows the grid of them all.
     artist: Signal<Option<String>>,
     on_navigate: EventHandler<String>,
@@ -211,7 +211,7 @@ pub fn Artist(
         .and_then(Result::ok)
         .map(|detail| detail.info.name)
         .unwrap_or_default();
-    let page_container_class = crate::layout::page_container_class(&config.read().ui_style);
+    let page_container_class = crate::layout::page_container_class(&settings.read().ui.ui_style);
 
     if let (true, Some(error)) = (detail_open, load_error()) {
         return rsx! {

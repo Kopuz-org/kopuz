@@ -189,7 +189,7 @@ fn main() -> std::process::ExitCode {
                 return std::process::ExitCode::FAILURE;
             }
         };
-        if core.config.tracing_enabled {
+        if core.settings.system.tracing_enabled {
             logging::enable_trace(&log_dir);
         }
 
@@ -217,7 +217,7 @@ fn main() -> std::process::ExitCode {
 
         #[cfg(any(target_os = "linux", target_os = "windows"))]
         {
-            let initial_titlebar_mode = core.config.titlebar_mode;
+            let initial_titlebar_mode = core.settings.ui.titlebar_mode;
             window = window.with_decorations(initial_titlebar_mode == config::TitlebarMode::System);
         }
 
@@ -358,11 +358,11 @@ fn main() -> std::process::ExitCode {
 
 /// Pull the daemon's settings into the app's copy, keeping edits not yet sent.
 async fn adopt_daemon_config(
-    config: Signal<config::AppConfig>,
+    settings: Signal<config::Settings>,
     baseline: hooks::config_sync::ConfigBaseline,
 ) {
     match backend::api().config().await {
-        Ok(view) => baseline.adopt(config, &view),
+        Ok(view) => baseline.adopt(settings, &view),
         Err(error) => tracing::warn!(%error, "re-reading settings failed"),
     }
 }
@@ -370,12 +370,12 @@ async fn adopt_daemon_config(
 /// Events were lost, so re-read everything the app holds from the daemon.
 fn resync(
     gens: hooks::db_reactivity::Generations,
-    config: Signal<config::AppConfig>,
+    settings: Signal<config::Settings>,
     baseline: hooks::config_sync::ConfigBaseline,
     ui_prefs: hooks::ui_prefs::UiPrefsStore,
 ) {
     gens.bump_all();
-    spawn(adopt_daemon_config(config, baseline));
+    spawn(adopt_daemon_config(settings, baseline));
     ui_prefs.reload();
 }
 
@@ -443,7 +443,8 @@ fn App() -> Element {
     // ROOT-owned: detached tasks (download workers, close-flush) read/write
     // these after the spawning page — and in principle this component — is
     // gone; owning them at ROOT keeps Dioxus's cross-scope lint honest.
-    let mut config = use_hook(|| Signal::new_in_scope(config::AppConfig::default(), ScopeId::ROOT));
+    let mut settings =
+        use_hook(|| Signal::new_in_scope(config::Settings::default(), ScopeId::ROOT));
     let core = backend::core().expect("core started in main before launch");
     // The one seam every hook and page reads through.
     use_context_provider(|| core.api.clone() as Arc<dyn api::KopuzApi>);
@@ -527,7 +528,7 @@ fn App() -> Element {
                 // already committed as a targeted write when it happened. The
                 // queue is the core's: it owns the store and persists on the
                 // way out, so only the config surface is ours to push.
-                let cfg = (*config_loaded_ok.peek()).then(|| config.peek().clone());
+                let cfg = (*config_loaded_ok.peek()).then(|| settings.peek().clone());
                 exit_flush::persist_on_fresh_thread(cfg, Some(ui_prefs.unsent()));
             }
             backend::shutdown();
@@ -615,7 +616,7 @@ fn App() -> Element {
         current_song_progress,
         current_track_snapshot,
         volume,
-        config,
+        settings,
         config_loaded_ok,
     );
 
@@ -648,7 +649,7 @@ fn App() -> Element {
             return;
         }
 
-        if !config.read().auto_check_updates {
+        if !settings.read().system.auto_check_updates {
             update_banner.set(None);
             if *did_check_updates.peek() {
                 did_check_updates.set(false);
@@ -677,7 +678,7 @@ fn App() -> Element {
         if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;
         }
-        let _ = config.read();
+        let _ = settings.read();
         config_dirty += 1;
     });
     #[cfg(not(target_os = "android"))]
@@ -685,7 +686,7 @@ fn App() -> Element {
         if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;
         }
-        exit_flush::stash_config(config.read().clone());
+        exit_flush::stash_config(settings.read().clone());
     });
     #[cfg(not(target_os = "android"))]
     use_effect(move || exit_flush::stash_prefs(ui_prefs.unsent_tracked()));
@@ -702,7 +703,7 @@ fn App() -> Element {
             }
             utils::sleep(std::time::Duration::from_millis(STORE_SAVE_SETTLE_MS)).await;
             flushed = *config_dirty.peek();
-            let snapshot = config.peek().clone();
+            let snapshot = settings.peek().clone();
             match api
                 .set_config(snapshot.clone())
                 .instrument(tracing::info_span!("config.persist"))
@@ -710,7 +711,7 @@ fn App() -> Element {
             {
                 Ok(view) => {
                     config_baseline.sent(snapshot);
-                    config_baseline.adopt(config, &view);
+                    config_baseline.adopt(settings, &view);
                 }
                 Err(error) => tracing::error!(%error, "failed to save settings"),
             }
@@ -720,7 +721,7 @@ fn App() -> Element {
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     use_effect(move || {
-        let mode = config.read().titlebar_mode;
+        let mode = settings.read().ui.titlebar_mode;
         let win = dioxus::desktop::window();
         win.set_decorations(mode == config::TitlebarMode::System);
     });
@@ -734,7 +735,7 @@ fn App() -> Element {
 
     #[cfg(target_os = "windows")]
     use_effect(move || {
-        let mode = config.read().titlebar_mode;
+        let mode = settings.read().ui.titlebar_mode;
         let win = dioxus::desktop::window();
         let hwnd = HWND(win.window.hwnd() as _);
         windows_titlebar::install(hwnd);
@@ -792,7 +793,7 @@ fn App() -> Element {
             let mut close_hides_window = close_hides_window;
             move || {
                 use dioxus::desktop::trayicon::TrayIconBuilder;
-                let want_tray = config.read().minimize_to_tray;
+                let want_tray = settings.read().system.minimize_to_tray;
                 let enabled = want_tray && desktop_shell::tray_backend_available();
                 let mut warned = tray_warned.borrow_mut();
                 if want_tray && !enabled {
@@ -871,7 +872,7 @@ fn App() -> Element {
                     Ok(view) => {
                         config_loaded_ok.set(true);
                         config_baseline.loaded(&view);
-                        Some(view.config)
+                        Some(view.settings)
                     }
                     Err(error) => {
                         tracing::error!(%error, "could not read settings; saves are off this session");
@@ -882,8 +883,8 @@ fn App() -> Element {
                 {
                     let _apply = tracing::info_span!("startup.apply_config").entered();
                     let loaded = cfg_loaded;
-                    config.set(loaded.clone());
-                    i18n::set_locale(&loaded.language);
+                    settings.set(loaded.clone());
+                    i18n::set_locale(&loaded.ui.language);
                 }
 
                 initial_load_done.set(true);
@@ -936,7 +937,7 @@ fn App() -> Element {
                                 scan_current_file.set(None);
                             }
                             api::ApiEvent::ConfigChanged { .. } => {
-                                spawn(adopt_daemon_config(config, config_baseline));
+                                spawn(adopt_daemon_config(settings, config_baseline));
                             }
                             api::ApiEvent::FrontendPrefsChanged { frontend, .. }
                                 if frontend == hooks::ui_prefs::FRONTEND =>
@@ -944,12 +945,12 @@ fn App() -> Element {
                                 ui_prefs.reload();
                             }
                             api::ApiEvent::Resync => {
-                                resync(gens, config, config_baseline, ui_prefs);
+                                resync(gens, settings, config_baseline, ui_prefs);
                             }
                             _ => {}
                         },
                         Err(RecvError::Lagged(_)) => {
-                            resync(gens, config, config_baseline, ui_prefs)
+                            resync(gens, settings, config_baseline, ui_prefs)
                         }
                         Err(RecvError::Closed) => break,
                     }
@@ -996,7 +997,7 @@ fn App() -> Element {
     });
 
     provide_context(ctrl);
-    provide_context(config);
+    provide_context(settings);
     let discover_now_playing = use_signal(|| None::<String>);
     provide_context(pages::server::discover::DiscoverNowPlaying(
         discover_now_playing,
@@ -1127,8 +1128,9 @@ fn App() -> Element {
 
     // Inject CSS for all custom themes reactively
     let custom_themes_css = use_memo(move || {
-        config
+        settings
             .read()
+            .ui
             .custom_themes
             .iter()
             .map(|(id, ct)| utils::themes::custom_theme_to_css(id, &ct.vars))
@@ -1157,14 +1159,14 @@ fn App() -> Element {
     use_future(move || async move {
         let mut last: Option<(PathBuf, String)> = None;
         loop {
-            if config.peek().theme != utils::live_theme::THEME_ID {
+            if settings.peek().ui.theme != utils::live_theme::THEME_ID {
                 if last.take().is_some() {
                     live_theme_css.set(String::new());
                 }
                 utils::sleep(std::time::Duration::from_millis(LIVE_THEME_IDLE_POLL_MS)).await;
                 continue;
             }
-            let path = utils::live_theme::resolve_path(&config.peek().live_theme_path);
+            let path = utils::live_theme::resolve_path(&settings.peek().ui.live_theme_path);
             let probe = path.clone();
             let raw = tokio::task::spawn_blocking(move || utils::live_theme::read(&probe))
                 .await
@@ -1197,7 +1199,7 @@ fn App() -> Element {
 
     // Inject a user-picked UI font reactively, mirroring the custom-themes path
     // above: read the file, inline it as a data: URI, and swap the <style>'s text.
-    let custom_font_path = use_memo(move || config.read().custom_font_path.clone());
+    let custom_font_path = use_memo(move || settings.read().ui.custom_font_path.clone());
     use_effect(move || {
         let path = custom_font_path.read().clone();
         spawn(async move {
@@ -1220,7 +1222,7 @@ fn App() -> Element {
     });
 
     let theme_class = use_memo(move || {
-        let theme = config.read().theme.clone();
+        let theme = settings.read().ui.theme.clone();
         if theme == "album-art" {
             "theme-default".to_string()
         } else if theme == utils::live_theme::THEME_ID || theme == "system" {
@@ -1290,10 +1292,10 @@ fn App() -> Element {
     };
 
     let background_style = use_memo(move || {
-        let conf = config.read();
-        if conf.theme == "album-art"
-            && !conf.cover_art_background
-            && conf.custom_background_path.is_empty()
+        let conf = settings.read();
+        if conf.ui.theme == "album-art"
+            && !conf.background.cover_art_background
+            && conf.background.custom_background_path.is_empty()
         {
             utils::color::get_background_style(palette.read().as_deref())
         } else {
@@ -1302,18 +1304,18 @@ fn App() -> Element {
     });
 
     let cover_background = use_memo(move || {
-        let conf = config.read();
-        if !conf.custom_background_path.is_empty() {
-            let path = std::path::PathBuf::from(&conf.custom_background_path);
+        let conf = settings.read();
+        if !conf.background.custom_background_path.is_empty() {
+            let path = std::path::PathBuf::from(&conf.background.custom_background_path);
             return utils::format_artwork_url(Some(&path)).map(|url| url.as_ref().to_string());
         }
-        if conf.cover_art_background {
+        if conf.background.cover_art_background {
             return ctrl.current_cover_url(hooks::artwork::Size::Full);
         }
         None
     });
 
-    let reduce_animations = use_memo(move || config.read().reduce_animations);
+    let reduce_animations = use_memo(move || settings.read().ui.reduce_animations);
     let switch_source = hooks::source_switch::use_switch_source();
     let all_sources = hooks::sources::use_sources();
     let mut show_quick_search = use_signal(|| false);
@@ -1395,7 +1397,7 @@ fn App() -> Element {
 
     rsx! {
         WindowsToolbarIconAssets {}
-        material3::SystemColors { config, artwork: palette }
+        material3::SystemColors { settings, artwork: palette }
 
         div {
             id: "app-root",
@@ -1409,7 +1411,7 @@ fn App() -> Element {
             },
             dir: "{dir}",
             "data-platform": if cfg!(target_os = "android") { "android" } else { "desktop" },
-            "data-ui-style": config.read().ui_style.as_str(),
+            "data-ui-style": settings.read().ui.ui_style.as_str(),
             "data-reduce-animations": "{reduce_animations}",
             tabindex: "0",
             autofocus: true,
@@ -1599,9 +1601,9 @@ fn App() -> Element {
                 }
             }
 
-            if config.read().player_bar_position == config::PlayerBarPosition::Top {
+            if settings.read().ui.player_bar_position == config::PlayerBarPosition::Top {
                 Bottombar {
-                    config,
+                    settings,
                     current_song_title: current_song_title,
                     current_song_artist: current_song_artist,
                     is_playing: is_playing,
@@ -1680,8 +1682,8 @@ fn App() -> Element {
                                 #[cfg(not(target_os = "android"))]
                                 Route::Downloader | Route::ThemeEditor => i18n::t("home"),
                             };
-                            let has_image_background = config.read().cover_art_background
-                                || !config.read().custom_background_path.is_empty();
+                            let has_image_background = settings.read().background.cover_art_background
+                                || !settings.read().background.custom_background_path.is_empty();
                             rsx! {
                                 div { class: if has_image_background { "app-topbar shrink-0 z-[60] bg-black/30 backdrop-blur-xl border-b border-white/5 flex items-center h-11 px-3" } else { "app-topbar shrink-0 z-[60] bg-black/60 backdrop-blur-2xl border-b border-white/5 flex items-center h-11 px-3 shadow-xl" },
                                     if is_details {
@@ -1708,7 +1710,7 @@ fn App() -> Element {
                                     div { class: "flex-1 flex justify-center pr-10",
                                         h2 {
                                             class: "app-topbar-title text-[13px] font-black tracking-[0.2em] text-white/90 uppercase",
-                                            style: if config.read().ui_style != config::UiStyle::Material3 { "font-family: 'kopuz-custom-font', 'JetBrains Mono', monospace;" },
+                                            style: if settings.read().ui.ui_style != config::UiStyle::Material3 { "font-family: 'kopuz-custom-font', 'JetBrains Mono', monospace;" },
                                             "{page_title}"
                                         }
                                     }
@@ -1798,7 +1800,7 @@ fn App() -> Element {
                         },
                         Route::Search => rsx! {
                             pages::search::Search {
-                                config: config,
+                                settings: settings,
                                 search_query: search_query,
                                             is_playing: is_playing,
                                 current_playing: current_playing,
@@ -1822,7 +1824,7 @@ fn App() -> Element {
                         },
                         Route::Library => rsx! {
                             pages::library::LibraryPage {
-                                config: config,
+                                settings: settings,
                                 on_rescan: move |_| {
                                     spawn(async move {
                                         if let Err(error) =
@@ -1884,7 +1886,7 @@ fn App() -> Element {
                             } else {
                                 rsx! {
                                     pages::artist::Artist {
-                                        config: config,
+                                        settings: settings,
                                         artist: selected_artist,
                                                             on_navigate: move |album_id| {
                                             selected_album_id.set(album_id);
@@ -1904,7 +1906,7 @@ fn App() -> Element {
                         },
                         Route::Favorites => rsx! {
                             pages::favorites::FavoritesPage {
-                                config,
+                                settings,
                                 is_playing,
                                 current_playing,
                                 current_song_title,
@@ -1917,25 +1919,25 @@ fn App() -> Element {
                         },
                         Route::Playlists => rsx! {
                             pages::playlists::PlaylistsPage {
-                                config: config,
+                                settings: settings,
                                 selected_playlist_id: selected_playlist_id,
                             }
                         },
                         Route::Activity => rsx! {
                           pages::activity::Activity {
-                              config: config,
+                              settings: settings,
                           }
                         },
                         Route::Radio => rsx! {
                             pages::radio::Radio {
-                                config: config,
+                                settings: settings,
                             }
                         },
                         #[cfg(not(target_os = "android"))]
                         Route::Downloader => rsx! { pages::downloader::DownloaderPage {} },
-                        Route::Settings => rsx! { pages::settings::Settings { config } },
+                        Route::Settings => rsx! { pages::settings::Settings { settings } },
                         #[cfg(not(target_os = "android"))]
-                        Route::ThemeEditor => rsx! { pages::theme_editor::ThemeEditorPage { config } },
+                        Route::ThemeEditor => rsx! { pages::theme_editor::ThemeEditorPage { settings } },
                     }
                     }
                 }
@@ -2004,9 +2006,9 @@ fn App() -> Element {
                     },
                 }
             }
-            if config.read().player_bar_position == config::PlayerBarPosition::Bottom {
+            if settings.read().ui.player_bar_position == config::PlayerBarPosition::Bottom {
                 Bottombar {
-                    config,
+                    settings,
                     current_song_title: current_song_title,
                     current_song_artist: current_song_artist,
                     is_playing: is_playing,

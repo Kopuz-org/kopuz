@@ -29,7 +29,9 @@ impl Session {
             if !allow_crossfade || restore_seek.is_some_and(|position| !position.is_zero()) {
                 Transition::Immediate
             } else if self.should_crossfade() {
-                Transition::Crossfade(Duration::from_secs(self.config.crossfade_seconds as u64))
+                Transition::Crossfade(Duration::from_secs(
+                    self.settings.playback.crossfade_seconds as u64,
+                ))
             } else if self.should_play_gapless() {
                 Transition::Gapless
             } else {
@@ -230,7 +232,7 @@ impl Session {
             local_path,
             remote_ref,
             active_source: self.active_source.clone(),
-            stream_quality: self.config.stream_quality,
+            stream_quality: self.settings.playback.stream_quality,
             artwork,
             transition,
             start_at: restore_seek.filter(|position| !position.is_zero()),

@@ -98,7 +98,7 @@ const TOOL_ITEMS: &[NavItem] = &[NavItem {
 
 #[component]
 pub fn SidebarVaxry(props: SidebarProps) -> Element {
-    let config = use_context::<Signal<config::AppConfig>>();
+    let settings = use_context::<Signal<config::Settings>>();
     let mut width = use_signal(|| 200i32);
     let mut is_collapsed = use_signal(|| false);
     let mut is_resizing = use_signal(|| false);
@@ -159,9 +159,9 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
         format!(
             "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: {drawer_width}px; background-color: var(--color-neutral-900); --vaxry-sidebar-fg: var(--color-white);"
         )
-    } else if config.read().theme == "album-art"
-        || config.read().cover_art_background
-        || !config.read().custom_background_path.is_empty()
+    } else if settings.read().ui.theme == "album-art"
+        || settings.read().background.cover_art_background
+        || !settings.read().background.custom_background_path.is_empty()
     {
         format!(
             "width: {current_width}px; background: rgba(0, 0, 0, 0.4); --vaxry-sidebar-fg: #fff;"
@@ -229,7 +229,7 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                 }
             }
 
-            if config.read().show_source_toggle {
+            if settings.read().ui.show_source_toggle {
                 crate::source_switcher::SourceSwitcher {
                     collapsed,
                     on_manage: move |_| props.on_navigate.call(Route::Settings),

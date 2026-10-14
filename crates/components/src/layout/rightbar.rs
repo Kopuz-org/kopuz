@@ -1,6 +1,6 @@
 use crate::lyrics_view::LyricsView;
 use crate::queue_list_view::QueueListView;
-use config::AppConfig;
+use config::Settings;
 use dioxus::document::eval;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
@@ -20,7 +20,7 @@ pub fn Rightbar(
 ) -> Element {
     let mut active_tab = use_signal(|| 0usize);
     let ctrl = use_context::<PlayerController>();
-    let config = use_context::<Signal<AppConfig>>();
+    let settings = use_context::<Signal<Settings>>();
     // The words come from the daemon: several providers are tried, and some
     // want the account's own token, which never leaves it.
     let track_key = use_memo(move || {
@@ -128,7 +128,7 @@ pub fn Rightbar(
             if *active_tab.read() == 0 {
                 QueueListView {
                     items,
-                    config,
+                    settings,
                     current_queue_index,
                     layout: crate::queue_list_view::LayoutMode::Rightbar,
                 }
@@ -136,7 +136,7 @@ pub fn Rightbar(
                 LyricsView {
                     lyrics,
                     current_song_progress,
-                    config,
+                    settings,
                     layout: crate::lyrics_view::LayoutMode::Rightbar,
                 }
             }

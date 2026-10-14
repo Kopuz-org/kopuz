@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use config::{AppConfig, Browser, MusicServer, MusicService, SavedServer};
+use config::{Browser, MusicServer, MusicService, SavedServer};
 use db::Source;
 use reader::models::{ArtistCredit, PlaylistEntry, Track, TrackId};
 
@@ -212,7 +212,7 @@ async fn a_server_round_trips_through_its_credentials_and_settings() {
     let db = db::init(&unique_db()).await.unwrap();
     let saved = server(Some("token"));
     save_sources(&db, &saved).await;
-    db.save_config(&AppConfig::default()).await.unwrap();
+    db.ensure_app_state().await.unwrap();
 
     let loaded = db.load_sources().await.unwrap();
 
@@ -246,7 +246,7 @@ async fn the_device_id_is_stored_once_and_a_config_save_keeps_it() {
     assert_eq!(db.load_sources().await.unwrap().device_id, None);
 
     db.set_device_id("dev-1").await.unwrap();
-    db.save_config(&AppConfig::default()).await.unwrap();
+    db.ensure_app_state().await.unwrap();
     db.set_active_source(&config::Source::Server("s1".into()))
         .await
         .unwrap();
@@ -710,7 +710,7 @@ async fn each_sources_queue_keeps_its_own_origin() {
 async fn offline_copies_and_pins_live_in_their_own_tables() {
     let path = unique_db();
     let db = db::init(&path).await.unwrap();
-    db.save_config(&AppConfig::default()).await.unwrap();
+    db.ensure_app_state().await.unwrap();
     db.set_offline_track("t1", Some("/cache/t1.flac"))
         .await
         .unwrap();
@@ -724,8 +724,8 @@ async fn offline_copies_and_pins_live_in_their_own_tables() {
         .await
         .unwrap();
 
-    let stale = db.load_config().await.unwrap().unwrap();
-    db.save_config(&stale).await.unwrap();
+    let settings_path = config::store::settings_path_for(path.parent().unwrap());
+    config::store::save_settings(&settings_path, &config::Settings::default()).unwrap();
 
     assert_eq!(
         db.offline_tracks()
@@ -740,8 +740,7 @@ async fn offline_copies_and_pins_live_in_their_own_tables() {
         [r#"{"id":"moe","name":"LISTEN.moe"}"#, r#"{"id":"jazz"}"#],
         "a re-pin keeps its place"
     );
-    let settings =
-        std::fs::read_to_string(config::store::settings_path_for(path.parent().unwrap())).unwrap();
+    let settings = std::fs::read_to_string(&settings_path).unwrap();
     assert!(!settings.contains("offline_tracks") && !settings.contains("pinned_stations"));
 
     db.set_offline_track("t1", None).await.unwrap();
@@ -753,7 +752,7 @@ async fn offline_copies_and_pins_live_in_their_own_tables() {
 #[tokio::test]
 async fn downloader_history_keeps_the_newest_first_up_to_its_limit() {
     let db = db::init(&unique_db()).await.unwrap();
-    db.save_config(&AppConfig::default()).await.unwrap();
+    db.ensure_app_state().await.unwrap();
     let entry = |n: usize| config::DownloaderHistoryEntry {
         url: format!("https://example.invalid/{n}"),
         title: format!("Track {n}"),
@@ -764,9 +763,7 @@ async fn downloader_history_keeps_the_newest_first_up_to_its_limit() {
     for n in 0..4 {
         db.push_downloader_history(&entry(n), 3).await.unwrap();
     }
-    db.save_config(&db.load_config().await.unwrap().unwrap())
-        .await
-        .unwrap();
+    db.ensure_app_state().await.unwrap();
 
     assert_eq!(
         db.downloader_history().await.unwrap(),

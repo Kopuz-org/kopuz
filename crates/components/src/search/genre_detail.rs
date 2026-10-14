@@ -3,7 +3,7 @@ use crate::showcase::{self};
 use crate::track_row::TrackRow;
 use crate::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use api::TrackInfo as Track;
-use config::{AppConfig, UiStyle};
+use config::{Settings, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
@@ -25,8 +25,8 @@ pub fn SearchGenreDetail(
     mut selected_track_for_playlist: Signal<Option<String>>,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-    let config = use_context::<Signal<AppConfig>>();
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let settings = use_context::<Signal<Settings>>();
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
     let sort_state = use_signal(|| None);
     let sorted_genre_tracks = showcase::sorted_tracks(&genre_tracks, *sort_state.read());
     let genre_tracks_list: Vec<Track> = sorted_genre_tracks.clone();

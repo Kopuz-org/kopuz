@@ -1,4 +1,4 @@
-use config::{AppConfig, UiStyle};
+use config::{Settings, UiStyle};
 use dioxus::prelude::*;
 
 use crate::home_body::HomeBody;
@@ -10,9 +10,9 @@ pub fn Home(
     on_select_playlist: EventHandler<String>,
     on_open_artist: EventHandler<String>,
 ) -> Element {
-    let config = use_context::<Signal<AppConfig>>();
+    let settings = use_context::<Signal<Settings>>();
     let mut prefs = hooks::ui_prefs::use_ui_prefs();
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
     let mut edit_mode = use_signal(|| false);
 
     rsx! {

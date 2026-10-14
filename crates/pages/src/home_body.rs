@@ -1,6 +1,6 @@
 use api::{AlbumInfo as Album, TrackInfo as Track};
 use components::dots_menu::{DotsMenu, MenuAction};
-use config::{AppConfig, ListenNowStyle, UiStyle};
+use config::{ListenNowStyle, Settings, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{
     use_active_source, use_album_tracks, use_albums, use_albums_window, use_artist_sample_tracks,
@@ -88,7 +88,7 @@ pub fn HomeBody(
     on_open_artist: EventHandler<String>,
 ) -> Element {
     let is_offline = use_context::<Signal<bool>>();
-    let config = use_context::<Signal<AppConfig>>();
+    let settings = use_context::<Signal<Settings>>();
     let mut prefs = hooks::ui_prefs::use_ui_prefs();
     let source = use_active_source();
     let caps = hooks::sources::use_capabilities();
@@ -389,7 +389,7 @@ pub fn HomeBody(
         Some(cover.to_string())
     });
 
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
     let prefs_snapshot = prefs.read();
     let listen_now_style = prefs_snapshot.listen_now_style;
     let sections: Vec<(String, bool)> = prefs_snapshot
@@ -493,7 +493,7 @@ pub fn HomeBody(
                                 }
                                 {render_server_section(
                                     &key_for_render,
-                                    config,
+                                    settings,
                                     edit,
                                     is_vaxry,
                                     listen_now_style,

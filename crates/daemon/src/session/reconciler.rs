@@ -171,7 +171,7 @@ impl Session {
     pub(super) fn should_arm_transition(&mut self, position: Duration) -> bool {
         let (window, gapless) = if self.should_crossfade() {
             (
-                Duration::from_secs(self.config.crossfade_seconds as u64),
+                Duration::from_secs(self.settings.playback.crossfade_seconds as u64),
                 false,
             )
         } else if self.should_play_gapless() {
@@ -190,7 +190,7 @@ impl Session {
         }
         // Handing a track to an integration stops the engine, so it waits for
         // the end of this one rather than cutting it short.
-        let skip = self.config.skip_explicit;
+        let skip = self.settings.playback.skip_explicit;
         if gapless
             && let NextOutcome::Play(idx) = self
                 .model
@@ -216,7 +216,7 @@ impl Session {
     }
 
     pub(super) fn arm_transition(&mut self) {
-        let skip = self.config.skip_explicit;
+        let skip = self.settings.playback.skip_explicit;
         let NextOutcome::Play(idx) = self
             .model
             .peek_next_where(|track| !(skip && track.explicit))

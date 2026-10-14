@@ -358,7 +358,7 @@ impl SourceService {
         }
     }
 
-    async fn current(&self) -> config::AppConfig {
+    async fn current(&self) -> config::Settings {
         self.config.snapshot().await
     }
 
@@ -381,6 +381,7 @@ impl SourceService {
                 if !self
                     .current()
                     .await
+                    .library
                     .local_sources
                     .iter()
                     .any(|saved| saved.id == local_id)
@@ -407,6 +408,7 @@ impl SourceService {
         let config = self.current().await;
         let servers = self.snapshot().await;
         let ids: Vec<String> = config
+            .library
             .local_sources
             .iter()
             .map(|source| source.id.clone())
@@ -434,6 +436,7 @@ impl SourceService {
         match &key {
             config::Source::LocalLibrary(local_id) => {
                 let saved = current
+                    .library
                     .local_sources
                     .iter()
                     .find(|saved| saved.id == *local_id)
@@ -568,12 +571,13 @@ impl SourceService {
         self.config
             .mutate_state(&["local_sources"], move |config| {
                 match config
+                    .library
                     .local_sources
                     .iter_mut()
                     .find(|source| source.id == saved.id)
                 {
                     Some(existing) => *existing = saved,
-                    None => config.local_sources.push(saved),
+                    None => config.library.local_sources.push(saved),
                 }
             })
             .await?;
@@ -590,7 +594,12 @@ impl SourceService {
             ));
         }
         let current = self.current().await;
-        if !current.local_sources.iter().any(|source| source.id == id) {
+        if !current
+            .library
+            .local_sources
+            .iter()
+            .any(|source| source.id == id)
+        {
             return Err(ApiError::not_found("no such source"));
         }
         let was_active = self.snapshot().await.active.local_library_id() == Some(id);
@@ -598,7 +607,7 @@ impl SourceService {
         // The folder list goes first, so the session forgets the queue of the source it leaves rather than parking it.
         self.config
             .mutate_state(&["local_sources"], move |config| {
-                config.remove_local_source(&id_owned);
+                config.library.remove_local_source(&id_owned);
             })
             .await?;
         // The session drops this source's queue itself once its pending saves land, so none outlives the purge.
@@ -640,13 +649,19 @@ impl SourceService {
         }
         self.config.ensure_unlocked(&["local_sources"])?;
         let current = self.current().await;
-        if !current.local_sources.iter().any(|saved| saved.id == id) {
+        if !current
+            .library
+            .local_sources
+            .iter()
+            .any(|saved| saved.id == id)
+        {
             return Err(ApiError::not_found("no such source"));
         }
         let target = id.to_string();
         self.config
             .mutate_state(&["local_sources"], move |config| {
                 if let Some(saved) = config
+                    .library
                     .local_sources
                     .iter_mut()
                     .find(|saved| saved.id == target)
@@ -1816,7 +1831,7 @@ mod tests {
         let config = Arc::new(ConfigService::new(
             db.clone(),
             dir.path().join("settings.toml"),
-            config::AppConfig::default(),
+            config::Settings::default(),
         ));
         let player =
             player::player::Player::try_with_sink(Box::new(player::engine::NullSink::new()))
@@ -2072,8 +2087,8 @@ mod tests {
     async fn a_switch_and_a_deleted_active_folder_source_are_stored_and_reach_the_session() {
         let dir = tempfile::tempdir().expect("tempdir");
         let database = db::init(&dir.path().join("sources.db")).await.expect("db");
-        let mut seeded = config::AppConfig::default();
-        seeded.local_sources.push(config::SavedLocalSource {
+        let mut seeded = config::Settings::default();
+        seeded.library.local_sources.push(config::SavedLocalSource {
             id: "local:b".into(),
             name: "B".into(),
             directories: Vec::new(),
@@ -2090,7 +2105,7 @@ mod tests {
             Arc::new(NoTracks),
             player,
             crate::PlaybackServices {
-                config: seeded,
+                settings: seeded,
                 ..Default::default()
             },
         );
@@ -2118,6 +2133,7 @@ mod tests {
             !config
                 .snapshot()
                 .await
+                .library
                 .local_sources
                 .iter()
                 .any(|saved| saved.id == "local:b")

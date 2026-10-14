@@ -1,5 +1,5 @@
 use crate::shared::fmt_time;
-use config::AppConfig;
+use config::Settings;
 use dioxus::prelude::*;
 use std::sync::{
     Arc,
@@ -19,7 +19,7 @@ pub fn QuickSearch(
     mut show: Signal<bool>,
     on_play: EventHandler<(api::TrackInfo, Vec<api::TrackInfo>)>,
 ) -> Element {
-    let config = use_context::<Signal<AppConfig>>();
+    let settings = use_context::<Signal<Settings>>();
     let mut input_text = use_signal(String::new);
     let mut query = use_signal(String::new);
     let mut selected = use_signal(|| 0usize);
@@ -172,7 +172,7 @@ pub fn QuickSearch(
                                         },
                                         onmouseenter: move |_| selected.set(i),
                                         onclick: move |_| play_index.call(i),
-                                        if config.read().show_row_images {
+                                        if settings.read().ui.show_row_images {
                                             div {
                                                 class: "w-9 h-9 bg-white/5 rounded overflow-hidden shrink-0 flex items-center justify-center",
                                                 if let Some(url) = hooks::artwork::for_track(track, hooks::artwork::Size::Thumb) {

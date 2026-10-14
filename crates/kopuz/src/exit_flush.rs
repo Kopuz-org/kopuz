@@ -3,7 +3,7 @@
 use std::sync::Mutex;
 use std::time::Duration;
 
-static STASHED: Mutex<Option<config::AppConfig>> = Mutex::new(None);
+static STASHED: Mutex<Option<config::Settings>> = Mutex::new(None);
 static STASHED_PREFS: Mutex<Option<Vec<api::PrefEntry>>> = Mutex::new(None);
 
 /// How long an exiting process waits for each write; a window that will not close is worse than a lost last-moment change.
@@ -11,7 +11,7 @@ const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Stash an eligibility-checked config snapshot (guards: `initial_load_done
 /// && config_loaded_ok`).
-pub fn stash_config(config: config::AppConfig) {
+pub fn stash_config(config: config::Settings) {
     if let Ok(mut stashed) = STASHED.lock() {
         *stashed = Some(config);
     }
@@ -26,7 +26,7 @@ pub fn stash_prefs(entries: Vec<api::PrefEntry>) {
 
 /// Persist the config and unsent preferences on a fresh thread: `block_on` panics inside dioxus's tokio context.
 pub fn persist_on_fresh_thread(
-    config: Option<config::AppConfig>,
+    config: Option<config::Settings>,
     prefs: Option<Vec<api::PrefEntry>>,
 ) {
     let prefs = prefs.filter(|prefs| !prefs.is_empty());

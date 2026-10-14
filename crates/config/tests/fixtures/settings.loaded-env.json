@@ -1,0 +1,121 @@
+{
+  "auto_check_updates": true,
+  "auto_fetch_covers": true,
+  "autoplay_radio": false,
+  "back_behavior": "RewindThenPrev",
+  "channel_mode": "Stereo",
+  "cover_art_background": false,
+  "cover_art_blur": 0,
+  "cover_art_darkening": 45,
+  "cover_fetch_strategy": "LastFmFirst",
+  "crossfade_seconds": 4,
+  "custom_background_path": "/home/me/Pictures/wall.png",
+  "custom_font_path": "",
+  "custom_themes": {
+    "ember": {
+      "name": "Ember",
+      "vars": {
+        "--color-bg": "#1a0f0a"
+      }
+    },
+    "ocean": {
+      "name": "Ocean",
+      "vars": {
+        "--color-bg": "#0b1d2a",
+        "--color-fg": "#d8e6f0"
+      }
+    }
+  },
+  "device_change_behavior": "Pause",
+  "discord_presence": false,
+  "discord_presence_source": true,
+  "enable_musixmatch_lyrics": false,
+  "equalizer": {
+    "bands": [
+      -6.0,
+      -3.5,
+      0.0,
+      1.5,
+      3.0,
+      4.5,
+      6.0,
+      -1.0,
+      -2.0,
+      12.0
+    ],
+    "enabled": true,
+    "preamp_db": -4.5,
+    "preset": "Custom"
+  },
+  "fullscreen_use_player_bar": false,
+  "language": "tr",
+  "live_theme_path": "",
+  "local_sources": [
+    {
+      "directories": [
+        "/home/me/Music"
+      ],
+      "id": "local",
+      "name": "Local Library"
+    },
+    {
+      "directories": [
+        "/mnt/archive/flac",
+        "/mnt/archive/mp3"
+      ],
+      "id": "local:archive",
+      "name": "Archive"
+    }
+  ],
+  "lyrics_depth_blur": true,
+  "lyrics_depth_blur_strength": 80,
+  "lyrics_offset_auto": true,
+  "lyrics_offset_ms": 1000,
+  "minimize_to_tray": false,
+  "offline_quality": "Kbps256",
+  "pause_watch_history": false,
+  "player_bar_position": "Bottom",
+  "prefer_local_lyrics": false,
+  "radio_registries": [
+    {
+      "enabled": true,
+      "is_default": true,
+      "url": "https://raw.githubusercontent.com/Kopuz-org/kopuz/refs/heads/master/radio-registry/index.json"
+    },
+    {
+      "enabled": false,
+      "is_default": false,
+      "url": "https://example.org/stations/index.json"
+    }
+  ],
+  "reduce_animations": false,
+  "replay_gain": {
+    "fallback_gain_db": 0.0,
+    "mode": "Album",
+    "normalize_loudness": true,
+    "preamp_db": 1.5,
+    "prevent_clipping": true
+  },
+  "sample_rate_mode": "System",
+  "settings_layout": "Cd",
+  "show_row_images": true,
+  "show_source_toggle": true,
+  "skip_explicit": false,
+  "spotify_browser": "brave",
+  "spotify_prefer_active_device": true,
+  "stream_quality": "High",
+  "sync_interval_minutes": 90,
+  "theme": "gruvbox",
+  "titlebar_mode": "System",
+  "tracing_enabled": false,
+  "ui_style": "Vaxry",
+  "volume_scroll_step": 0.10000000149011612,
+  "ytdlp_options": {
+    "embed_metadata": true,
+    "embed_thumbnail": true,
+    "organize_by_album": false,
+    "overwrite_existing": false,
+    "write_thumbnail": true
+  },
+  "ytdlp_output_dir": "/home/me/Downloads/kopuz"
+}

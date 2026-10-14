@@ -60,8 +60,8 @@ pub(crate) async fn last_synced(
 }
 
 /// How often the schedule runs; `None` when the setting is 0 (never).
-pub(crate) fn interval(config: &config::AppConfig) -> Option<Duration> {
-    match config.sync_interval_minutes {
+pub(crate) fn interval(config: &config::Settings) -> Option<Duration> {
+    match config.library.sync_interval_minutes {
         0 => None,
         minutes => Some(Duration::from_secs(u64::from(minutes) * 60)),
     }
@@ -120,7 +120,7 @@ struct Syncs {
 
 impl Syncs {
     /// Start what is due; the answer is how long to wait before looking again.
-    async fn check(&self, config: &config::AppConfig, sources: &Sources) -> Option<Duration> {
+    async fn check(&self, config: &config::Settings, sources: &Sources) -> Option<Duration> {
         // A local library has nothing to pull; it has the file scan.
         let active = server::source::active(self.db.clone(), sources);
         if !active.capabilities().sync {
@@ -161,10 +161,10 @@ impl Syncs {
 const RETRY_BLOCKED: Duration = Duration::from_secs(60);
 
 /// What re-arms the schedule: the source, the interval, and whether the source can sync at all.
-fn arm_key(config: &config::AppConfig, sources: &Sources) -> (config::Source, u32, bool) {
+fn arm_key(config: &config::Settings, sources: &Sources) -> (config::Source, u32, bool) {
     (
         sources.active.clone(),
-        config.sync_interval_minutes,
+        config.library.sync_interval_minutes,
         server::server_ops::ServerConn::resolve(sources).is_some(),
     )
 }
@@ -179,11 +179,11 @@ pub(crate) async fn until(deadline: Option<Instant>) {
 
 /// Run `check` now, when its own answer says it is time, and whenever the source, interval or sign-in changes.
 async fn drive<F, Fut>(
-    mut config: watch::Receiver<config::AppConfig>,
+    mut config: watch::Receiver<config::Settings>,
     mut sources: watch::Receiver<Arc<Sources>>,
     mut check: F,
 ) where
-    F: FnMut(config::AppConfig, Arc<Sources>) -> Fut,
+    F: FnMut(config::Settings, Arc<Sources>) -> Fut,
     Fut: Future<Output = Option<Duration>>,
 {
     let first = config.borrow_and_update().clone();
@@ -230,7 +230,7 @@ pub fn spawn(
     library: Arc<LibraryService>,
     playlists: Arc<PlaylistService>,
     favorites: Arc<FavoritesService>,
-    config: watch::Receiver<config::AppConfig>,
+    config: watch::Receiver<config::Settings>,
     sources: watch::Receiver<Arc<Sources>>,
 ) {
     let syncs = Arc::new(Syncs {
@@ -307,13 +307,16 @@ mod tests {
 
     #[test]
     fn the_default_interval_is_the_old_day() {
-        assert_eq!(interval(&config::AppConfig::default()), Some(DAY));
+        assert_eq!(interval(&config::Settings::default()), Some(DAY));
     }
 
     #[test]
     fn zero_minutes_is_no_interval() {
-        let config = config::AppConfig {
-            sync_interval_minutes: 0,
+        let config = config::Settings {
+            library: config::Library {
+                sync_interval_minutes: 0,
+                ..Default::default()
+            },
             ..Default::default()
         };
         assert_eq!(interval(&config), None);
@@ -426,9 +429,12 @@ mod tests {
         );
     }
 
-    fn config_every(minutes: u32) -> config::AppConfig {
-        config::AppConfig {
-            sync_interval_minutes: minutes,
+    fn config_every(minutes: u32) -> config::Settings {
+        config::Settings {
+            library: config::Library {
+                sync_interval_minutes: minutes,
+                ..Default::default()
+            },
             ..Default::default()
         }
     }
@@ -440,8 +446,8 @@ mod tests {
     /// Each check is counted and answered with the configured interval, as the real one does when nothing is stamped.
     fn counting(
         seen: Arc<AtomicUsize>,
-    ) -> impl FnMut(config::AppConfig, Arc<Sources>) -> std::future::Ready<Option<Duration>> {
-        move |config: config::AppConfig, _: Arc<Sources>| {
+    ) -> impl FnMut(config::Settings, Arc<Sources>) -> std::future::Ready<Option<Duration>> {
+        move |config: config::Settings, _: Arc<Sources>| {
             seen.fetch_add(1, Ordering::SeqCst);
             std::future::ready(interval(&config))
         }
@@ -488,7 +494,7 @@ mod tests {
         settle().await;
         pass(minutes(10)).await;
 
-        tx.send_modify(|config| config.sync_interval_minutes = 5);
+        tx.send_modify(|config| config.library.sync_interval_minutes = 5);
         settle().await;
         assert_eq!(count.load(Ordering::SeqCst), 2, "rechecked on the change");
 
@@ -515,13 +521,13 @@ mod tests {
         tokio::spawn(drive(rx, srx, check));
         settle().await;
 
-        tx.send_modify(|config| config.sync_interval_minutes = 0);
+        tx.send_modify(|config| config.library.sync_interval_minutes = 0);
         settle().await;
         assert_eq!(count.load(Ordering::SeqCst), 2, "the change is seen once");
         pass(Duration::from_secs(7 * 24 * 60 * 60)).await;
         assert_eq!(count.load(Ordering::SeqCst), 2, "a week of silence");
 
-        tx.send_modify(|config| config.sync_interval_minutes = 30);
+        tx.send_modify(|config| config.library.sync_interval_minutes = 30);
         settle().await;
         assert_eq!(count.load(Ordering::SeqCst), 3, "turned back on");
         pass(minutes(31)).await;
@@ -551,7 +557,7 @@ mod tests {
         settle().await;
         pass(minutes(30)).await;
 
-        tx.send_modify(|config| config.crossfade_seconds = 3);
+        tx.send_modify(|config| config.playback.crossfade_seconds = 3);
         settle().await;
         assert_eq!(count.load(Ordering::SeqCst), 1);
         pass(minutes(31)).await;

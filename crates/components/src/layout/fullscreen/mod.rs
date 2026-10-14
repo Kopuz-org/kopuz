@@ -9,7 +9,7 @@ mod video;
 
 use android::FullscreenAndroid;
 use background::use_fullscreen_background;
-use config::AppConfig;
+use config::Settings;
 use desktop::FullscreenDesktop;
 use dioxus::prelude::*;
 use lyrics::use_fullscreen_lyrics;
@@ -33,7 +33,7 @@ pub fn Fullscreen(
         return rsx! { div {} };
     }
 
-    let config = use_context::<Signal<AppConfig>>();
+    let settings = use_context::<Signal<Settings>>();
 
     let lyrics = use_fullscreen_lyrics();
     let (background_style, cover_background) = use_fullscreen_background(palette);
@@ -44,7 +44,7 @@ pub fn Fullscreen(
             FullscreenAndroid {
                 is_playing,
                 is_fullscreen,
-                config,
+                settings,
                 current_song_duration,
                 current_song_progress,
                 current_song_title,
@@ -63,7 +63,7 @@ pub fn Fullscreen(
             FullscreenDesktop {
                 is_playing,
                 is_fullscreen,
-                config,
+                settings,
                 current_song_duration,
                 current_song_progress,
                 current_song_title,

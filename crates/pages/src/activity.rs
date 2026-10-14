@@ -1,5 +1,5 @@
 use api::TrackInfo as Track;
-use config::{AppConfig, UiStyle};
+use config::{Settings, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{use_active_source, use_albums, use_listen_counts, use_tracks_window};
 use hooks::use_player_controller::PlayerController;
@@ -19,7 +19,7 @@ fn format_duration(seconds: u64) -> String {
 /// only per-source bits are the cover (file vs remote URL), the track
 /// origin icon, and the subtitle.
 #[component]
-pub fn Activity(config: Signal<AppConfig>) -> Element {
+pub fn Activity(settings: Signal<Settings>) -> Element {
     let mut ctrl = use_context::<PlayerController>();
 
     let source = use_active_source();
@@ -48,7 +48,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
             .collect::<HashMap<String, String>>()
     });
 
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
     let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
     let saved_scroll = scroll_positions
         .peek()

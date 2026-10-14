@@ -5,7 +5,7 @@ use super::*;
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_server_section(
     key: &str,
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     edit: bool,
     is_vaxry: bool,
     listen_now_style: ListenNowStyle,
@@ -94,7 +94,7 @@ pub(super) fn render_server_section(
             scroll_container,
         ),
         "playlists" => render_playlists(
-            config,
+            settings,
             is_vaxry,
             recent_playlists,
             on_select_playlist,
@@ -731,7 +731,7 @@ fn render_albums_row(
 }
 
 fn render_playlists(
-    _config: Signal<AppConfig>,
+    _config: Signal<Settings>,
     is_vaxry: bool,
     recent_playlists: Vec<(String, String, usize, Option<String>)>,
     on_select_playlist: EventHandler<String>,

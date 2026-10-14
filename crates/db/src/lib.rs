@@ -239,10 +239,8 @@ pub type ArtistImages = (
 /// a supertrait of [`Storage`], so any `dyn Storage` is also a `dyn ReadStore`.
 #[async_trait::async_trait]
 pub trait ReadStore: Send + Sync {
-    /// Load the persisted `AppConfig`: the single-row JSON blob overlaid with
-    /// the settings file, drop-ins, and `KOPUZ_CONFIG_*` env vars. `None` if
-    /// the app has never been configured (no blob and no file layers).
-    async fn load_config(&self) -> Result<Option<config::AppConfig>, DbError>;
+    /// Whether the app_state row exists, which with no settings file either means the app was never configured.
+    async fn has_app_state(&self) -> Result<bool, DbError>;
 
     /// One window of a track listing (sorted + filtered in SQL — only this slice
     /// is materialized).
@@ -476,9 +474,8 @@ pub trait ReadStore: Send + Sync {
 /// read-only [`ReadStore`]. One impl per target (sqlx native / in-mem stub).
 #[async_trait::async_trait]
 pub trait Storage: ReadStore {
-    /// Persist the whole `AppConfig`: the single-row JSON blob, plus a mirror
-    /// of the settings into the standalone config file when it is writable.
-    async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError>;
+    /// Create the app_state row if nothing has yet, so an install whose settings were saved never reads as unconfigured.
+    async fn ensure_app_state(&self) -> Result<(), DbError>;
 
     /// Drop every row a source left behind: its library, playlists, favorites, plays and photos.
     async fn purge_source(&self, source: &Source) -> Result<(), DbError>;

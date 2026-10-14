@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use api::KopuzApi;
 use api::TrackInfo as Track;
-use config::AppConfig;
+use config::Settings;
 use dioxus::prelude::*;
 
 pub use api::LoopMode;
@@ -40,7 +40,7 @@ pub struct PlayerController {
     pub current_track_snapshot: Signal<Option<Track>>,
     pub volume: Signal<f32>,
     pub muted: Signal<bool>,
-    pub config: Signal<AppConfig>,
+    pub settings: Signal<Settings>,
     pub playback_error: Signal<Option<PlaybackError>>,
     /// Set by a "sign in again" anywhere in the app, and answered by
     /// Settings, which owns the sign-in dialogs.
@@ -531,7 +531,7 @@ pub fn use_player_controller(
     current_song_progress: Signal<u64>,
     current_track_snapshot: Signal<Option<Track>>,
     volume: Signal<f32>,
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     _config_loaded_ok: Signal<bool>,
 ) -> PlayerController {
     let api = use_signal(move || api_handle);
@@ -574,7 +574,7 @@ pub fn use_player_controller(
         current_track_snapshot,
         volume,
         muted,
-        config,
+        settings,
         playback_error,
         reauth_requested,
         browse_loading,
