@@ -297,13 +297,7 @@ where
             retry = retry + 1,
             "googlevideo refused the tail of the stream; resolving again"
         );
-        match again().await {
-            Ok(next) => current = next,
-            Err(error) => {
-                tracing::debug!(%error, "resolving a gated stream again failed");
-                break;
-            }
-        }
+        current = again().await?;
     }
     Err(format!(
         "{}: googlevideo refused the stream on every resolve",
@@ -932,13 +926,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_failed_resolve_of_a_gated_url_is_refused() {
+    async fn a_failed_resolve_of_a_gated_url_reports_its_error() {
         let addr = googlevideo().await;
         let result = recheck_gated(stream_at(addr, "gated"), || async {
             Err("VISIONOS playability ERROR: nope".to_string())
         })
         .await;
-        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "VISIONOS playability ERROR: nope");
     }
 
     #[tokio::test]
