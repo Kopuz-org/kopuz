@@ -8,10 +8,6 @@ use super::innertube::sapisid_hash;
 const ORIGIN_YT_MUSIC: &str = "https://music.youtube.com";
 const SONGS_FILTER: &str = "EgWKAQIIAWoMEAMQBBAJEAoQDhAV";
 const VIDEOS_FILTER: &str = "EgWKAQIQAWoMEAMQBBAJEAoQDhAV";
-// `params` value for "Artists" tab on YT Music search. Restricts hits
-// to musicResponsiveListItemRenderer rows whose nav endpoint browseId
-// begins with `UC…`, exactly what we need for name → channel resolve.
-const ARTISTS_FILTER: &str = "EgWKAQIgAWoMEAMQBBAJEAoQDhAV";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MusicVideoType {
@@ -90,114 +86,6 @@ pub async fn music_search_tracks(query: &str, cookies: Option<&str>) -> Result<V
         }
     }
     Ok(out)
-}
-
-/// The best-matching artist's avatar URL for `name` from the YT Music
-/// "Artists" tab. Powers the Artists grid so its circular photos are the real
-/// YT artist images and nothing else. Returns None when no artist row
-/// survived the row checks — the grid then falls back to an album cover,
-/// which beats confidently showing someone else's face.
-#[tracing::instrument(name = "yt.artist_image", skip(cookies), fields(name = %name))]
-pub async fn resolve_artist_image(
-    name: &str,
-    cookies: Option<&str>,
-) -> Result<Option<String>, String> {
-    if name.trim().is_empty() {
-        return Ok(None);
-    }
-    let http = super::innertube::http_client();
-    let resp = do_search_raw(http, name, Some(ARTISTS_FILTER), cookies).await?;
-    Ok(pick_artist_row(&resp, name).and_then(best_thumbnail))
-}
-
-/// The search row that best represents artist `want`:
-///
-/// - only rows whose OWN navigation endpoint browses to a `UC…` channel typed
-///   `MUSIC_PAGE_TYPE_ARTIST` count. Checking for a `UC…` id anywhere inside
-///   the row (as this used to) also matched playlist/profile rows, whose
-///   per-artist title runs carry channel links — donating a playlist cover as
-///   an "artist photo".
-/// - aggregate auto-channels are skipped: they title themselves with a pile
-///   of names ("A、B、C、…"), carry a generic mosaic avatar, and rank first
-///   for many different queries — the "several tiles share one wrong photo"
-///   failure.
-/// - a row whose folded title equals the query wins; otherwise the first
-///   surviving row does. The fallback is deliberate: YT restyles names the
-///   library spells differently (romanization, casing, spacing — "さんみゅ~"
-///   is titled "Sunmyu" with `hl=en`), so demanding a title match would strip
-///   photos from every such artist.
-fn pick_artist_row<'a>(resp: &'a Value, want: &str) -> Option<&'a Value> {
-    let mut rows = Vec::new();
-    collect_search_rows(resp, &mut rows);
-    let candidates: Vec<&Value> = rows
-        .into_iter()
-        .filter(|r| is_artist_row(r))
-        .filter(|r| row_title(r).is_some_and(|t| !looks_like_artist_pile(t)))
-        .collect();
-    let want = fold_artist_name(want);
-    candidates
-        .iter()
-        .find(|r| row_title(r).is_some_and(|t| fold_artist_name(t) == want))
-        .or(candidates.first())
-        .copied()
-}
-
-/// Every `musicResponsiveListItemRenderer` in the response, in document order.
-fn collect_search_rows<'a>(v: &'a Value, out: &mut Vec<&'a Value>) {
-    match v {
-        Value::Object(map) => {
-            if let Some(row) = map.get("musicResponsiveListItemRenderer") {
-                out.push(row);
-            }
-            for child in map.values() {
-                collect_search_rows(child, out);
-            }
-        }
-        Value::Array(arr) => {
-            for child in arr {
-                collect_search_rows(child, out);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Whether the row itself navigates to an artist page (not merely contains a
-/// channel link somewhere inside).
-fn is_artist_row(row: &Value) -> bool {
-    let Some(ep) = row.pointer("/navigationEndpoint/browseEndpoint") else {
-        return false;
-    };
-    ep.get("browseId")
-        .and_then(|v| v.as_str())
-        .is_some_and(|b| b.starts_with("UC"))
-        && ep
-            .pointer(
-                "/browseEndpointContextSupportedConfigs/browseEndpointContextMusicConfig/pageType",
-            )
-            .and_then(|v| v.as_str())
-            == Some("MUSIC_PAGE_TYPE_ARTIST")
-}
-
-fn row_title(row: &Value) -> Option<&str> {
-    row.pointer("/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text")
-        .and_then(|v| v.as_str())
-}
-
-/// Aggregate auto-channels list several artists in their title; three or more
-/// comma segments marks one. (Two is a legitimate duo credit.)
-fn looks_like_artist_pile(title: &str) -> bool {
-    title.split(['、', ',']).count() >= 3
-}
-
-/// Fold a name for comparison: lowercase, whitespace removed. YT restyles
-/// casing and spacing freely — "FujiwaraHagane" for "Fujiwara Hagane",
-/// "D-Cell" for "D-CELL".
-pub(super) fn fold_artist_name(s: &str) -> String {
-    s.chars()
-        .filter(|c| !c.is_whitespace())
-        .collect::<String>()
-        .to_lowercase()
 }
 
 /// A column's text up to its first " • ", every run joined as displayed.

@@ -14,7 +14,7 @@
 
 use std::fmt::Write as _;
 use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -53,18 +53,12 @@ fn ref_for(target: ArtworkTarget, cover: CoverRef) -> Option<ArtworkRef> {
     }
 }
 
-/// An artist's picture: a custom override, then the source's own photo, then
-/// -- for a library source only -- one of their album covers.
-///
-/// That last resort is what keeps a local grid from being a wall of
-/// placeholders. A remote catalog never uses it: a liked track's album cover
-/// is not a picture of the artist.
+/// An artist's picture: a custom override, then the source's own photo, then the cover of its first album or else its first track.
 pub fn artist_cover(
     source: &str,
     key: &str,
     images: &db::ArtistImages,
-    album_cover: Option<&Path>,
-    library_view: bool,
+    fallback: Option<&CoverRef>,
 ) -> CoverRef {
     let (overrides, photos) = images;
     let identity = (source.to_string(), key.to_string());
@@ -81,10 +75,7 @@ pub fn artist_cover(
             },
         };
     }
-    match album_cover.filter(|_| library_view) {
-        Some(path) => CoverRef::parse(&path.to_string_lossy()),
-        None => CoverRef::None,
-    }
+    fallback.cloned().unwrap_or(CoverRef::None)
 }
 
 /// A playlist's cover: an explicit one, then the server's image tag, then the
@@ -137,18 +128,11 @@ pub fn artist_ref(
     artist: &db::ArtistRow,
     source: &config::Source,
     images: &db::ArtistImages,
-    album_cover: Option<&Path>,
-    library_view: bool,
+    fallback: Option<&CoverRef>,
 ) -> Option<ArtworkRef> {
     ref_for(
         ArtworkTarget::Artist(artist.key.clone()),
-        artist_cover(
-            source.as_str(),
-            &artist.key,
-            images,
-            album_cover,
-            library_view,
-        ),
+        artist_cover(source.as_str(), &artist.key, images, fallback),
     )
 }
 
@@ -305,25 +289,17 @@ impl ArtworkService {
             ArtworkTarget::Artist(key) => {
                 let artist = crate::artist_row::require(&self.db, active, key).await?;
                 let images = self.db.artist_images().await.map_err(db_error)?;
-                let source = server::source::active(self.db.clone(), sources);
-                let library_view =
-                    source.capabilities().artist_view == server::source::ArtistView::Library;
                 // The cover the listing advertised, so the bytes served are the picture its ref was versioned on.
-                let album = match library_view {
-                    true => self
-                        .db
-                        .artist_album_cover(active, &artist.key)
-                        .await
-                        .map_err(db_error)?
-                        .map(PathBuf::from),
-                    false => None,
-                };
+                let fallback = self
+                    .db
+                    .artist_fallback_cover(active, &artist.key)
+                    .await
+                    .map_err(db_error)?;
                 Ok(artist_cover(
                     active.as_str(),
                     &artist.key,
                     &images,
-                    album.as_deref(),
-                    library_view,
+                    fallback.as_ref(),
                 ))
             }
             ArtworkTarget::Playlist(id) => {
@@ -656,13 +632,11 @@ mod tests {
         assert_eq!(first.target, other.target, "the target is the identity");
     }
 
-    /// The artist chain the grid depends on: an override wins, then the
-    /// source's photo, then an album cover -- but only for a library source.
+    /// The artist chain the grid depends on: an override wins, then the source's photo, then the album or track cover.
     #[test]
     fn artist_art_falls_back_through_override_photo_then_album() {
-        let album = std::path::Path::new("/music/band/cover.jpg");
-        let artist_cover =
-            |images, album, library| artist_cover("srv", "k-band", images, album, library);
+        let album = &CoverRef::Local(PathBuf::from("/music/band/cover.jpg"));
+        let artist_cover = |images, album| artist_cover("srv", "k-band", images, album);
         let identity = ("srv".to_string(), "k-band".to_string());
         let mut overrides = std::collections::HashMap::new();
         let mut photos = std::collections::HashMap::new();
@@ -672,28 +646,20 @@ mod tests {
         );
         let images: db::ArtistImages = (overrides.clone(), photos.clone());
         assert_eq!(
-            artist_cover(&images, Some(album), true),
+            artist_cover(&images, Some(album)),
             CoverRef::EmbeddedUrl("https://p/band.jpg".into())
         );
 
         overrides.insert(identity, PathBuf::from("/pics/band.png"));
         let images: db::ArtistImages = (overrides, photos);
         assert_eq!(
-            artist_cover(&images, Some(album), true),
+            artist_cover(&images, Some(album)),
             CoverRef::Local(PathBuf::from("/pics/band.png"))
         );
 
         let empty: db::ArtistImages = Default::default();
-        assert_eq!(
-            artist_cover(&empty, Some(album), true),
-            CoverRef::Local(album.to_path_buf()),
-            "a library artist may borrow an album cover"
-        );
-        assert_eq!(
-            artist_cover(&empty, Some(album), false),
-            CoverRef::None,
-            "a remote catalog never renders an album as the artist"
-        );
+        assert_eq!(artist_cover(&empty, Some(album)), album.clone());
+        assert_eq!(artist_cover(&empty, None), CoverRef::None);
     }
 
     #[test]
@@ -707,11 +673,11 @@ mod tests {
         let images: db::ArtistImages = (Default::default(), photos);
 
         assert_eq!(
-            artist_cover("a", "k1", &images, None, true),
+            artist_cover("a", "k1", &images, None),
             CoverRef::EmbeddedUrl("https://p/a.jpg".into())
         );
-        assert_eq!(artist_cover("a", "k2", &images, None, true), CoverRef::None);
-        assert_eq!(artist_cover("b", "k1", &images, None, true), CoverRef::None);
+        assert_eq!(artist_cover("a", "k2", &images, None), CoverRef::None);
+        assert_eq!(artist_cover("b", "k1", &images, None), CoverRef::None);
     }
 }
 

@@ -269,19 +269,23 @@ impl ReadStore for Native {
         queries::artists_page(&self.pool(), query, page).await
     }
 
-    async fn artist_album_covers(
+    async fn artist_fallback_covers(
         &self,
         source: &crate::Source,
-    ) -> Result<std::collections::HashMap<String, String>, DbError> {
-        queries::artist_album_covers(&self.pool(), source).await
+    ) -> Result<std::collections::HashMap<String, reader::CoverRef>, DbError> {
+        queries::artist_fallback_covers(&self.pool(), source, None).await
     }
 
-    async fn artist_album_cover(
+    async fn artist_fallback_cover(
         &self,
         source: &crate::Source,
         artist: &str,
-    ) -> Result<Option<String>, DbError> {
-        queries::artist_album_cover(&self.pool(), source, artist).await
+    ) -> Result<Option<reader::CoverRef>, DbError> {
+        Ok(
+            queries::artist_fallback_covers(&self.pool(), source, Some(artist))
+                .await?
+                .remove(artist),
+        )
     }
 
     async fn genres(&self, source: &crate::Source) -> Result<Vec<String>, DbError> {

@@ -221,54 +221,19 @@ impl MediaSource for YtSource {
         &self,
         artist: &reader::ArtistCredit,
     ) -> Result<ArtistLookup, SourceError> {
-        if let Some(channel) = artist.id.as_deref() {
-            let header = self
-                .client
-                .artist_header(channel)
-                .await
-                .map_err(SourceError::from)?;
-            return Ok(ArtistLookup {
-                image: header.avatar,
-                name: header.name,
-            });
-        }
-        let name = artist.name.as_str();
-        if let Some(url) = self
-            .client
-            .resolve_artist_image(name)
-            .await
-            .map_err(SourceError::from)?
-        {
-            return Ok(ArtistLookup {
-                image: Some(url),
-                name: None,
-            });
-        }
-        // No artists-search entry (user channels for uploaded content) —
-        // reconcile the channel from a library song and use its avatar.
-        let Some(key) = artist.key.as_deref() else {
+        // A credit's text names no one for sure, so only the channel it links has a photo.
+        let Some(channel) = artist.id.as_deref() else {
             return Ok(ArtistLookup::default());
         };
-        let tracks = self
-            .db
-            .artist_tracks(&self.source, key, Some(3))
+        let header = self
+            .client
+            .artist_header(channel)
             .await
-            .unwrap_or_default();
-        for track in tracks.iter() {
-            if let Ok(Some(cid)) = self
-                .client
-                .artist_channel_for_video(&track.id.key(), name)
-                .await
-                && let Ok(header) = self.client.artist_header(&cid).await
-                && header.avatar.is_some()
-            {
-                return Ok(ArtistLookup {
-                    image: header.avatar,
-                    name: None,
-                });
-            }
-        }
-        Ok(ArtistLookup::default())
+            .map_err(SourceError::from)?;
+        Ok(ArtistLookup {
+            image: header.avatar,
+            name: header.name,
+        })
     }
 
     async fn add_to_playlist(

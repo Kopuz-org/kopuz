@@ -6,7 +6,7 @@
 //! `ORDER BY`/`WHERE` from the filter) rather than via the `query!` macro;
 //! sort/search clauses are fixed strings, values are always bound.
 
-use reader::models::{Album, Track};
+use reader::models::{Album, CoverRef, Track};
 use sqlx::SqlitePool;
 
 use super::rows::{AlbumRow, CreditRow, TrackRow};
@@ -716,41 +716,66 @@ pub async fn artist(
     }))
 }
 
-/// The earliest covered album per credited artist, by key, stable so the advertised ref and served bytes agree.
-pub async fn artist_album_covers(
+/// What each artist of `source` (or just `one`) shows without a photo, by key: its first covered album, else its first credited track's cover.
+pub async fn artist_fallback_covers(
     pool: &SqlitePool,
     source: &Source,
-) -> Result<std::collections::HashMap<String, String>, DbError> {
-    let src = source.as_str();
-    let rows = sqlx::query!(
-        r#"SELECT ar.key, cv.cover_path AS "cover_path!"
-             FROM artist_cover_albums cv JOIN artists ar ON ar.id = cv.artist_pk
-            WHERE cv.source = ?1"#,
-        src
+    one: Option<&str>,
+) -> Result<std::collections::HashMap<String, CoverRef>, DbError> {
+    // Ordered by ids and stored fields only, so the listing's ref and the fetched bytes name the same picture.
+    let albums: Vec<(String, String)> = sqlx::query_as(
+        "SELECT key, cover_path FROM ( \
+            SELECT ar.key AS key, al.cover_path AS cover_path, \
+                   ROW_NUMBER() OVER (PARTITION BY ar.id \
+                       ORDER BY al.year = 0, al.year, al.title, al.rowid_pk) AS n \
+              FROM artists ar JOIN albums al ON al.source = ar.source AND al.artist_pk = ar.id \
+             WHERE ar.source = ?1 AND (?2 IS NULL OR ar.key = ?2) \
+               AND al.cover_path IS NOT NULL AND al.cover_path != '') \
+          WHERE n = 1",
     )
+    .bind(source.as_str())
+    .bind(one)
     .fetch_all(pool)
     .await?;
-    Ok(rows
+    let mut covers: std::collections::HashMap<String, CoverRef> = albums
         .into_iter()
-        .map(|row| (row.key, row.cover_path))
-        .collect())
-}
+        .map(|(key, cover)| (key, CoverRef::parse(&cover)))
+        .filter(|(_, cover)| *cover != CoverRef::None)
+        .collect();
 
-/// One artist's entry of [`artist_album_covers`].
-pub async fn artist_album_cover(
-    pool: &SqlitePool,
-    source: &Source,
-    artist: &str,
-) -> Result<Option<String>, DbError> {
-    let src = source.as_str();
-    Ok(sqlx::query_scalar!(
-        r#"SELECT cover_path AS "cover_path!" FROM artist_cover_albums
-            WHERE source = ?1 AND artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2)"#,
-        src,
-        artist
+    let firsts: Vec<(String, String)> = sqlx::query_as(
+        "SELECT key, track_key FROM ( \
+            SELECT ar.key AS key, t.track_key AS track_key, \
+                   ROW_NUMBER() OVER (PARTITION BY ar.id \
+                       ORDER BY COALESCE(t.cover_path, al.cover_path) IS NULL, t.rowid_pk) AS n \
+              FROM artists ar \
+              JOIN track_credits c ON c.artist_pk = ar.id \
+              JOIN tracks t ON t.rowid_pk = c.track_pk \
+              LEFT JOIN albums al ON al.source = t.source AND al.source_album_id = t.source_album_id \
+             WHERE ar.source = ?1 AND (?2 IS NULL OR ar.key = ?2)) \
+          WHERE n = 1",
     )
-    .fetch_optional(pool)
-    .await?)
+    .bind(source.as_str())
+    .bind(one)
+    .fetch_all(pool)
+    .await?;
+    let firsts: Vec<(String, String)> = firsts
+        .into_iter()
+        .filter(|(artist, _)| !covers.contains_key(artist))
+        .collect();
+    let keys: Vec<String> = firsts.iter().map(|(_, track)| track.clone()).collect();
+    let tracks: std::collections::HashMap<String, Track> = tracks_by_keys(pool, source, &keys)
+        .await?
+        .into_iter()
+        .map(|track| (track.id.key().into_owned(), track))
+        .collect();
+    for (artist, key) in firsts {
+        let cover = tracks.get(&key).map_or(CoverRef::None, CoverRef::for_track);
+        if cover != CoverRef::None {
+            covers.insert(artist, cover);
+        }
+    }
+    Ok(covers)
 }
 
 pub async fn genres(pool: &SqlitePool, source: &Source) -> Result<Vec<String>, DbError> {
@@ -1344,24 +1369,82 @@ mod tests {
     }
 
     /// The listing's fallback and the single fetch's must agree, since a ref is versioned on the picture it names.
-    #[tokio::test]
-    async fn a_credited_artist_falls_back_to_the_cover_of_an_album_they_are_on() {
-        let (pool, source) = seeded().await;
-        let listed = artists(&pool, &source).await.unwrap();
-
-        let covers = artist_album_covers(&pool, &source).await.unwrap();
-
-        for (name, cover) in [
-            ("Boris", "/covers/one.jpg"),
-            ("Ada", "/covers/one.jpg"),
-            // An album artist no track is credited to still names its own cover.
-            ("Various Artists", "/covers/two.jpg"),
-        ] {
+    async fn fallbacks(pool: &SqlitePool, source: &Source, names: &[&str]) -> Vec<CoverRef> {
+        let listed = artists(pool, source).await.unwrap();
+        let covers = artist_fallback_covers(pool, source, None).await.unwrap();
+        let mut found = Vec::new();
+        for name in names {
             let key = &named(&listed, name).key;
-            assert_eq!(covers.get(key).map(String::as_str), Some(cover), "{name}");
-            let one = artist_album_cover(&pool, &source, key).await.unwrap();
-            assert_eq!(one.as_deref(), Some(cover), "{name} alone");
+            let one = artist_fallback_covers(pool, source, Some(key))
+                .await
+                .unwrap()
+                .remove(key);
+            assert_eq!(one.as_ref(), covers.get(key), "{name} alone");
+            found.push(covers.get(key).cloned().unwrap_or(CoverRef::None));
         }
+        found
+    }
+
+    fn local(path: &str) -> CoverRef {
+        CoverRef::Local(path.into())
+    }
+
+    #[tokio::test]
+    async fn an_artist_with_no_album_falls_back_to_its_first_tracks_cover() {
+        let (pool, source) = seeded().await;
+
+        let covers = fallbacks(&pool, &source, &["Ada", "Various Artists", "Boris", "Cyd"]).await;
+
+        assert_eq!(
+            covers,
+            [
+                local("/covers/one.jpg"),
+                local("/covers/two.jpg"),
+                // Boris has no album of his own, so his one track speaks for him.
+                local("/covers/one.jpg"),
+                local("/covers/two.jpg"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unlinked_artist_shows_its_earliest_album_over_any_track() {
+        let pool = mem_pool().await;
+        let source = Source::default();
+        let covered = |key: &str, credit: &str, album: &str, cover: &str| Track {
+            cover: Some(cover.into()),
+            ..track(key, credit, &[credit], album)
+        };
+        let tracks = [
+            covered("/n1.flac", "Natural", "al-late", "/covers/n1.jpg"),
+            covered("/n2.flac", "Natural", "al-early", "/covers/n2.jpg"),
+            covered("/s.flac", "Solo", "al-loose", "/covers/solo.jpg"),
+        ];
+        super::super::writes::upsert_tracks(&pool, &source, &tracks)
+            .await
+            .unwrap();
+        let dated = |id: &str, year: u16, cover: Option<&str>| Album {
+            year,
+            ..album(id, "Natural", cover)
+        };
+        let albums = [
+            dated("al-late", 2020, Some("/covers/late.jpg")),
+            dated("al-early", 2010, Some("/covers/early.jpg")),
+            Album {
+                artist: "Solo".into(),
+                ..dated("al-loose", 2000, None)
+            },
+        ];
+        super::super::writes::upsert_albums(&pool, &source, &albums)
+            .await
+            .unwrap();
+
+        let covers = fallbacks(&pool, &source, &["Natural", "Solo"]).await;
+
+        assert_eq!(
+            covers,
+            [local("/covers/early.jpg"), local("/covers/solo.jpg")]
+        );
     }
 
     #[tokio::test]
