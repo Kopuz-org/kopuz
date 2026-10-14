@@ -307,6 +307,7 @@ fn AlbumDetail(
                             artist: remote.subtitle.unwrap_or_default(),
                             artist_key: remote.artist_key,
                             year: remote.year,
+                            release_kind: remote.release_kind,
                             album_id: Some(remote.id),
                             remote_cover: hooks::artwork::url(remote.artwork.as_ref(), hooks::artwork::Size::Thumb),
                             tracks,
@@ -422,6 +423,7 @@ fn AlbumDetail(
         .and_then(|a| a.year.clone())
         .or_else(|| (album.year > 0).then(|| album.year.to_string()));
     let remote_album_id = remote_album.as_ref().map(|a| a.id.clone());
+    let remote_kind = remote_album.as_ref().and_then(|a| a.release_kind);
     let remote_artist_key = remote_album
         .as_ref()
         .and_then(|a| a.artist_key.clone())
@@ -435,6 +437,7 @@ fn AlbumDetail(
                     artist: remote_artist,
                     artist_key: remote_artist_key,
                     year: remote_year,
+                    release_kind: remote_kind,
                     album_id: remote_album_id,
                     remote_cover: cover_url_remote,
                     tracks: tracks(),
@@ -539,11 +542,17 @@ fn RemoteAlbumDetail(
     artist: String,
     artist_key: Option<String>,
     year: Option<String>,
+    release_kind: Option<api::ReleaseKind>,
     album_id: Option<String>,
     remote_cover: Option<utils::CoverUrl>,
     tracks: Vec<api::TrackInfo>,
     on_close: EventHandler<()>,
 ) -> Element {
+    let release_label = release_kind.map(|kind| match kind {
+        api::ReleaseKind::Album => i18n::t("album"),
+        api::ReleaseKind::Single => i18n::t("release_single"),
+        api::ReleaseKind::Ep => i18n::t("release_ep"),
+    });
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let nav_ctrl = use_context::<components::NavigationController>();
     let downloads = hooks::downloads::use_downloads();
@@ -632,8 +641,8 @@ fn RemoteAlbumDetail(
                         }
                         h1 { class: "text-3xl font-semibold tracking-tight text-white leading-[1.1] break-words", "{title}" }
                         div { class: "text-sm text-slate-400 flex flex-wrap items-center gap-x-2 justify-center md:justify-start",
-                            if year.is_some() {
-                                span { class: "uppercase tracking-wide text-xs font-semibold text-white/40", "{i18n::t(\"album\")}" }
+                            if let Some(label) = release_label {
+                                span { class: "uppercase tracking-wide text-xs font-semibold text-white/40", "{label}" }
                                 span { class: "text-white/30", "•" }
                             }
                             span { {i18n::t_with("showcase_song_count", &[("count", song_count.into())])} }

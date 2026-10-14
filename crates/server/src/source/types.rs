@@ -201,6 +201,14 @@ pub struct PlaylistMeta {
     pub image_tag: Option<String>,
 }
 
+/// What kind of release a source files an album as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseKind {
+    Album,
+    Single,
+    Ep,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RemoteAlbum {
     pub browse_id: String,
@@ -208,6 +216,8 @@ pub struct RemoteAlbum {
     pub artist: Option<String>,
     pub artist_id: Option<String>,
     pub year: Option<String>,
+    /// The kind the source reports; `None` when it reports none it names.
+    pub kind: Option<ReleaseKind>,
     pub thumbnail: Option<String>,
     pub audio_playlist_id: Option<String>,
     pub tracks: Vec<reader::Track>,
@@ -221,6 +231,7 @@ impl From<crate::ytmusic::discover::YtAlbum> for RemoteAlbum {
             artist: a.artist,
             artist_id: a.artist_id,
             year: a.year,
+            kind: a.kind,
             thumbnail: a.thumbnail,
             audio_playlist_id: a.audio_playlist_id,
             tracks: a.tracks,

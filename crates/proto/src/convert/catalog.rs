@@ -111,6 +111,25 @@ pub fn catalog_detail_to_proto(value: &api::CatalogDetail) -> CatalogDetail {
         shelves: value.shelves.iter().map(catalog_shelf_to_proto).collect(),
         continuation: value.continuation.clone(),
         artist_key: value.artist_key.as_ref().map(ToString::to_string),
+        release_kind: release_kind_to_proto(value.release_kind) as i32,
+    }
+}
+
+pub fn release_kind_to_proto(value: Option<api::ReleaseKind>) -> ReleaseKind {
+    match value {
+        None => ReleaseKind::Unspecified,
+        Some(api::ReleaseKind::Album) => ReleaseKind::Album,
+        Some(api::ReleaseKind::Single) => ReleaseKind::Single,
+        Some(api::ReleaseKind::Ep) => ReleaseKind::Ep,
+    }
+}
+
+pub fn release_kind_from_proto(value: i32) -> Option<api::ReleaseKind> {
+    match ReleaseKind::try_from(value).unwrap_or(ReleaseKind::Unspecified) {
+        ReleaseKind::Unspecified => None,
+        ReleaseKind::Album => Some(api::ReleaseKind::Album),
+        ReleaseKind::Single => Some(api::ReleaseKind::Single),
+        ReleaseKind::Ep => Some(api::ReleaseKind::Ep),
     }
 }
 
@@ -128,6 +147,7 @@ pub fn catalog_detail_from_proto(value: &CatalogDetail) -> api::CatalogDetail {
         shelves: value.shelves.iter().map(catalog_shelf_from_proto).collect(),
         continuation: value.continuation.clone(),
         artist_key: value.artist_key.clone(),
+        release_kind: release_kind_from_proto(value.release_kind),
     }
 }
 

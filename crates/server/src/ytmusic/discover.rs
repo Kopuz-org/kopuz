@@ -102,6 +102,7 @@ pub struct YtAlbum {
     pub artist: Option<String>,
     pub artist_id: Option<String>,
     pub year: Option<String>,
+    pub kind: Option<crate::source::ReleaseKind>,
     pub thumbnail: Option<String>,
     pub audio_playlist_id: Option<String>,
     pub tracks: Vec<Track>,
@@ -457,6 +458,7 @@ fn parse_album(browse_id: &str, resp: &Value) -> YtAlbum {
 
     let artist = pick_album_artist(header);
     let year = pick_album_year(header);
+    let kind = pick_album_kind(header);
     let thumbnail = best_album_thumbnail(header).map(normalize_yt_thumbnail);
     let audio_playlist_id_header = header.and_then(find_audio_playlist_id);
     let album_id = super::search::album_browse_id(browse_id)
@@ -510,6 +512,7 @@ fn parse_album(browse_id: &str, resp: &Value) -> YtAlbum {
         artist_id: artist.as_ref().and_then(|credit| credit.id.clone()),
         artist: artist.map(|credit| credit.name),
         year,
+        kind,
         thumbnail,
         audio_playlist_id: audio_playlist_id_header.or(audio_pid_from_rows),
         tracks,
@@ -651,6 +654,20 @@ fn pick_album_year(header: Option<&Value>) -> Option<String> {
         }
     }
     None
+}
+
+/// The release kind the header's subtitle opens with, in either layout ("Single • 2019", "Album • Artist • 2019").
+fn pick_album_kind(header: Option<&Value>) -> Option<crate::source::ReleaseKind> {
+    use crate::source::ReleaseKind;
+    let first = header?
+        .pointer("/subtitle/runs/0/text")
+        .and_then(|v| v.as_str())?;
+    match first.trim() {
+        "Album" => Some(ReleaseKind::Album),
+        "Single" => Some(ReleaseKind::Single),
+        "EP" => Some(ReleaseKind::Ep),
+        _ => None,
+    }
 }
 
 fn find_audio_playlist_id(header: &Value) -> Option<String> {
@@ -1298,6 +1315,7 @@ fn normalize_yt_thumbnail(url: String) -> String {
 mod credit_tests {
     use super::{
         RowColumn, classify_flex_columns, parse_album, parse_artist_song_row, pick_album_artist,
+        pick_album_kind,
     };
     use serde_json::{Value, json};
 
@@ -1400,5 +1418,25 @@ mod credit_tests {
 
         assert_eq!(credit.name, "Ada");
         assert!(credit.id.is_none());
+    }
+
+    #[test]
+    fn the_header_subtitle_says_what_kind_of_release_it_is() {
+        use crate::source::ReleaseKind;
+        let kind = |runs: Value| pick_album_kind(Some(&json!({ "subtitle": { "runs": runs } })));
+
+        assert_eq!(
+            kind(json!([{ "text": "Single" }, { "text": " • " }, { "text": "2019" }])),
+            Some(ReleaseKind::Single)
+        );
+        assert_eq!(
+            kind(json!([{ "text": "EP" }, { "text": " • " }, { "text": "2021" }])),
+            Some(ReleaseKind::Ep)
+        );
+        assert_eq!(
+            kind(json!([{ "text": "Album" }, { "text": " • " }, { "text": "Ada" }])),
+            Some(ReleaseKind::Album)
+        );
+        assert_eq!(kind(json!([{ "text": "2019" }])), None);
     }
 }

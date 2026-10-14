@@ -337,6 +337,11 @@ pub async fn album_remote(
         year: album["release_date"]
             .as_str()
             .map(|d| d.chars().take(4).collect()),
+        kind: match album["album_type"].as_str() {
+            Some("album") => Some(crate::source::ReleaseKind::Album),
+            Some("single") => Some(crate::source::ReleaseKind::Single),
+            _ => None,
+        },
         thumbnail: first_image(&album["images"]),
         audio_playlist_id: None,
         tracks: out,

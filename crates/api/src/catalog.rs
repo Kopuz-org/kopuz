@@ -91,4 +91,14 @@ pub struct CatalogDetail {
     pub continuation: Option<String>,
     /// For an album, the artist its header opens; absent when it bills nobody.
     pub artist_key: Option<String>,
+    /// For an album, the kind of release its source files it as.
+    pub release_kind: Option<ReleaseKind>,
+}
+
+/// What kind of release a source files an album as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseKind {
+    Album,
+    Single,
+    Ep,
 }

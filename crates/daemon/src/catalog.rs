@@ -241,6 +241,11 @@ impl CatalogService {
                     artwork,
                     playback_id: album.audio_playlist_id,
                     year: album.year,
+                    release_kind: album.kind.map(|kind| match kind {
+                        server::source::ReleaseKind::Album => api::ReleaseKind::Album,
+                        server::source::ReleaseKind::Single => api::ReleaseKind::Single,
+                        server::source::ReleaseKind::Ep => api::ReleaseKind::Ep,
+                    }),
                     tracks: album
                         .tracks
                         .iter()

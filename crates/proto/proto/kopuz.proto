@@ -1125,6 +1125,15 @@ message CatalogDetail {
   optional string continuation = 11;
   // For an album, the artist its header opens; absent when it bills nobody.
   optional string artist_key = 12;
+  // For an album, the kind of release its source files it as.
+  ReleaseKind release_kind = 13;
+}
+
+enum ReleaseKind {
+  RELEASE_KIND_UNSPECIFIED = 0;
+  RELEASE_KIND_ALBUM = 1;
+  RELEASE_KIND_SINGLE = 2;
+  RELEASE_KIND_EP = 3;
 }
 
 // ---------------- radio ----------------

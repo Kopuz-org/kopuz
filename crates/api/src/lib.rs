@@ -28,6 +28,7 @@ pub use sources::{MAX_MUSIC_UPLOAD_BYTES, StorageQuota, TrackUpload};
 pub use artwork::{ArtworkData, ArtworkRef, ArtworkRequest, ArtworkTarget};
 pub use catalog::{
     CatalogDetail, CatalogDetailRequest, CatalogItem, CatalogItemKind, CatalogPage, CatalogShelf,
+    ReleaseKind,
 };
 pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
