@@ -213,18 +213,17 @@ fn music_video_of(key: &str) -> reader::Counterpart {
 
 #[test]
 fn smb_now_playing_artwork_resolves_cached_files_and_missing_covers() {
-    let config = config::AppConfig::default();
     let mut track = test_track(&"smb:Album/song.flac".to_string());
     track.cover = Some("/cache/album cover.jpg".into());
     assert_eq!(
-        load::now_playing_artwork(&config, &track).as_deref(),
+        load::now_playing_artwork(None, &track).as_deref(),
         Some("/cache/album cover.jpg")
     );
     track.cover = Some(reader::CoverRef::NO_COVER.into());
-    assert_eq!(load::now_playing_artwork(&config, &track), None);
+    assert_eq!(load::now_playing_artwork(None, &track), None);
     track.cover = Some("https://example.com/cover.jpg".into());
     assert_eq!(
-        load::now_playing_artwork(&config, &track).as_deref(),
+        load::now_playing_artwork(None, &track).as_deref(),
         Some("https://example.com/cover.jpg")
     );
 }
@@ -232,7 +231,8 @@ fn smb_now_playing_artwork_resolves_cached_files_and_missing_covers() {
 #[tokio::test]
 async fn album_artwork_arriving_after_playback_refreshes_the_queue() {
     let source = config::Source::Server("nas".into());
-    let harness = harness(|config| config.active_source = source.clone());
+    let harness = harness(|_| {});
+    harness.api.session.set_sources(active_on(source.clone()));
     harness
         .api
         .set_queue(replace(&["smb:01.flac", "smb:02.flac"]))
@@ -1713,6 +1713,13 @@ async fn persist_now_writes_the_current_snapshot() {
     assert!(!last.shuffle_enabled);
 }
 
+fn active_on(source: config::Source) -> Arc<server::sources::Sources> {
+    Arc::new(server::sources::Sources {
+        active: source,
+        ..Default::default()
+    })
+}
+
 /// Each source keeps its queue: leaving one parks it, coming back resumes it, and a source never visited starts empty.
 #[tokio::test]
 async fn switching_sources_parks_and_resumes_each_queue() {
@@ -1720,16 +1727,17 @@ async fn switching_sources_parks_and_resumes_each_queue() {
     let sink = FakeSinkHandle::default();
     let player =
         Player::try_with_sink(Box::new(FakeSink(sink.clone()))).expect("headless player starts");
-    let mut on_a = config::AppConfig::default();
-    on_a.local_sources.push(config::SavedLocalSource {
+    let mut config = config::AppConfig::default();
+    config.local_sources.push(config::SavedLocalSource {
         id: "local:b".into(),
         name: "B".into(),
         directories: Vec::new(),
     });
-    let mut on_b = on_a.clone();
-    on_b.active_source = config::Source::LocalLibrary("local:b".into());
+    let on_a = active_on(config::Source::default());
+    let on_b = active_on(config::Source::LocalLibrary("local:b".into()));
     let services = PlaybackServices {
-        config: on_a.clone(),
+        config,
+        sources: on_a.clone(),
         queue_store: Some(store.clone()),
         ..Default::default()
     };
@@ -1746,13 +1754,13 @@ async fn switching_sources_parks_and_resumes_each_queue() {
     wait_committed(&api).await;
     let on_a_titles = queue_titles(&api).await;
 
-    session.set_config(on_b.clone(), vec!["active_source".into()]);
+    session.set_sources(on_b.clone());
     session.persist_now().await;
     assert!(queue_titles(&api).await.is_empty(), "B was never visited");
     api.set_queue(replace(&["b-0"])).await.expect("set queue");
     wait_committed(&api).await;
 
-    session.set_config(on_a.clone(), vec!["active_source".into()]);
+    session.set_sources(on_a.clone());
     session.persist_now().await;
     assert_eq!(
         queue_titles(&api).await,
@@ -1760,7 +1768,7 @@ async fn switching_sources_parks_and_resumes_each_queue() {
         "A resumes its own queue"
     );
 
-    session.set_config(on_b, vec!["active_source".into()]);
+    session.set_sources(on_b);
     session.persist_now().await;
     assert_eq!(queue_titles(&api).await.len(), 1, "and B its own");
 }
@@ -1778,9 +1786,9 @@ async fn leaving_a_deleted_source_parks_nothing() {
         name: "B".into(),
         directories: Vec::new(),
     });
-    on_b.active_source = config::Source::LocalLibrary("local:b".into());
     let services = PlaybackServices {
         config: on_b.clone(),
+        sources: active_on(config::Source::LocalLibrary("local:b".into())),
         queue_store: Some(store.clone()),
         ..Default::default()
     };
@@ -1805,12 +1813,11 @@ async fn leaving_a_deleted_source_parks_nothing() {
     session.persist_now().await;
     assert!(saves_of_b() > 0, "the queue was stored while B was active");
 
+    // The order SourceService sends them in: the folder list first, then the active source.
     let mut deleted = on_b.clone();
     deleted.remove_local_source("local:b");
-    session.set_config(
-        deleted,
-        vec!["local_sources".into(), "active_source".into()],
-    );
+    session.set_config(deleted, vec!["local_sources".into()]);
+    session.set_sources(active_on(config::Source::default()));
     session.persist_now().await;
 
     assert_eq!(
@@ -2135,11 +2142,14 @@ async fn switching_source_releases_the_integration_that_owned_playback() {
         name: "B".into(),
         directories: Vec::new(),
     });
-    elsewhere.active_source = config::Source::LocalLibrary("local:b".into());
     harness
         .api
         .session
-        .set_config(elsewhere, vec!["active_source".into()]);
+        .set_config(elsewhere, vec!["local_sources".into()]);
+    harness
+        .api
+        .session
+        .set_sources(active_on(config::Source::LocalLibrary("local:b".into())));
     let state = wait_state(&harness.api, "playback handed back", |state| {
         state.external.is_none()
     })
@@ -2201,16 +2211,17 @@ async fn an_unreadable_queue_is_not_saved_over() {
     let sink = FakeSinkHandle::default();
     let player =
         Player::try_with_sink(Box::new(FakeSink(sink.clone()))).expect("headless player starts");
-    let mut on_a = config::AppConfig::default();
-    on_a.local_sources.push(config::SavedLocalSource {
+    let mut config = config::AppConfig::default();
+    config.local_sources.push(config::SavedLocalSource {
         id: "local:b".into(),
         name: "B".into(),
         directories: Vec::new(),
     });
-    let mut on_b = on_a.clone();
-    on_b.active_source = b.clone();
+    let on_a = active_on(config::Source::default());
+    let on_b = active_on(b.clone());
     let services = PlaybackServices {
-        config: on_a.clone(),
+        config,
+        sources: on_a.clone(),
         queue_store: Some(store.clone()),
         ..Default::default()
     };
@@ -2234,7 +2245,7 @@ async fn an_unreadable_queue_is_not_saved_over() {
             .count()
     };
 
-    session.set_config(on_b.clone(), vec!["active_source".into()]);
+    session.set_sources(on_b.clone());
     session.persist_now().await;
     assert!(queue_titles(&api).await.is_empty());
     api.player_command(PlayerCommand::SetVolume { volume: 0.3 })
@@ -2247,11 +2258,11 @@ async fn an_unreadable_queue_is_not_saved_over() {
     .await
     .expect("a shuffle toggle on nothing builds no queue");
     session.persist_now().await;
-    session.set_config(on_a, vec!["active_source".into()]);
+    session.set_sources(on_a);
     session.persist_now().await;
     assert_eq!(saves_of_b(), 0, "nothing was saved over B's queue");
 
-    session.set_config(on_b, vec!["active_source".into()]);
+    session.set_sources(on_b);
     session.persist_now().await;
     api.set_queue(replace(&["b-new"])).await.expect("set queue");
     wait_committed(&api).await;
@@ -3426,7 +3437,10 @@ impl server::source::MediaSource for QueueServer {
 async fn queue_server() -> (Arc<QueueServer>, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("tempdir");
     let db = db::init(&dir.path().join("server.db")).await.expect("db");
-    let inner = Arc::from(server::source::active(db, &config::AppConfig::default()));
+    let inner = Arc::from(server::source::active(
+        db,
+        &server::sources::Sources::default(),
+    ));
     let server = Arc::new(QueueServer {
         inner,
         saves: Mutex::new(Vec::new()),
@@ -4284,27 +4298,28 @@ async fn each_source_keeps_its_own_origin_across_a_switch() {
     let store = Arc::new(MemoryStore::default());
     let player = Player::try_with_sink(Box::new(FakeSink(FakeSinkHandle::default())))
         .expect("headless player starts");
-    let mut on_a = config::AppConfig::default();
-    on_a.local_sources.push(config::SavedLocalSource {
+    let mut config = config::AppConfig::default();
+    config.local_sources.push(config::SavedLocalSource {
         id: "local:b".into(),
         name: "B".into(),
         directories: Vec::new(),
     });
-    let mut on_b = on_a.clone();
-    on_b.active_source = config::Source::LocalLibrary("local:b".into());
+    let on_a = active_on(config::Source::default());
+    let on_b = active_on(config::Source::LocalLibrary("local:b".into()));
     let session = SessionHandle::spawn_with_factory(
         Arc::new(StubLibrary),
         player,
         PlaybackServices {
-            config: on_a.clone(),
+            config,
+            sources: on_a.clone(),
             queue_store: Some(store.clone()),
             ..Default::default()
         },
         Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
     );
     let api = LocalApi::new(session.clone());
-    let switch = |to: &config::AppConfig| {
-        session.set_config(to.clone(), vec!["active_source".into()]);
+    let switch = |to: &Arc<server::sources::Sources>| {
+        session.set_sources(to.clone());
         session.persist_now()
     };
 

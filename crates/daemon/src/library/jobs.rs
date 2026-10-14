@@ -44,15 +44,11 @@ impl LibraryService {
     ) -> Result<JobRef, ApiError> {
         let service = self.clone();
         runner.start_as(JobKind::LibrarySync, trigger, move |ctx| async move {
-            let config = service.current_config();
-            let result = service.run_remote_sync(&ctx, &config).await;
+            let sources = service.current_sources();
+            let result = service.run_remote_sync(&ctx, &sources).await;
             if result.is_ok() && !ctx.cancelled() {
-                crate::auto_sync::mark_synced(
-                    &service.db,
-                    JobKind::LibrarySync,
-                    &config.active_source,
-                )
-                .await;
+                crate::auto_sync::mark_synced(&service.db, JobKind::LibrarySync, &sources.active)
+                    .await;
             }
             result
         })
@@ -308,10 +304,10 @@ impl LibraryService {
     pub async fn run_remote_sync(
         &self,
         ctx: &JobCtx,
-        config: &config::AppConfig,
+        sources: &server::sources::Sources,
     ) -> Result<(), ApiError> {
         let source: server::source::ActiveSource =
-            Arc::from(server::source::active(self.db.clone(), config));
+            Arc::from(server::source::active(self.db.clone(), sources));
         if !source.capabilities().sync {
             return Err(ApiError::unsupported(
                 "the active source has no library sync",

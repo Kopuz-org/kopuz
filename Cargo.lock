@@ -4694,6 +4694,7 @@ dependencies = [
  "tokio",
  "toml 0.8.2",
  "tracing",
+ "uuid 1.23.5",
  "windows 0.62.2",
 ]
 

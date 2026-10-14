@@ -25,6 +25,7 @@ pub struct LibraryService {
     station_registry: std::sync::RwLock<Arc<radio::registry::StationRegistry>>,
     cover_cache: PathBuf,
     config_rx: OnceLock<watch::Receiver<config::AppConfig>>,
+    sources_rx: OnceLock<watch::Receiver<Arc<server::sources::Sources>>>,
     session: OnceLock<SessionHandle>,
     catalog: OnceLock<Arc<dyn crate::catalog::CatalogQueue>>,
     transient: std::sync::Mutex<TransientTracks>,
@@ -161,6 +162,7 @@ impl LibraryService {
             station_registry: std::sync::RwLock::new(station_registry),
             cover_cache,
             config_rx: OnceLock::new(),
+            sources_rx: OnceLock::new(),
             session: OnceLock::new(),
             catalog: OnceLock::new(),
             transient: std::sync::Mutex::new(TransientTracks::default()),
@@ -220,6 +222,7 @@ impl LibraryService {
     /// gives the service live config and the event stream for invalidations.
     pub fn attach_session(&self, session: SessionHandle) {
         let _ = self.config_rx.set(session.config_watch());
+        let _ = self.sources_rx.set(session.sources_watch());
         let _ = self.session.set(session);
     }
 
@@ -228,6 +231,17 @@ impl LibraryService {
             .get()
             .map(|rx| rx.borrow().clone())
             .unwrap_or_default()
+    }
+
+    /// The live sources once the session is attached, the construction-time source before that.
+    fn current_sources(&self) -> Arc<server::sources::Sources> {
+        match self.sources_rx.get() {
+            Some(rx) => rx.borrow().clone(),
+            None => Arc::new(server::sources::Sources {
+                active: self.source.clone(),
+                ..Default::default()
+            }),
+        }
     }
 
     fn offline(&self) -> crate::offline::OfflineIndex {
@@ -246,9 +260,9 @@ impl LibraryService {
     /// The source library reads run against: the live active source once the
     /// session is attached, the construction-time source before that.
     fn query_source(&self) -> config::Source {
-        self.config_rx
+        self.sources_rx
             .get()
-            .map(|rx| rx.borrow().active_source.clone())
+            .map(|rx| rx.borrow().active.clone())
             .unwrap_or_else(|| self.source.clone())
     }
 
@@ -334,7 +348,7 @@ impl LibraryService {
     }
 
     pub async fn stats(&self) -> Result<api::StatsView, ApiError> {
-        let own = self.current_config().active_source.listen_count_key("");
+        let own = self.query_source().listen_count_key("");
         let listen_counts = self
             .db
             .listen_counts()
@@ -357,9 +371,10 @@ impl LibraryService {
     /// process cache. Radio has no lyrics by construction.
     pub async fn lyrics(&self, key: &str) -> Result<api::LyricsView, ApiError> {
         let config = self.current_config();
+        let sources = self.current_sources();
         let track = match self
             .db
-            .tracks_by_keys(&config.active_source, &[key.to_string()])
+            .tracks_by_keys(&sources.active, &[key.to_string()])
             .await
             .map_err(db_error)?
             .into_iter()
@@ -385,7 +400,7 @@ impl LibraryService {
         )
         .prefer_local(config.prefer_local_lyrics)
         .enable_musixmatch(config.enable_musixmatch_lyrics);
-        if let Some(server) = &config.server {
+        if let Some(server) = &sources.server {
             request = request.with_server(
                 Some(&server.url),
                 server.access_token.as_deref(),

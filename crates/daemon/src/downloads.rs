@@ -162,9 +162,9 @@ impl DownloadsService {
     }
 
     async fn run_downloads(&self, ctx: &JobCtx, keys: Vec<String>) -> Result<(), ApiError> {
-        let config = self.session.config_watch().borrow().clone();
+        let sources = self.session.sources();
         let source: server::source::ActiveSource =
-            Arc::from(server::source::active(self.db.clone(), &config));
+            Arc::from(server::source::active(self.db.clone(), &sources));
         let total = keys.len() as u64;
         if let Ok(mut batch) = self.batch.lock() {
             *batch = Batch {
@@ -187,7 +187,7 @@ impl DownloadsService {
                 batch.queued.retain(|queued| queued != key);
                 batch.active = Some(key.clone());
             }
-            if let Err(error) = self.download_one(ctx, &source, &config, key).await {
+            if let Err(error) = self.download_one(ctx, &source, &sources.active, key).await {
                 if ctx.cancelled() {
                     return Ok(());
                 }
@@ -219,12 +219,12 @@ impl DownloadsService {
         &self,
         ctx: &JobCtx,
         source: &server::source::ActiveSource,
-        config: &config::AppConfig,
+        active: &config::Source,
         key: &str,
     ) -> Result<(), ApiError> {
         let uid = self
             .db
-            .tracks_by_keys(&config.active_source, &[key.to_string()])
+            .tracks_by_keys(active, &[key.to_string()])
             .await
             .map_err(|error| ApiError::internal(format!("database error: {error}")))?
             .into_iter()

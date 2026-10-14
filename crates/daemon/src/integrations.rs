@@ -78,7 +78,7 @@ async fn next_state(
 pub fn spawn_jellyfin_reporter(
     session: &SessionHandle,
     source: server::source::ActiveSource,
-    config: watch::Receiver<config::AppConfig>,
+    sources: watch::Receiver<Arc<server::sources::Sources>>,
 ) -> tokio::task::JoinHandle<()> {
     let mut events = session.subscribe();
     tokio::spawn(async move {
@@ -90,7 +90,7 @@ pub fn spawn_jellyfin_reporter(
         report.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
-            let jellyfin_configured = config
+            let jellyfin_configured = sources
                 .borrow()
                 .server
                 .as_ref()
@@ -174,9 +174,9 @@ pub fn spawn_jellyfin_reporter(
     })
 }
 
-fn youtube_signed_in(config: &config::AppConfig) -> bool {
-    matches!(config.active_source, config::Source::Server(_))
-        && config.server.as_ref().is_some_and(|server| {
+fn youtube_signed_in(sources: &server::sources::Sources) -> bool {
+    matches!(sources.active, config::Source::Server(_))
+        && sources.server.as_ref().is_some_and(|server| {
             server.service == config::MusicService::YtMusic
                 && !server.yt_anonymous
                 && server
@@ -187,12 +187,13 @@ fn youtube_signed_in(config: &config::AppConfig) -> bool {
 }
 
 /// Reports plays to YouTube History while a signed-in YouTube Music source is
-/// active and `pause_watch_history` is off. The source is built from the config
-/// at the start of each play, so a sign-out or pausing the history stops
+/// active and `pause_watch_history` is off. The source is built from the saved
+/// sources at the start of each play, so a sign-out or pausing the history stops
 /// reporting at the next state change.
 pub fn spawn_youtube_reporter(
     session: &SessionHandle,
     db: db::Db,
+    sources: watch::Receiver<Arc<server::sources::Sources>>,
     config: watch::Receiver<config::AppConfig>,
 ) -> tokio::task::JoinHandle<()> {
     let mut events = session.subscribe();
@@ -218,10 +219,8 @@ pub fn spawn_youtube_reporter(
                         Err(broadcast::error::RecvError::Closed) => break,
                     };
                     let received = Instant::now();
-                    let (signed_in, history_paused) = {
-                        let config = config.borrow();
-                        (youtube_signed_in(&config), config.pause_watch_history)
-                    };
+                    let signed_in = youtube_signed_in(&sources.borrow());
+                    let history_paused = config.borrow().pause_watch_history;
                     let live_id = (signed_in
                         && !history_paused
                         && matches!(state.phase, Phase::Playing | Phase::Paused))
@@ -251,7 +250,7 @@ pub fn spawn_youtube_reporter(
                         && let Some(id) = live_id
                     {
                         let source: server::source::ActiveSource =
-                            Arc::from(server::source::active(db.clone(), &config.borrow()));
+                            Arc::from(server::source::active(db.clone(), &sources.borrow()));
                         let _ = source.report_playback_start(&id).await;
                         current = Some((id, source));
                     }
@@ -311,6 +310,7 @@ impl Drop for DiscordState {
 pub fn spawn_discord_presence(
     session: &SessionHandle,
     config: watch::Receiver<config::AppConfig>,
+    sources: watch::Receiver<Arc<server::sources::Sources>>,
 ) -> tokio::task::JoinHandle<()> {
     let mut events = session.subscribe();
     let session = session.clone();
@@ -345,7 +345,8 @@ pub fn spawn_discord_presence(
                     let Some(state) = state else { break };
                     let Some(state) = state else { continue };
                     let received = Instant::now();
-                    project(&presence, &config.borrow(), &state, received, &mut discord, &session, &cover_tx);
+                    let service = sources.borrow().active_service();
+                    project(&presence, &config.borrow(), service, &state, received, &mut discord, &session, &cover_tx);
                     last_state = Some((state, received));
                 }
                 resolved = cover_rx.recv() => {
@@ -355,7 +356,8 @@ pub fn spawn_discord_presence(
                         discord.cover = url;
                         discord.cover_sent = false;
                         if let Some((state, received)) = &last_state {
-                            project(&presence, &config.borrow(), state, *received, &mut discord, &session, &cover_tx);
+                            let service = sources.borrow().active_service();
+                            project(&presence, &config.borrow(), service, state, *received, &mut discord, &session, &cover_tx);
                         }
                     }
                 }
@@ -370,6 +372,7 @@ pub fn spawn_discord_presence(
 fn project(
     presence: &discord_presence::Presence,
     config: &config::AppConfig,
+    service: Option<config::MusicService>,
     state: &PlayerState,
     received: Instant,
     discord: &mut DiscordState,
@@ -379,8 +382,7 @@ fn project(
     let enabled = config.discord_presence.unwrap_or(true);
     let paused_enabled = config.discord_presence_paused.unwrap_or(true);
     let source_name = config.discord_presence_source.unwrap_or(true).then(|| {
-        config
-            .active_service()
+        service
             .map_or("Local", |service| service.display_name())
             .to_string()
     });
@@ -935,18 +937,18 @@ async fn web_sign_in(_id: &str, _api_key: &str, _api_secret: &str) -> Result<Str
 mod tests {
     use super::*;
 
-    fn youtube(token: &str, anonymous: bool) -> config::AppConfig {
-        let mut config = config::AppConfig {
-            active_source: config::Source::Server("yt".into()),
+    fn youtube(token: &str, anonymous: bool) -> server::sources::Sources {
+        let mut sources = server::sources::Sources {
+            active: config::Source::Server("yt".into()),
             ..Default::default()
         };
-        config.server = Some(config::MusicServer {
+        sources.server = Some(config::MusicServer {
             service: config::MusicService::YtMusic,
             access_token: Some(token.into()),
             yt_anonymous: anonymous,
             ..config::MusicServer::new("YouTube Music".into(), String::new())
         });
-        config
+        sources
     }
 
     #[test]
@@ -955,7 +957,7 @@ mod tests {
         assert!(!youtube_signed_in(&youtube("", true)));
         assert!(!youtube_signed_in(&youtube("", false)));
         let mut local = youtube("SAPISID=abc", false);
-        local.active_source = config::Source::LocalLibrary("local".into());
+        local.active = config::Source::LocalLibrary("local".into());
         assert!(!youtube_signed_in(&local));
     }
 }

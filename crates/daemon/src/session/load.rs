@@ -79,8 +79,9 @@ impl Session {
             station
                 .and_then(|station| station.streams.iter().find(|stream| stream.id == stream_id))
                 .map(|stream| (stream.url.clone(), cover))
-        } else if is_server && self.config.server.is_some() && self.active_source.is_some() {
-            let cover = now_playing_artwork(&self.config, &track).unwrap_or_default();
+        } else if is_server && self.sources.server.is_some() && self.active_source.is_some() {
+            let cover =
+                now_playing_artwork(self.sources.server.as_ref(), &track).unwrap_or_default();
             Some((ResolvedStreamRef::pending_marker(&item_id), cover))
         } else {
             None
@@ -190,7 +191,7 @@ impl Session {
         }
 
         let cover_url = if offline_path.is_some() {
-            now_playing_artwork(&self.config, &track).unwrap_or_default()
+            now_playing_artwork(self.sources.server.as_ref(), &track).unwrap_or_default()
         } else {
             remote_ref
                 .as_ref()
@@ -266,7 +267,7 @@ impl Session {
             .model
             .track_at(prepared.idx)
             .filter(|track| track.id == prepared.track.id)
-            .and_then(|track| now_playing_artwork(&self.config, track))
+            .and_then(|track| now_playing_artwork(self.sources.server.as_ref(), track))
         {
             prepared.artwork = Some(artwork);
         }
@@ -446,8 +447,8 @@ impl Session {
         if self.external.is_none() {
             self.attach_external_now(sink.clone());
         }
-        let artwork =
-            server::cover::track(&self.config, &track, 800).map(|cover| cover.as_ref().to_string());
+        let artwork = server::cover::track(self.sources.server.as_ref(), &track, 800)
+            .map(|cover| cover.as_ref().to_string());
         tokio::spawn(async move {
             if let Err(error) = sink.load(&track, artwork).await {
                 tracing::warn!(%error, "external playback could not start");
@@ -462,7 +463,7 @@ impl Session {
         covers: std::collections::HashMap<String, String>,
         state_tx: &watch::Sender<PlayerState>,
     ) {
-        if source != self.config.active_source {
+        if source != self.sources.active {
             return;
         }
         let loaded_position = self
@@ -489,7 +490,7 @@ impl Session {
             let artwork = self
                 .model
                 .track_at(loaded_position)
-                .and_then(|track| now_playing_artwork(&self.config, track));
+                .and_then(|track| now_playing_artwork(self.sources.server.as_ref(), track));
             if self.player.set_artwork(self.intent.token(), artwork)
                 && self.pending_transition.is_none()
             {
@@ -502,8 +503,11 @@ impl Session {
     }
 }
 
-pub(super) fn now_playing_artwork(config: &config::AppConfig, track: &Track) -> Option<String> {
-    match server::cover::locate(config, reader::CoverRef::for_track(track), 800)? {
+pub(super) fn now_playing_artwork(
+    server: Option<&config::MusicServer>,
+    track: &Track,
+) -> Option<String> {
+    match server::cover::locate(server, reader::CoverRef::for_track(track), 800)? {
         server::cover::Located::File(path) => Some(path.to_string_lossy().into_owned()),
         server::cover::Located::Url(url) => Some(url),
     }

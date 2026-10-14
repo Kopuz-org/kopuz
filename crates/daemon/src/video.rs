@@ -90,8 +90,8 @@ impl VideoService {
         {
             return Ok(stream.clone());
         }
-        let config = self.session.config_watch().borrow().clone();
-        let source = server::source::active(self.db.clone(), &config);
+        let sources = self.session.sources();
+        let source = server::source::active(self.db.clone(), &sources);
         if !source.capabilities().music_videos {
             return Err(ApiError::unsupported("this source has no music videos"));
         }

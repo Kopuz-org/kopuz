@@ -1,10 +1,4 @@
-//! Connection resolution + legacy track-id parsing for the remote bridge.
-//!
-//! [`ServerConn`] hydrates the active server's request params from config (used
-//! by [`crate::source`] and [`crate::sync`] to build a remote client), and
-//! [`parse_item_id`] extracts an item id from a legacy `"service:id"` path. The
-//! playlist/favorite mutations that used to live here are now methods on
-//! [`crate::source::MediaSource`].
+//! Connection resolution from the active sources, and legacy `"service:id"` track-id parsing, for the remote bridge.
 
 use config::MusicService;
 
@@ -24,17 +18,9 @@ pub struct ServerConn {
 }
 
 impl ServerConn {
-    /// Build connection params from app config for the active server, or
-    /// `None` when a field the active service requires is missing. An access
-    /// token is required except by anonymous YouTube Music, which runs on empty
-    /// cookies and ignores any token kept from an earlier sign-in;
-    /// Jellyfin/Subsonic/Custom additionally require
-    /// a `user_id` (YouTube Music authenticates by cookie only and Spotify by
-    /// OAuth token only, so a missing user_id is fine for both). Centralizing this stops every UI call site from
-    /// coercing an absent user_id into `""` and firing a malformed
-    /// authenticated request that silently fails.
-    pub fn resolve(config: &config::AppConfig) -> Option<Self> {
-        let server = config.server.as_ref()?;
+    /// The active server's connection params, or `None` without a token (anonymous YouTube Music runs on none and ignores a leftover one), or without a `user_id` for a service that signs requests with one.
+    pub fn resolve(sources: &crate::sources::Sources) -> Option<Self> {
+        let server = sources.server.as_ref()?;
         let token = if server.service == MusicService::YtMusic && server.yt_anonymous {
             String::new()
         } else {
@@ -52,14 +38,14 @@ impl ServerConn {
             url: server.url.clone(),
             token,
             user_id,
-            device_id: config.device_id.clone(),
+            device_id: sources.device_id.clone(),
             apple_music_storefront: server.apple_music_storefront.clone(),
             apple_music_language: server.apple_music_language.clone(),
             account: server.account.clone(),
             folders: server
                 .id
                 .as_deref()
-                .map(|id| config.folders_for(id))
+                .map(|id| sources.folders_for(id))
                 .unwrap_or_default(),
         })
     }
@@ -75,10 +61,8 @@ pub fn parse_item_id(path: &str) -> Option<&str> {
 mod tests {
     use super::*;
 
-    // Build an AppConfig with a server via serde so the test isn't tied to
-    // MusicServer's full field list (only name/url are required; the rest
-    // default).
-    fn cfg(service: &str, token: Option<&str>, user_id: Option<&str>) -> config::AppConfig {
+    // Built via serde so the test isn't tied to MusicServer's full field list.
+    fn cfg(service: &str, token: Option<&str>, user_id: Option<&str>) -> crate::sources::Sources {
         let mut server = serde_json::json!({
             "name": "test",
             "url": "http://localhost",
@@ -90,7 +74,7 @@ mod tests {
         if let Some(u) = user_id {
             server["user_id"] = u.into();
         }
-        config::AppConfig {
+        crate::sources::Sources {
             server: Some(serde_json::from_value(server).unwrap()),
             ..Default::default()
         }
@@ -108,7 +92,7 @@ mod tests {
     #[test]
     fn resolve_none_without_server_or_token() {
         // No server configured at all.
-        assert!(ServerConn::resolve(&config::AppConfig::default()).is_none());
+        assert!(ServerConn::resolve(&crate::sources::Sources::default()).is_none());
         // Server present but no access token.
         assert!(ServerConn::resolve(&cfg("Jellyfin", None, Some("u"))).is_none());
     }

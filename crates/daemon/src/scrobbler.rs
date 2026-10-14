@@ -112,6 +112,7 @@ impl Scrobbler {
         }
         let is_server = item_ref.is_server();
         let item_id = is_server.then(|| item_ref.primary_id().unwrap_or_default().to_string());
+        let source = is_server.then(|| server::source::active(self.db.clone(), &session.sources()));
         let include_ids = !is_server;
 
         self.spawn_playing_now_heartbeat(&session, &track, token, &config, include_ids);
@@ -124,7 +125,7 @@ impl Scrobbler {
         tokio::spawn(tracing::Instrument::instrument(
             async move {
                 scrobbler
-                    .submit_flow(session, track, token, item_id, include_ids, config)
+                    .submit_flow(session, track, token, item_id, include_ids, config, source)
                     .await;
             },
             span,
@@ -139,6 +140,7 @@ impl Scrobbler {
         item_id: Option<String>,
         include_ids: bool,
         config: config::AppConfig,
+        source: Option<Box<dyn server::source::MediaSource>>,
     ) {
         let duration_secs = track.duration;
         let threshold_secs = std::cmp::min(240, duration_secs / 2);
@@ -151,9 +153,6 @@ impl Scrobbler {
             return;
         }
 
-        let source = item_id
-            .as_deref()
-            .map(|_| server::source::active(self.db.clone(), &config));
         if let (Some(source), Some(id)) = (&source, item_id.as_deref())
             && let Err(error) = source.scrobble_now_playing(id).await
         {

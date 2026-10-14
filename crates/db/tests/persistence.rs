@@ -53,37 +53,40 @@ fn server_track(id: &str, title: &str) -> Track {
 }
 
 async fn seed_active_server(db: &db::Db, id: &str) {
-    let cfg = AppConfig {
-        servers: vec![SavedServer {
-            id: id.into(),
-            name: "yt".into(),
-            url: "https://music.youtube.com".into(),
-            service: MusicService::YtMusic,
-            yt_browser: None,
-            yt_anonymous: false,
-            yt_profile: None,
-            account: None,
-            apple_music_storefront: "us".into(),
-            apple_music_language: "en".into(),
-        }],
-        server: Some(MusicServer {
-            name: "yt".into(),
-            url: "https://music.youtube.com".into(),
-            service: MusicService::YtMusic,
-            access_token: Some("cookie".into()),
-            user_id: None,
-            id: Some(id.into()),
-            yt_browser: None,
-            yt_anonymous: false,
-            yt_profile: None,
-            account: None,
-            apple_music_storefront: "us".into(),
-            apple_music_language: "en".into(),
-        }),
-        active_source: config::Source::Server(id.into()),
-        ..Default::default()
-    };
-    db.save_config(&cfg).await.unwrap();
+    db.save_config(&AppConfig::default()).await.unwrap();
+    db.save_server(&SavedServer {
+        id: id.into(),
+        name: "yt".into(),
+        url: "https://music.youtube.com".into(),
+        service: MusicService::YtMusic,
+        yt_browser: None,
+        yt_anonymous: false,
+        yt_profile: None,
+        account: None,
+        apple_music_storefront: "us".into(),
+        apple_music_language: "en".into(),
+    })
+    .await
+    .unwrap();
+    db.save_active_server(&MusicServer {
+        name: "yt".into(),
+        url: "https://music.youtube.com".into(),
+        service: MusicService::YtMusic,
+        access_token: Some("cookie".into()),
+        user_id: None,
+        id: Some(id.into()),
+        yt_browser: None,
+        yt_anonymous: false,
+        yt_profile: None,
+        account: None,
+        apple_music_storefront: "us".into(),
+        apple_music_language: "en".into(),
+    })
+    .await
+    .unwrap();
+    db.set_active_source(&config::Source::Server(id.into()))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

@@ -22,6 +22,7 @@ use api::{
     SourceFolderEntry, SourceInfo, SourceLoginRequest, SourceState, Table,
 };
 use server::source::{AuthOutcome, MediaSource};
+use server::sources::Sources;
 
 use crate::config_service::ConfigService;
 use crate::recovery::{Recovery, once_more};
@@ -37,6 +38,8 @@ pub struct SourceService {
     db: db::Db,
     session: SessionHandle,
     config: Arc<ConfigService>,
+    /// The authority on the sources; the session's copy follows it.
+    current: tokio::sync::Mutex<Arc<Sources>>,
     /// Each source's last probe answer, tagged with the probe that wrote it.
     status: Mutex<HashMap<String, (u64, SourceState)>>,
     probes: AtomicU64,
@@ -88,6 +91,57 @@ fn auth_expired<T>(result: &Result<T, ApiError>) -> bool {
 
 fn db_error(error: db::DbError) -> ApiError {
     ApiError::internal(format!("database error: {error}"))
+}
+
+/// The stored sources, storing a device id the first time one is made.
+pub async fn load(db: &db::Db) -> Result<Sources, db::DbError> {
+    let stored = db.load_sources().await?;
+    let fresh = stored.device_id.is_none();
+    let sources = Sources::from(stored);
+    if fresh {
+        db.set_device_id(&sources.device_id).await?;
+    }
+    Ok(sources)
+}
+
+/// Write what moved between `before` and `after`; a removed server goes last, once nothing else names it.
+async fn persist(db: &db::Db, before: &Sources, after: &Sources) -> Result<(), db::DbError> {
+    for saved in &after.servers {
+        if before.find_saved_server(&saved.id) != Some(saved) {
+            db.save_server(saved).await?;
+        }
+    }
+    if let Some(server) = &after.server
+        && before.server.as_ref() != Some(server)
+    {
+        db.save_active_server(server).await?;
+    }
+    for (id, folders) in &after.folders {
+        if before.folders.get(id) != Some(folders) {
+            db.set_server_folders(id, folders).await?;
+        }
+    }
+    for id in before.folders.keys() {
+        if !after.folders.contains_key(id) {
+            db.set_server_folders(id, &[]).await?;
+        }
+    }
+    if before.active != after.active {
+        db.set_active_source(&after.active).await?;
+    }
+    if before.device_id != after.device_id {
+        db.set_device_id(&after.device_id).await?;
+    }
+    let active_id = after
+        .server
+        .as_ref()
+        .and_then(|server| server.id.as_deref());
+    for saved in &before.servers {
+        if after.find_saved_server(&saved.id).is_none() && active_id != Some(saved.id.as_str()) {
+            db.delete_server(&saved.id).await?;
+        }
+    }
+    Ok(())
 }
 
 /// The in-process capability struct, as the wire describes it.
@@ -218,26 +272,81 @@ impl SourceService {
             .map_err(source_error)
     }
 
-    pub fn new(db: db::Db, session: SessionHandle, config: Arc<ConfigService>) -> Arc<Self> {
-        Self::with_upstream(db, session, config, Arc::new(Network))
+    pub fn new(
+        db: db::Db,
+        session: SessionHandle,
+        config: Arc<ConfigService>,
+        sources: Arc<Sources>,
+    ) -> Arc<Self> {
+        Self::with_upstream(db, session, config, sources, Arc::new(Network))
     }
 
     pub(crate) fn with_upstream(
         db: db::Db,
         session: SessionHandle,
         config: Arc<ConfigService>,
+        sources: Arc<Sources>,
         upstream: Arc<dyn Upstream>,
     ) -> Arc<Self> {
         Arc::new(Self {
             db,
             session,
             config,
+            current: tokio::sync::Mutex::new(sources),
             status: Mutex::new(HashMap::new()),
             probes: AtomicU64::new(0),
             upstream,
             recovery: Recovery::default(),
             runtime: tokio::runtime::Handle::current(),
         })
+    }
+
+    pub async fn snapshot(&self) -> Arc<Sources> {
+        self.current.lock().await.clone()
+    }
+
+    /// Change the sources, persist what moved, and pass them on while still locked, so the session sees changes in the order they were saved.
+    pub async fn mutate(
+        &self,
+        mutate: impl FnOnce(&mut Sources) + Send,
+    ) -> Result<Arc<Sources>, ApiError> {
+        let mut held = self.current.lock().await;
+        let mut next = Sources::clone(&held);
+        mutate(&mut next);
+        if next == **held {
+            return Ok(held.clone());
+        }
+        persist(&self.db, &held, &next).await.map_err(db_error)?;
+        let next = Arc::new(next);
+        *held = next.clone();
+        self.session
+            .set_active_source(Some(self.build_active(&next)));
+        self.session.set_sources(next.clone());
+        Ok(next)
+    }
+
+    fn build_active(&self, sources: &Sources) -> server::source::ActiveSource {
+        Arc::from(server::source::active(self.db.clone(), sources))
+    }
+
+    /// Rebuild the active media source after the folder sources changed beside it.
+    async fn refresh_active(&self) {
+        let held = self.current.lock().await;
+        self.session
+            .set_active_source(Some(self.build_active(&held)));
+    }
+
+    /// Remember that the user picked a source, which only the first pick has to write.
+    async fn mark_chosen(&self) -> Result<(), ApiError> {
+        if self.current().await.source_explicitly_set {
+            return Ok(());
+        }
+        self.config
+            .mutate_state(&["source_explicitly_set"], |config| {
+                config.source_explicitly_set = true;
+            })
+            .await?;
+        Ok(())
     }
 
     /// The last probe answer for `id`, if it has been probed.
@@ -277,23 +386,21 @@ impl SourceService {
         Ok(())
     }
 
-    /// The config as it would be with `id` active, and the source built from
-    /// it. Used to describe a source without switching to it.
-    async fn resolve(
-        &self,
-        id: &str,
-    ) -> Result<(config::AppConfig, server::source::ActiveSource), ApiError> {
-        let mut config = self.current().await;
+    /// The sources as they would be with `id` active and the source built from them, to describe one without switching to it.
+    async fn resolve(&self, id: &str) -> Result<(Sources, server::source::ActiveSource), ApiError> {
+        let mut sources = Sources::clone(&*self.snapshot().await);
         match config::Source::from_column(id) {
             config::Source::LocalLibrary(local_id) => {
-                if !config
+                if !self
+                    .current()
+                    .await
                     .local_sources
                     .iter()
                     .any(|saved| saved.id == local_id)
                 {
                     return Err(ApiError::not_found("no such local source"));
                 }
-                config.set_active_local_source(config::Source::LocalLibrary(local_id));
+                sources.set_active_local(config::Source::LocalLibrary(local_id));
             }
             config::Source::Server(server_id) => {
                 let server = self
@@ -302,20 +409,21 @@ impl SourceService {
                     .await
                     .map_err(db_error)?
                     .ok_or_else(|| ApiError::not_found("no such server"))?;
-                config.set_active_server_snapshot(server);
+                sources.set_active_server(server);
             }
         }
-        let active = Arc::from(server::source::active(self.db.clone(), &config));
-        Ok((config, active))
+        let active = self.build_active(&sources);
+        Ok((sources, active))
     }
 
     pub async fn sources(&self) -> Result<Vec<SourceInfo>, ApiError> {
         let config = self.current().await;
+        let servers = self.snapshot().await;
         let ids: Vec<String> = config
             .local_sources
             .iter()
             .map(|source| source.id.clone())
-            .chain(config.servers.iter().map(|server| server.id.clone()))
+            .chain(servers.servers.iter().map(|server| server.id.clone()))
             .collect();
         let mut sources = Vec::with_capacity(ids.len());
         for id in ids {
@@ -326,18 +434,19 @@ impl SourceService {
 
     pub async fn source_info(&self, id: &str) -> Result<SourceInfo, ApiError> {
         let current = self.current().await;
+        let active = self.snapshot().await.active.clone();
         let (resolved, source) = self.resolve(id).await?;
-        let key = resolved.active_source.clone();
+        let key = resolved.active.clone();
         let mut info = SourceInfo {
             id: key.as_str().to_string(),
-            active: current.active_source.as_str() == key.as_str(),
+            active: active.as_str() == key.as_str(),
             capabilities: capabilities(source.as_ref()),
             state: self.status(key.as_str()),
             ..Default::default()
         };
         match &key {
             config::Source::LocalLibrary(local_id) => {
-                let saved = resolved
+                let saved = current
                     .local_sources
                     .iter()
                     .find(|saved| saved.id == *local_id)
@@ -427,22 +536,21 @@ impl SourceService {
     }
 
     pub async fn switch_source(&self, id: &str) -> Result<SourceInfo, ApiError> {
-        self.config.ensure_unlocked(&["active_source", "server"])?;
-        let previous = self.current().await.active_source;
+        let previous = self.snapshot().await.active.clone();
         let (target, _) = self.resolve(id).await?;
-        let source = target.active_source.clone();
+        let source = target.active.clone();
         let changed = previous != source;
         let server = target.server.clone();
-        self.config
-            .mutate_state(&["active_source", "server"], move |config| match source {
-                config::Source::LocalLibrary(_) => config.set_active_local_source(source),
-                config::Source::Server(_) => {
-                    if let Some(server) = server {
-                        config.set_active_server_snapshot(server);
-                    }
+        self.mark_chosen().await?;
+        self.mutate(move |sources| match source {
+            config::Source::LocalLibrary(_) => sources.set_active_local(source),
+            config::Source::Server(_) => {
+                if let Some(server) = server {
+                    sources.set_active_server(server);
                 }
-            })
-            .await?;
+            }
+        })
+        .await?;
         if changed {
             self.finish_source_change();
         }
@@ -483,13 +591,13 @@ impl SourceService {
                 }
             })
             .await?;
+        self.refresh_active().await;
         self.session.invalidate(Table::Servers);
         self.source_info(&id).await
     }
 
     async fn delete_folder_source(&self, id: &str) -> Result<(), ApiError> {
-        self.config
-            .ensure_unlocked(&["active_source", "local_sources"])?;
+        self.config.ensure_unlocked(&["local_sources"])?;
         if id == config::DEFAULT_LOCAL_ID {
             return Err(ApiError::invalid_input(
                 "the default folder source cannot be deleted",
@@ -499,14 +607,28 @@ impl SourceService {
         if !current.local_sources.iter().any(|source| source.id == id) {
             return Err(ApiError::not_found("no such source"));
         }
-        let was_active = current.active_source.local_library_id() == Some(id);
+        let was_active = self.snapshot().await.active.local_library_id() == Some(id);
         let id_owned = id.to_string();
-        // The session drops this source's queue itself once its pending saves land, so none outlives the purge.
+        let keys: &[&str] = if was_active {
+            &["local_sources", "source_explicitly_set"]
+        } else {
+            &["local_sources"]
+        };
+        // The folder list goes first, so the session forgets the queue of the source it leaves rather than parking it.
         self.config
-            .mutate_state(&["local_sources", "active_source"], move |config| {
-                config.remove_local_source(&id_owned)
+            .mutate_state(keys, move |config| {
+                config.remove_local_source(&id_owned);
+                if was_active {
+                    config.source_explicitly_set = true;
+                }
             })
             .await?;
+        // The session drops this source's queue itself once its pending saves land, so none outlives the purge.
+        if was_active {
+            self.mutate(Sources::clear_active).await?;
+        } else {
+            self.refresh_active().await;
+        }
         self.db
             .purge_source(&config::Source::from_column(id))
             .await
@@ -555,6 +677,7 @@ impl SourceService {
                 }
             })
             .await?;
+        self.refresh_active().await;
         self.session.invalidate(Table::Servers);
         self.source_info(id).await
     }
@@ -600,7 +723,6 @@ impl SourceService {
     }
 
     async fn upsert_server(&self, draft: SourceDraft) -> Result<SourceInfo, ApiError> {
-        self.config.ensure_unlocked(&["server", "servers"])?;
         let service = Self::drafted_service(&draft)?;
         let (_, problems) = crate::services::check(service, &draft);
         if let Some(problem) = problems.first() {
@@ -620,51 +742,54 @@ impl SourceService {
             .map(str::trim)
             .filter(|secret| !secret.is_empty())
             .map(str::to_string);
-        let current = self.current().await;
+        let current = self.snapshot().await;
         // Changing where the active server points invalidates whatever is
         // loaded from it, so playback stops rather than carrying on against
         // the old backend.
-        let backend_changed = current.active_source.server_id() == Some(id.as_str())
+        let backend_changed = current.active.server_id() == Some(id.as_str())
             && current
                 .server
                 .as_ref()
                 .is_some_and(|server| server.service != saved.service || server.url != saved.url);
-        self.config
-            .mutate_state(&["servers", "server"], move |config| {
-                match config.servers.iter_mut().find(|entry| entry.id == saved.id) {
-                    // The form carries neither the imported profile nor the
-                    // account choice, so an edit keeps them unless the source
-                    // now speaks another service.
-                    Some(existing) => {
-                        let same_service = existing.service == saved.service;
-                        let profile = existing.yt_profile.take().filter(|_| same_service);
-                        let account = existing.account.take().filter(|_| same_service);
-                        *existing = saved.clone();
-                        existing.yt_profile = profile;
-                        existing.account = account;
-                    }
-                    None => config.servers.push(saved.clone()),
+        self.mutate(move |sources| {
+            match sources
+                .servers
+                .iter_mut()
+                .find(|entry| entry.id == saved.id)
+            {
+                // The form carries neither the imported profile nor the
+                // account choice, so an edit keeps them unless the source
+                // now speaks another service.
+                Some(existing) => {
+                    let same_service = existing.service == saved.service;
+                    let profile = existing.yt_profile.take().filter(|_| same_service);
+                    let account = existing.account.take().filter(|_| same_service);
+                    *existing = saved.clone();
+                    existing.yt_profile = profile;
+                    existing.account = account;
                 }
-                if config.active_source.server_id() == Some(saved.id.as_str())
-                    && let Some(server) = config.server.as_mut()
-                {
-                    if server.service != saved.service {
-                        server.account = None;
-                    }
-                    server.name.clone_from(&saved.name);
-                    server.url.clone_from(&saved.url);
-                    server.service = saved.service;
-                    server.yt_browser = saved.yt_browser;
-                    server.yt_anonymous = saved.yt_anonymous;
-                    server
-                        .apple_music_storefront
-                        .clone_from(&saved.apple_music_storefront);
-                    server
-                        .apple_music_language
-                        .clone_from(&saved.apple_music_language);
+                None => sources.servers.push(saved.clone()),
+            }
+            if sources.active.server_id() == Some(saved.id.as_str())
+                && let Some(server) = sources.server.as_mut()
+            {
+                if server.service != saved.service {
+                    server.account = None;
                 }
-            })
-            .await?;
+                server.name.clone_from(&saved.name);
+                server.url.clone_from(&saved.url);
+                server.service = saved.service;
+                server.yt_browser = saved.yt_browser;
+                server.yt_anonymous = saved.yt_anonymous;
+                server
+                    .apple_music_storefront
+                    .clone_from(&saved.apple_music_storefront);
+                server
+                    .apple_music_language
+                    .clone_from(&saved.apple_music_language);
+            }
+        })
+        .await?;
         if backend_changed {
             self.session.reset_playback().await?;
         }
@@ -684,9 +809,7 @@ impl SourceService {
         self.source_info(&id).await
     }
 
-    /// Answer a source's own options. An absent key is left alone; the Spotify
-    /// ones live on the config rather than the server row, so both are written
-    /// in the one mutation.
+    /// Answer a source's own options, leaving absent keys alone; the Spotify ones are settings, so they go through the config first.
     pub async fn set_source_settings(
         &self,
         id: &str,
@@ -698,78 +821,81 @@ impl SourceService {
         ) {
             return self.set_folder_settings(id, &values).await;
         }
-        let current = self.current().await;
-        let Some(existing) = current.servers.iter().find(|server| server.id == id) else {
+        let current = self.snapshot().await;
+        let Some(existing) = current.find_saved_server(id) else {
             return Err(ApiError::not_found("no such server"));
         };
-        let mut keys = vec!["servers".to_string()];
-        keys.extend(
-            crate::services::config_keys(existing, &values)
-                .into_iter()
-                .map(str::to_string),
-        );
+        let config_keys = crate::services::config_keys(existing, &values);
+        let service = existing.service;
         let folders = api::schema::value_of(&values, crate::services::DIRECTORIES)
             .map(api::schema::decode_directories);
-        if let Some(folders) = &folders {
-            if folders.iter().any(|path| path.trim().is_empty()) {
-                return Err(ApiError::invalid_input(
-                    "a source directory cannot be empty",
-                ));
-            }
-            keys.push("server_folders".to_string());
+        if let Some(folders) = &folders
+            && folders.iter().any(|path| path.trim().is_empty())
+        {
+            return Err(ApiError::invalid_input(
+                "a source directory cannot be empty",
+            ));
         }
-        let locked: Vec<&str> = keys.iter().map(String::as_str).collect();
-        self.config.ensure_unlocked(&locked)?;
+        self.config.ensure_unlocked(&config_keys)?;
+        if !config_keys.is_empty() {
+            let answers = values.clone();
+            self.config
+                .mutate_state(&config_keys, move |config| {
+                    crate::services::apply_config_settings(service, &answers, config);
+                })
+                .await?;
+        }
         let target = id.to_string();
-        self.config
-            .mutate_state(&locked, move |config| {
-                let Some(index) = config.servers.iter().position(|server| server.id == target)
-                else {
-                    return;
-                };
-                let mut saved = config.servers[index].clone();
-                crate::services::apply_server_settings(&values, &mut saved);
-                crate::services::apply_config_settings(saved.service, &values, config);
-                config.servers[index] = saved.clone();
-                if let Some(folders) = folders {
-                    config.set_folders_for(&saved.id, folders);
-                }
-                if config.active_source.server_id() == Some(saved.id.as_str())
-                    && let Some(server) = config.server.as_mut()
-                {
-                    server.yt_browser = saved.yt_browser;
-                    server
-                        .apple_music_storefront
-                        .clone_from(&saved.apple_music_storefront);
-                    server
-                        .apple_music_language
-                        .clone_from(&saved.apple_music_language);
-                }
-            })
-            .await?;
+        self.mutate(move |sources| {
+            let Some(index) = sources
+                .servers
+                .iter()
+                .position(|server| server.id == target)
+            else {
+                return;
+            };
+            let mut saved = sources.servers[index].clone();
+            crate::services::apply_server_settings(&values, &mut saved);
+            sources.servers[index] = saved.clone();
+            if let Some(folders) = folders {
+                sources.set_folders_for(&saved.id, folders);
+            }
+            if sources.active.server_id() == Some(saved.id.as_str())
+                && let Some(server) = sources.server.as_mut()
+            {
+                server.yt_browser = saved.yt_browser;
+                server
+                    .apple_music_storefront
+                    .clone_from(&saved.apple_music_storefront);
+                server
+                    .apple_music_language
+                    .clone_from(&saved.apple_music_language);
+            }
+        })
+        .await?;
         self.session.invalidate(Table::Servers);
         self.source_info(id).await
     }
 
     async fn delete_server(&self, id: &str) -> Result<(), ApiError> {
-        self.config
-            .ensure_unlocked(&["active_source", "server", "servers"])?;
-        let current = self.current().await;
+        let current = self.snapshot().await;
         let service = current
             .servers
             .iter()
             .find(|server| server.id == id)
             .map(|server| server.service);
-        let was_active = current.active_source.server_id() == Some(id);
+        let was_active = current.active.server_id() == Some(id);
         let id_owned = id.to_string();
-        self.config
-            .mutate_state(&["servers", "active_source", "server"], move |config| {
-                config.remove_saved_server(&id_owned);
-                if was_active {
-                    config.clear_active_server();
-                }
-            })
-            .await?;
+        if was_active {
+            self.mark_chosen().await?;
+        }
+        self.mutate(move |sources| {
+            sources.remove_saved_server(&id_owned);
+            if was_active {
+                sources.clear_active();
+            }
+        })
+        .await?;
         if was_active {
             self.finish_source_change();
         } else {
@@ -810,7 +936,6 @@ impl SourceService {
         provision: CredentialProvision,
         profile: Option<String>,
     ) -> Result<SourceInfo, ApiError> {
-        self.config.ensure_unlocked(&["server", "servers"])?;
         if provision.secret.is_empty() {
             return Err(ApiError::invalid_input("the credential is empty"));
         }
@@ -838,33 +963,36 @@ impl SourceService {
             server.account = None;
         }
         let active = self
-            .current()
+            .snapshot()
             .await
-            .active_source
+            .active
             .server_id()
             .is_some_and(|id| id == provision.server_id);
         let token = server.access_token.clone();
         let user = server.user_id.clone();
         let mut saved = config::SavedServer::from_music_server(&server);
         let mut live = server.clone();
-        self.config
-            .mutate_state(&["servers", "server"], move |config| {
-                match config.servers.iter_mut().find(|entry| entry.id == saved.id) {
-                    Some(existing) => {
-                        // `server` was loaded before the lock, so a switch_account in between wins.
-                        if !user_changed {
-                            saved.account = existing.account.clone();
-                            live.account = existing.account.clone();
-                        }
-                        *existing = saved;
+        self.mutate(move |sources| {
+            match sources
+                .servers
+                .iter_mut()
+                .find(|entry| entry.id == saved.id)
+            {
+                Some(existing) => {
+                    // `server` was loaded before the lock, so a switch_account in between wins.
+                    if !user_changed {
+                        saved.account = existing.account.clone();
+                        live.account = existing.account.clone();
                     }
-                    None => config.servers.push(saved),
+                    *existing = saved;
                 }
-                if active {
-                    config.server = Some(live);
-                }
-            })
-            .await?;
+                None => sources.servers.push(saved),
+            }
+            if active {
+                sources.server = Some(live);
+            }
+        })
+        .await?;
         self.db
             .set_server_credentials(&provision.server_id, token.as_deref(), user.as_deref())
             .await
@@ -885,13 +1013,12 @@ impl SourceService {
     }
 
     pub async fn login_source(&self, request: SourceLoginRequest) -> Result<SourceInfo, ApiError> {
-        self.config.ensure_unlocked(&["server", "servers"])?;
         if request.username.trim().is_empty() || request.password.is_empty() {
             return Err(ApiError::invalid_input(
                 "a username and password are required",
             ));
         }
-        let current = self.current().await;
+        let device_id = self.snapshot().await.device_id.clone();
         let server = self
             .db
             .load_server(&request.server_id)
@@ -907,7 +1034,7 @@ impl SourceService {
                 user_id: account.id.to_string(),
             }
         } else {
-            server::provider::ProviderClient::new(server.service, server.url, current.device_id)
+            server::provider::ProviderClient::new(server.service, server.url, device_id)
                 .login(request.username.trim(), &request.password)
                 .await
                 .map_err(|error| ApiError::new(ErrorCode::SourceAuthExpired, error))?
@@ -922,7 +1049,6 @@ impl SourceService {
     }
 
     pub async fn clear_credentials(&self, id: &str) -> Result<(), ApiError> {
-        self.config.ensure_unlocked(&["server", "servers"])?;
         let mut server = self
             .db
             .load_server(id)
@@ -933,9 +1059,9 @@ impl SourceService {
         server.access_token = None;
         server.user_id = None;
         let active = self
-            .current()
+            .snapshot()
             .await
-            .active_source
+            .active
             .server_id()
             .is_some_and(|server_id| server_id == id);
         self.db
@@ -943,8 +1069,7 @@ impl SourceService {
             .await
             .map_err(db_error)?;
         if active {
-            self.config
-                .mutate_state(&["server"], move |config| config.server = Some(server))
+            self.mutate(move |sources| sources.server = Some(server))
                 .await?;
             if had_credentials {
                 self.session.reset_playback().await?;
@@ -959,7 +1084,6 @@ impl SourceService {
     /// The secret never leaves this process: the caller learns only that the
     /// source is now authenticated.
     pub async fn authenticate_source(&self, id: &str) -> Result<SourceInfo, ApiError> {
-        self.config.ensure_unlocked(&["server", "servers"])?;
         #[cfg(target_os = "android")]
         {
             let source = self
@@ -1094,7 +1218,6 @@ impl SourceService {
         id: &str,
         session: &str,
     ) -> Result<SourceInfo, ApiError> {
-        self.config.ensure_unlocked(&["server", "servers"])?;
         let server = self
             .db
             .load_server(id)
@@ -1246,7 +1369,6 @@ impl SourceService {
         id: &str,
         account: Option<String>,
     ) -> Result<(SourceInfo, bool), ApiError> {
-        self.config.ensure_unlocked(&["server", "servers"])?;
         let (_, source) = self.resolve(id).await?;
         if !source.capabilities().accounts {
             return Err(ApiError::unsupported(
@@ -1254,36 +1376,33 @@ impl SourceService {
             ));
         }
         let account = account.filter(|account| !account.is_empty());
-        let current = self.current().await;
+        let current = self.snapshot().await;
         let previous = current
-            .servers
-            .iter()
-            .find(|server| server.id == id)
+            .find_saved_server(id)
             .ok_or_else(|| ApiError::not_found("no such server"))?
             .account
             .clone();
         if previous == account {
             return Ok((self.source_info(id).await?, false));
         }
-        let active = current.active_source.server_id() == Some(id);
+        let active = current.active.server_id() == Some(id);
         let target = id.to_string();
         // Likes queued under the old account would otherwise be pushed to the new one.
         self.db
             .discard_pending_favorites(id)
             .await
             .map_err(db_error)?;
-        self.config
-            .mutate_state(&["servers", "server"], move |config| {
-                if let Some(saved) = config.servers.iter_mut().find(|s| s.id == target) {
-                    saved.account.clone_from(&account);
-                }
-                if config.active_source.server_id() == Some(target.as_str())
-                    && let Some(server) = config.server.as_mut()
-                {
-                    server.account = account;
-                }
-            })
-            .await?;
+        self.mutate(move |sources| {
+            if let Some(saved) = sources.servers.iter_mut().find(|s| s.id == target) {
+                saved.account.clone_from(&account);
+            }
+            if sources.active.server_id() == Some(target.as_str())
+                && let Some(server) = sources.server.as_mut()
+            {
+                server.account = account;
+            }
+        })
+        .await?;
         if active {
             self.session.reset_playback().await?;
             self.finish_source_change();
@@ -1331,13 +1450,7 @@ impl SourceService {
     }
 
     async fn recover_active(&self, seen: u64) -> bool {
-        let Some(id) = self
-            .current()
-            .await
-            .active_source
-            .server_id()
-            .map(str::to_string)
-        else {
+        let Some(id) = self.snapshot().await.active.server_id().map(str::to_string) else {
             return false;
         };
         // Once recovery gives up, the re-probe retries it, so each request against
@@ -1402,20 +1515,16 @@ impl SourceService {
     }
 
     /// Probe the active source whenever it or its server entry changes, and retry one that is not online.
-    pub fn watch_active(
-        self: &Arc<Self>,
-        mut config: tokio::sync::watch::Receiver<config::AppConfig>,
-    ) {
+    pub fn watch_active(self: &Arc<Self>, mut sources: tokio::sync::watch::Receiver<Arc<Sources>>) {
         let service = self.clone();
         tokio::spawn(async move {
-            let key =
-                |config: &config::AppConfig| (config.active_source.clone(), config.server.clone());
+            let key = |sources: &Sources| (sources.active.clone(), sources.server.clone());
             let mut probed: Option<(config::Source, Option<config::MusicServer>)> = None;
             let mut retry = tokio::time::interval(RETRY_PROBE);
             retry.tick().await;
             let mut retry_due = false;
             loop {
-                let next = key(&config.borrow_and_update());
+                let next = key(&sources.borrow_and_update());
                 let id = next.0.as_str().to_string();
                 let moved = probed.as_ref() != Some(&next);
                 let unsettled = retry_due && service.status(&id) != Some(SourceState::Online);
@@ -1431,7 +1540,7 @@ impl SourceService {
                     });
                 }
                 retry_due = tokio::select! {
-                    changed = config.changed() => {
+                    changed = sources.changed() => {
                         if changed.is_err() {
                             break;
                         }
@@ -1471,10 +1580,7 @@ impl SourceService {
     }
 
     async fn refresh_ytmusic_client_version(&self) {
-        let config = self.current().await;
-        if config.server.as_ref().map(|server| server.service)
-            != Some(config::MusicService::YtMusic)
-        {
+        if self.snapshot().await.active_service() != Some(config::MusicService::YtMusic) {
             return;
         }
         if let Err(error) = server::ytmusic::clients::refresh_live_version().await {
@@ -1483,7 +1589,7 @@ impl SourceService {
     }
 
     async fn rotate_ytmusic(&self) {
-        let Some((cookies, id)) = ytmusic_rotation(&self.current().await) else {
+        let Some((cookies, id)) = ytmusic_rotation(&*self.snapshot().await) else {
             return;
         };
         match server::ytmusic::verify_session_keepalive::tick(&cookies).await {
@@ -1507,8 +1613,8 @@ impl SourceService {
     }
 
     async fn refresh_spotify(&self) {
-        let config = self.current().await;
-        let Some(server) = config
+        let sources = self.snapshot().await;
+        let Some(server) = sources
             .server
             .as_ref()
             .filter(|server| server.service == config::MusicService::Spotify)
@@ -1517,7 +1623,7 @@ impl SourceService {
         };
         let (Some(packed), Some(id)) = (
             server.access_token.clone(),
-            config.active_source.server_id().map(str::to_string),
+            sources.active.server_id().map(str::to_string),
         ) else {
             return;
         };
@@ -1541,9 +1647,9 @@ impl SourceService {
     }
 }
 
-fn ytmusic_rotation(config: &config::AppConfig) -> Option<(String, String)> {
-    let cookies = config.server.as_ref()?.ytmusic_cookies()?.to_string();
-    let id = config.active_source.server_id()?.to_string();
+fn ytmusic_rotation(sources: &server::sources::Sources) -> Option<(String, String)> {
+    let cookies = sources.server.as_ref()?.ytmusic_cookies()?.to_string();
+    let id = sources.active.server_id()?.to_string();
     Some((cookies, id))
 }
 
@@ -1644,7 +1750,7 @@ mod tests {
         assert!(SourceService::validate_server_id("jellyfin-1").is_ok());
     }
 
-    fn youtube_music(anonymous: bool) -> config::AppConfig {
+    fn youtube_music(anonymous: bool) -> server::sources::Sources {
         let mut server = config::MusicServer::new_with_service(
             "YouTube Music".into(),
             "https://music.youtube.com".into(),
@@ -1653,9 +1759,9 @@ mod tests {
         server.id = Some("yt".into());
         server.access_token = Some("SAPISID=leftover".into());
         server.yt_anonymous = anonymous;
-        config::AppConfig {
+        server::sources::Sources {
             server: Some(server),
-            active_source: config::Source::Server("yt".into()),
+            active: config::Source::Server("yt".into()),
             ..Default::default()
         }
     }
@@ -1729,15 +1835,14 @@ mod tests {
                 .servers
                 .push(config::SavedServer::from_music_server(server));
         }
+        persist(&db, &Sources::default(), &seeded)
+            .await
+            .expect("seed the database");
         let config = Arc::new(ConfigService::new(
             db.clone(),
             dir.path().join("settings.toml"),
-            seeded,
+            config::AppConfig::default(),
         ));
-        config
-            .mutate_state(&[], |_| {})
-            .await
-            .expect("seed the database");
         let player =
             player::player::Player::try_with_sink(Box::new(player::engine::NullSink::new()))
                 .expect("headless player starts");
@@ -1748,7 +1853,8 @@ mod tests {
             Arc::new(|_| None),
         );
         config.attach_session(session.clone());
-        let sources = SourceService::with_upstream(db.clone(), session, config, upstream);
+        let sources =
+            SourceService::with_upstream(db.clone(), session, config, Arc::new(seeded), upstream);
         Fixture {
             _dir: dir,
             db,
@@ -1773,9 +1879,10 @@ mod tests {
                 }
                 Ok(fixture
                     .sources
-                    .current()
+                    .snapshot()
                     .await
                     .server
+                    .clone()
                     .and_then(|server| server.access_token))
             })
             .await
@@ -1902,11 +2009,10 @@ mod tests {
                 .expect("server");
             let saved = fixture
                 .sources
-                .current()
+                .snapshot()
                 .await
-                .servers
-                .into_iter()
-                .find(|saved| saved.id == "yt")
+                .find_saved_server("yt")
+                .cloned()
                 .expect("saved");
             assert_eq!(saved.yt_profile, server.yt_profile);
             server.yt_profile
@@ -1965,5 +2071,83 @@ mod tests {
             ytmusic_rotation(&youtube_music(false)),
             Some(("SAPISID=leftover".into(), "yt".into()))
         );
+    }
+
+    struct NoTracks;
+
+    #[async_trait::async_trait]
+    impl crate::session::QueueMaterializer for NoTracks {
+        async fn materialize(&self, _: &api::QueueContext) -> Result<Vec<reader::Track>, ApiError> {
+            Ok(Vec::new())
+        }
+    }
+
+    async fn reaches_the_session(session: &SessionHandle, active: &config::Source) {
+        let mut sources = session.sources_watch();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            sources.wait_for(|s| s.active == *active),
+        )
+        .await
+        .expect("the session adopts the change")
+        .expect("the session is running");
+    }
+
+    #[tokio::test]
+    async fn a_switch_and_a_deleted_active_folder_source_are_stored_and_reach_the_session() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let database = db::init(&dir.path().join("sources.db")).await.expect("db");
+        let mut seeded = config::AppConfig::default();
+        seeded.local_sources.push(config::SavedLocalSource {
+            id: "local:b".into(),
+            name: "B".into(),
+            directories: Vec::new(),
+        });
+        let config = Arc::new(ConfigService::new(
+            database.clone(),
+            dir.path().join("settings.toml"),
+            seeded.clone(),
+        ));
+        let player =
+            player::player::Player::try_with_sink(Box::new(player::engine::NullSink::new()))
+                .expect("headless player starts");
+        let session = SessionHandle::spawn_with_player(
+            Arc::new(NoTracks),
+            player,
+            crate::PlaybackServices {
+                config: seeded,
+                ..Default::default()
+            },
+        );
+        config.attach_session(session.clone());
+        let service = SourceService::new(
+            database.clone(),
+            session.clone(),
+            config.clone(),
+            session.sources(),
+        );
+        let b = config::Source::LocalLibrary("local:b".into());
+
+        let info = service.switch_source("local:b").await.expect("switch");
+        assert!(info.active);
+        assert_eq!(database.load_sources().await.expect("load").active, b);
+        assert!(config.snapshot().await.source_explicitly_set);
+        reaches_the_session(&session, &b).await;
+
+        service.delete_source("local:b").await.expect("delete");
+        let fallback = config::Source::default();
+        assert_eq!(
+            database.load_sources().await.expect("load").active,
+            fallback
+        );
+        assert!(
+            !config
+                .snapshot()
+                .await
+                .local_sources
+                .iter()
+                .any(|saved| saved.id == "local:b")
+        );
+        reaches_the_session(&session, &fallback).await;
     }
 }

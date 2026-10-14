@@ -359,6 +359,10 @@ impl ReadStore for Native {
         cfg_store::load_server(&self.pool(), id).await
     }
 
+    async fn load_sources(&self) -> Result<crate::StoredSources, DbError> {
+        cfg_store::load_sources(&self.pool()).await
+    }
+
     async fn set_server_credentials(
         &self,
         id: &str,
@@ -416,6 +420,30 @@ impl Storage for Native {
         cfg_store::purge_source(&mut tx, source.as_str()).await?;
         tx.commit().await?;
         Ok(())
+    }
+
+    async fn save_server(&self, server: &config::SavedServer) -> Result<(), DbError> {
+        cfg_store::save_server(&self.pool(), server).await
+    }
+
+    async fn save_active_server(&self, server: &config::MusicServer) -> Result<(), DbError> {
+        cfg_store::save_active_server(&self.pool(), server).await
+    }
+
+    async fn delete_server(&self, id: &str) -> Result<(), DbError> {
+        cfg_store::delete_server(&self.pool(), id).await
+    }
+
+    async fn set_active_source(&self, source: &crate::Source) -> Result<(), DbError> {
+        cfg_store::set_active_source(&self.pool(), source).await
+    }
+
+    async fn set_server_folders(&self, id: &str, folders: &[String]) -> Result<(), DbError> {
+        cfg_store::set_server_folders(&self.pool(), id, folders).await
+    }
+
+    async fn set_device_id(&self, device_id: &str) -> Result<(), DbError> {
+        cfg_store::set_device_id(&self.pool(), device_id).await
     }
 
     async fn import_legacy_json(&self, config_dir: &Path) -> Result<crate::ImportReport, DbError> {

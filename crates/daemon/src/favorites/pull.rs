@@ -66,9 +66,9 @@ impl super::FavoritesService {
 
     /// Import the remote favorites and answer whether it did; `force` skips the staleness gate, and without a `ctx` nothing reports progress or cancels it.
     pub(super) async fn pull(&self, ctx: Option<&JobCtx>, force: bool) -> Result<bool, ApiError> {
-        let config = self.session.config_watch().borrow().clone();
+        let sources = self.session.sources();
         let source: ActiveSource =
-            std::sync::Arc::from(server::source::active(self.db.clone(), &config));
+            std::sync::Arc::from(server::source::active(self.db.clone(), &sources));
         if !source.capabilities().sync {
             return Ok(false);
         }

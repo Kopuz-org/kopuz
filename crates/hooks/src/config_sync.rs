@@ -128,14 +128,14 @@ mod tests {
     fn a_field_only_the_daemon_writes_reaches_the_copy() {
         let baseline = config(4, false);
         let mut daemon = baseline.clone();
-        daemon
-            .server_folders
-            .insert("srv".into(), vec!["/music".into()]);
+        let added = config::SavedLocalSource {
+            id: "local:a".into(),
+            name: "a".into(),
+            directories: vec!["/music".into()],
+        };
+        daemon.local_sources.push(added.clone());
         let (next, _) = moved(&baseline, &baseline, &daemon).expect("folders moved");
-        assert_eq!(
-            next.server_folders.get("srv").map(Vec::as_slice),
-            Some(&["/music".to_string()][..])
-        );
+        assert_eq!(next.local_sources.last(), Some(&added));
     }
 
     #[test]

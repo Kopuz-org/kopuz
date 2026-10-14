@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use api::JobKind;
+use server::sources::Sources;
 use tokio::sync::watch;
 use tokio::time::Instant;
 
@@ -119,13 +120,13 @@ struct Syncs {
 
 impl Syncs {
     /// Start what is due; the answer is how long to wait before looking again.
-    async fn check(&self, config: &config::AppConfig) -> Option<Duration> {
+    async fn check(&self, config: &config::AppConfig, sources: &Sources) -> Option<Duration> {
         // A local library has nothing to pull; it has the file scan.
-        let active = server::source::active(self.db.clone(), config);
+        let active = server::source::active(self.db.clone(), sources);
         if !active.capabilities().sync {
             return None;
         }
-        let source = &config.active_source;
+        let source = &sources.active;
         let plan = plan(&self.db, source, interval(config)).await;
         let mut blocked = false;
         for kind in plan.due {
@@ -160,11 +161,11 @@ impl Syncs {
 const RETRY_BLOCKED: Duration = Duration::from_secs(60);
 
 /// What re-arms the schedule: the source, the interval, and whether the source can sync at all.
-fn arm_key(config: &config::AppConfig) -> (config::Source, u32, bool) {
+fn arm_key(config: &config::AppConfig, sources: &Sources) -> (config::Source, u32, bool) {
     (
-        config.active_source.clone(),
+        sources.active.clone(),
         config.sync_interval_minutes,
-        server::server_ops::ServerConn::resolve(config).is_some(),
+        server::server_ops::ServerConn::resolve(sources).is_some(),
     )
 }
 
@@ -177,31 +178,47 @@ pub(crate) async fn until(deadline: Option<Instant>) {
 }
 
 /// Run `check` now, when its own answer says it is time, and whenever the source, interval or sign-in changes.
-async fn drive<F, Fut>(mut config: watch::Receiver<config::AppConfig>, mut check: F)
-where
-    F: FnMut(config::AppConfig) -> Fut,
+async fn drive<F, Fut>(
+    mut config: watch::Receiver<config::AppConfig>,
+    mut sources: watch::Receiver<Arc<Sources>>,
+    mut check: F,
+) where
+    F: FnMut(config::AppConfig, Arc<Sources>) -> Fut,
     Fut: Future<Output = Option<Duration>>,
 {
     let first = config.borrow_and_update().clone();
-    let mut armed = arm_key(&first);
-    let mut deadline = check(first).await.map(|wait| Instant::now() + wait);
+    let first_sources = sources.borrow_and_update().clone();
+    let mut armed = arm_key(&first, &first_sources);
+    let mut deadline = check(first, first_sources)
+        .await
+        .map(|wait| Instant::now() + wait);
     loop {
         tokio::select! {
             changed = config.changed() => {
                 if changed.is_err() {
                     return;
                 }
-                let next = config.borrow_and_update().clone();
-                let key = arm_key(&next);
-                if key != armed {
-                    armed = key;
-                    deadline = check(next).await.map(|wait| Instant::now() + wait);
+            }
+            changed = sources.changed() => {
+                if changed.is_err() {
+                    return;
                 }
             }
             () = until(deadline) => {
                 let current = config.borrow().clone();
-                deadline = check(current).await.map(|wait| Instant::now() + wait);
+                let current_sources = sources.borrow().clone();
+                deadline = check(current, current_sources).await.map(|wait| Instant::now() + wait);
+                continue;
             }
+        }
+        let next = config.borrow_and_update().clone();
+        let next_sources = sources.borrow_and_update().clone();
+        let key = arm_key(&next, &next_sources);
+        if key != armed {
+            armed = key;
+            deadline = check(next, next_sources)
+                .await
+                .map(|wait| Instant::now() + wait);
         }
     }
 }
@@ -214,6 +231,7 @@ pub fn spawn(
     playlists: Arc<PlaylistService>,
     favorites: Arc<FavoritesService>,
     config: watch::Receiver<config::AppConfig>,
+    sources: watch::Receiver<Arc<Sources>>,
 ) {
     let syncs = Arc::new(Syncs {
         db,
@@ -222,14 +240,14 @@ pub fn spawn(
         playlists,
         favorites,
     });
-    tokio::spawn(drive(config, move |config| {
+    tokio::spawn(drive(config, sources, move |config, sources| {
         let syncs = syncs.clone();
-        async move { syncs.check(&config).await }
+        async move { syncs.check(&config, &sources).await }
     }));
 }
 #[cfg(test)]
 mod tests {
-    use super::{Plan, drive, interval, mark_synced, plan, stamp_key, until_due};
+    use super::{Plan, Sources, drive, interval, mark_synced, plan, stamp_key, until_due};
     use api::JobKind;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -420,17 +438,17 @@ mod tests {
     }
 
     /// Each check is counted and answered with the configured interval, as the real one does when nothing is stamped.
-    fn counting() -> (
-        Arc<AtomicUsize>,
-        impl FnMut(config::AppConfig) -> std::future::Ready<Option<Duration>>,
-    ) {
-        let count = Arc::new(AtomicUsize::new(0));
-        let seen = count.clone();
-        let check = move |config: config::AppConfig| {
+    fn counting(
+        seen: Arc<AtomicUsize>,
+    ) -> impl FnMut(config::AppConfig, Arc<Sources>) -> std::future::Ready<Option<Duration>> {
+        move |config: config::AppConfig, _: Arc<Sources>| {
             seen.fetch_add(1, Ordering::SeqCst);
             std::future::ready(interval(&config))
-        };
-        (count, check)
+        }
+    }
+
+    fn no_sources() -> (watch::Sender<Arc<Sources>>, watch::Receiver<Arc<Sources>>) {
+        watch::channel(Arc::new(Sources::default()))
     }
 
     async fn settle() {
@@ -445,8 +463,10 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn the_interval_elapsing_runs_the_check_again_and_again() {
         let (_tx, rx) = watch::channel(config_every(60));
-        let (count, check) = counting();
-        tokio::spawn(drive(rx, check));
+        let count = Arc::new(AtomicUsize::new(0));
+        let check = counting(count.clone());
+        let (_sources, srx) = no_sources();
+        tokio::spawn(drive(rx, srx, check));
         settle().await;
         assert_eq!(count.load(Ordering::SeqCst), 1, "startup check");
 
@@ -461,8 +481,10 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn changing_the_interval_re_arms_the_timer() {
         let (tx, rx) = watch::channel(config_every(60));
-        let (count, check) = counting();
-        tokio::spawn(drive(rx, check));
+        let count = Arc::new(AtomicUsize::new(0));
+        let check = counting(count.clone());
+        let (_sources, srx) = no_sources();
+        tokio::spawn(drive(rx, srx, check));
         settle().await;
         pass(minutes(10)).await;
 
@@ -487,8 +509,10 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_zero_interval_never_checks_again_until_it_is_raised() {
         let (tx, rx) = watch::channel(config_every(60));
-        let (count, check) = counting();
-        tokio::spawn(drive(rx, check));
+        let count = Arc::new(AtomicUsize::new(0));
+        let check = counting(count.clone());
+        let (_sources, srx) = no_sources();
+        tokio::spawn(drive(rx, srx, check));
         settle().await;
 
         tx.send_modify(|config| config.sync_interval_minutes = 0);
@@ -507,8 +531,10 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn starting_at_zero_checks_once_and_then_idles() {
         let (_tx, rx) = watch::channel(config_every(0));
-        let (count, check) = counting();
-        tokio::spawn(drive(rx, check));
+        let count = Arc::new(AtomicUsize::new(0));
+        let check = counting(count.clone());
+        let (_sources, srx) = no_sources();
+        tokio::spawn(drive(rx, srx, check));
         settle().await;
         pass(Duration::from_secs(7 * 24 * 60 * 60)).await;
         assert_eq!(count.load(Ordering::SeqCst), 1);
@@ -518,8 +544,10 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn an_unrelated_config_write_neither_rechecks_nor_delays_the_timer() {
         let (tx, rx) = watch::channel(config_every(60));
-        let (count, check) = counting();
-        tokio::spawn(drive(rx, check));
+        let count = Arc::new(AtomicUsize::new(0));
+        let check = counting(count.clone());
+        let (_sources, srx) = no_sources();
+        tokio::spawn(drive(rx, srx, check));
         settle().await;
         pass(minutes(30)).await;
 
@@ -537,20 +565,24 @@ mod tests {
     /// A signed-out server checks as unsyncable; signing back in is what has to wake the schedule.
     #[tokio::test(start_paused = true)]
     async fn signing_in_rechecks_at_once() {
-        let mut signed_out = config_every(60);
-        signed_out.active_source = server();
-        signed_out.server = Some(config::MusicServer::new_with_service(
-            "yt".into(),
-            String::new(),
-            config::MusicService::YtMusic,
-        ));
-        let (tx, rx) = watch::channel(signed_out);
-        let (count, check) = counting();
-        tokio::spawn(drive(rx, check));
+        let signed_out = Sources {
+            active: server(),
+            server: Some(config::MusicServer::new_with_service(
+                "yt".into(),
+                String::new(),
+                config::MusicService::YtMusic,
+            )),
+            ..Default::default()
+        };
+        let (_tx, rx) = watch::channel(config_every(60));
+        let (sources, srx) = watch::channel(Arc::new(signed_out));
+        let count = Arc::new(AtomicUsize::new(0));
+        let check = counting(count.clone());
+        tokio::spawn(drive(rx, srx, check));
         settle().await;
 
-        tx.send_modify(|config| {
-            if let Some(server) = config.server.as_mut() {
+        sources.send_modify(|sources| {
+            if let Some(server) = Arc::make_mut(sources).server.as_mut() {
                 server.access_token = Some("cookie".into());
             }
         });
@@ -560,12 +592,14 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn a_source_change_rechecks_at_once() {
-        let (tx, rx) = watch::channel(config_every(60));
-        let (count, check) = counting();
-        tokio::spawn(drive(rx, check));
+        let (_tx, rx) = watch::channel(config_every(60));
+        let count = Arc::new(AtomicUsize::new(0));
+        let check = counting(count.clone());
+        let (sources, srx) = no_sources();
+        tokio::spawn(drive(rx, srx, check));
         settle().await;
 
-        tx.send_modify(|config| config.active_source = server());
+        sources.send_modify(|sources| Arc::make_mut(sources).active = server());
         settle().await;
         assert_eq!(count.load(Ordering::SeqCst), 2);
     }

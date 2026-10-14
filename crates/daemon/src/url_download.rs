@@ -35,6 +35,7 @@ const HISTORY_LIMIT: usize = 50;
 pub struct UrlDownloadService {
     db: db::Db,
     config: Arc<ConfigService>,
+    sources: Arc<crate::sources::SourceService>,
     rescan: std::sync::OnceLock<(Arc<crate::library::LibraryService>, Arc<JobRunner>)>,
 }
 
@@ -379,10 +380,15 @@ async fn write_tags(
 }
 
 impl UrlDownloadService {
-    pub fn new(db: db::Db, config: Arc<ConfigService>) -> Arc<Self> {
+    pub fn new(
+        db: db::Db,
+        config: Arc<ConfigService>,
+        sources: Arc<crate::sources::SourceService>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             db,
             config,
+            sources,
             rescan: std::sync::OnceLock::new(),
         })
     }
@@ -439,7 +445,7 @@ impl UrlDownloadService {
             output_dir,
             format,
             options: config.downloader_options.clone(),
-            downloader: YoutubeDownloader::new(youtube_cookies(&config)),
+            downloader: YoutubeDownloader::new(youtube_cookies(&*self.sources.snapshot().await)),
             ffmpeg,
         };
         let service = self.clone();
@@ -455,8 +461,7 @@ impl UrlDownloadService {
         if query.is_empty() {
             return Ok(Vec::new());
         }
-        let config = self.config.snapshot().await;
-        let downloader = YoutubeDownloader::new(youtube_cookies(&config));
+        let downloader = YoutubeDownloader::new(youtube_cookies(&*self.sources.snapshot().await));
         let tracks = match youtube_download::parse_link(query) {
             Some(link) => downloader.tracks(&link).await,
             None => downloader.search(query).await,
@@ -755,8 +760,8 @@ impl Step<'_> {
 
 /// The signed-in YouTube Music session's cookies, when that is the configured
 /// server, so Premium streams download at Premium quality.
-fn youtube_cookies(config: &config::AppConfig) -> Option<String> {
-    config
+fn youtube_cookies(sources: &server::sources::Sources) -> Option<String> {
+    sources
         .server
         .as_ref()
         .and_then(|server| server.ytmusic_cookies())
@@ -806,16 +811,16 @@ mod tests {
         );
         server.access_token = Some("SAPISID=leftover".into());
         server.yt_anonymous = true;
-        let mut config = config::AppConfig {
+        let mut sources = server::sources::Sources {
             server: Some(server),
             ..Default::default()
         };
-        assert_eq!(youtube_cookies(&config), None);
-        if let Some(server) = config.server.as_mut() {
+        assert_eq!(youtube_cookies(&sources), None);
+        if let Some(server) = sources.server.as_mut() {
             server.yt_anonymous = false;
         }
         assert_eq!(
-            youtube_cookies(&config).as_deref(),
+            youtube_cookies(&sources).as_deref(),
             Some("SAPISID=leftover")
         );
     }

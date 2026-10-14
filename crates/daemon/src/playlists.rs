@@ -44,19 +44,22 @@ impl PlaylistService {
         let _ = self.favorites.set(favorites);
     }
 
-    fn config(&self) -> config::AppConfig {
-        self.session.config_watch().borrow().clone()
+    fn active(&self) -> config::Source {
+        self.session.sources().active.clone()
     }
 
     fn active_source(&self) -> server::source::ActiveSource {
-        Arc::from(server::source::active(self.db.clone(), &self.config()))
+        Arc::from(server::source::active(
+            self.db.clone(),
+            &self.session.sources(),
+        ))
     }
 
     pub async fn catalog(&self) -> Result<PlaylistCatalog, ApiError> {
-        let config = self.config();
+        let sources = self.session.sources();
         let store = self
             .db
-            .load_playlists(&config.active_source)
+            .load_playlists(&sources.active)
             .await
             .map_err(db_error)?;
         // A playlist with no cover of its own borrows its first track's, so
@@ -68,7 +71,7 @@ impl PlaylistService {
             .collect();
         let first_tracks: std::collections::HashMap<String, reader::Track> = self
             .db
-            .tracks_by_keys(&config.active_source, &first_keys)
+            .tracks_by_keys(&sources.active, &first_keys)
             .await
             .map_err(db_error)?
             .into_iter()
@@ -81,7 +84,7 @@ impl PlaylistService {
                 .map(|playlist| PlaylistInfo {
                     artwork: crate::artwork::playlist_ref(
                         &playlist,
-                        &config,
+                        sources.server.as_ref(),
                         playlist
                             .tracks
                             .first()
@@ -111,7 +114,7 @@ impl PlaylistService {
         playlist_id: &str,
         index: usize,
     ) -> Result<reader::Track, ApiError> {
-        let source = self.config().active_source;
+        let source = self.active();
         let entry = self
             .entries(playlist_id)
             .await?
@@ -132,7 +135,7 @@ impl PlaylistService {
 
     async fn entries(&self, playlist_id: &str) -> Result<Vec<reader::PlaylistEntry>, ApiError> {
         self.db
-            .playlist_entries(&self.config().active_source, playlist_id)
+            .playlist_entries(&self.active(), playlist_id)
             .await
             .map_err(db_error)
     }
@@ -385,7 +388,7 @@ impl PlaylistService {
     ) -> Result<api::JobRef, ApiError> {
         let service = self.clone();
         runner.start_as(api::JobKind::PlaylistSync, trigger, move |ctx| async move {
-            let source = service.config().active_source;
+            let source = service.active();
             let result = service.sync(&ctx).await;
             if result.is_ok() && !ctx.cancelled() {
                 crate::auto_sync::mark_synced(&service.db, api::JobKind::PlaylistSync, &source)
@@ -417,7 +420,7 @@ impl PlaylistService {
         }
         let existing = self
             .db
-            .load_playlists(&self.config().active_source)
+            .load_playlists(&self.active())
             .await
             .map_err(db_error)?
             .playlists;

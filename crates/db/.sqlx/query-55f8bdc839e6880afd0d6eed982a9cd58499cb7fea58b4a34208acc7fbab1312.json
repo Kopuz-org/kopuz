@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT device_id, active_source FROM app_state WHERE id = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "device_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "active_source",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "55f8bdc839e6880afd0d6eed982a9cd58499cb7fea58b4a34208acc7fbab1312"
+}
