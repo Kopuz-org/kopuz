@@ -5,8 +5,6 @@
 //! in the daemon so a frontend never holds the whole library, and they answer
 //! with wire rows, so cover paths and local filesystem paths stay here.
 
-use std::path::PathBuf;
-
 use api::{
     AlbumInfo, AlbumPage, AlbumQuery, ApiError, ArtistInfo, ArtistPage, ArtistQuery, Page,
     SearchResults, TrackPage,
@@ -44,8 +42,7 @@ fn album_info(album: &Album) -> AlbumInfo {
 
 struct ArtistArt {
     images: db::ArtistImages,
-    covers: std::collections::HashMap<String, PathBuf>,
-    library_view: bool,
+    covers: std::collections::HashMap<String, reader::CoverRef>,
     source: config::Source,
 }
 
@@ -57,8 +54,7 @@ impl ArtistArt {
                 &artist,
                 &self.source,
                 &self.images,
-                self.covers.get(&artist.key).map(PathBuf::as_path),
-                self.library_view,
+                self.covers.get(&artist.key),
             ),
             name: artist.name,
             track_count: artist.tracks,
@@ -218,24 +214,18 @@ impl LibraryService {
         })
     }
 
-    /// The photos and album covers an artist's artwork chain reads: for every artist, or just `one`.
+    /// The photos and fallback covers an artist's artwork chain reads: for every artist, or just `one`.
     async fn artist_art(&self, one: Option<&str>) -> Result<ArtistArt, ApiError> {
         let source = self.query_source();
-        let sources = self.current_sources();
-        let library_view = server::source::active(self.db.clone(), &sources)
-            .capabilities()
-            .artist_view
-            == server::source::ArtistView::Library;
-        let covers: std::collections::HashMap<String, String> = match (library_view, one) {
-            (false, _) => std::collections::HashMap::new(),
-            (true, None) => self
+        let covers = match one {
+            None => self
                 .db
-                .artist_album_covers(&source)
+                .artist_fallback_covers(&source)
                 .await
                 .map_err(db_error)?,
-            (true, Some(key)) => self
+            Some(key) => self
                 .db
-                .artist_album_cover(&source, key)
+                .artist_fallback_cover(&source, key)
                 .await
                 .map_err(db_error)?
                 .map(|cover| (key.to_string(), cover))
@@ -244,11 +234,7 @@ impl LibraryService {
         };
         Ok(ArtistArt {
             images: self.db.artist_images().await.map_err(db_error)?,
-            covers: covers
-                .into_iter()
-                .map(|(key, cover)| (key, PathBuf::from(cover)))
-                .collect(),
-            library_view,
+            covers,
             source,
         })
     }

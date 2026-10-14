@@ -172,31 +172,6 @@ impl YouTubeMusicClient {
             .await
     }
 
-    /// Top YT Music artist-search avatar for `name` — the Artists grid uses this
-    /// so its photos are real YT artist images.
-    pub async fn resolve_artist_image(&self, name: &str) -> Result<Option<String>, String> {
-        self.account(async { search::resolve_artist_image(name, self.cookies.as_deref()).await })
-            .await
-    }
-
-    /// The artist's channel reconciled from one of their songs' watch-queue
-    /// byline — works for user channels the Artists search can't find.
-    pub async fn artist_channel_for_video(
-        &self,
-        video_id: &str,
-        artist_name: &str,
-    ) -> Result<Option<String>, String> {
-        self.account(async {
-            mix::artist_channel_for_video(
-                video_id,
-                artist_name,
-                self.cookies.as_deref().unwrap_or(""),
-            )
-            .await
-        })
-        .await
-    }
-
     /// The channel's own name and square avatar.
     pub async fn artist_header(&self, channel_id: &str) -> Result<discover::ChannelHeader, String> {
         self.account(async {

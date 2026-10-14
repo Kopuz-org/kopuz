@@ -862,14 +862,15 @@ async fn the_single_and_bulk_artist_covers_agree_for_every_artist() {
             .unwrap();
     }
 
-    let bulk = db.artist_album_covers(&source).await.unwrap();
+    let bulk = db.artist_fallback_covers(&source).await.unwrap();
     let artists = db.artists(&source).await.unwrap();
     assert_eq!(artists.len(), 3);
     for artist in &artists {
-        let single = db.artist_album_cover(&source, &artist.key).await.unwrap();
+        let single = db
+            .artist_fallback_cover(&source, &artist.key)
+            .await
+            .unwrap();
         assert_eq!(single, bulk.get(&artist.key).cloned(), "{}", artist.name);
     }
-    assert_eq!(bulk.get("UC-ada").map(String::as_str), Some("/a1.jpg"));
-    assert_eq!(bulk.get("UC-boris").map(String::as_str), Some("/a2.jpg"));
-    assert_eq!(bulk.len(), 2);
+    assert_eq!(bulk.len(), 3, "each has a track to fall back on");
 }

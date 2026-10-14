@@ -341,18 +341,18 @@ pub trait ReadStore: Send + Sync {
         page: Page,
     ) -> Result<Listing<ArtistRow>, DbError>;
 
-    /// One album cover per credited artist: what an artist with no photo renders.
-    async fn artist_album_covers(
+    /// What each artist renders without a photo: its first covered album, else its first credited track's cover.
+    async fn artist_fallback_covers(
         &self,
         source: &Source,
-    ) -> Result<std::collections::HashMap<String, String>, DbError>;
+    ) -> Result<std::collections::HashMap<String, reader::CoverRef>, DbError>;
 
-    /// One artist's entry of [`ReadStore::artist_album_covers`].
-    async fn artist_album_cover(
+    /// One artist's entry of [`ReadStore::artist_fallback_covers`].
+    async fn artist_fallback_cover(
         &self,
         source: &Source,
         artist: &str,
-    ) -> Result<Option<String>, DbError>;
+    ) -> Result<Option<reader::CoverRef>, DbError>;
 
     /// Distinct non-empty album genres for a source, A→Z.
     async fn genres(&self, source: &Source) -> Result<Vec<String>, DbError>;

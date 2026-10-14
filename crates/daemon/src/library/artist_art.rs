@@ -1,4 +1,4 @@
-//! Finding artist photos, which the daemon does itself: one bulk listing from a `Library` server, one search per artist on a `Remote` catalog (YT), with a definite miss remembered for a day.
+//! Finding artist photos, which the daemon does itself: one bulk listing from a `Library` server, one lookup by id per linked artist on a `Remote` catalog (YT), with a definite miss remembered for a day.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -81,26 +81,10 @@ impl LibraryService {
             ArtistView::Library => self.refresh_bulk(&source).await,
             ArtistView::Remote => {
                 let scope = source.source();
-                // A search wants the name the library calls them, which only the listing holds.
-                let named = self
-                    .db
-                    .artists(scope)
-                    .await
-                    .map_err(db_error)?
-                    .into_iter()
-                    .filter(|row| match &wanted {
-                        Wanted::Missing => true,
-                        Wanted::Keys(keys) => keys.contains(&row.key),
-                    })
-                    .map(|row| reader::ArtistCredit {
-                        name: row.name,
-                        id: row.source_id,
-                        source: Some(scope.clone()),
-                        key: Some(row.key),
-                    })
-                    .collect();
+                let rows = self.db.artists(scope).await.map_err(db_error)?;
+                let linked = lookups(rows, &wanted, scope);
                 let gap = matches!(wanted, Wanted::Missing).then_some(SWEEP_LOOKUP_GAP);
-                self.refresh_each(&source, named, gap).await
+                self.refresh_each(&source, linked, gap).await
             }
         }
     }
@@ -113,18 +97,13 @@ impl LibraryService {
         }
         let scope = source.source().as_str().to_string();
         let (_, photos) = self.db.artist_images().await.map_err(db_error)?;
-        let unlinked = self
-            .db
-            .unlinked_artist_keys(source.source())
-            .await
-            .map_err(db_error)?;
         let linked = self
             .db
             .linked_artist_keys(source.source())
             .await
             .map_err(db_error)?;
         let mut changed = false;
-        for (key, url) in changed_photos(images, &scope, &photos, &linked, &unlinked) {
+        for (key, url) in changed_photos(images, &scope, &photos, &linked) {
             changed |= source
                 .set_artist_image(&key, "server", Some(&url))
                 .await
@@ -283,18 +262,38 @@ async fn resolve_one(source: &ActiveSource, artist: &reader::ArtistCredit) -> bo
     }
 }
 
-/// The key a source's listing credit is filed under: its own, else its linked row by the id the source issued, else its unlinked row by name.
+/// The wanted artists a catalog can look up: only those it issued an id for, since a credit's text may name a stranger.
+fn lookups(
+    rows: Vec<db::ArtistRow>,
+    wanted: &Wanted,
+    scope: &config::Source,
+) -> Vec<reader::ArtistCredit> {
+    rows.into_iter()
+        .filter(|row| match wanted {
+            Wanted::Missing => true,
+            Wanted::Keys(keys) => keys.contains(&row.key),
+        })
+        .filter_map(|row| {
+            let id = row.source_id?;
+            Some(reader::ArtistCredit {
+                name: row.name,
+                id: Some(id),
+                source: Some(scope.clone()),
+                key: Some(row.key),
+            })
+        })
+        .collect()
+}
+
+/// The key a source's listing credit is filed under: its own, else its linked row by the id the source issued; a bare name files nowhere.
 pub(super) fn credit_key(
     credit: &reader::ArtistCredit,
     linked: &std::collections::HashMap<String, String>,
-    unlinked: &std::collections::HashMap<String, String>,
 ) -> Option<String> {
     match (&credit.key, &credit.id) {
         (Some(key), _) => Some(key.clone()),
         (None, Some(id)) => linked.get(id).cloned(),
-        (None, None) => unlinked
-            .get(&utils::artist::normalize_artist_key(&credit.name))
-            .cloned(),
+        (None, None) => None,
     }
 }
 
@@ -321,12 +320,11 @@ fn changed_photos(
     scope: &str,
     photos: &std::collections::HashMap<(String, String), reader::ArtistImageRef>,
     linked: &std::collections::HashMap<String, String>,
-    unlinked: &std::collections::HashMap<String, String>,
 ) -> Vec<(String, String)> {
     images
         .into_iter()
         .filter_map(|(artist, url)| {
-            let key = credit_key(&artist, linked, unlinked)?;
+            let key = credit_key(&artist, linked)?;
             let stored = photos.get(&(scope.to_string(), key.clone()));
             (stored != Some(&reader::ArtistImageRef::Remote(url.clone()))).then_some((key, url))
         })
@@ -378,7 +376,6 @@ mod tests {
             "srv",
             &photos,
             &linked,
-            &HashMap::new(),
         );
 
         assert_eq!(
@@ -413,5 +410,57 @@ mod tests {
         ));
         let later = start + Duration::from_secs(60) + SWEEP_SPACING;
         assert!(claim_sweep(&mut sweeps, "yt".into(), false, later));
+    }
+
+    fn row(key: &str, source_id: Option<&str>, name: &str) -> db::ArtistRow {
+        db::ArtistRow {
+            key: key.into(),
+            source_id: source_id.map(Into::into),
+            name: name.into(),
+            tracks: 1,
+            albums: 0,
+        }
+    }
+
+    #[test]
+    fn an_unlinked_artist_is_never_looked_up() {
+        let scope = config::Source::Server("yt".into());
+        let rows = || {
+            vec![
+                row("UC-teto", Some("UC-teto"), "TETO KASANE"),
+                row("9f2b", None, "____natural / TETO KASANE"),
+            ]
+        };
+
+        let swept = lookups(rows(), &Wanted::Missing, &scope);
+        let asked = lookups(
+            rows(),
+            &Wanted::Keys(HashSet::from(["9f2b".to_string()])),
+            &scope,
+        );
+
+        assert_eq!(
+            swept
+                .iter()
+                .map(|credit| credit.id.as_deref())
+                .collect::<Vec<_>>(),
+            [Some("UC-teto")]
+        );
+        assert!(asked.is_empty(), "asking for it by key searches nothing");
+    }
+
+    #[test]
+    fn a_listing_credit_with_only_a_name_files_under_no_artist() {
+        let linked = HashMap::from([("id-ada".to_string(), "ada".to_string())]);
+
+        assert_eq!(
+            credit_key(&reader::ArtistCredit::unlinked("Ada"), &linked),
+            None
+        );
+        let by_id = reader::ArtistCredit {
+            key: None,
+            ..reader::ArtistCredit::linked("Ada", "id-ada")
+        };
+        assert_eq!(credit_key(&by_id, &linked).as_deref(), Some("ada"));
     }
 }
