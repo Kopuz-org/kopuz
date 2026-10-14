@@ -1,21 +1,8 @@
-//! Finding artist photos.
-//!
-//! Two shapes, chosen by the source's capability rather than its identity: a
-//! `Library` server answers with one bulk listing, a `Remote` catalog (YT) has
-//! to be asked per artist. Both write what they find into the library, so the
-//! next open resolves instantly instead of searching again.
-//!
-//! A definitive "no photo exists" is recorded too, with a day's TTL. Without
-//! that, every visit re-searches the same artists -- most of a local library's
-//! artists have no photo anywhere, and the search is a network round trip
-//! each.
-//!
-//! This ran in the app, holding results in a session map the grid read
-//! alongside the persisted one. It writes only to the library now: the daemon
-//! announces the change and every frontend re-reads, so a photo found while
-//! one window was open shows up in the others too.
+//! Finding artist photos, which the daemon does itself: one bulk listing from a `Library` server, one search per artist on a `Remote` catalog (YT), with a definite miss remembered for a day.
 
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use api::{ApiError, Table};
 use server::source::{ActiveSource, ArtistView};
@@ -27,22 +14,72 @@ const MISS_TTL_SECS: i64 = 86_400;
 /// Enough to fill a grid page quickly without hammering the catalog.
 const WORKERS: usize = 6;
 /// Photos found mid-batch show up this often at most.
-const ANNOUNCE_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
+const ANNOUNCE_EVERY: Duration = Duration::from_secs(2);
+/// A boot or a source switch sweeps a source no more often than this.
+const SWEEP_SPACING: Duration = Duration::from_secs(10 * 60);
+/// What each worker of a sweep waits between two lookups, since nobody is looking at the grid it fills.
+const SWEEP_LOOKUP_GAP: Duration = Duration::from_millis(250);
+/// A sweep at boot waits this long, so it does not compete with the startup reads.
+const BOOT_SWEEP_DELAY: Duration = Duration::from_secs(20);
+
+/// Which artists one refresh looks up.
+enum Wanted {
+    /// Every artist still missing a photo, paced: a background sweep.
+    Missing,
+    /// These keys, now: a caller asked.
+    Keys(HashSet<String>),
+}
 
 impl LibraryService {
-    /// Find photos for the artists the library does not already have one for.
-    ///
-    /// Artists already resolved, and those whose miss is still fresh, are
-    /// skipped -- so calling this on every page open is cheap once the first
-    /// pass has run.
+    /// Find photos for these artists if the library has none for them and no fresh miss; the keys only scope a per-artist search.
     pub async fn refresh_artist_artwork(&self, artists: Vec<String>) -> Result<(), ApiError> {
+        self.refresh_photos(Wanted::Keys(artists.into_iter().collect()))
+            .await
+    }
+
+    /// Sweep the active source shortly after boot and whenever it changes, until the session ends.
+    pub fn spawn_artist_photo_upkeep(self: &Arc<Self>) {
+        let Some(mut sources) = self.sources_rx.get().cloned() else {
+            return;
+        };
+        let service = self.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(BOOT_SWEEP_DELAY).await;
+            let mut swept: Option<config::Source> = None;
+            loop {
+                let active = sources.borrow_and_update().active.clone();
+                if swept.as_ref() != Some(&active) {
+                    swept = Some(active);
+                    service.sweep_artist_photos(false).await;
+                }
+                if sources.changed().await.is_err() {
+                    return;
+                }
+            }
+        });
+    }
+
+    /// Look up every artist of the active source still missing a photo; `fresh` says a sync just stored new ones, which no spacing holds back.
+    pub(super) async fn sweep_artist_photos(&self, fresh: bool) {
+        let scope = self.current_sources().active.as_str().to_string();
+        let due = match self.photo_sweeps.lock() {
+            Ok(mut sweeps) => claim_sweep(&mut sweeps, scope, fresh, Instant::now()),
+            Err(_) => false,
+        };
+        if !due {
+            return;
+        }
+        if let Err(error) = self.refresh_photos(Wanted::Missing).await {
+            tracing::debug!(%error, "artist photo sweep failed");
+        }
+    }
+
+    async fn refresh_photos(&self, wanted: Wanted) -> Result<(), ApiError> {
         let sources = self.current_sources();
         let source: ActiveSource = Arc::from(server::source::active(self.db.clone(), &sources));
         match source.capabilities().artist_view {
             ArtistView::Library => self.refresh_bulk(&source).await,
             ArtistView::Remote => {
-                let wanted: std::collections::HashSet<&str> =
-                    artists.iter().map(String::as_str).collect();
                 let scope = source.source();
                 // A search wants the name the library calls them, which only the listing holds.
                 let named = self
@@ -51,7 +88,10 @@ impl LibraryService {
                     .await
                     .map_err(db_error)?
                     .into_iter()
-                    .filter(|row| wanted.contains(row.key.as_str()))
+                    .filter(|row| match &wanted {
+                        Wanted::Missing => true,
+                        Wanted::Keys(keys) => keys.contains(&row.key),
+                    })
                     .map(|row| reader::ArtistCredit {
                         name: row.name,
                         id: row.source_id,
@@ -59,17 +99,20 @@ impl LibraryService {
                         key: Some(row.key),
                     })
                     .collect();
-                self.refresh_each(&source, named).await
+                let gap = matches!(wanted, Wanted::Missing).then_some(SWEEP_LOOKUP_GAP);
+                self.refresh_each(&source, named, gap).await
             }
         }
     }
 
-    /// One listing for the whole server.
+    /// One listing for the whole server; only a photo that differs from the stored one is written and announced.
     async fn refresh_bulk(&self, source: &ActiveSource) -> Result<(), ApiError> {
         let images = source.fetch_artist_images().await.unwrap_or_default();
         if images.is_empty() {
             return Ok(());
         }
+        let scope = source.source().as_str().to_string();
+        let (_, photos) = self.db.artist_images().await.map_err(db_error)?;
         let unlinked = self
             .db
             .unlinked_artist_keys(source.source())
@@ -80,21 +123,25 @@ impl LibraryService {
             .linked_artist_keys(source.source())
             .await
             .map_err(db_error)?;
-        for (artist, url) in images {
-            let Some(key) = credit_key(&artist, &linked, &unlinked) else {
-                continue;
-            };
-            let _ = source.set_artist_image(&key, "server", Some(&url)).await;
+        let mut changed = false;
+        for (key, url) in changed_photos(images, &scope, &photos, &linked, &unlinked) {
+            changed |= source
+                .set_artist_image(&key, "server", Some(&url))
+                .await
+                .is_ok();
         }
-        self.invalidate(Table::Tracks);
+        if changed {
+            self.invalidate(Table::Artists);
+        }
         Ok(())
     }
 
-    /// One search per artist, a few at a time.
+    /// One search per artist, a few at a time, each worker waiting `gap` between two.
     async fn refresh_each(
         &self,
         source: &ActiveSource,
         artists: Vec<reader::ArtistCredit>,
+        gap: Option<Duration>,
     ) -> Result<(), ApiError> {
         let (_, photos) = self.db.artist_images().await.map_err(db_error)?;
         let fresh_misses: std::collections::HashSet<String> = self
@@ -142,13 +189,9 @@ impl LibraryService {
         }
 
         let queue = Arc::new(Mutex::new(pending.into_iter()));
-        // Announce as they land rather than once at the end: a grid of a few
-        // hundred artists takes a while to search, and holding every photo
-        // until the last one resolves is a page of placeholders for all of it.
-        // Every announcement re-runs every track-keyed read in every frontend, so a
-        // batch that finds a photo every few milliseconds announces on a timer.
+        // Announced as they land, on a timer, so a long batch neither holds every photo to the end nor floods the frontends.
         let found = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let last_announced = Arc::new(Mutex::new(std::time::Instant::now()));
+        let last_announced = Arc::new(Mutex::new(Instant::now()));
         let workers: Vec<_> = (0..WORKERS)
             .map(|_| {
                 let source = source.clone();
@@ -163,18 +206,20 @@ impl LibraryService {
                             if let Some(session) = &session
                                 && announce_due(&last_announced)
                             {
-                                session.invalidate(Table::Tracks);
+                                session.invalidate(Table::Artists);
                             }
+                        }
+                        if let Some(gap) = gap {
+                            tokio::time::sleep(gap).await;
                         }
                     }
                 }
             })
             .collect();
         futures_util::future::join_all(workers).await;
-        // A last one, in case the tail of the batch landed inside a window the
-        // frontend had already coalesced away.
+        // A last one, in case the tail of the batch landed inside a window the frontend had already coalesced away.
         if found.load(std::sync::atomic::Ordering::Relaxed) > 0 {
-            self.invalidate(Table::Tracks);
+            self.invalidate(Table::Artists);
         }
         Ok(())
     }
@@ -250,5 +295,123 @@ pub(super) fn credit_key(
         (None, None) => unlinked
             .get(&utils::artist::normalize_artist_key(&credit.name))
             .cloned(),
+    }
+}
+
+/// Whether a sweep of `scope` may run now, marking it as run when it may.
+fn claim_sweep(
+    sweeps: &mut std::collections::HashMap<String, Instant>,
+    scope: String,
+    fresh: bool,
+    now: Instant,
+) -> bool {
+    let recent = sweeps
+        .get(&scope)
+        .is_some_and(|at| now.saturating_duration_since(*at) < SWEEP_SPACING);
+    if recent && !fresh {
+        return false;
+    }
+    sweeps.insert(scope, now);
+    true
+}
+
+/// The photos of a server's listing that differ from what `scope` already stores, by artist key.
+fn changed_photos(
+    images: Vec<(reader::ArtistCredit, String)>,
+    scope: &str,
+    photos: &std::collections::HashMap<(String, String), reader::ArtistImageRef>,
+    linked: &std::collections::HashMap<String, String>,
+    unlinked: &std::collections::HashMap<String, String>,
+) -> Vec<(String, String)> {
+    images
+        .into_iter()
+        .filter_map(|(artist, url)| {
+            let key = credit_key(&artist, linked, unlinked)?;
+            let stored = photos.get(&(scope.to_string(), key.clone()));
+            (stored != Some(&reader::ArtistImageRef::Remote(url.clone()))).then_some((key, url))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    #[test]
+    fn a_listing_rewrites_only_the_photos_that_changed() {
+        let photos = HashMap::from([
+            (
+                ("srv".to_string(), "ada".to_string()),
+                reader::ArtistImageRef::Remote("https://srv/ada.jpg".into()),
+            ),
+            (
+                ("srv".to_string(), "boris".to_string()),
+                reader::ArtistImageRef::Remote("https://srv/old.jpg".into()),
+            ),
+        ]);
+        let linked = HashMap::from([
+            ("id-ada".to_string(), "ada".to_string()),
+            ("id-boris".to_string(), "boris".to_string()),
+            ("id-cleo".to_string(), "cleo".to_string()),
+        ]);
+        let listing = |id: &str, url: &str| {
+            (
+                reader::ArtistCredit {
+                    name: id.into(),
+                    id: Some(id.into()),
+                    source: None,
+                    key: None,
+                },
+                url.to_string(),
+            )
+        };
+
+        let changed = changed_photos(
+            vec![
+                listing("id-ada", "https://srv/ada.jpg"),
+                listing("id-boris", "https://srv/boris.jpg"),
+                listing("id-cleo", "https://srv/cleo.jpg"),
+                listing("id-nobody", "https://srv/nobody.jpg"),
+            ],
+            "srv",
+            &photos,
+            &linked,
+            &HashMap::new(),
+        );
+
+        assert_eq!(
+            changed,
+            vec![
+                ("boris".to_string(), "https://srv/boris.jpg".to_string()),
+                ("cleo".to_string(), "https://srv/cleo.jpg".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_source_is_swept_again_only_after_the_spacing_or_a_sync() {
+        let mut sweeps = HashMap::new();
+        let start = Instant::now();
+        assert!(claim_sweep(&mut sweeps, "yt".into(), false, start));
+        assert!(!claim_sweep(
+            &mut sweeps,
+            "yt".into(),
+            false,
+            start + Duration::from_secs(60)
+        ));
+        assert!(
+            claim_sweep(&mut sweeps, "srv".into(), false, start),
+            "each source on its own"
+        );
+        assert!(claim_sweep(
+            &mut sweeps,
+            "yt".into(),
+            true,
+            start + Duration::from_secs(60)
+        ));
+        let later = start + Duration::from_secs(60) + SWEEP_SPACING;
+        assert!(claim_sweep(&mut sweeps, "yt".into(), false, later));
     }
 }

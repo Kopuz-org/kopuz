@@ -75,6 +75,7 @@ pub fn table_to_proto(value: api::Table) -> Table {
         api::Table::Servers => Table::Servers,
         api::Table::Recents => Table::Recents,
         api::Table::Stations => Table::Stations,
+        api::Table::Artists => Table::Artists,
         api::Table::Unknown => Table::Unspecified,
     }
 }
@@ -89,6 +90,7 @@ pub fn table_from_proto(value: i32) -> api::Table {
         Table::Servers => api::Table::Servers,
         Table::Recents => api::Table::Recents,
         Table::Stations => api::Table::Stations,
+        Table::Artists => api::Table::Artists,
         Table::Unspecified => api::Table::Unknown,
     }
 }
@@ -337,6 +339,7 @@ mod tests {
             api::Table::Servers,
             api::Table::Recents,
             api::Table::Stations,
+            api::Table::Artists,
             api::Table::Unknown,
         ] {
             assert_eq!(table, table_from_proto(table_to_proto(table) as i32));

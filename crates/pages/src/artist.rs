@@ -83,7 +83,6 @@ pub fn Artist(
         ..Default::default()
     });
     let artists_res = use_artists(source, artists_query);
-    hooks::artist_images::use_artist_photo_fetch(artists_res);
 
     // The grid view has no artist open, so it asks for no albums.
     let artist_albums_query = use_memo(move || {

@@ -23,9 +23,10 @@ pub enum Table {
     Servers = 5,
     Recents = 6,
     Stations = 7,
+    Artists = 8,
 }
 
-const N: usize = 8;
+const N: usize = 9;
 
 /// One monotonically-increasing counter per [`Table`], plus a dirty bitset the
 /// flusher drains. `Copy` (just `Signal`s inside), so it's cheap to pass around
@@ -81,6 +82,7 @@ impl Generations {
 pub fn use_generations_provider() -> Generations {
     let gens = Generations {
         counters: [
+            use_signal(|| 0u64),
             use_signal(|| 0u64),
             use_signal(|| 0u64),
             use_signal(|| 0u64),

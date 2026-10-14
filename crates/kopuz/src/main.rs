@@ -813,6 +813,7 @@ fn App() -> Element {
                                     api::Table::Servers => Some(Table::Servers),
                                     api::Table::Recents => Some(Table::Recents),
                                     api::Table::Stations => Some(Table::Stations),
+                                    api::Table::Artists => Some(Table::Artists),
                                     _ => None,
                                 };
                                 if let Some(table) = mapped {

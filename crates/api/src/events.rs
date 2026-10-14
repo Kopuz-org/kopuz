@@ -18,6 +18,8 @@ pub enum Table {
     Recents,
     /// The radio station list, including which stations are pinned.
     Stations,
+    /// Artist rows on their own: their photos and the names their source gives them.
+    Artists,
     Unknown,
 }
 
