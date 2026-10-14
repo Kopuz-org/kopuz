@@ -215,9 +215,7 @@ pub(crate) async fn resolve_stream(
 
     let track_auth = track.get("track_authorization").and_then(|v| v.as_str());
 
-    if let Some(tc) = transcodings.iter().find(|tc| {
-        transcoding_protocol(tc) == Some("hls") && transcoding_mime(tc) == Some("audio/mp4")
-    }) {
+    if let Some(tc) = transcodings.iter().find(|tc| is_hls_aac(tc)) {
         // Best-effort: if the AAC/HLS transcoding can't be resolved, fall
         // through to the progressive MP3 stream rather than failing the play.
         if let Some(hls_url) = tc.get("url").and_then(|v| v.as_str()) {
@@ -321,6 +319,17 @@ fn transcoding_mime(tc: &Value) -> Option<&str> {
         .and_then(|m| m.as_str())
 }
 
+/// The AAC HLS stream; its mime type carries codec parameters (`audio/mp4; codecs="mp4a.40.2"`).
+fn is_hls_aac(tc: &Value) -> bool {
+    transcoding_protocol(tc) == Some("hls")
+        && transcoding_mime(tc).is_some_and(|mime| mime.starts_with("audio/mp4"))
+}
+
+/// Whether [`resolve_stream`] can play this transcoding; most tracks now offer only HLS.
+fn is_playable(tc: &Value) -> bool {
+    transcoding_protocol(tc) == Some("progressive") || is_hls_aac(tc)
+}
+
 /// The SoundCloud track id (the typed identity's key).
 fn track_id(t: &Track) -> String {
     t.id.key().into_owned()
@@ -329,15 +338,12 @@ fn track_id(t: &Track) -> String {
 fn parse_track(item: &Value) -> Option<Track> {
     let track_id = item.get("id").and_then(|v| v.as_u64())?;
 
-    let has_progressive = item
+    let playable = item
         .get("media")
         .and_then(|m| m.get("transcodings"))
         .and_then(|t| t.as_array())
-        .is_some_and(|arr| {
-            arr.iter()
-                .any(|tc| transcoding_protocol(tc) == Some("progressive"))
-        });
-    if !has_progressive {
+        .is_some_and(|arr| arr.iter().any(is_playable));
+    if !playable {
         return None;
     }
 
@@ -718,13 +724,27 @@ mod tests {
     }
 
     #[test]
-    fn parse_track_requires_progressive_transcoding() {
-        let hls_only = serde_json::json!({
+    fn parse_track_requires_a_playable_transcoding() {
+        let mpegurl_only = serde_json::json!({
             "id": 1, "title": "t", "kind": "track",
             "user": {"username": "u"},
-            "media": {"transcodings": [{"url": "x", "format": {"protocol": "hls"}}]}
+            "media": {"transcodings": [{"url": "x", "format": {"protocol": "hls", "mime_type": "audio/mpegurl"}}]}
         });
-        assert!(parse_track(&hls_only).is_none());
+        assert!(parse_track(&mpegurl_only).is_none());
+
+        // What api-v2 search answers for "snowgrave": AAC HLS only, no progressive.
+        let aac_hls = serde_json::json!({
+            "id": 7, "title": "SNOWGRAVE", "kind": "track",
+            "user": {"username": "u"},
+            "media": {"transcodings": [
+                {"url": "x", "format": {"protocol": "hls", "mime_type": "audio/mp4; codecs=\"mp4a.40.2\""}},
+                {"url": "y", "format": {"protocol": "hls", "mime_type": "audio/mpegurl"}}
+            ]}
+        });
+        assert_eq!(
+            parse_track(&aac_hls).map(|track| track.title),
+            Some("SNOWGRAVE".to_string())
+        );
 
         let ok = serde_json::json!({
             "id": 42, "title": "Song", "kind": "track",
