@@ -410,9 +410,10 @@ pub async fn delete_server(pool: &SqlitePool, id: &str) -> Result<(), DbError> {
     tx.commit().await
 }
 
-/// The legacy importers' settings go to the settings file, which is only rewritten when one of them changed.
+/// The legacy importers' settings go to the settings file, every key of them, which is only rewritten when one of them changed.
 pub(crate) fn write_settings(settings: &Settings, settings_path: &Path) -> Result<(), DbError> {
-    config::store::save_settings(settings_path, settings)
+    let every_key: Vec<config::SettingKey> = config::SettingKey::iter().collect();
+    config::store::save_settings(settings_path, settings, &every_key)
         .map_err(|error| DbError::Io(format!("{}: {error}", settings_path.display())))?;
     Ok(())
 }

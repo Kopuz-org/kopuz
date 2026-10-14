@@ -559,6 +559,9 @@ prefer_active_device = Playback device
 prefer_active_device_help = When another device is already playing, take it over instead of starting playback here.
 settings_managed_notice = nasin ilo mute li lawa tan nasin pi ilo suli (Nix/hjem) la sina ken ala ante e ona lon ni.
 setting_managed_by_system = nasin pi ilo suli li lawa e ni
+setting_locked_by_file = lipu { $path } li lawa e ni
+setting_locked_by_dropin = lipu namako { $path } li lawa e ni
+setting_locked_by_env = nimi { $var } li lawa e ni
 
 settings_interface = Interface
 interface_general = General

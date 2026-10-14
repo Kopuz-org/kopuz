@@ -459,7 +459,10 @@ mod tests {
             ],
             view: api::ConfigView {
                 settings: config::Settings::default(),
-                locked: vec![config::SettingKey::Ui(UiKey::Theme)],
+                locks: vec![api::SettingLock {
+                    key: config::SettingKey::Ui(UiKey::Theme),
+                    by: api::LockSource::Env("KOPUZ_CONFIG_THEME".into()),
+                }],
                 revision: 11,
             },
         };

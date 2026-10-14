@@ -540,7 +540,7 @@ impl UrlDownloadService {
         if values.iter().any(|value| value.key != OUTPUT_DIR) {
             keys.push(SettingKey::Downloads(DownloadsKey::DownloaderOptions));
         }
-        self.config.ensure_unlocked(&keys)?;
+        self.config.ensure_unlocked(&keys).await?;
         self.config
             .mutate_state(&keys, move |config| {
                 if let Some(dir) = value_of(&values, OUTPUT_DIR) {

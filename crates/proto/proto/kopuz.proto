@@ -1462,9 +1462,20 @@ message DownloadList {
 message ConfigView {
   Config config = 1;
   reserved 2; // was locked_keys, as strings
-  repeated SettingKey locked = 4;
+  reserved 4; // was locked, without the layer that pins each key
+  repeated SettingLock locks = 5;
   // Rises with every saved change, so a client can tell an older view from a newer one.
   uint64 revision = 3;
+}
+
+// One pinned key and the highest layer pinning it.
+message SettingLock {
+  SettingKey key = 1;
+  oneof by {
+    string managed_file = 2;
+    string drop_in = 3;
+    string env_var = 4;
+  }
 }
 
 message EditConfigRequest {

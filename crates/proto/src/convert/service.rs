@@ -46,11 +46,7 @@ pub fn job_status_from_proto(value: &JobStatus) -> api::JobStatus {
 pub fn config_view_to_proto(value: &api::ConfigView) -> ConfigView {
     ConfigView {
         config: Some(config_to_proto(&value.settings)),
-        locked: value
-            .locked
-            .iter()
-            .map(|key| setting_key_to_proto(*key) as i32)
-            .collect(),
+        locks: value.locks.iter().map(setting_lock_to_proto).collect(),
         revision: value.revision,
     }
 }
@@ -59,13 +55,43 @@ pub fn config_view_to_proto(value: &api::ConfigView) -> ConfigView {
 pub fn config_view_from_proto(value: &ConfigView) -> api::ConfigView {
     api::ConfigView {
         settings: config_from_proto(value.config.as_ref().unwrap_or(&Config::default())),
-        locked: value
-            .locked
+        locks: value
+            .locks
             .iter()
-            .filter_map(|key| setting_key_from_proto(*key))
+            .filter_map(setting_lock_from_proto)
             .collect(),
         revision: value.revision,
     }
+}
+
+fn setting_lock_to_proto(value: &api::SettingLock) -> SettingLock {
+    let by = match &value.by {
+        api::LockSource::Managed(path) => {
+            setting_lock::By::ManagedFile(path.to_string_lossy().into_owned())
+        }
+        api::LockSource::DropIn(path) => {
+            setting_lock::By::DropIn(path.to_string_lossy().into_owned())
+        }
+        api::LockSource::Env(var) => setting_lock::By::EnvVar(var.clone()),
+    };
+    SettingLock {
+        key: setting_key_to_proto(value.key) as i32,
+        by: Some(by),
+    }
+}
+
+/// A lock that names no layer still locks; it cites the main file, with no path to show.
+fn setting_lock_from_proto(value: &SettingLock) -> Option<api::SettingLock> {
+    let by = match &value.by {
+        Some(setting_lock::By::ManagedFile(path)) => api::LockSource::Managed(path.into()),
+        Some(setting_lock::By::DropIn(path)) => api::LockSource::DropIn(path.into()),
+        Some(setting_lock::By::EnvVar(var)) => api::LockSource::Env(var.clone()),
+        None => api::LockSource::Managed(std::path::PathBuf::new()),
+    };
+    Some(api::SettingLock {
+        key: setting_key_from_proto(value.key)?,
+        by,
+    })
 }
 
 pub fn daemon_status_to_proto(value: &api::DaemonStatus) -> DaemonStatus {
@@ -102,10 +128,21 @@ mod tests {
     }
 
     #[test]
-    fn a_config_view_keeps_its_locked_keys_and_revision() {
+    fn a_config_view_keeps_its_locks_their_layers_and_revision() {
+        let layers = [
+            api::LockSource::Managed("/home/me/.config/kopuz/settings.toml".into()),
+            api::LockSource::DropIn("/home/me/.config/kopuz/settings.d/10-theme.toml".into()),
+            api::LockSource::Env("KOPUZ_CONFIG_THEME".into()),
+        ];
         let view = api::ConfigView {
             settings: ::config::Settings::default(),
-            locked: ::config::SettingKey::iter().collect(),
+            locks: ::config::SettingKey::iter()
+                .zip(layers.iter().cycle())
+                .map(|(key, by)| api::SettingLock {
+                    key,
+                    by: by.clone(),
+                })
+                .collect(),
             revision: 7,
         };
         assert_eq!(config_view_from_proto(&config_view_to_proto(&view)), view);

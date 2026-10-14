@@ -554,7 +554,7 @@ impl api::ArtworkApi for LocalApi {
     ) -> Result<Vec<api::FieldSpec>, ApiError> {
         let service = self.config_service()?;
         let keys = crate::artwork::settings::written_keys(&values);
-        service.ensure_unlocked(&keys)?;
+        service.ensure_unlocked(&keys).await?;
         let updated = service
             .mutate_state(&keys, move |config| {
                 crate::artwork::settings::apply(&values, config)

@@ -426,7 +426,7 @@ impl SourceService {
     }
 
     async fn upsert_folder_source(&self, draft: SourceDraft) -> Result<SourceInfo, ApiError> {
-        self.config.ensure_unlocked(&LOCAL_SOURCES)?;
+        self.config.ensure_unlocked(&LOCAL_SOURCES).await?;
         if let Some(problem) = crate::services::check_folders(&draft).first() {
             return Err(ApiError::invalid_input(crate::services::problem_text(
                 problem,
@@ -466,7 +466,7 @@ impl SourceService {
     }
 
     async fn delete_folder_source(&self, id: &str) -> Result<(), ApiError> {
-        self.config.ensure_unlocked(&LOCAL_SOURCES)?;
+        self.config.ensure_unlocked(&LOCAL_SOURCES).await?;
         if id == config::DEFAULT_LOCAL_ID {
             return Err(ApiError::invalid_input(
                 "the default folder source cannot be deleted",
@@ -526,7 +526,7 @@ impl SourceService {
                 "a source directory cannot be empty",
             ));
         }
-        self.config.ensure_unlocked(&LOCAL_SOURCES)?;
+        self.config.ensure_unlocked(&LOCAL_SOURCES).await?;
         let current = self.current().await;
         if !current
             .library
@@ -695,7 +695,7 @@ impl SourceService {
                 "a source directory cannot be empty",
             ));
         }
-        self.config.ensure_unlocked(&config_keys)?;
+        self.config.ensure_unlocked(&config_keys).await?;
         if !config_keys.is_empty() {
             let answers = values.clone();
             self.config

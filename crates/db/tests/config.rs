@@ -146,7 +146,8 @@ fn settings_path(db_path: &Path) -> PathBuf {
 /// What the daemon's settings service does on a save: make sure of the state row, then write the file.
 async fn save(db: &db::Db, db_path: &Path, settings: &Settings) {
     db.ensure_app_state().await.unwrap();
-    config::store::save_settings(&settings_path(db_path), settings).unwrap();
+    let every_key: Vec<config::SettingKey> = config::SettingKey::iter().collect();
+    config::store::save_settings(&settings_path(db_path), settings, &every_key).unwrap();
 }
 
 fn load(db_path: &Path) -> Settings {

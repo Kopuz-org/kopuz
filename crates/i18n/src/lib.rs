@@ -12,6 +12,7 @@ include!(concat!(env!("OUT_DIR"), "/locales.rs"));
 pub use self::AVAILABLE_LANGUAGES as LANGUAGES;
 
 struct I18nState {
+    lang: String,
     bundle: FluentBundle<FluentResource>,
     fallback: Option<FluentBundle<FluentResource>>,
 }
@@ -26,7 +27,11 @@ impl I18nState {
         } else {
             None
         };
-        I18nState { bundle, fallback }
+        I18nState {
+            lang: lang.to_string(),
+            bundle,
+            fallback,
+        }
     }
 
     fn translate(&self, key: &str, args: Option<&FluentArgs<'_>>) -> String {
@@ -81,9 +86,12 @@ pub fn init(lang: &str) {
     }
 }
 
+/// Switch to `lang`; the bundles are only rebuilt when it differs from the current one.
 pub fn set_locale(lang: &str) {
     let mut w = state().write().unwrap_or_else(|e| e.into_inner());
-    *w = I18nState::new(lang);
+    if w.lang != lang {
+        *w = I18nState::new(lang);
+    }
 }
 
 pub fn t(key: &str) -> String {

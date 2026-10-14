@@ -1,12 +1,12 @@
-//! The settings files (issue #530): `<stem>.local.toml` < `settings.toml` < `<stem>.d/*.toml` drop-ins < `KOPUZ_CONFIG_*` env, merged as TOML tables into [`Settings`], with the keys an unwritable layer pins reported as locked.
+//! The settings files (issue #530): `<stem>.local.toml` < `settings.toml` < `<stem>.d/*.toml` drop-ins < `KOPUZ_CONFIG_*` env, merged as TOML tables into [`Settings`], with the keys an unwritable layer pins reported as locked by that layer; a save rewrites only the keys it names.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value as JsonValue;
 use toml::{Table, Value as TomlValue};
 
-use crate::Settings;
+use crate::{LibraryKey, SettingKey, Settings};
 
 /// Env prefix for ad-hoc per-key overrides: `KOPUZ_CONFIG_THEME=nord`,
 /// nested fields with `__` (`KOPUZ_CONFIG_EQUALIZER__ENABLED=true`).
@@ -112,6 +112,23 @@ pub fn local_path_for(settings_path: &Path) -> PathBuf {
     settings_path.with_file_name(format!("{stem}.local.toml"))
 }
 
+/// The layer that pins a setting, as a settings UI cites it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LockSource {
+    /// The main settings file, which is unwritable (a Nix-store link or read-only).
+    Managed(PathBuf),
+    DropIn(PathBuf),
+    /// The `KOPUZ_CONFIG_*` variable's name.
+    Env(String),
+}
+
+/// One pinned setting and the highest layer pinning it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingLock {
+    pub key: SettingKey,
+    pub by: LockSource,
+}
+
 /// The read-side snapshot of every file/env layer, plus what the UI needs to
 /// know about mutability.
 #[derive(Debug, Clone, Default)]
@@ -123,69 +140,184 @@ pub struct FileLayers {
     /// The main file must not be written: it resolves into the Nix store or is
     /// read-only on disk.
     pub managed: bool,
-    /// Top-level `Settings` keys pinned by an unwritable layer.
-    pub locked_keys: BTreeSet<String>,
+    /// `None` is the real Nix store; tests point it elsewhere.
+    store_prefix: Option<PathBuf>,
+    local: Option<Table>,
+    main: Option<Table>,
+    dropins: Vec<(PathBuf, Table)>,
+    env: Table,
+    /// The variable behind each top-level key of `env`.
+    env_vars: BTreeMap<String, String>,
+    /// Top-level keys pinned by an unwritable layer, with the layer's rank so the highest is cited.
+    locks: BTreeMap<String, (usize, LockSource)>,
     /// Merged overrides (file → drop-ins → env).
     overrides: Table,
+}
+
+/// What reading one layer file found.
+enum LayerRead {
+    Missing,
+    Parsed(Table),
+    Broken(toml::de::Error),
+}
+
+fn read_layer(path: &Path) -> LayerRead {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return LayerRead::Missing;
+    };
+    match text.parse::<Table>() {
+        Ok(table) => LayerRead::Parsed(read_table(table)),
+        Err(error) => LayerRead::Broken(error),
+    }
+}
+
+/// A file that fails to parse whole is most likely mid-save, so its last good version stands in for it.
+fn resolve_layer(path: &Path, previous: Option<&Table>) -> Option<Table> {
+    match read_layer(path) {
+        LayerRead::Missing => None,
+        LayerRead::Parsed(table) => Some(table),
+        LayerRead::Broken(error) => match previous {
+            Some(table) => {
+                tracing::warn!(path = %path.display(), "keeping the previous version of an unparsable config layer: {error}");
+                Some(table.clone())
+            }
+            None => {
+                tracing::warn!(path = %path.display(), "ignoring unparsable config layer: {error}");
+                None
+            }
+        },
+    }
 }
 
 impl FileLayers {
     /// Read the file, its drop-ins, and the process environment.
     pub fn read(settings_path: &Path) -> Self {
-        Self::read_inner(settings_path, NIX_STORE_PREFIX, std::env::vars())
+        let (env, env_vars) = env_overrides(std::env::vars());
+        Self::build(settings_path, None, env, env_vars, None)
     }
 
+    #[cfg(test)]
     fn read_inner(
         settings_path: &Path,
         store_prefix: &str,
         env: impl Iterator<Item = (String, String)>,
     ) -> Self {
+        let (env, env_vars) = env_overrides(env);
+        Self::build(
+            settings_path,
+            Some(PathBuf::from(store_prefix)),
+            env,
+            env_vars,
+            None,
+        )
+    }
+
+    /// Read the files again, keeping the environment as first read (it cannot change under a running process) and the last good version of a file that no longer parses.
+    pub fn reread(&self) -> Self {
+        Self::build(
+            &self.path,
+            self.store_prefix.clone(),
+            self.env.clone(),
+            self.env_vars.clone(),
+            Some(self),
+        )
+    }
+
+    fn build(
+        settings_path: &Path,
+        store_prefix: Option<PathBuf>,
+        env: Table,
+        env_vars: BTreeMap<String, String>,
+        previous: Option<&Self>,
+    ) -> Self {
+        let mut layers = Self {
+            path: settings_path.to_path_buf(),
+            store_prefix,
+            env,
+            env_vars,
+            ..Self::default()
+        };
+        layers.managed = is_managed(settings_path, layers.prefix());
+        layers.local = resolve_layer(
+            &local_path_for(settings_path),
+            previous.and_then(|it| it.local.as_ref()),
+        );
+        layers.main = resolve_layer(settings_path, previous.and_then(|it| it.main.as_ref()));
+        layers.file_exists = layers.main.is_some() || settings_path.exists();
+        layers.dropins = sorted_toml_files(&dropin_dir_for(settings_path))
+            .into_iter()
+            .filter_map(|path| {
+                let before = previous.and_then(|it| {
+                    it.dropins
+                        .iter()
+                        .find(|(seen, _)| *seen == path)
+                        .map(|(_, table)| table)
+                });
+                let table = resolve_layer(&path, before)?;
+                Some((path, table))
+            })
+            .collect();
+        layers.merge();
+        layers
+    }
+
+    /// Stack the layers into `overrides` and note what each unwritable one pins.
+    fn merge(&mut self) {
         let mut overrides = Table::new();
-        let mut locked_keys = BTreeSet::new();
+        let mut locks: BTreeMap<String, (usize, LockSource)> = BTreeMap::new();
+        let mut rank = 0;
+        let mut pin = |locks: &mut BTreeMap<String, (usize, LockSource)>, key: &str, by| {
+            rank += 1;
+            locks.insert(key.to_owned(), (rank, by));
+        };
 
         // Under the main file, so a managed file's keys still win over what the app saved beside it.
-        if let Some(table) = read_toml_table(&local_path_for(settings_path)) {
-            merge_into(&mut overrides, table);
+        if let Some(table) = &self.local {
+            merge_into(&mut overrides, table.clone());
         }
-
-        let managed = is_managed(settings_path, store_prefix);
-        let file_exists;
-        if let Some(table) = read_toml_table(settings_path) {
-            file_exists = true;
-            if managed {
-                locked_keys.extend(table.keys().cloned());
+        if let Some(table) = &self.main {
+            if self.managed {
+                for key in table.keys() {
+                    pin(&mut locks, key, LockSource::Managed(self.path.clone()));
+                }
             }
-            merge_into(&mut overrides, table);
-        } else {
-            file_exists = settings_path.exists();
+            merge_into(&mut overrides, table.clone());
         }
+        // Drop-ins always lock their keys: they out-rank the main file, so a UI edit saved there could never take effect.
+        for (path, table) in &self.dropins {
+            for key in table.keys() {
+                pin(&mut locks, key, LockSource::DropIn(path.clone()));
+            }
+            merge_into(&mut overrides, table.clone());
+        }
+        for key in self.env.keys() {
+            let var = self
+                .env_vars
+                .get(key)
+                .cloned()
+                .unwrap_or_else(|| format!("{ENV_PREFIX}{}", key.to_uppercase()));
+            pin(&mut locks, key, LockSource::Env(var));
+        }
+        merge_into(&mut overrides, self.env.clone());
 
-        // Drop-ins always lock their keys: they out-rank the main file, so a
-        // UI edit saved there could never take effect.
-        let dropin_dir = dropin_dir_for(settings_path);
-        for path in sorted_toml_files(&dropin_dir) {
-            if let Some(table) = read_toml_table(&path) {
-                locked_keys.extend(table.keys().cloned());
-                merge_into(&mut overrides, table);
+        // The retired key's value now lives in the default folder source, and the higher of the two pins wins it.
+        if let Some(legacy) = locks.get("music_directory").cloned() {
+            let outranked = locks
+                .get("local_sources")
+                .is_none_or(|(held, _)| *held < legacy.0);
+            if outranked {
+                locks.insert("local_sources".to_owned(), legacy);
             }
         }
 
-        let env_layer = env_overrides(env);
-        locked_keys.extend(env_layer.keys().cloned());
-        merge_into(&mut overrides, env_layer);
+        self.overrides = overrides;
+        self.locks = locks;
+    }
 
-        // The retired key's value now lives in the default folder source.
-        if locked_keys.contains("music_directory") {
-            locked_keys.insert("local_sources".to_owned());
-        }
-
-        Self {
-            path: settings_path.to_path_buf(),
-            file_exists,
-            managed,
-            locked_keys,
-            overrides,
-        }
+    fn prefix(&self) -> &Path {
+        self.store_prefix
+            .as_deref()
+            .unwrap_or(Path::new(NIX_STORE_PREFIX))
     }
 
     /// Whether any layer contributes anything at all.
@@ -195,7 +327,20 @@ impl FileLayers {
 
     /// Whether the settings UI should treat a top-level settings key as read-only.
     pub fn is_locked(&self, key: &str) -> bool {
-        self.locked_keys.contains(key)
+        self.locks.contains_key(key)
+    }
+
+    /// Every pinned setting with the layer that wins it; a pinned name that is no setting is left out.
+    pub fn locks(&self) -> Vec<SettingLock> {
+        self.locks
+            .iter()
+            .filter_map(|(name, (_, by))| {
+                Some(SettingLock {
+                    key: SettingKey::named(name)?,
+                    by: by.clone(),
+                })
+            })
+            .collect()
     }
 
     /// Deep-merge the layered overrides over `base`.
@@ -247,53 +392,70 @@ impl FileLayers {
         }
         parse(kept)
     }
+
+    /// Write `keys` of `settings` into the file, or beside it when it is managed ([`local_path_for`]), leaving every other key there as it was; answers whether anything was written.
+    pub fn save(&self, settings: &Settings, keys: &[SettingKey]) -> std::io::Result<bool> {
+        let written_path = match is_managed(&self.path, self.prefix()) {
+            true => local_path_for(&self.path),
+            false => self.path.clone(),
+        };
+        let mut table = match std::fs::read_to_string(&written_path) {
+            Ok(text) => match text.parse::<Table>() {
+                Ok(table) => table,
+                // A save of every key replaces the file as saves always did; a sparse one would lose what it cannot read.
+                Err(_) if SettingKey::iter().all(|key| keys.contains(&key)) => Table::new(),
+                Err(error) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("refusing to rewrite an unparsable settings file: {error}"),
+                    ));
+                }
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Table::new(),
+            Err(error) => return Err(error),
+        };
+        let before = table.clone();
+        let values = Table::try_from(settings).map_err(std::io::Error::other)?;
+        for key in keys {
+            let name = key.name();
+            // A pinned key's value in `settings` is the layer's; skipping it keeps the file's own value for when the pin goes.
+            if self.is_locked(name) {
+                continue;
+            }
+            match values.get(name).cloned().and_then(written_value) {
+                Some(value) => table.insert(name.to_owned(), value),
+                None => table.remove(name),
+            };
+            // Left beside the new sources, the retired key would overwrite them again on load.
+            if *key == SettingKey::Library(LibraryKey::LocalSources) {
+                table.remove("music_directory");
+            }
+        }
+        if table == before {
+            return Ok(false);
+        }
+        write_table(&written_path, &table)?;
+        Ok(true)
+    }
 }
 
 fn parse(table: Table) -> Result<Settings, toml::de::Error> {
     table.try_into()
 }
 
-/// Write the settings to the file, or beside it when it is managed, keeping every locked key at the file's own value.
-pub fn save_settings(settings_path: &Path, settings: &Settings) -> std::io::Result<bool> {
-    let layers = FileLayers::read(settings_path);
-    save_settings_file(settings_path, settings, &layers.locked_keys)
-}
-
-/// Write the settings, only when one changed, to the file or beside a managed one ([`local_path_for`]); answers whether anything was written.
-pub fn save_settings_file(
+/// Write `keys` of the settings to the file, or beside it when it is managed, skipping every key a layer pins.
+pub fn save_settings(
     settings_path: &Path,
     settings: &Settings,
-    locked_keys: &BTreeSet<String>,
+    keys: &[SettingKey],
 ) -> std::io::Result<bool> {
-    let written_path = match is_managed(settings_path, NIX_STORE_PREFIX) {
-        true => local_path_for(settings_path),
-        false => settings_path.to_path_buf(),
-    };
+    FileLayers::read(settings_path).save(settings, keys)
+}
 
-    let mut table = Table::try_from(settings).map_err(std::io::Error::other)?;
-    // A pinned key's value in `settings` is the layer's, merged in on load; writing it back would bake the override into the base file.
-    if !locked_keys.is_empty() {
-        let existing = read_toml_table(&written_path).unwrap_or_default();
-        for key in locked_keys {
-            match existing.get(key) {
-                Some(value) => table.insert(key.clone(), value.clone()),
-                None => table.remove(key),
-            };
-        }
-    }
-    let table = written_table(table);
-    let on_disk = std::fs::read_to_string(&written_path)
-        .ok()
-        .and_then(|text| text.parse::<Table>().ok());
-    if on_disk.as_ref() == Some(&table) {
-        return Ok(false);
-    }
-    let text = toml::to_string_pretty(&table).map_err(std::io::Error::other)?;
-
-    // Follow a writable symlink to its target instead of replacing the link
-    // with a regular file. (An hjem-managed link points into the store and
-    // never gets here — this is for someone linking the file themselves.)
-    let target = std::fs::canonicalize(&written_path).unwrap_or(written_path);
+fn write_table(written_path: &Path, table: &Table) -> std::io::Result<()> {
+    let text = toml::to_string_pretty(table).map_err(std::io::Error::other)?;
+    // Follow a hand-made writable symlink to its target rather than replace it; an hjem link points into the store and never gets here.
+    let target = std::fs::canonicalize(written_path).unwrap_or_else(|_| written_path.to_path_buf());
     if let Some(parent) = target.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -301,8 +463,7 @@ pub fn save_settings_file(
     }
     let tmp = target.with_extension("toml.tmp");
     std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, &target)?;
-    Ok(true)
+    std::fs::rename(&tmp, &target)
 }
 
 /// A legacy JSON store's settings as a TOML table: nulls are dropped, which every `Option` field reads back as its default.
@@ -315,7 +476,7 @@ pub fn table_from_json(value: &JsonValue) -> Option<Table> {
 
 /// A file is "managed" when the app must not write it: it is (or resolves
 /// through symlinks into) the Nix store, or it exists read-only.
-fn is_managed(path: &Path, store_prefix: &str) -> bool {
+fn is_managed(path: &Path, store_prefix: &Path) -> bool {
     if let Ok(target) = std::fs::canonicalize(path)
         && target.starts_with(store_prefix)
     {
@@ -324,17 +485,6 @@ fn is_managed(path: &Path, store_prefix: &str) -> bool {
     match std::fs::metadata(path) {
         Ok(meta) => meta.permissions().readonly(),
         Err(_) => false,
-    }
-}
-
-fn read_toml_table(path: &Path) -> Option<Table> {
-    let text = std::fs::read_to_string(path).ok()?;
-    match text.parse::<Table>() {
-        Ok(table) => Some(read_table(table)),
-        Err(e) => {
-            tracing::warn!(path = %path.display(), "ignoring unparsable config layer: {e}");
-            None
-        }
     }
 }
 
@@ -385,9 +535,10 @@ fn sorted_toml_files(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// The env layer: every `KOPUZ_CONFIG_<FIELD>` but the path override is a lowercased key, `__` nesting tables, its value a TOML literal or else a plain string.
-fn env_overrides(env: impl Iterator<Item = (String, String)>) -> Table {
+/// The env layer: every `KOPUZ_CONFIG_<FIELD>` but the path override is a lowercased key, `__` nesting tables, its value a TOML literal or else a plain string; beside it, the variable behind each top-level key.
+fn env_overrides(env: impl Iterator<Item = (String, String)>) -> (Table, BTreeMap<String, String>) {
     let mut layer = Table::new();
+    let mut names = BTreeMap::new();
     let mut vars: Vec<(String, String)> = env
         .filter(|(k, _)| k.starts_with(ENV_PREFIX) && k != ENV_PATH_OVERRIDE)
         .collect();
@@ -405,9 +556,12 @@ fn env_overrides(env: impl Iterator<Item = (String, String)>) -> Table {
         for part in parents.iter().rev() {
             nested = Table::from_iter([(part.clone(), TomlValue::Table(nested))]);
         }
+        if let Some(top) = path.first() {
+            names.insert(top.clone(), key.clone());
+        }
         merge_into(&mut layer, nested);
     }
-    layer
+    (layer, names)
 }
 
 /// Parse one env value as the right-hand side of a TOML assignment, so
@@ -517,9 +671,36 @@ mod tests {
         .collect()
     }
 
-    /// The expected files were written by the store before settings had sections, from this same fixture and env.
+    fn all_keys() -> Vec<SettingKey> {
+        SettingKey::iter().collect()
+    }
+
+    fn save_all(path: &Path, settings: &Settings) -> bool {
+        FileLayers::read_inner(path, NIX_STORE_PREFIX, empty_env())
+            .save(settings, &all_keys())
+            .unwrap()
+    }
+
+    #[cfg(unix)]
+    fn write_read_only(path: &Path, text: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::remove_file(path);
+        std::fs::write(path, text).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o444)).unwrap();
+    }
+
+    /// The edits the golden saves make: the env pins `theme`, so that one stays the file's.
+    const GOLDEN_CHANGED: [SettingKey; 4] = [
+        SettingKey::Ui(crate::UiKey::Theme),
+        SettingKey::Ui(crate::UiKey::Language),
+        SettingKey::Background(crate::BackgroundKey::CoverArtDarkening),
+        SettingKey::Downloads(crate::DownloadsKey::DownloaderOptions),
+    ];
+
+    /// A save rewrites only the keys it names, so every other key of the hand-written fixture, a stale one included, keeps its value.
     #[test]
-    fn the_golden_settings_file_loads_and_saves_as_before() {
+    fn the_golden_settings_file_loads_and_saves_only_what_changed() {
+        let original: Table = GOLDEN.parse().unwrap();
         for (env, expected) in [(Vec::new(), GOLDEN_SAVED), (golden_env(), GOLDEN_SAVED_ENV)] {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("settings.toml");
@@ -554,13 +735,177 @@ mod tests {
                 assert!(layers.is_locked("equalizer") && layers.is_locked("replay_gain"));
             }
 
-            assert!(save_settings_file(&path, &settings, &layers.locked_keys).unwrap());
-            assert_eq!(std::fs::read_to_string(&path).unwrap(), expected);
+            let mut edited = settings.clone();
+            edited.ui.theme = "dracula".into();
+            edited.ui.language = "de".into();
+            edited.background.cover_art_darkening = 30;
+            edited.downloads.downloader_options.embed_metadata = false;
+            assert!(layers.save(&edited, &GOLDEN_CHANGED).unwrap());
+            let text = std::fs::read_to_string(&path).unwrap();
+            assert_eq!(text, expected);
+
+            let saved: Table = text.parse().unwrap();
+            assert_eq!(
+                saved.keys().collect::<Vec<_>>(),
+                original.keys().collect::<Vec<_>>()
+            );
+            for (key, value) in &original {
+                let rewritten = GOLDEN_CHANGED.iter().any(|changed| changed.name() == key)
+                    && !layers.is_locked(key);
+                if !rewritten {
+                    assert_eq!(saved.get(key), Some(value), "{key} moved");
+                }
+            }
+            let theme = if with_env { "nord" } else { "dracula" };
+            assert_eq!(saved["theme"].as_str(), Some(theme));
             assert!(
-                !save_settings_file(&path, &settings, &layers.locked_keys).unwrap(),
+                !layers.save(&edited, &GOLDEN_CHANGED).unwrap(),
                 "a second save of the same settings writes nothing"
             );
         }
+    }
+
+    /// What the app saved before a layer pinned a key is back once the pin goes: a drop-in over the writable file, then a managed file over the local one.
+    #[cfg(unix)]
+    #[test]
+    fn a_value_saved_before_a_pin_survives_the_pin_and_returns_after() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        std::fs::write(&path, GOLDEN).unwrap();
+        let dropins = dropin_dir_for(&path);
+        std::fs::create_dir_all(&dropins).unwrap();
+        std::fs::write(dropins.join("10-theme.toml"), "theme = \"dracula\"\n").unwrap();
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
+        let mut settings = layers.merge_and_parse(Table::new()).unwrap();
+        assert_eq!(settings.ui.theme, "dracula");
+        settings.ui.language = "de".into();
+        let keys = [
+            SettingKey::Ui(crate::UiKey::Theme),
+            SettingKey::Ui(crate::UiKey::Language),
+        ];
+        assert!(layers.save(&settings, &keys).unwrap());
+        std::fs::remove_dir_all(&dropins).unwrap();
+        let unpinned = reloaded(&path);
+        assert_eq!(
+            (unpinned.ui.theme.as_str(), unpinned.ui.language.as_str()),
+            ("nord", "de")
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        write_read_only(&path, "language = \"tr\"\n");
+        let mut settings = reloaded(&path);
+        settings.ui.theme = "midnight".into();
+        assert!(save_all(&path, &settings));
+        write_read_only(&path, "theme = \"nord\"\n");
+        let pinned = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
+        let mut settings = pinned.merge_and_parse(Table::new()).unwrap();
+        assert_eq!(settings.ui.theme, "nord");
+        settings.ui.reduce_animations = true;
+        assert!(pinned.save(&settings, &all_keys()).unwrap());
+        write_read_only(&path, "language = \"tr\"\n");
+        let unpinned = reloaded(&path);
+        assert_eq!(unpinned.ui.theme, "midnight");
+        assert!(unpinned.ui.reduce_animations);
+    }
+
+    #[test]
+    fn each_lock_cites_the_highest_layer_that_pins_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        std::fs::write(
+            &path,
+            "theme = \"nord\"\nlanguage = \"tr\"\nmusic_directory = \"/music\"\n",
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&path, perms).unwrap();
+        let dropins = dropin_dir_for(&path);
+        std::fs::create_dir_all(&dropins).unwrap();
+        let dropin = dropins.join("10-theme.toml");
+        std::fs::write(&dropin, "theme = \"dracula\"\n").unwrap();
+        let env = vec![(
+            "KOPUZ_CONFIG_EQUALIZER__ENABLED".to_string(),
+            "true".to_string(),
+        )];
+
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, env.into_iter());
+
+        let lock = |key| SettingLock {
+            key,
+            by: LockSource::Managed(path.clone()),
+        };
+        assert_eq!(
+            layers.locks(),
+            vec![
+                SettingLock {
+                    key: SettingKey::Playback(crate::PlaybackKey::Equalizer),
+                    by: LockSource::Env("KOPUZ_CONFIG_EQUALIZER__ENABLED".into()),
+                },
+                lock(SettingKey::Ui(crate::UiKey::Language)),
+                lock(SettingKey::Library(LibraryKey::LocalSources)),
+                SettingLock {
+                    key: SettingKey::Ui(crate::UiKey::Theme),
+                    by: LockSource::DropIn(dropin.clone()),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_layer_that_stops_parsing_keeps_its_last_good_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        std::fs::write(&path, "theme = \"nord\"\n").unwrap();
+        let dropins = dropin_dir_for(&path);
+        std::fs::create_dir_all(&dropins).unwrap();
+        std::fs::write(dropins.join("10-lang.toml"), "language = \"tr\"\n").unwrap();
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
+
+        std::fs::write(&path, "theme = \"dra").unwrap();
+        std::fs::write(dropins.join("10-lang.toml"), "language = ").unwrap();
+        let torn = layers.reread();
+        let settings = torn.merge_and_parse(Table::new()).unwrap();
+        assert_eq!(
+            (settings.ui.theme.as_str(), settings.ui.language.as_str()),
+            ("nord", "tr")
+        );
+        assert!(torn.is_locked("language"));
+
+        std::fs::write(&path, "theme = \"dracula\"\n").unwrap();
+        let settings = torn.reread().merge_and_parse(Table::new()).unwrap();
+        assert_eq!(settings.ui.theme, "dracula");
+    }
+
+    #[test]
+    fn saving_the_folder_sources_retires_a_stored_music_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        std::fs::write(&path, "music_directory = [\"/old\"]\n").unwrap();
+        let mut settings = reloaded_layers(&path);
+        assert_eq!(default_dirs(&settings), vec![PathBuf::from("/old")]);
+        settings.library.local_sources[0].directories = vec!["/new".into()];
+
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
+        assert!(
+            layers
+                .save(&settings, &[SettingKey::Library(LibraryKey::LocalSources)])
+                .unwrap()
+        );
+
+        let written: Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
+        assert!(!written.contains_key("music_directory"));
+        assert_eq!(
+            default_dirs(&reloaded_layers(&path)),
+            vec![PathBuf::from("/new")]
+        );
+    }
+
+    fn reloaded_layers(path: &Path) -> Settings {
+        FileLayers::read_inner(path, NIX_STORE_PREFIX, empty_env())
+            .merge_and_parse(Table::new())
+            .unwrap()
     }
 
     #[test]
@@ -689,7 +1034,7 @@ mod tests {
         let mut settings = Settings::default();
         settings.ui.ui_style = crate::UiStyle::Material3;
         settings.ui.theme = "system".into();
-        save_settings_file(&path, &settings, &BTreeSet::new()).unwrap();
+        save_all(&path, &settings);
         let restored = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env())
             .merge_and_parse(Table::new())
             .unwrap();
@@ -702,7 +1047,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
 
-        assert!(save_settings_file(&path, &Settings::default(), &BTreeSet::new()).unwrap());
+        assert!(save_all(&path, &Settings::default()));
 
         assert_eq!(reloaded(&path), Settings::default());
     }
@@ -777,8 +1122,7 @@ mod tests {
         settings.lyrics.prefer_local_lyrics = true;
         settings.library.sync_interval_minutes = 90;
 
-        let written = save_settings_file(&path, &settings, &BTreeSet::new());
-        assert!(written.unwrap(), "settings file not written");
+        assert!(save_all(&path, &settings), "settings file not written");
 
         let restored = reloaded(&path);
         assert_eq!(restored, settings);
@@ -791,7 +1135,7 @@ mod tests {
         let mut settings = Settings::default();
         settings.playback.volume_scroll_step = 0.05;
 
-        save_settings_file(&path, &settings, &BTreeSet::new()).unwrap();
+        save_all(&path, &settings);
 
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
@@ -805,17 +1149,19 @@ mod tests {
     }
 
     #[test]
-    fn a_key_an_older_build_wrote_is_ignored() {
+    fn a_key_an_older_build_wrote_is_ignored_and_left_in_place() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
         std::fs::write(&path, "hero_height = 900\ntheme = \"nord\"\n").unwrap();
         let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
-        let settings = layers.merge_and_parse(Table::new()).unwrap();
+        let mut settings = layers.merge_and_parse(Table::new()).unwrap();
         assert_eq!(settings.ui.theme, "nord");
 
-        save_settings_file(&path, &settings, &BTreeSet::new()).unwrap();
+        settings.ui.theme = "dracula".into();
+        assert!(layers.save(&settings, &all_keys()).unwrap());
         let written: Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
-        assert!(!written.contains_key("hero_height"));
+        assert_eq!(written["hero_height"].as_integer(), Some(900));
+        assert_eq!(written["theme"].as_str(), Some("dracula"));
     }
 
     #[test]
@@ -926,7 +1272,7 @@ mod tests {
         let mut settings = Settings::default();
         settings.ui.theme = "nord".into();
         settings.ui.language = "tr".into();
-        assert!(save_settings_file(&path, &settings, &layers.locked_keys).unwrap());
+        assert!(layers.save(&settings, &all_keys()).unwrap());
 
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
@@ -960,13 +1306,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
         let settings = Settings::default();
-        save_settings_file(&path, &settings, &BTreeSet::new()).unwrap();
+        save_all(&path, &settings);
         let hand_written = format!("# mine\n{}", std::fs::read_to_string(&path).unwrap());
         std::fs::write(&path, &hand_written).unwrap();
 
-        let saved = save_settings_file(&path, &settings, &BTreeSet::new());
-
-        assert!(!saved.unwrap(), "no setting changed");
+        assert!(!save_all(&path, &settings), "no setting changed");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), hand_written);
     }
 
@@ -998,7 +1342,7 @@ mod tests {
         let link = dir.path().join("settings.toml");
         std::os::unix::fs::symlink(&target, &link).unwrap();
 
-        assert!(save_settings_file(&link, &Settings::default(), &BTreeSet::new()).unwrap());
+        assert!(save_all(&link, &Settings::default()));
 
         assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
         let written: Table = std::fs::read_to_string(&target).unwrap().parse().unwrap();
@@ -1079,7 +1423,7 @@ mod tests {
         assert!(!layers.has_overrides());
         assert!(!layers.managed);
         assert!(!layers.file_exists);
-        assert!(layers.locked_keys.is_empty());
+        assert!(layers.locks().is_empty());
     }
 
     #[test]

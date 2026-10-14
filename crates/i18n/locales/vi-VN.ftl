@@ -552,6 +552,9 @@ prefer_active_device = Playback device
 prefer_active_device_help = When another device is already playing, take it over instead of starting playback here.
 settings_managed_notice = Một số cài đặt được quản lý bởi cấu hình hệ thống (Nix/hjem) và không thể thay đổi tại đây.
 setting_managed_by_system = Được quản lý bởi cấu hình hệ thống
+setting_locked_by_file = Được đặt bởi { $path }
+setting_locked_by_dropin = Được đặt bởi tệp bổ sung { $path }
+setting_locked_by_env = Được đặt bởi { $var }
 
 settings_interface = Interface
 interface_general = General

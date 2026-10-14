@@ -559,6 +559,9 @@ prefer_active_device = Playback device
 prefer_active_device_help = When another device is already playing, take it over instead of starting playback here.
 settings_managed_notice = Некоторые настройки управляются конфигурацией системы (Nix/hjem) и не могут быть изменены здесь.
 setting_managed_by_system = Управляется конфигурацией системы
+setting_locked_by_file = Задано в { $path }
+setting_locked_by_dropin = Задано дополнительным файлом { $path }
+setting_locked_by_env = Задано переменной { $var }
 
 settings_interface = Interface
 interface_general = General

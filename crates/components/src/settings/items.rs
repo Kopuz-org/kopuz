@@ -24,12 +24,14 @@ pub fn SettingItem(
     stacked: bool,
     #[props(default)] nested: bool,
 ) -> Element {
-    let locked = try_consume_context::<hooks::config_view::LockedKeys>().is_some_and(|layers| {
-        (!config_key.is_empty() && layers.is_name_locked(&config_key))
-            || extra_config_keys
-                .iter()
-                .any(|key| layers.is_name_locked(key))
+    let lock = try_consume_context::<hooks::config_view::LockedKeys>().and_then(|layers| {
+        std::iter::once(config_key.as_str())
+            .filter(|key| !key.is_empty())
+            .chain(extra_config_keys.iter().copied())
+            .find_map(|key| layers.lock_of_name(key))
     });
+    let locked = lock.is_some();
+    let cited = lock.as_ref().map(cite_lock).unwrap_or_default();
     let nested_class = if nested { "settings-row-nested" } else { "" };
     rsx! {
         div {
@@ -40,27 +42,43 @@ pub fn SettingItem(
                 if locked {
                     i {
                         class: "fa-solid fa-lock text-[10px] text-white/40",
-                        title: i18n::t("setting_managed_by_system"),
+                        title: "{cited}",
                     }
+                    span { class: "min-w-0 truncate text-[10px] text-white/40", title: "{cited}", "{cited}" }
                 }
             }
             if locked {
-                // `inert` is what actually disables the control: it takes the
-                // whole subtree out of the tab order and drops click/key
-                // events, so a managed setting can't be changed by keyboard
-                // either. The class/aria only cover the look and the a11y
-                // label.
+                // `inert` takes the subtree out of the tab order and drops click/key events, so a managed setting can't be changed by keyboard either.
                 div {
                     class: "opacity-50 pointer-events-none select-none",
                     inert: true,
                     aria_disabled: true,
-                    title: i18n::t("setting_managed_by_system"),
+                    title: "{cited}",
                     {control}
                 }
             } else {
                 {control}
             }
         }
+    }
+}
+
+/// What a locked row says pins it: the managed file's or drop-in's path, or the env var's name.
+fn cite_lock(by: &config::store::LockSource) -> String {
+    use config::store::LockSource;
+    match by {
+        LockSource::Managed(path) if path.as_os_str().is_empty() => {
+            i18n::t("setting_managed_by_system")
+        }
+        LockSource::Managed(path) => i18n::t_with(
+            "setting_locked_by_file",
+            &[("path", path.display().to_string())],
+        ),
+        LockSource::DropIn(path) => i18n::t_with(
+            "setting_locked_by_dropin",
+            &[("path", path.display().to_string())],
+        ),
+        LockSource::Env(var) => i18n::t_with("setting_locked_by_env", &[("var", var.clone())]),
     }
 }
 

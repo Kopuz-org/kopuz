@@ -25,6 +25,10 @@ use dioxus::prelude::*;
 use crate::DebugPanel;
 use hooks::use_player_controller::PlayerController;
 
+/// The category Settings shows, held at the app root so the remount a language change does keeps it.
+#[derive(Clone, Copy)]
+pub struct OpenCategory(pub Signal<SettingsCategory>);
+
 #[component]
 fn BuildInfoCard() -> Element {
     let build_summary = utils::build_info::summary();
@@ -85,7 +89,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
     let error = use_signal(|| Option::<String>::None);
     let mut login_error = use_signal(|| Option::<String>::None);
     let is_loading = use_signal(|| false);
-    let mut active_category = use_signal(|| SettingsCategory::General);
+    let OpenCategory(mut active_category) = use_context();
     let settings_anchor = try_consume_context::<components::source_switcher::SettingsAnchor>();
     let subpage = try_consume_context::<components::tabbar::SettingsSubpage>()
         .map(|components::tabbar::SettingsSubpage(subpage)| subpage);
@@ -115,12 +119,6 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
             let _ = document::eval(
                 "requestAnimationFrame(() => document.getElementById('settings-index')?.scrollIntoView({ block: 'start' }))",
             );
-        }
-    });
-
-    use_drop(move || {
-        if let Some(mut subpage) = subpage {
-            subpage.set(None);
         }
     });
 
@@ -265,8 +263,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                 LanguageSelector {
                                     current_language: settings.read().ui.language.clone(),
                                     on_change: move |lang: String| {
-                                        edits.edit(SettingsEdit::Ui(UiEdit::Language(lang.clone())));
-                                        i18n::set_locale(&lang);
+                                        edits.edit(SettingsEdit::Ui(UiEdit::Language(lang)));
                                     }
                                 }
                             }

@@ -552,6 +552,9 @@ prefer_active_device = Playback device
 prefer_active_device_help = When another device is already playing, take it over instead of starting playback here.
 settings_managed_notice = Ang ilang setting ay pinamamahalaan ng configuration ng system (Nix/hjem) at hindi mababago rito.
 setting_managed_by_system = Pinamamahalaan ng configuration ng system
+setting_locked_by_file = Itinakda ng { $path }
+setting_locked_by_dropin = Itinakda ng karagdagang file na { $path }
+setting_locked_by_env = Itinakda ng { $var }
 
 settings_interface = Interface
 interface_general = General

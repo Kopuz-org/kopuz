@@ -817,7 +817,9 @@ impl IntegrationService {
         values: Vec<FieldValue>,
     ) -> Result<IntegrationInfo, ApiError> {
         let info = self.info(id).await?;
-        self.config.ensure_unlocked(&write_keys(&info, &values))?;
+        self.config
+            .ensure_unlocked(&write_keys(&info, &values))
+            .await?;
         if id == DISCORD {
             if let Some(paused) = value_of(&values, PAUSED) {
                 self.presence_pause
@@ -848,7 +850,7 @@ impl IntegrationService {
     pub async fn clear(&self, id: &str) -> Result<(), ApiError> {
         self.info(id).await?;
         if id == DISCORD {
-            self.config.ensure_unlocked(&PRESENCE_KEYS[..1])?;
+            self.config.ensure_unlocked(&PRESENCE_KEYS[..1]).await?;
             // Discord holds no credential, so unconfigured means presence off.
             self.config
                 .mutate_state(&PRESENCE_KEYS[..1], |config| {
