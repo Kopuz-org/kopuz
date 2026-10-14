@@ -180,7 +180,10 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
         ..Default::default()
     };
     let anonymous_err = match anonymous_attempt(video_id, extras).await {
-        Ok(info) => return Ok(recheck_gated(info, || anonymous_attempt(video_id, extras)).await),
+        Ok(info) => match recheck_gated(info, || anonymous_attempt(video_id, extras)).await {
+            Ok(info) => return Ok(info),
+            Err(error) => error,
+        },
         Err(error) => error,
     };
     tracing::debug!(%anonymous_err, "anonymous path failed");
@@ -201,9 +204,10 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
                 };
                 match anonymous_attempt(video_id, extras).await {
                     Ok(info) => {
-                        return Ok(
-                            recheck_gated(info, || anonymous_attempt(video_id, extras)).await
-                        );
+                        match recheck_gated(info, || anonymous_attempt(video_id, extras)).await {
+                            Ok(info) => return Ok(info),
+                            Err(error) => error,
+                        }
                     }
                     Err(error) => error,
                 }
@@ -273,7 +277,10 @@ const GATE_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Some plain URLs are gated behind a PO token the response never asks for:
 /// ranges past the first megabyte get 403, at random, so a repeat request
 /// usually returns a clean URL. `again` must reuse the original extras.
-async fn recheck_gated<F, Fut>(info: YtStreamInfo, mut again: F) -> YtStreamInfo
+///
+/// A URL still gated after the retries is an error: googlevideo refuses a
+/// plain GET of it too, so streaming it sequentially reads zero bytes.
+async fn recheck_gated<F, Fut>(info: YtStreamInfo, mut again: F) -> Result<YtStreamInfo, String>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<YtStreamInfo, String>>,
@@ -281,7 +288,7 @@ where
     let mut current = info;
     for retry in 0..=GATED_RETRIES {
         if !is_gated(&current).await {
-            return current;
+            return Ok(current);
         }
         if retry == GATED_RETRIES {
             break;
@@ -298,11 +305,10 @@ where
             }
         }
     }
-    tracing::warn!(
-        "googlevideo refused deep ranges on every resolve; streaming sequentially without seeking"
-    );
-    current.range_safe = false;
-    current
+    Err(format!(
+        "{}: googlevideo refused the stream on every resolve",
+        VISIONOS.client_name
+    ))
 }
 
 /// Any probe failure other than 403/410 passes; the range source rechecks the tail on open.
@@ -905,34 +911,34 @@ mod tests {
             calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             async move { Ok(stream_at(addr, "good")) }
         })
-        .await;
+        .await
+        .unwrap();
         assert!(info.url.ends_with("/good"), "{}", info.url);
         assert!(info.range_safe);
         assert_eq!(calls.into_inner(), 1);
     }
 
     #[tokio::test]
-    async fn a_url_gated_on_every_resolve_streams_sequentially() {
+    async fn a_url_gated_on_every_resolve_is_refused() {
         let addr = googlevideo().await;
         let calls = std::sync::atomic::AtomicUsize::new(0);
-        let info = recheck_gated(stream_at(addr, "gated"), || {
+        let result = recheck_gated(stream_at(addr, "gated"), || {
             calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             async move { Ok(stream_at(addr, "gated")) }
         })
         .await;
-        assert!(!info.range_safe);
+        assert!(result.is_err());
         assert_eq!(calls.into_inner(), GATED_RETRIES);
     }
 
     #[tokio::test]
-    async fn a_failed_resolve_keeps_the_gated_url_sequential() {
+    async fn a_failed_resolve_of_a_gated_url_is_refused() {
         let addr = googlevideo().await;
-        let info = recheck_gated(stream_at(addr, "gated"), || async {
+        let result = recheck_gated(stream_at(addr, "gated"), || async {
             Err("VISIONOS playability ERROR: nope".to_string())
         })
         .await;
-        assert!(info.url.ends_with("/gated"), "{}", info.url);
-        assert!(!info.range_safe);
+        assert!(result.is_err());
     }
 
     #[tokio::test]
@@ -943,7 +949,8 @@ mod tests {
             calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             async move { Ok(stream_at(addr, "gated")) }
         })
-        .await;
+        .await
+        .unwrap();
         assert!(info.url.ends_with("/good"), "{}", info.url);
         assert!(info.range_safe);
         assert_eq!(calls.into_inner(), 0);
