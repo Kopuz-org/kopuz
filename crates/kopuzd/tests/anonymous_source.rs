@@ -40,7 +40,12 @@ async fn an_anonymous_youtube_music_source_is_usable_without_a_credential() {
         provider,
     );
     config.attach_session(session.clone());
-    let sources = daemon::SourceService::new(database.clone(), session.clone(), config.clone());
+    let sources = daemon::SourceService::new(
+        database.clone(),
+        session.clone(),
+        config.clone(),
+        session.sources(),
+    );
     let local = Arc::new(
         LocalApi::new(session.clone())
             .with_config(config.clone())

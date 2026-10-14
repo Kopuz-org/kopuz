@@ -85,7 +85,7 @@ pub fn artist_cover(
 /// first track's art. Only the daemon can sign the middle one.
 pub fn playlist_cover(
     playlist: &reader::models::Playlist,
-    config: &config::AppConfig,
+    server: Option<&config::MusicServer>,
     first_track: Option<&reader::Track>,
 ) -> CoverRef {
     if let Some(path) = playlist.cover_path.as_ref() {
@@ -94,7 +94,7 @@ pub fn playlist_cover(
             return explicit;
         }
     }
-    if let (Some(tag), Some(server)) = (playlist.image_tag.as_ref(), config.server.as_ref()) {
+    if let (Some(tag), Some(server)) = (playlist.image_tag.as_ref(), server) {
         let tagged = CoverRef::remote_item(server.service, &playlist.id, Some(tag));
         if tagged != CoverRef::None {
             return tagged;
@@ -148,12 +148,12 @@ pub fn artist_ref(
 
 pub fn playlist_ref(
     playlist: &reader::models::Playlist,
-    config: &config::AppConfig,
+    server: Option<&config::MusicServer>,
     first_track: Option<&reader::Track>,
 ) -> Option<ArtworkRef> {
     ref_for(
         ArtworkTarget::Playlist(playlist.id.clone()),
-        playlist_cover(playlist, config, first_track),
+        playlist_cover(playlist, server, first_track),
     )
 }
 
@@ -250,11 +250,11 @@ impl ArtworkService {
         target: &ArtworkTarget,
         hq: bool,
     ) -> Result<ArtworkPayload, ApiError> {
-        let config = self.session.config_watch().borrow().clone();
+        let sources = self.session.sources();
         let width = if hq { HQ_MAX } else { THUMB_MAX };
-        let cover = self.cover_for(target, &config).await?;
+        let cover = self.cover_for(target, &sources).await?;
         let missing = || ApiError::not_found("no artwork for this entity");
-        match server::cover::locate(&config, cover, width).ok_or_else(missing)? {
+        match server::cover::locate(sources.server.as_ref(), cover, width).ok_or_else(missing)? {
             Located::File(path) => self.local_payload(&path.to_string_lossy(), hq).await,
             Located::Url(url) => self.proxied_payload(&url, hq).await,
         }
@@ -265,39 +265,39 @@ impl ArtworkService {
     async fn cover_for(
         &self,
         target: &ArtworkTarget,
-        config: &config::AppConfig,
+        sources: &server::sources::Sources,
     ) -> Result<CoverRef, ApiError> {
         let db_error = |error: db::DbError| ApiError::internal(format!("database error: {error}"));
+        let active = &sources.active;
         match target {
-            ArtworkTarget::Track(key) => Ok(CoverRef::for_track(&self.track(key, config).await?)),
+            ArtworkTarget::Track(key) => Ok(CoverRef::for_track(&self.track(key, active).await?)),
             ArtworkTarget::Album(id) => {
                 let album = self
                     .db
-                    .album(&config.active_source, id)
+                    .album(active, id)
                     .await
                     .map_err(db_error)?
                     .ok_or_else(|| ApiError::not_found("unknown album id"))?;
                 Ok(album_cover(&album))
             }
             ArtworkTarget::Artist(key) => {
-                let artist =
-                    crate::artist_row::require(&self.db, &config.active_source, key).await?;
+                let artist = crate::artist_row::require(&self.db, active, key).await?;
                 let images = self.db.artist_images().await.map_err(db_error)?;
-                let source = server::source::active(self.db.clone(), config);
+                let source = server::source::active(self.db.clone(), sources);
                 let library_view =
                     source.capabilities().artist_view == server::source::ArtistView::Library;
                 // The cover the listing advertised, so the bytes served are the picture its ref was versioned on.
                 let album = match library_view {
                     true => self
                         .db
-                        .artist_album_cover(&config.active_source, &artist.key)
+                        .artist_album_cover(active, &artist.key)
                         .await
                         .map_err(db_error)?
                         .map(PathBuf::from),
                     false => None,
                 };
                 Ok(artist_cover(
-                    config.active_source.as_str(),
+                    active.as_str(),
                     &artist.key,
                     &images,
                     album.as_deref(),
@@ -305,21 +305,21 @@ impl ArtworkService {
                 ))
             }
             ArtworkTarget::Playlist(id) => {
-                let store = self
-                    .db
-                    .load_playlists(&config.active_source)
-                    .await
-                    .map_err(db_error)?;
+                let store = self.db.load_playlists(active).await.map_err(db_error)?;
                 let playlist = store
                     .playlists
                     .iter()
                     .find(|playlist| &playlist.id == id)
                     .ok_or_else(|| ApiError::not_found("unknown playlist id"))?;
                 let first = match playlist.tracks.first() {
-                    Some(key) => self.track(key, config).await.ok(),
+                    Some(key) => self.track(key, active).await.ok(),
                     None => None,
                 };
-                Ok(playlist_cover(playlist, config, first.as_ref()))
+                Ok(playlist_cover(
+                    playlist,
+                    sources.server.as_ref(),
+                    first.as_ref(),
+                ))
             }
             // Public images the daemon holds a URL for. Proxied rather than
             // handed over, so every frontend gets pictures the same way and
@@ -346,14 +346,10 @@ impl ArtworkService {
 
     /// A track the library holds, or one the session is playing that came
     /// from a live listing the database has never seen.
-    async fn track(
-        &self,
-        key: &str,
-        config: &config::AppConfig,
-    ) -> Result<reader::Track, ApiError> {
+    async fn track(&self, key: &str, active: &config::Source) -> Result<reader::Track, ApiError> {
         let found = self
             .db
-            .tracks_by_keys(&config.active_source, &[key.to_string()])
+            .tracks_by_keys(active, &[key.to_string()])
             .await
             .map_err(|error| ApiError::internal(format!("database error: {error}")))?
             .into_iter()

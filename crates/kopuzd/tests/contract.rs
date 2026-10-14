@@ -109,6 +109,7 @@ struct Pair {
     library: Arc<LibraryService>,
     favorites: Arc<FavoritesService>,
     playlists: Arc<daemon::PlaylistService>,
+    sources: Arc<daemon::SourceService>,
     database: db::Db,
     session: SessionHandle,
     _dir: tempfile::TempDir,
@@ -166,11 +167,16 @@ async fn spawn_pair() -> Pair {
         session.clone(),
         dir.path().join("offline"),
     );
-    let sources =
-        daemon::SourceService::new(database.clone(), session.clone(), config_service.clone());
-    sources.watch_active(session.config_watch());
+    let sources = daemon::SourceService::new(
+        database.clone(),
+        session.clone(),
+        config_service.clone(),
+        session.sources(),
+    );
+    sources.watch_active(session.sources_watch());
     let integrations = daemon::IntegrationService::new(config_service.clone());
-    let downloader = daemon::UrlDownloadService::new(database.clone(), config_service.clone());
+    let downloader =
+        daemon::UrlDownloadService::new(database.clone(), config_service.clone(), sources.clone());
     let prefs = daemon::PrefsService::new(database.clone(), session.clone());
     let build_api = |session: SessionHandle| {
         LocalApi::new(session)
@@ -213,6 +219,7 @@ async fn spawn_pair() -> Pair {
         library,
         favorites,
         playlists,
+        sources,
         database,
         session,
         _dir: dir,
@@ -233,9 +240,9 @@ async fn clippsly_pair() -> (Pair, String, tokio::task::JoinHandle<()>) {
         })
         .await
         .unwrap();
-    pair.config_service
-        .mutate_state(&["servers"], |config| {
-            config
+    pair.sources
+        .mutate(|sources| {
+            sources
                 .servers
                 .iter_mut()
                 .find(|row| row.id == source.id)
@@ -732,19 +739,27 @@ async fn a_job_says_whether_the_daemons_schedule_started_it_on_every_transport()
     }
 }
 
-fn config_with_active_jellyfin(minutes: u32) -> impl FnOnce(&mut config::AppConfig) + Send {
-    move |config| {
-        config.server = Some(config::MusicServer {
-            name: "unreachable".into(),
-            url: "http://127.0.0.1:9".into(),
-            access_token: Some("token".into()),
-            user_id: Some("user".into()),
-            id: Some("srv-1".into()),
-            ..Default::default()
-        });
-        config.active_source = config::Source::Server("srv-1".into());
-        config.sync_interval_minutes = minutes;
-    }
+async fn activate_jellyfin(pair: &Pair, minutes: u32) {
+    pair.config_service
+        .mutate_state(&["sync_interval_minutes"], move |config| {
+            config.sync_interval_minutes = minutes;
+        })
+        .await
+        .expect("config saved");
+    pair.sources
+        .mutate(|sources| {
+            sources.server = Some(config::MusicServer {
+                name: "unreachable".into(),
+                url: "http://127.0.0.1:9".into(),
+                access_token: Some("token".into()),
+                user_id: Some("user".into()),
+                id: Some("srv-1".into()),
+                ..Default::default()
+            });
+            sources.active = config::Source::Server("srv-1".into());
+        })
+        .await
+        .expect("sources saved");
 }
 
 fn spawn_auto_sync(pair: &Pair) {
@@ -755,19 +770,14 @@ fn spawn_auto_sync(pair: &Pair) {
         pair.playlists.clone(),
         pair.favorites.clone(),
         pair.session.config_watch(),
+        pair.session.sources_watch(),
     );
 }
 
 #[tokio::test]
 async fn the_daemons_own_syncs_are_automatic_on_every_transport() {
     let pair = spawn_pair().await;
-    pair.config_service
-        .mutate_state(
-            &["server", "active_source", "sync_interval_minutes"],
-            config_with_active_jellyfin(60),
-        )
-        .await
-        .expect("config saved");
+    activate_jellyfin(&pair, 60).await;
     spawn_auto_sync(&pair);
 
     for kind in [
@@ -786,13 +796,7 @@ async fn the_daemons_own_syncs_are_automatic_on_every_transport() {
 #[tokio::test]
 async fn a_zero_sync_interval_starts_no_syncs() {
     let pair = spawn_pair().await;
-    pair.config_service
-        .mutate_state(
-            &["server", "active_source", "sync_interval_minutes"],
-            config_with_active_jellyfin(0),
-        )
-        .await
-        .expect("config saved");
+    activate_jellyfin(&pair, 0).await;
     spawn_auto_sync(&pair);
 
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -1077,7 +1081,6 @@ async fn config_view_and_set_agree_across_transports() {
     // these to be equal, so this is the guard on every field mapping.
     assert_eq!(local_view, wire_view);
     assert!(local_view.config.lastfm_session_key.is_empty());
-    assert!(local_view.config.server.is_none());
 
     let mut next = wire_view.config.clone();
     next.crossfade_seconds = 7;
@@ -1098,7 +1101,6 @@ async fn config_view_and_set_agree_across_transports() {
     // cannot erase them; the daemon keeps its own. (Seeding one is only
     // possible below the API, so the depth test lives in config_service.)
     assert!(written.config.lastfm_session_key.is_empty());
-    assert!(written.config.servers.is_empty());
 }
 
 fn pref(key: &str, value: Option<&str>) -> api::PrefEntry {

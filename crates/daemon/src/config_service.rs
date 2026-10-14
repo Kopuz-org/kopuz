@@ -11,21 +11,12 @@
 //! churn, and an immediate write keeps the daemon free of idle timers.
 
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 use api::{ApiError, ConfigView};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use crate::session::SessionHandle;
-
-/// Keys whose change means the active media source has to be rebuilt.
-const SOURCE_KEYS: &[&str] = &[
-    "active_source",
-    "server",
-    "servers",
-    "local_sources",
-    "server_folders",
-];
 
 /// Never serialized to a client and never patchable: credentials move through the provisioning endpoints.
 pub struct ConfigService {
@@ -70,15 +61,6 @@ impl ConfigService {
         let Some(session) = self.session.get() else {
             return;
         };
-        if changed
-            .iter()
-            .any(|key| SOURCE_KEYS.contains(&key.as_str()))
-        {
-            session.set_active_source(Some(Arc::from(server::source::active(
-                self.db.clone(),
-                &held.config,
-            ))));
-        }
         session.set_config(held.config.clone(), changed);
     }
 
@@ -232,11 +214,7 @@ fn with_daemon_owned_fields(
     incoming.muted = current.muted;
     incoming.auto_fetch_covers = current.auto_fetch_covers;
     incoming.cover_fetch_strategy = current.cover_fetch_strategy;
-    incoming.server = current.server.clone();
-    incoming.servers = current.servers.clone();
-    incoming.active_source = current.active_source.clone();
     incoming.local_sources = current.local_sources.clone();
-    incoming.server_folders = current.server_folders.clone();
     incoming.musicbrainz_token = current.musicbrainz_token.clone();
     incoming.lastfm_api_key = current.lastfm_api_key.clone();
     incoming.lastfm_api_secret = current.lastfm_api_secret.clone();
@@ -270,9 +248,7 @@ fn stripped(config: &config::AppConfig) -> config::AppConfig {
     view.muted = config.muted;
     view.auto_fetch_covers = config.auto_fetch_covers;
     view.cover_fetch_strategy = config.cover_fetch_strategy;
-    view.active_source = config.active_source.clone();
     view.local_sources = config.local_sources.clone();
-    view.server_folders = config.server_folders.clone();
     view
 }
 
@@ -310,10 +286,8 @@ mod tests {
             name: "a".into(),
             directories: vec!["/music".into()],
         });
-        current.active_source = config::Source::LocalLibrary("local:a".into());
         let updated = with_daemon_owned_fields(config::AppConfig::default(), &current);
         assert_eq!(updated.local_sources, current.local_sources);
-        assert_eq!(updated.active_source, current.active_source);
         let view = stripped(&current);
         assert_eq!(view.local_sources, current.local_sources);
     }
@@ -331,7 +305,6 @@ mod tests {
 
         let view = service.view().await.expect("view");
         assert!(view.config.lastfm_session_key.is_empty());
-        assert!(view.config.server.is_none());
         assert!(view.locked_keys.is_empty());
 
         let mut next = view.config.clone();

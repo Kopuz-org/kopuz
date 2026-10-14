@@ -111,6 +111,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         db::legacy::migrate_json_store(&database, &db::config_dir()).await;
     }
     let config = database.load_config().await?.unwrap_or_default();
+    let sources = Arc::new(crate::sources::load(&database).await?);
     let offline = crate::OfflineIndex::load(&database).await?;
     let downloads_pruned = offline.pruned();
 
@@ -128,18 +129,19 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let _ = std::fs::create_dir_all(&cover_cache);
     let library = Arc::new(LibraryService::new(
         database.clone(),
-        config.active_source.clone(),
+        sources.active.clone(),
         station_registry.clone(),
         cover_cache,
     ));
     server::ytmusic::player::init_tier_store(database.clone());
     db::cache::init(database.clone());
     let active_source: server::source::ActiveSource =
-        Arc::from(server::source::active(database.clone(), &config));
+        Arc::from(server::source::active(database.clone(), &sources));
     let queue_store: Arc<dyn QueueStore> = Arc::new(DbQueueStore::new(database.clone()));
     let scrobbler = crate::Scrobbler::new(database.clone());
     let services = PlaybackServices {
         config: config.clone(),
+        sources: sources.clone(),
         active_source: Some(active_source.clone()),
         station_registry: station_registry.clone(),
         queue_store: Some(queue_store.clone()),
@@ -187,11 +189,19 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     crate::integrations::spawn_jellyfin_reporter(
         &session,
         active_source.clone(),
-        session.config_watch(),
+        session.sources_watch(),
     );
-    crate::integrations::spawn_youtube_reporter(&session, database.clone(), session.config_watch());
-    crate::integrations::spawn_discord_presence(&session, session.config_watch());
-    let restored_source = session.config_watch().borrow().active_source.clone();
+    crate::integrations::spawn_youtube_reporter(
+        &session,
+        database.clone(),
+        session.sources_watch(),
+    );
+    crate::integrations::spawn_discord_presence(
+        &session,
+        session.config_watch(),
+        session.sources_watch(),
+    );
+    let restored_source = session.sources().active.clone();
     match queue_store.load(&restored_source).await {
         Ok(snapshot) if !snapshot.queue.is_empty() => {
             let restored = snapshot.queue.len();
@@ -235,10 +245,14 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .map(|dirs| dirs.data_dir().join("artwork-uploads"))
             .unwrap_or_else(|| std::env::temp_dir().join("kopuz-artwork-uploads")),
     );
-    let sources =
-        crate::SourceService::new(database.clone(), session.clone(), config_service.clone());
+    let sources = crate::SourceService::new(
+        database.clone(),
+        session.clone(),
+        config_service.clone(),
+        sources,
+    );
     sources.spawn_credential_upkeep();
-    sources.watch_active(session.config_watch());
+    sources.watch_active(session.sources_watch());
     crate::auto_sync::spawn(
         database.clone(),
         jobs.clone(),
@@ -246,6 +260,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         playlists.clone(),
         favorites.clone(),
         session.config_watch(),
+        session.sources_watch(),
     );
     // A failed settings read aborts boot above, so reaching here means the config is real.
     crate::folder_scan::spawn(
@@ -276,11 +291,12 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             tracing::warn!(%error, "radio registry could not be loaded");
         }
     });
-    let downloader = crate::UrlDownloadService::new(database.clone(), config_service.clone());
+    let downloader =
+        crate::UrlDownloadService::new(database.clone(), config_service.clone(), sources.clone());
     downloader.attach_rescan(library.clone(), jobs.clone());
     // Spotify plays itself, so the session is told where to send a track it
     // cannot decode. Nothing starts until one is actually queued.
-    let spotify = crate::SpotifySink::new(session.clone(), config_service.clone());
+    let spotify = crate::SpotifySink::new(session.clone(), sources.clone());
     session.set_external_sink(spotify.clone());
     spotify.spawn_discovery();
     let api = Arc::new(

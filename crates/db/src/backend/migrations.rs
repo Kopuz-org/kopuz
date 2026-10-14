@@ -368,8 +368,8 @@ async fn fill_state(pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(
            artist_album_view_mode, artists_view_mode, artist_view_order, listen_now_style, hero_height) \
          VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
     )
-    .bind(&cfg.device_id)
-    .bind(cfg.active_source.as_str())
+    .bind(&data.device_id)
+    .bind(data.active_source.as_str())
     .bind(cfg.source_explicitly_set)
     .bind(f64::from(cfg.volume))
     .bind(cfg.discord_presence_paused)
@@ -457,7 +457,7 @@ async fn fill_state(pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(
         .execute(&mut *tx)
         .await?;
     }
-    for (server, paths) in &cfg.server_folders {
+    for (server, paths) in &data.server_folders {
         for (position, path) in paths.iter().enumerate() {
             sqlx::query(
                 "INSERT OR REPLACE INTO server_folders (server_id, position, path) \
@@ -677,7 +677,8 @@ pub async fn run_json_import(
     let server_src = active_server_id.clone();
 
     // --- app_config blob (minus servers/creds/listen_counts) + listen_counts -
-    let imported_config = import_config(&mut tx, &cfg_val, &active_server_id).await?;
+    let (imported_config, imported_source) =
+        import_config(&mut tx, &cfg_val, &active_server_id).await?;
     import_listen_counts(&mut tx, &cfg_val, active_server_id.as_deref()).await?;
     import_recently_played(&mut tx, &cfg_val, &active_server_id).await?;
 
@@ -841,7 +842,7 @@ pub async fn run_json_import(
         radio_cursor: None,
         origin: None,
     };
-    super::writes::write_queue(&mut tx, imported_config.active_source.as_str(), &snapshot).await?;
+    super::writes::write_queue(&mut tx, imported_source.as_str(), &snapshot).await?;
 
     // Record what this import actually consumed, so finalize never moves aside a skipped corrupt file.
     for file in &consumed {
@@ -1000,12 +1001,12 @@ fn legacy_options(yt_browser: Option<&str>, yt_anonymous: bool) -> Vec<(&'static
     )
 }
 
-/// The legacy config as an `AppConfig`, its state and credentials written to their tables; the caller writes its settings file after commit.
+/// The legacy config as an `AppConfig` and its active source, its state and credentials written to their tables; the caller writes its settings file after commit.
 async fn import_config(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     cfg: &serde_json::Value,
     active_server_id: &Option<String>,
-) -> Result<config::AppConfig, DbError> {
+) -> Result<(config::AppConfig, config::Source), DbError> {
     let mut legacy = if cfg.is_null() {
         serde_json::json!({})
     } else {
@@ -1032,7 +1033,12 @@ async fn import_config(
             config::AppConfig::default()
         }
     };
-    super::cfg_store::write_state(tx, &config, &config.active_source).await?;
+    super::cfg_store::write_state(tx, &config).await?;
+    super::cfg_store::write_source_state(tx, Some(&data.active_source), Some(&data.device_id))
+        .await?;
+    for (server, folders) in &data.server_folders {
+        super::cfg_store::write_server_folders(tx, server, folders).await?;
+    }
     super::cfg_store::write_history(tx, &data.downloader_history).await?;
     for (item_id, path) in &data.offline_tracks {
         sqlx::query!(
@@ -1052,7 +1058,7 @@ async fn import_config(
         };
         super::writes::pin_station(tx, &id, manifest).await?;
     }
-    Ok(config)
+    Ok((config, data.active_source))
 }
 
 /// `listen_counts` map → its own table, keyed by the source-qualified id
@@ -1597,15 +1603,30 @@ struct LegacyQueue {
     shuffle_enabled: bool,
 }
 
-/// The library data an old config blob or `config.json` held beside its settings.
-#[derive(Deserialize, Default)]
+/// The library data and source state an old config blob or `config.json` held beside its settings.
+#[derive(Deserialize)]
+#[serde(default)]
 struct LegacyData {
-    #[serde(default)]
     offline_tracks: HashMap<String, String>,
-    #[serde(default)]
     pinned_stations: Vec<String>,
-    #[serde(default, rename = "ytdlp_history")]
+    #[serde(rename = "ytdlp_history")]
     downloader_history: Vec<config::DownloaderHistoryEntry>,
+    server_folders: HashMap<String, Vec<String>>,
+    active_source: config::Source,
+    device_id: String,
+}
+
+impl Default for LegacyData {
+    fn default() -> Self {
+        Self {
+            offline_tracks: HashMap::new(),
+            pinned_stations: Vec::new(),
+            downloader_history: Vec::new(),
+            server_folders: HashMap::new(),
+            active_source: config::Source::default(),
+            device_id: uuid::Uuid::new_v4().to_string(),
+        }
+    }
 }
 
 #[cfg(test)]

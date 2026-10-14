@@ -749,25 +749,11 @@ fn default_hero_height() -> u32 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppConfig {
-    #[serde(default)]
-    pub server: Option<MusicServer>,
-    #[serde(default)]
-    pub servers: Vec<SavedServer>,
     /// Isolated filesystem libraries; the one under `DEFAULT_LOCAL_ID` is the install's own.
     #[serde(default)]
     pub local_sources: Vec<SavedLocalSource>,
-    /// The active source: a folder library or Server(id).
-    /// `server` is hydrated only for the active remote source.
-    #[serde(default)]
-    pub active_source: Source,
     #[serde(default)]
     pub source_explicitly_set: bool,
-    /// Library roots per server id, for backends whose library is a folder tree
-    /// rather than a catalogue (Nextcloud/WebDAV). Lives here rather than on
-    /// `SavedServer` because the servers table holds creds and is stripped from
-    /// the config blob. No entry means "auto-detect".
-    #[serde(default)]
-    pub server_folders: HashMap<String, Vec<String>>,
     /// Browser id used to host Spotify playback (`chrome`/`edge`/`brave`/
     /// `chromium`/`vivaldi`/`safari`); `None` picks the first available.
     #[serde(default)]
@@ -783,8 +769,6 @@ pub struct AppConfig {
     /// theme is active. Empty means whichever default location exists.
     #[serde(default)]
     pub live_theme_path: String,
-    #[serde(default = "default_device_id")]
-    pub device_id: String,
     #[serde(default = "default_discord_presence")]
     pub discord_presence: Option<bool>,
     #[serde(default = "default_discord_presence_paused")]
@@ -953,10 +937,6 @@ fn default_theme() -> String {
     "default".to_string()
 }
 
-fn default_device_id() -> String {
-    uuid::Uuid::new_v4().to_string()
-}
-
 fn default_discord_presence() -> Option<bool> {
     Some(true)
 }
@@ -1068,17 +1048,12 @@ impl Default for AppConfig {
     fn default() -> Self {
         let music_directory = default_music_directory();
         Self {
-            server: None,
-            servers: Vec::new(),
             local_sources: vec![SavedLocalSource::default_library(vec![music_directory])],
-            active_source: Source::default(),
             source_explicitly_set: false,
-            server_folders: HashMap::new(),
             spotify_browser: None,
             spotify_prefer_active_device: true,
             theme: default_theme(),
             live_theme_path: String::new(),
-            device_id: default_device_id(),
             discord_presence: Some(true),
             discord_presence_paused: Some(true),
             discord_presence_source: Some(true),
@@ -1168,32 +1143,8 @@ impl AppConfig {
         }
     }
 
-    pub fn remove_saved_server(&mut self, id: &str) {
-        self.servers.retain(|s| s.id != id);
-        if let Some(active) = &self.server
-            && active.id.as_deref() == Some(id)
-        {
-            self.server = None;
-        }
-    }
-
     pub fn remove_local_source(&mut self, id: &str) {
         self.local_sources.retain(|source| source.id != id);
-        if self.active_source.local_library_id() == Some(id) {
-            self.clear_active_server();
-        }
-    }
-
-    /// Whether `source` is one this config still has, as opposed to one just deleted.
-    pub fn has_source(&self, source: &Source) -> bool {
-        match source {
-            Source::LocalLibrary(id) => self.local_sources.iter().any(|saved| &saved.id == id),
-            Source::Server(id) => self.servers.iter().any(|saved| &saved.id == id),
-        }
-    }
-
-    pub fn find_saved_server(&self, id: &str) -> Option<&SavedServer> {
-        self.servers.iter().find(|s| s.id == id)
     }
 
     pub fn migrate_sidebar_order(&mut self) {
@@ -1225,51 +1176,6 @@ impl AppConfig {
                 },
             );
         }
-    }
-}
-
-impl AppConfig {
-    /// Library roots configured for a server, empty when it auto-detects.
-    pub fn folders_for(&self, server_id: &str) -> Vec<String> {
-        self.server_folders
-            .get(server_id)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    /// Replace a server's library roots, dropping the entry when the list empties
-    /// so the backend goes back to auto-detecting.
-    pub fn set_folders_for(&mut self, server_id: &str, folders: Vec<String>) {
-        if folders.is_empty() {
-            self.server_folders.remove(server_id);
-        } else {
-            self.server_folders.insert(server_id.to_string(), folders);
-        }
-    }
-
-    pub fn clear_active_server(&mut self) {
-        self.active_source = Source::default();
-        self.server = None;
-        self.source_explicitly_set = true;
-    }
-
-    pub fn set_active_local_source(&mut self, source: Source) {
-        debug_assert!(source.is_local());
-        self.active_source = source;
-        self.server = None;
-        self.source_explicitly_set = true;
-    }
-
-    pub fn set_active_server_snapshot(&mut self, server: MusicServer) {
-        let source = server.id.clone().map_or(Source::default(), Source::Server);
-        self.active_source = source;
-        self.server = Some(server);
-        self.source_explicitly_set = true;
-    }
-
-    pub fn active_service(&self) -> Option<MusicService> {
-        self.active_source.server_id()?;
-        self.server.as_ref().map(|server| server.service)
     }
 }
 
@@ -1577,20 +1483,6 @@ mod tests {
                 anonymous: true,
             }
         );
-    }
-
-    #[test]
-    fn server_folders_round_trip_and_clear_when_emptied() {
-        let mut config = AppConfig::default();
-        assert!(config.folders_for("srv").is_empty());
-
-        config.set_folders_for("srv", vec!["/Music".to_string()]);
-        assert_eq!(config.folders_for("srv"), vec!["/Music".to_string()]);
-
-        // Emptying drops the entry, so the backend auto-detects again.
-        config.set_folders_for("srv", Vec::new());
-        assert!(config.folders_for("srv").is_empty());
-        assert!(!config.server_folders.contains_key("srv"));
     }
 
     /// Settings saved before the key existed keep syncing daily rather than never.

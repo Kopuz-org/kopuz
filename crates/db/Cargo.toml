@@ -35,6 +35,7 @@ directories = { workspace = true }
 sha2 = { workspace = true }
 icu_collator = { workspace = true }
 icu_locale_core = { workspace = true }
+uuid = { workspace = true }
 
 # Android has no XDG layout — the writable per-app directory has to come from
 # the Activity, so `config_dir` asks it over JNI.

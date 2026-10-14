@@ -1,6 +1,6 @@
 //! Config persistence: settings in the settings file (`config::store`), and state, credentials and library data in tables, hydrated into one `AppConfig`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 
 use config::{AppConfig, Browser, MusicServer, MusicService, SavedServer, Source};
@@ -17,7 +17,7 @@ pub async fn load_config(
 ) -> Result<Option<AppConfig>, DbError> {
     let layers = config::store::FileLayers::read(settings_path);
     let state = sqlx::query!(
-        "SELECT device_id, active_source, source_explicitly_set, volume, muted, discord_presence_paused, \
+        "SELECT source_explicitly_set, volume, muted, discord_presence_paused, \
                 fullscreen_tabs_collapsed, sort_order, album_view_mode, artist_album_view_mode, \
                 artists_view_mode, artist_view_order, listen_now_style, hero_height \
            FROM app_state WHERE id = 1"
@@ -31,8 +31,6 @@ pub async fn load_config(
     let mut cfg: AppConfig = layers.merge_and_parse(serde_json::json!({}))?;
 
     if let Some(state) = state {
-        cfg.device_id = state.device_id;
-        cfg.active_source = Source::from_column(&state.active_source);
         cfg.source_explicitly_set = state.source_explicitly_set != 0;
         cfg.volume = state.volume as f32;
         cfg.muted = state.muted != 0;
@@ -74,33 +72,44 @@ pub async fn load_config(
             *slot = row.value;
         }
     }
-    let folders =
-        sqlx::query!("SELECT server_id, path FROM server_folders ORDER BY server_id, position")
-            .fetch_all(pool)
-            .await?;
-    cfg.server_folders = std::collections::HashMap::new();
-    for row in folders {
-        cfg.server_folders
-            .entry(row.server_id)
-            .or_default()
-            .push(row.path);
-    }
     // The in-memory shape migrations the legacy file load used to run.
     cfg.migrate_home_sections();
     cfg.migrate_sidebar_order();
     cfg.migrate_registry_paths();
 
-    // Hydrate servers from their tables (creds included for the active one).
+    Ok(Some(cfg))
+}
+
+pub async fn load_sources(pool: &SqlitePool) -> Result<crate::StoredSources, DbError> {
+    let state = sqlx::query!("SELECT device_id, active_source FROM app_state WHERE id = 1")
+        .fetch_optional(pool)
+        .await?;
+    let active = state
+        .as_ref()
+        .map(|state| Source::from_column(&state.active_source))
+        .unwrap_or_default();
+    let mut folders: HashMap<String, Vec<String>> = HashMap::new();
+    let rows =
+        sqlx::query!("SELECT server_id, path FROM server_folders ORDER BY server_id, position")
+            .fetch_all(pool)
+            .await?;
+    for row in rows {
+        folders.entry(row.server_id).or_default().push(row.path);
+    }
     let servers = stored_servers(pool, None).await?;
-    cfg.servers = servers.iter().map(StoredServer::saved).collect();
-    cfg.server = cfg.active_source.server_id().and_then(|active| {
+    let server = active.server_id().and_then(|active| {
         servers
             .iter()
             .find(|server| server.id == *active)
             .map(StoredServer::music_server)
     });
-
-    Ok(Some(cfg))
+    Ok(crate::StoredSources {
+        active,
+        server,
+        servers: servers.iter().map(StoredServer::saved).collect(),
+        folders,
+        device_id: state.map(|state| state.device_id),
+    })
 }
 
 /// Every play count, under the uid keys every reader of the map looks them up by.
@@ -287,125 +296,60 @@ pub async fn save_config(
 ) -> Result<(), DbError> {
     // It can read before it writes, and a deferred BEGIN then fails at once against a write that landed meanwhile.
     let mut tx = super::begin_immediate(pool).await?;
-    let active = sync_servers(&mut tx, cfg).await?;
-    write_state(&mut tx, cfg, &active).await?;
+    write_state(&mut tx, cfg).await?;
     tx.commit().await?;
     write_settings(cfg, settings_path)
 }
 
-/// Sync the saved servers and the active one's creds; answers the active source with any resolved server id stamped in.
-async fn sync_servers(tx: &mut sqlx::SqliteConnection, cfg: &AppConfig) -> Result<Source, DbError> {
-    let now = now_secs();
-    // Non-cred fields only: the in-memory config carries no other server's creds to write.
-    for s in &cfg.servers {
-        upsert_server_row(tx, &s.id, &s.name, &s.url, service_str(s.service), now).await?;
-        let browser = s.yt_browser.map(browser_str);
-        let options = server_options(
-            browser.as_deref(),
-            s.yt_anonymous,
-            &s.apple_music_storefront,
-            &s.apple_music_language,
-        );
-        write_server_options(tx, &s.id, &options).await?;
-    }
-
-    let mut active_id: Option<String> = cfg.active_source.server_id().map(String::from);
-    if let Some(srv) = &cfg.server {
-        let id = srv
-            .id
-            .clone()
-            .or_else(|| cfg.active_source.server_id().map(String::from))
-            .unwrap_or_else(|| format!("legacy-{}", service_str(srv.service)));
-        upsert_server_row(tx, &id, &srv.name, &srv.url, service_str(srv.service), now).await?;
-        let browser = srv.yt_browser.map(browser_str);
-        let options = server_options(
-            browser.as_deref(),
-            srv.yt_anonymous,
-            &srv.apple_music_storefront,
-            &srv.apple_music_language,
-        );
-        write_server_options(tx, &id, &options).await?;
-        write_server_credentials(
-            tx,
-            &id,
-            srv.access_token.as_deref(),
-            srv.user_id.as_deref(),
-            now,
-        )
+/// The app_state row's own columns; a first write also stamps a fresh device id and the default source, which have writers of their own.
+async fn write_state_row(
+    conn: &mut sqlx::SqliteConnection,
+    cfg: &AppConfig,
+    on_conflict: &str,
+) -> Result<(), DbError> {
+    let sql = format!(
+        "INSERT INTO app_state (id, device_id, active_source, source_explicitly_set, volume, \
+           discord_presence_paused, fullscreen_tabs_collapsed, sort_order, album_view_mode, \
+           artist_album_view_mode, artists_view_mode, artist_view_order, listen_now_style, hero_height, muted) \
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
+         ON CONFLICT(id) {on_conflict}"
+    );
+    sqlx::query(&sql)
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(Source::default().as_str())
+        .bind(cfg.source_explicitly_set)
+        .bind(f64::from(cfg.volume))
+        .bind(cfg.discord_presence_paused)
+        .bind(cfg.fullscreen_tabs_collapsed)
+        .bind(variant(&cfg.sort_order)?)
+        .bind(variant(&cfg.album_view_mode)?)
+        .bind(variant(&cfg.artist_album_view_mode)?)
+        .bind(variant(&cfg.artists_view_mode)?)
+        .bind(variant(&cfg.artist_view_order)?)
+        .bind(variant(&cfg.listen_now_style)?)
+        .bind(i64::from(cfg.hero_height))
+        .bind(cfg.muted)
+        .execute(&mut *conn)
         .await?;
-        active_id = Some(id);
-    }
-
-    // Drop server rows the user removed (keep the active one regardless).
-    let keep: HashSet<&str> = cfg
-        .servers
-        .iter()
-        .map(|s| s.id.as_str())
-        .chain(active_id.as_deref())
-        .collect();
-    let existing: Vec<String> = sqlx::query_scalar!("SELECT id FROM servers")
-        .fetch_all(&mut *tx)
-        .await?;
-    for id in existing {
-        if !keep.contains(id.as_str()) {
-            purge_source(tx, &id).await?;
-            sqlx::query!("DELETE FROM servers WHERE id = ?1", id)
-                .execute(&mut *tx)
-                .await?;
-        }
-    }
-    Ok(match active_id {
-        Some(id) => Source::Server(id),
-        None => cfg.active_source.clone(),
-    })
+    Ok(())
 }
 
-/// State, credentials and the lists the app keeps; play counts, offline copies and pins each have their own writer.
+const UPDATE_STATE: &str = "DO UPDATE SET source_explicitly_set = ?3, volume = ?4, \
+    discord_presence_paused = ?5, fullscreen_tabs_collapsed = ?6, sort_order = ?7, \
+    album_view_mode = ?8, artist_album_view_mode = ?9, artists_view_mode = ?10, \
+    artist_view_order = ?11, listen_now_style = ?12, hero_height = ?13, muted = ?14";
+
+/// Create the app_state row with the defaults if nothing has written it yet.
+async fn ensure_state_row(conn: &mut sqlx::SqliteConnection) -> Result<(), DbError> {
+    write_state_row(conn, &AppConfig::default(), "DO NOTHING").await
+}
+
+/// State, credentials and the lists the app keeps; the sources, play counts, offline copies and pins each have their own writer.
 pub(crate) async fn write_state(
     conn: &mut sqlx::SqliteConnection,
     cfg: &AppConfig,
-    active: &Source,
 ) -> Result<(), DbError> {
-    let active = active.as_str();
-    let explicit = cfg.source_explicitly_set as i64;
-    let volume = f64::from(cfg.volume);
-    let muted = cfg.muted as i64;
-    let paused = cfg.discord_presence_paused.map(i64::from);
-    let collapsed = cfg.fullscreen_tabs_collapsed as i64;
-    let sort_order = variant(&cfg.sort_order)?;
-    let album_view_mode = variant(&cfg.album_view_mode)?;
-    let artist_album_view_mode = variant(&cfg.artist_album_view_mode)?;
-    let artists_view_mode = variant(&cfg.artists_view_mode)?;
-    let artist_view_order = variant(&cfg.artist_view_order)?;
-    let listen_now_style = variant(&cfg.listen_now_style)?;
-    let hero_height = i64::from(cfg.hero_height);
-    sqlx::query!(
-        "INSERT INTO app_state (id, device_id, active_source, source_explicitly_set, volume, \
-           discord_presence_paused, fullscreen_tabs_collapsed, sort_order, album_view_mode, \
-           artist_album_view_mode, artists_view_mode, artist_view_order, listen_now_style, hero_height, \
-           muted) \
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
-         ON CONFLICT(id) DO UPDATE SET device_id = ?1, active_source = ?2, source_explicitly_set = ?3, \
-           volume = ?4, discord_presence_paused = ?5, fullscreen_tabs_collapsed = ?6, sort_order = ?7, \
-           album_view_mode = ?8, artist_album_view_mode = ?9, artists_view_mode = ?10, \
-           artist_view_order = ?11, listen_now_style = ?12, hero_height = ?13, muted = ?14",
-        cfg.device_id,
-        active,
-        explicit,
-        volume,
-        paused,
-        collapsed,
-        sort_order,
-        album_view_mode,
-        artist_album_view_mode,
-        artists_view_mode,
-        artist_view_order,
-        listen_now_style,
-        hero_height,
-        muted
-    )
-    .execute(&mut *conn)
-    .await?;
+    write_state_row(conn, cfg, UPDATE_STATE).await?;
 
     sqlx::query!("DELETE FROM view_sorts")
         .execute(&mut *conn)
@@ -460,26 +404,143 @@ pub(crate) async fn write_state(
         .execute(&mut *conn)
         .await?;
     }
+    Ok(())
+}
 
-    sqlx::query!("DELETE FROM server_folders")
+/// Replace one server's library roots.
+pub(crate) async fn write_server_folders(
+    conn: &mut sqlx::SqliteConnection,
+    id: &str,
+    folders: &[String],
+) -> Result<(), DbError> {
+    sqlx::query("DELETE FROM server_folders WHERE server_id = ?1")
+        .bind(id)
         .execute(&mut *conn)
         .await?;
-    for (server, paths) in &cfg.server_folders {
-        for (position, path) in paths.iter().enumerate() {
-            let position = position as i64;
-            // A folder list for a server the app no longer has would name nothing.
-            sqlx::query!(
-                "INSERT INTO server_folders (server_id, position, path) \
-                 SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM servers WHERE id = ?1)",
-                server,
-                position,
-                path
-            )
-            .execute(&mut *conn)
-            .await?;
-        }
+    for (position, path) in folders.iter().enumerate() {
+        // A folder list for a server the app no longer has would name nothing.
+        sqlx::query(
+            "INSERT INTO server_folders (server_id, position, path) \
+             SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM servers WHERE id = ?1)",
+        )
+        .bind(id)
+        .bind(position as i64)
+        .bind(path)
+        .execute(&mut *conn)
+        .await?;
     }
     Ok(())
+}
+
+pub async fn set_server_folders(
+    pool: &SqlitePool,
+    id: &str,
+    folders: &[String],
+) -> Result<(), DbError> {
+    let mut tx = super::begin_immediate(pool).await?;
+    write_server_folders(&mut tx, id, folders).await?;
+    tx.commit().await
+}
+
+/// Set the stored source and device id, creating the state row if it is missing.
+pub(crate) async fn write_source_state(
+    conn: &mut sqlx::SqliteConnection,
+    active: Option<&Source>,
+    device_id: Option<&str>,
+) -> Result<(), DbError> {
+    ensure_state_row(conn).await?;
+    if let Some(active) = active {
+        sqlx::query("UPDATE app_state SET active_source = ?1 WHERE id = 1")
+            .bind(active.as_str())
+            .execute(&mut *conn)
+            .await?;
+    }
+    if let Some(device_id) = device_id {
+        sqlx::query("UPDATE app_state SET device_id = ?1 WHERE id = 1")
+            .bind(device_id)
+            .execute(&mut *conn)
+            .await?;
+    }
+    Ok(())
+}
+
+pub async fn set_active_source(pool: &SqlitePool, source: &Source) -> Result<(), DbError> {
+    let mut tx = super::begin_immediate(pool).await?;
+    write_source_state(&mut tx, Some(source), None).await?;
+    tx.commit().await
+}
+
+pub async fn set_device_id(pool: &SqlitePool, device_id: &str) -> Result<(), DbError> {
+    let mut tx = super::begin_immediate(pool).await?;
+    write_source_state(&mut tx, None, Some(device_id)).await?;
+    tx.commit().await
+}
+
+pub async fn save_server(pool: &SqlitePool, server: &SavedServer) -> Result<(), DbError> {
+    let mut tx = super::begin_immediate(pool).await?;
+    upsert_server_row(
+        &mut tx,
+        &server.id,
+        &server.name,
+        &server.url,
+        service_str(server.service),
+        now_secs(),
+    )
+    .await?;
+    let browser = server.yt_browser.map(browser_str);
+    let options = server_options(
+        browser.as_deref(),
+        server.yt_anonymous,
+        &server.apple_music_storefront,
+        &server.apple_music_language,
+    );
+    write_server_options(&mut tx, &server.id, &options).await?;
+    tx.commit().await
+}
+
+pub async fn save_active_server(pool: &SqlitePool, server: &MusicServer) -> Result<(), DbError> {
+    let now = now_secs();
+    let id = server
+        .id
+        .clone()
+        .unwrap_or_else(|| format!("legacy-{}", service_str(server.service)));
+    let mut tx = super::begin_immediate(pool).await?;
+    upsert_server_row(
+        &mut tx,
+        &id,
+        &server.name,
+        &server.url,
+        service_str(server.service),
+        now,
+    )
+    .await?;
+    let browser = server.yt_browser.map(browser_str);
+    let options = server_options(
+        browser.as_deref(),
+        server.yt_anonymous,
+        &server.apple_music_storefront,
+        &server.apple_music_language,
+    );
+    write_server_options(&mut tx, &id, &options).await?;
+    write_server_credentials(
+        &mut tx,
+        &id,
+        server.access_token.as_deref(),
+        server.user_id.as_deref(),
+        now,
+    )
+    .await?;
+    tx.commit().await
+}
+
+pub async fn delete_server(pool: &SqlitePool, id: &str) -> Result<(), DbError> {
+    let mut tx = super::begin_immediate(pool).await?;
+    purge_source(&mut tx, id).await?;
+    sqlx::query("DELETE FROM servers WHERE id = ?1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await
 }
 
 async fn write_view_sort<F: serde::Serialize>(
@@ -818,10 +879,6 @@ fn now_secs() -> i64 {
 }
 
 /// Store one server's credentials without touching the rest of its row.
-///
-/// `save_config` only persists credentials for the *active* server, because
-/// the in-memory config holds no others. Signing into a server before
-/// switching to it needs this narrower write.
 pub async fn set_server_credentials(
     pool: &SqlitePool,
     id: &str,

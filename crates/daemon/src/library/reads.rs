@@ -89,7 +89,7 @@ impl LibraryService {
     /// still answers, because a catalog hit is exactly the row someone wants
     /// to share.
     pub async fn track_web_url(&self, key: &str) -> Result<Option<String>, ApiError> {
-        let config = self.current_config();
+        let sources = self.current_sources();
         let track = match self
             .db
             .tracks_by_keys(&self.query_source(), &[key.to_string()])
@@ -104,7 +104,7 @@ impl LibraryService {
                 None => return Ok(None),
             },
         };
-        if let Some(url) = server::source::active(self.db.clone(), &config).web_url(&track) {
+        if let Some(url) = server::source::active(self.db.clone(), &sources).web_url(&track) {
             return Ok(Some(url));
         }
         Ok(server::musicbrainz::track_page_url(
@@ -118,8 +118,8 @@ impl LibraryService {
     /// The source's page for an album, falling back to its first track's page
     /// for a source that has albums but no album pages.
     pub async fn album_web_url(&self, id: &str) -> Result<Option<String>, ApiError> {
-        let config = self.current_config();
-        let source = server::source::active(self.db.clone(), &config);
+        let sources = self.current_sources();
+        let source = server::source::active(self.db.clone(), &sources);
         if let Some(url) = source.album_web_url(id) {
             return Ok(Some(url));
         }
@@ -221,8 +221,8 @@ impl LibraryService {
     /// The photos and album covers an artist's artwork chain reads: for every artist, or just `one`.
     async fn artist_art(&self, one: Option<&str>) -> Result<ArtistArt, ApiError> {
         let source = self.query_source();
-        let config = self.current_config();
-        let library_view = server::source::active(self.db.clone(), &config)
+        let sources = self.current_sources();
+        let library_view = server::source::active(self.db.clone(), &sources)
             .capabilities()
             .artist_view
             == server::source::ArtistView::Library;
@@ -352,11 +352,11 @@ impl LibraryService {
     }
 
     pub async fn search(&self, query: &str) -> Result<SearchResults, ApiError> {
-        let config = self.current_config();
+        let sources = self.current_sources();
         let offline = self.offline();
         // A remote source answers over the network, so search is the one read
         // here that goes through the source rather than straight to the DB.
-        let source = server::source::active(self.db.clone(), &config);
+        let source = server::source::active(self.db.clone(), &sources);
         let (mut tracks, albums) = source
             .search(query)
             .await

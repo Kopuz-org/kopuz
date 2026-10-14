@@ -81,6 +81,7 @@ pub trait PlaybackRecorder: Send + Sync {
 /// lifecycle extraction do.
 pub struct PlaybackServices {
     pub config: config::AppConfig,
+    pub sources: Arc<server::sources::Sources>,
     pub active_source: Option<server::source::ActiveSource>,
     pub station_registry: Arc<radio::registry::StationRegistry>,
     pub queue_store: Option<Arc<dyn crate::persistence::QueueStore>>,
@@ -93,6 +94,7 @@ impl Default for PlaybackServices {
     fn default() -> Self {
         Self {
             config: config::AppConfig::default(),
+            sources: Arc::default(),
             active_source: None,
             station_registry: Arc::new(radio::registry::StationRegistry::default()),
             queue_store: None,
@@ -225,6 +227,7 @@ enum SessionCmd {
         config: Box<config::AppConfig>,
         changed: Vec<String>,
     },
+    SetSources(Arc<server::sources::Sources>),
     QueueUnread,
     PreviewEqualizer(config::EqualizerSettings),
     Emit(Box<ApiEvent>),
@@ -259,6 +262,7 @@ pub struct SessionHandle {
     cmd_tx: mpsc::UnboundedSender<SessionCmd>,
     state_rx: watch::Receiver<PlayerState>,
     config_rx: watch::Receiver<config::AppConfig>,
+    sources_rx: watch::Receiver<Arc<server::sources::Sources>>,
     events: broadcast::Sender<ApiEvent>,
     materializer: Arc<dyn QueueMaterializer>,
     offline: crate::offline::OfflineIndex,
@@ -290,6 +294,7 @@ impl SessionHandle {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (events, _) = broadcast::channel(EVENT_BUFFER);
         let (config_tx, config_rx) = watch::channel(services.config.clone());
+        let (sources_tx, sources_rx) = watch::channel(services.sources.clone());
         let engine_events = player.subscribe();
         player.set_volume(match services.config.muted {
             true => 0.0,
@@ -347,6 +352,8 @@ impl SessionHandle {
             sink: None,
             config_tx,
             config: services.config,
+            sources_tx,
+            sources: services.sources,
             active_source: services.active_source,
             station_registry: services.station_registry,
             offline: services.offline.clone(),
@@ -359,6 +366,7 @@ impl SessionHandle {
             cmd_tx,
             state_rx,
             config_rx,
+            sources_rx,
             events,
             materializer,
             offline: services.offline,
@@ -400,6 +408,16 @@ impl SessionHandle {
     /// `set_config`. Integration tasks watch this instead of polling.
     pub fn config_watch(&self) -> watch::Receiver<config::AppConfig> {
         self.config_rx.clone()
+    }
+
+    /// The session's live sources copy: seeded at spawn, updated by `set_sources`.
+    pub fn sources_watch(&self) -> watch::Receiver<Arc<server::sources::Sources>> {
+        self.sources_rx.clone()
+    }
+
+    /// The sources as the session last adopted them.
+    pub fn sources(&self) -> Arc<server::sources::Sources> {
+        self.sources_rx.borrow().clone()
     }
 
     /// The downloaded copies every wire row and offline playback reads.
@@ -592,6 +610,11 @@ impl SessionHandle {
         });
     }
 
+    /// Adopt new sources (a SourceService change), parking the queue under the source left when the active one moves.
+    pub(crate) fn set_sources(&self, sources: Arc<server::sources::Sources>) {
+        let _ = self.cmd_tx.send(SessionCmd::SetSources(sources));
+    }
+
     /// Flush the current queue snapshot to the store and wait for the write;
     /// the shutdown path calls this so a quit never loses the debounce window.
     pub async fn persist_now(&self) {
@@ -719,6 +742,8 @@ struct Session {
     sink: Option<crate::external::SharedExternalPlayer>,
     config_tx: watch::Sender<config::AppConfig>,
     config: config::AppConfig,
+    sources_tx: watch::Sender<Arc<server::sources::Sources>>,
+    sources: Arc<server::sources::Sources>,
     active_source: Option<server::source::ActiveSource>,
     station_registry: Arc<radio::registry::StationRegistry>,
     offline: crate::offline::OfflineIndex,
@@ -804,7 +829,7 @@ impl Session {
                 queue_rev,
                 reply,
             } => {
-                let current = self.queue_rev == queue_rev && self.config.active_source == source;
+                let current = self.queue_rev == queue_rev && self.sources.active == source;
                 let result = match current {
                     true => self.handle_restore(*snapshot, state_tx).map(|ack| {
                         // Unlike a restore from disk, nothing has stored this queue here yet.
@@ -816,10 +841,14 @@ impl Session {
                 let _ = reply.send(result);
             }
             SessionCmd::SetConfig { config, changed } => {
-                if config.active_source != self.config.active_source {
-                    self.swap_queue(&config, state_tx).await;
+                self.apply_config(*config, changed, state_tx)
+            }
+            SessionCmd::SetSources(sources) => {
+                if sources.active != self.sources.active {
+                    self.swap_queue(&sources, state_tx).await;
                 }
-                self.apply_config(*config, changed, state_tx);
+                self.sources = sources;
+                let _ = self.sources_tx.send(self.sources.clone());
             }
             SessionCmd::QueueUnread => self.queue_unread = true,
             SessionCmd::PreviewEqualizer(equalizer) => self.player.set_equalizer(equalizer),
@@ -871,7 +900,7 @@ impl Session {
                 {
                     let snapshot = self.snapshot();
                     self.queue_dirty = false;
-                    store.save(&self.config.active_source, snapshot).await;
+                    store.save(&self.sources.active, snapshot).await;
                 }
                 if self.push_remote_queue(true) {
                     let (done, flushed) = oneshot::channel();
@@ -1791,7 +1820,7 @@ impl Session {
             return;
         }
         let snapshot = self.snapshot();
-        let source = self.config.active_source.clone();
+        let source = self.sources.active.clone();
         let before = self.persisting.take();
         self.persisting = Some(tokio::spawn(async move {
             if let Some(before) = before {
@@ -1811,19 +1840,19 @@ impl Session {
     /// Park the queue under the source being left, or drop it when that source is gone, and resume the one being entered.
     async fn swap_queue(
         &mut self,
-        next: &config::AppConfig,
+        next: &server::sources::Sources,
         state_tx: &watch::Sender<PlayerState>,
     ) {
         let (resumed, unread) = match self.queue_store.clone() {
             Some(store) => {
                 self.settle_persists().await;
-                let leaving = self.config.active_source.clone();
-                if !next.has_source(&leaving) {
+                let leaving = self.sources.active.clone();
+                if !next.has_source(&self.config.local_sources, &leaving) {
                     store.forget(&leaving).await;
                 } else if !self.queue_unread {
                     store.save(&leaving, self.snapshot()).await;
                 }
-                match store.load(&next.active_source).await {
+                match store.load(&next.active).await {
                     Ok(resumed) => (resumed, false),
                     Err(error) => {
                         tracing::warn!(%error, "the queue of the source switched to could not be read");
@@ -1868,7 +1897,7 @@ impl Session {
             .collect();
         let push = RemoteQueuePush {
             source,
-            store_key: self.config.active_source.clone(),
+            store_key: self.sources.active.clone(),
             queue,
             current_index: self.model.current_position(),
             position_ms: crate::persistence::whole_seconds(

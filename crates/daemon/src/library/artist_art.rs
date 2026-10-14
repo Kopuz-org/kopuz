@@ -36,8 +36,8 @@ impl LibraryService {
     /// skipped -- so calling this on every page open is cheap once the first
     /// pass has run.
     pub async fn refresh_artist_artwork(&self, artists: Vec<String>) -> Result<(), ApiError> {
-        let config = self.current_config();
-        let source: ActiveSource = Arc::from(server::source::active(self.db.clone(), &config));
+        let sources = self.current_sources();
+        let source: ActiveSource = Arc::from(server::source::active(self.db.clone(), &sources));
         match source.capabilities().artist_view {
             ArtistView::Library => self.refresh_bulk(&source).await,
             ArtistView::Remote => {

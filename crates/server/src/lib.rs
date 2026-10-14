@@ -17,6 +17,7 @@ pub mod server_ops;
 pub mod smb;
 pub mod soundcloud;
 pub mod source;
+pub mod sources;
 pub mod spotify;
 pub mod stream;
 pub mod subsonic;

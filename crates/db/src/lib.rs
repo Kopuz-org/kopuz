@@ -41,6 +41,19 @@ pub fn artist_miss_name(source: &Source, artist_key: &str) -> String {
     format!("{}\u{1f}{artist_key}", source.as_str())
 }
 
+/// The configured sources as their tables hold them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StoredSources {
+    pub active: Source,
+    /// The active server with its credentials, when a server is active.
+    pub server: Option<config::MusicServer>,
+    pub servers: Vec<config::SavedServer>,
+    /// Library roots per server id; no entry means the backend auto-detects.
+    pub folders: std::collections::HashMap<String, Vec<String>>,
+    /// `None` until one is stored.
+    pub device_id: Option<String>,
+}
+
 /// A window into a list query (for virtual-scrolled big lists).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Page {
@@ -396,8 +409,10 @@ pub trait ReadStore: Send + Sync {
     /// by server switching so stored creds are reused instead of re-prompting.
     async fn load_server(&self, id: &str) -> Result<Option<config::MusicServer>, DbError>;
 
-    /// Store one server's credentials on their own. `save_config` writes
-    /// only the active server's, so signing into another one needs this.
+    /// The active source, every saved server, their library roots and the device id.
+    async fn load_sources(&self) -> Result<StoredSources, DbError>;
+
+    /// Store one server's credentials on their own, whether or not it is active.
     async fn set_server_credentials(
         &self,
         id: &str,
@@ -456,6 +471,22 @@ pub trait Storage: ReadStore {
 
     /// Drop every row a source left behind: its library, playlists, favorites, plays and photos.
     async fn purge_source(&self, source: &Source) -> Result<(), DbError>;
+
+    /// Add or rename a saved server and store its options; its credentials are left alone.
+    async fn save_server(&self, server: &config::SavedServer) -> Result<(), DbError>;
+
+    /// Store the active server whole: its row, its options and its credentials.
+    async fn save_active_server(&self, server: &config::MusicServer) -> Result<(), DbError>;
+
+    /// Forget a server and everything it left behind.
+    async fn delete_server(&self, id: &str) -> Result<(), DbError>;
+
+    async fn set_active_source(&self, source: &Source) -> Result<(), DbError>;
+
+    /// Replace a server's library roots; an empty list means auto-detect.
+    async fn set_server_folders(&self, id: &str, folders: &[String]) -> Result<(), DbError>;
+
+    async fn set_device_id(&self, device_id: &str) -> Result<(), DbError>;
 
     /// One-shot import of the legacy `*.json` store at `config_dir` into the DB,
     /// then rename each imported file to `*.json.bak` and drop a sentinel. No-op

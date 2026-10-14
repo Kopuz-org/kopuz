@@ -61,12 +61,11 @@ impl CatalogService {
         })
     }
 
-    fn config(&self) -> config::AppConfig {
-        self.session.config_watch().borrow().clone()
-    }
-
     fn source(&self) -> server::source::ActiveSource {
-        Arc::from(server::source::active(self.db.clone(), &self.config()))
+        Arc::from(server::source::active(
+            self.db.clone(),
+            &self.session.sources(),
+        ))
     }
 
     /// The image for a tile, if one was remembered from a page this session
@@ -406,7 +405,7 @@ impl CatalogService {
     async fn seed_track(&self, key: &str) -> Result<reader::Track, ApiError> {
         if let Some(track) = self
             .db
-            .tracks_by_keys(&self.config().active_source, &[key.to_string()])
+            .tracks_by_keys(&self.session.sources().active, &[key.to_string()])
             .await
             .map_err(|error| ApiError::internal(format!("database error: {error}")))?
             .into_iter()

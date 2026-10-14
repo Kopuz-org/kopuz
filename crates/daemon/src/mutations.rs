@@ -42,8 +42,8 @@ fn source_error(error: server::source::SourceError) -> ApiError {
 
 /// The roots the active source may delete inside. A server source has none:
 /// its files are not ours to unlink.
-fn configured_roots(config: &config::AppConfig) -> Vec<&Path> {
-    match &config.active_source {
+fn configured_roots<'a>(config: &'a config::AppConfig, active: &config::Source) -> Vec<&'a Path> {
+    match active {
         config::Source::LocalLibrary(id) => config
             .local_sources
             .iter()
@@ -56,11 +56,11 @@ fn configured_roots(config: &config::AppConfig) -> Vec<&Path> {
 
 /// Whether a path is genuinely inside a configured root, canonicalized on
 /// both sides so a symlink or `..` cannot walk out of the library.
-fn inside_a_root(config: &config::AppConfig, path: &Path) -> bool {
+fn inside_a_root(config: &config::AppConfig, active: &config::Source, path: &Path) -> bool {
     let Ok(target) = std::fs::canonicalize(path) else {
         return false;
     };
-    configured_roots(config).into_iter().any(|root| {
+    configured_roots(config, active).into_iter().any(|root| {
         std::fs::canonicalize(root).is_ok_and(|root| target != root && target.starts_with(&root))
     })
 }
@@ -78,13 +78,20 @@ impl MutationService {
         self.session.config_watch().borrow().clone()
     }
 
+    fn active(&self) -> config::Source {
+        self.session.sources().active.clone()
+    }
+
     fn source(&self) -> server::source::ActiveSource {
-        Arc::from(server::source::active(self.db.clone(), &self.config()))
+        Arc::from(server::source::active(
+            self.db.clone(),
+            &self.session.sources(),
+        ))
     }
 
     async fn track(&self, key: &str) -> Result<reader::Track, ApiError> {
         self.db
-            .tracks_by_keys(&self.config().active_source, &[key.to_string()])
+            .tracks_by_keys(&self.active(), &[key.to_string()])
             .await
             .map_err(db_error)?
             .into_iter()
@@ -95,13 +102,14 @@ impl MutationService {
     /// The file behind a track, once it is established that we may write it.
     fn editable_path(
         config: &config::AppConfig,
+        active: &config::Source,
         track: &reader::Track,
     ) -> Result<PathBuf, ApiError> {
         let path = track
             .id
             .local_path()
             .ok_or_else(|| ApiError::unsupported("only local files have tags to edit"))?;
-        if !inside_a_root(config, path) {
+        if !inside_a_root(config, active, path) {
             return Err(ApiError::invalid_input(
                 "that file is outside the configured library roots",
             ));
@@ -114,8 +122,9 @@ impl MutationService {
         patch: TrackMetadataPatch,
     ) -> Result<api::TrackInfo, ApiError> {
         let config = self.config();
+        let active = self.active();
         let track = self.track(&patch.key).await?;
-        let path = Self::editable_path(&config, &track)?;
+        let path = Self::editable_path(&config, &active, &track)?;
 
         let title = patch.title.unwrap_or_else(|| track.title.clone());
         let artist = patch.artist.unwrap_or_else(|| track.artist.clone());
@@ -163,12 +172,7 @@ impl MutationService {
             .ok_or_else(|| ApiError::internal("the edited file could not be read back"))?;
         scanned.cover = track.cover.clone();
         self.db
-            .refile_track(
-                &config.active_source,
-                &scanned,
-                &scanned_album,
-                &track.album_id,
-            )
+            .refile_track(&active, &scanned, &scanned_album, &track.album_id)
             .await
             .map_err(db_error)?;
         self.session.invalidate(Table::Tracks);
@@ -180,17 +184,18 @@ impl MutationService {
 
     pub async fn delete_tracks(&self, keys: &[String], from_disk: bool) -> Result<(), ApiError> {
         let config = self.config();
+        let active = self.active();
         if from_disk {
             let tracks = self
                 .db
-                .tracks_by_keys(&config.active_source, keys)
+                .tracks_by_keys(&active, keys)
                 .await
                 .map_err(db_error)?;
             // Every path is checked before any file is removed, so a refusal
             // does not leave the deletion half-done.
             let mut paths = Vec::with_capacity(tracks.len());
             for track in &tracks {
-                paths.push(Self::editable_path(&config, track)?);
+                paths.push(Self::editable_path(&config, &active, track)?);
             }
             tokio::task::spawn_blocking(move || {
                 for path in paths {
@@ -218,7 +223,7 @@ impl MutationService {
         if from_disk {
             let keys: Vec<String> = self
                 .db
-                .album_tracks(&self.config().active_source, id)
+                .album_tracks(&self.active(), id)
                 .await
                 .map_err(db_error)?
                 .iter()
@@ -334,7 +339,7 @@ impl MutationService {
                 let playlist = self.playlist(id).await?;
                 self.db
                     .upsert_playlist_meta(
-                        &self.config().active_source,
+                        &self.active(),
                         id,
                         &playlist.name,
                         None,
@@ -369,7 +374,7 @@ impl MutationService {
 
     async fn playlist(&self, id: &str) -> Result<reader::models::Playlist, ApiError> {
         self.db
-            .load_playlists(&self.config().active_source)
+            .load_playlists(&self.active())
             .await
             .map_err(db_error)?
             .playlists
@@ -380,7 +385,7 @@ impl MutationService {
 
     /// The key this artist's own photo is filed under in `artist_images`, with its source.
     async fn artist_image_key(&self, artist: &str) -> Result<(config::Source, String), ApiError> {
-        let source = self.config().active_source;
+        let source = self.active();
         let row = crate::artist_row::require(&self.db, &source, artist).await?;
         Ok((source, row.key))
     }
@@ -389,11 +394,10 @@ impl MutationService {
         &self,
         target: &ArtworkTarget,
     ) -> Result<Option<PathBuf>, ApiError> {
-        let config = self.config();
         Ok(match target {
             ArtworkTarget::Album(id) => self
                 .db
-                .album(&config.active_source, id)
+                .album(&self.active(), id)
                 .await
                 .map_err(db_error)?
                 .and_then(|album| album.cover_path),
@@ -472,21 +476,22 @@ mod tests {
         std::fs::write(&inside, b"in").expect("write inside");
         std::fs::write(&outside, b"out").expect("write outside");
         let config = config_with_root(&library);
+        let local = config::Source::default();
 
-        assert!(inside_a_root(&config, &inside));
-        assert!(!inside_a_root(&config, &outside));
+        assert!(inside_a_root(&config, &local, &inside));
+        assert!(!inside_a_root(&config, &local, &outside));
         assert!(
-            !inside_a_root(&config, &library.join("..").join("elsewhere.flac")),
+            !inside_a_root(&config, &local, &library.join("..").join("elsewhere.flac")),
             "a traversal out of the root is still out of the root"
         );
-        assert!(!inside_a_root(&config, &library), "the root is not a track");
+        assert!(
+            !inside_a_root(&config, &local, &library),
+            "the root is not a track"
+        );
 
         // A server source owns no local files, so nothing is deletable.
-        let server = config::AppConfig {
-            active_source: config::Source::Server("s".into()),
-            ..config
-        };
-        assert!(!inside_a_root(&server, &inside));
+        let server = config::Source::Server("s".into());
+        assert!(!inside_a_root(&config, &server, &inside));
     }
 
     #[test]

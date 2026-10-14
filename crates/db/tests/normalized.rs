@@ -161,8 +161,8 @@ async fn musicbrainz_ids_round_trip_and_clear() {
     assert_eq!(read(db).await.musicbrainz_recording_id, None);
 }
 
-fn server(token: Option<&str>) -> AppConfig {
-    AppConfig {
+fn server(token: Option<&str>) -> db::StoredSources {
+    db::StoredSources {
         servers: vec![SavedServer {
             id: "s1".into(),
             name: "am".into(),
@@ -185,27 +185,74 @@ fn server(token: Option<&str>) -> AppConfig {
             apple_music_storefront: "jp".into(),
             apple_music_language: "en".into(),
         }),
-        active_source: config::Source::Server("s1".into()),
+        active: config::Source::Server("s1".into()),
         ..Default::default()
     }
+}
+
+async fn save_sources(db: &db::Db, sources: &db::StoredSources) {
+    for saved in &sources.servers {
+        db.save_server(saved).await.unwrap();
+    }
+    if let Some(server) = &sources.server {
+        db.save_active_server(server).await.unwrap();
+    }
+    db.set_active_source(&sources.active).await.unwrap();
 }
 
 #[tokio::test]
 async fn a_server_round_trips_through_its_credentials_and_settings() {
     let db = db::init(&unique_db()).await.unwrap();
-    let cfg = server(Some("token"));
-    db.save_config(&cfg).await.unwrap();
+    let saved = server(Some("token"));
+    save_sources(&db, &saved).await;
+    db.save_config(&AppConfig::default()).await.unwrap();
 
-    let loaded = db.load_config().await.unwrap().unwrap();
+    let loaded = db.load_sources().await.unwrap();
 
-    assert_eq!(loaded.servers, cfg.servers);
-    assert_eq!(loaded.server, cfg.server);
+    assert_eq!(loaded.servers, saved.servers);
+    assert_eq!(loaded.server, saved.server);
+    assert_eq!(loaded.active, saved.active);
+}
+
+#[tokio::test]
+async fn a_folder_list_round_trips_and_an_empty_one_clears_it() {
+    let db = db::init(&unique_db()).await.unwrap();
+    save_sources(&db, &server(Some("token"))).await;
+    let roots = ["/Music".to_string(), "/Archive".to_string()];
+
+    db.set_server_folders("s1", &roots).await.unwrap();
+    db.set_server_folders("gone", &roots).await.unwrap();
+    let folders = db.load_sources().await.unwrap().folders;
+    assert_eq!(folders.get("s1").map(Vec::as_slice), Some(&roots[..]));
+    assert!(
+        !folders.contains_key("gone"),
+        "an unknown server names nothing"
+    );
+
+    db.set_server_folders("s1", &[]).await.unwrap();
+    assert!(db.load_sources().await.unwrap().folders.is_empty());
+}
+
+#[tokio::test]
+async fn the_device_id_is_stored_once_and_a_config_save_keeps_it() {
+    let db = db::init(&unique_db()).await.unwrap();
+    assert_eq!(db.load_sources().await.unwrap().device_id, None);
+
+    db.set_device_id("dev-1").await.unwrap();
+    db.save_config(&AppConfig::default()).await.unwrap();
+    db.set_active_source(&config::Source::Server("s1".into()))
+        .await
+        .unwrap();
+
+    let loaded = db.load_sources().await.unwrap();
+    assert_eq!(loaded.device_id.as_deref(), Some("dev-1"));
+    assert_eq!(loaded.active, config::Source::Server("s1".into()));
 }
 
 #[tokio::test]
 async fn signing_out_drops_the_credentials_and_keeps_the_server() {
     let db = db::init(&unique_db()).await.unwrap();
-    db.save_config(&server(Some("token"))).await.unwrap();
+    save_sources(&db, &server(Some("token"))).await;
     db.set_server_credentials("s1", None, None).await.unwrap();
 
     let loaded = db.load_server("s1").await.unwrap().unwrap();
@@ -245,8 +292,7 @@ async fn a_kv_value_round_trips() {
 #[tokio::test]
 async fn removing_a_server_takes_its_rows_with_it() {
     let db = db::init(&unique_db()).await.unwrap();
-    let mut cfg = server(Some("token"));
-    db.save_config(&cfg).await.unwrap();
+    save_sources(&db, &server(Some("token"))).await;
     let source = Source::Server("s1".into());
     db.upsert_tracks(&source, &[track("t1", Vec::new())])
         .await
@@ -257,11 +303,12 @@ async fn removing_a_server_takes_its_rows_with_it() {
     db.set_favorite("s1", "t1", true).await.unwrap();
     db.bump_listen_count(&source, "t1").await.unwrap();
 
-    cfg.servers.clear();
-    cfg.server = None;
-    cfg.active_source = config::Source::default();
-    db.save_config(&cfg).await.unwrap();
+    db.set_active_source(&config::Source::default())
+        .await
+        .unwrap();
+    db.delete_server("s1").await.unwrap();
 
+    assert!(db.load_server("s1").await.unwrap().is_none());
     assert!(
         db.tracks_by_keys(&source, &["t1".into()])
             .await

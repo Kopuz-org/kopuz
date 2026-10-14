@@ -76,8 +76,10 @@ impl FavoritesService {
     }
 
     fn active_source(&self) -> server::source::ActiveSource {
-        let config = self.session.config_watch().borrow().clone();
-        Arc::from(server::source::active(self.db.clone(), &config))
+        Arc::from(server::source::active(
+            self.db.clone(),
+            &self.session.sources(),
+        ))
     }
 
     fn bump(&self, table: Table) {
@@ -100,10 +102,10 @@ impl FavoritesService {
     /// on one still works (`record_favorite` then upserts the track like the
     /// old direct path).
     async fn resolve_track(&self, key: &str) -> Result<reader::Track, ApiError> {
-        let config = self.session.config_watch().borrow().clone();
+        let active = self.session.sources().active.clone();
         match self
             .db
-            .tracks_by_keys(&config.active_source, &[key.to_string()])
+            .tracks_by_keys(&active, &[key.to_string()])
             .await
             .map_err(|error| ApiError::internal(format!("database error: {error}")))?
             .into_iter()
@@ -216,6 +218,7 @@ impl FavoritesService {
         };
         let run = self.started.fetch_add(1, Ordering::SeqCst) + 1;
         let config = self.session.config_watch().borrow().clone();
+        let source = self.session.sources().active.clone();
         if let Some(ctx) = ctx {
             let phase = match ctx.kind() {
                 JobKind::FavoritesSync => "reconciling",
@@ -226,15 +229,14 @@ impl FavoritesService {
         let reconciled = self.reconcile(reason).await;
         let pulled = match import {
             Import::Always => self.pull(ctx, true).await,
-            Import::UnlessRecent if self.imported_recently(&config).await => Ok(false),
+            Import::UnlessRecent if self.imported_recently(&config, &source).await => Ok(false),
             Import::UnlessRecent => self.pull(ctx, true).await,
             Import::IfMissing if reconciled.is_err() => Ok(false),
             Import::IfMissing => self.pull(ctx, false).await,
         };
         let imported = matches!(pulled, Ok(true)) && !ctx.is_some_and(|ctx| ctx.cancelled());
         if imported {
-            crate::auto_sync::mark_synced(&self.db, JobKind::FavoritesSync, &config.active_source)
-                .await;
+            crate::auto_sync::mark_synced(&self.db, JobKind::FavoritesSync, &source).await;
         }
         let outcome = match pulled {
             Err(error) if import != Import::IfMissing => Err(error),
@@ -253,12 +255,11 @@ impl FavoritesService {
     }
 
     /// Whether the last favorites sync is younger than the sync interval (a day when it is "never").
-    async fn imported_recently(&self, config: &config::AppConfig) -> bool {
+    async fn imported_recently(&self, config: &config::AppConfig, source: &config::Source) -> bool {
         let window =
             crate::auto_sync::interval(config).unwrap_or(Duration::from_secs(24 * 60 * 60));
         let Some(at) =
-            crate::auto_sync::last_synced(&self.db, JobKind::FavoritesSync, &config.active_source)
-                .await
+            crate::auto_sync::last_synced(&self.db, JobKind::FavoritesSync, source).await
         else {
             return false;
         };
@@ -270,8 +271,8 @@ impl FavoritesService {
     }
 
     async fn reconcile(&self, reason: SyncReason) -> Result<(), ApiError> {
-        let config = self.session.config_watch().borrow().clone();
-        let Some(source) = server::source::configured_server(self.db.clone(), &config) else {
+        let sources = self.session.sources();
+        let Some(source) = server::source::configured_server(self.db.clone(), &sources) else {
             return Err(ApiError::invalid_input("no server configured"));
         };
         match reconcile_favorites(source.as_ref(), reason).await {
@@ -298,26 +299,24 @@ impl FavoritesService {
     pub fn spawn_reconciler(self: &Arc<Self>) -> tokio::task::JoinHandle<()> {
         let service = self.clone();
         tokio::spawn(async move {
-            let mut config_rx = service.session.config_watch();
+            let mut sources_rx = service.session.sources_watch();
             let mut consecutive_failures: u32 = 0;
-            // Switching source is the one config change worth waking for: the
-            // new source's favorites have never been imported, and waiting out
-            // an interval to notice would leave the page empty for minutes.
-            let mut last_source = config_rx.borrow().active_source.clone();
+            // A switch is worth waking for: the new source's favorites were never imported, and an interval's wait leaves the page empty.
+            let mut last_source = sources_rx.borrow().active.clone();
             loop {
                 let (has_server, base_secs) = {
-                    let config = config_rx.borrow();
-                    let base: u64 = match config.active_service() {
+                    let sources = sources_rx.borrow();
+                    let base: u64 = match sources.active_service() {
                         Some(config::MusicService::YtMusic) => 5 * 60,
                         _ => 10 * 60,
                     };
-                    (config.server.is_some(), base)
+                    (sources.server.is_some(), base)
                 };
 
                 if !has_server {
                     tokio::select! {
                         _ = service.nudge.notified() => {}
-                        changed = config_rx.changed() => {
+                        changed = sources_rx.changed() => {
                             if changed.is_err() {
                                 return;
                             }
@@ -330,15 +329,14 @@ impl FavoritesService {
                 let interval = Duration::from_secs(backoff.min(BACKOFF_CAP_SECS));
                 let nudged = tokio::select! {
                     _ = service.nudge.notified() => true,
-                    changed = config_rx.changed() => {
+                    changed = sources_rx.changed() => {
                         if changed.is_err() {
                             return;
                         }
-                        let current = config_rx.borrow().active_source.clone();
+                        let current = sources_rx.borrow().active.clone();
                         let switched = current != last_source;
                         last_source = current;
-                        // Any other config change goes back round to re-read
-                        // the interval rather than costing a network call.
+                        // Any other change goes back round to re-read the interval rather than costing a network call.
                         if !switched {
                             continue;
                         }
@@ -456,11 +454,11 @@ mod tests {
             Arc::new(NoTracks),
             player,
             crate::PlaybackServices {
-                config: config::AppConfig {
-                    active_source: config::Source::Server("srv".into()),
+                sources: Arc::new(server::sources::Sources {
+                    active: config::Source::Server("srv".into()),
                     server: Some(server),
                     ..Default::default()
-                },
+                }),
                 ..Default::default()
             },
         );
@@ -516,11 +514,11 @@ mod tests {
             Arc::new(NoTracks),
             player,
             crate::PlaybackServices {
-                config: config::AppConfig {
-                    active_source: source,
+                sources: Arc::new(server::sources::Sources {
+                    active: source,
                     server: Some(server),
                     ..Default::default()
-                },
+                }),
                 ..Default::default()
             },
         );

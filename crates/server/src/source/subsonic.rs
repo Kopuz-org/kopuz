@@ -532,7 +532,7 @@ mod tests {
 
         let image_tag = meta.image_tag.expect("playlist image tag");
         let image_url = crate::cover::resolve(
-            &config::AppConfig::default(),
+            None,
             reader::CoverRef::remote_item(MusicService::Subsonic, &meta.id, Some(&image_tag)),
             384,
         )

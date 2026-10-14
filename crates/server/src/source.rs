@@ -26,10 +26,11 @@
 
 use async_trait::async_trait;
 
-use config::{AppConfig, MusicService, Source};
+use config::{MusicService, Source};
 use db::Db;
 
 use crate::server_ops::ServerConn;
+use crate::sources::Sources;
 
 mod apple_music;
 pub mod capabilities;
@@ -852,16 +853,6 @@ pub(super) async fn mirror_created(
 
 // ============================ Resolvers ================================
 
-/// The server id of the active source — its own id, falling back to the
-/// configured server's id (matches the legacy single-server config).
-fn active_server_id(config: &AppConfig) -> Option<String> {
-    config
-        .active_source
-        .server_id()
-        .map(String::from)
-        .or_else(|| config.server.as_ref().and_then(|s| s.id.clone()))
-}
-
 /// Build the per-remote source for `conn` — the ONE place service dispatch happens.
 fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSource> {
     match conn.service {
@@ -901,9 +892,9 @@ pub type ActiveSource = std::sync::Arc<dyn MediaSource>;
 /// The configured server's [`MediaSource`], or `None` when no usable creds
 /// exist. Unlike [`active`] this ignores the active source — the reconciler
 /// syncs the configured server even while a local page is open.
-pub fn configured_server(db: Db, config: &AppConfig) -> Option<Box<dyn MediaSource>> {
-    let conn = ServerConn::resolve(config)?;
-    let source = Source::Server(active_server_id(config).unwrap_or_default());
+pub fn configured_server(db: Db, sources: &Sources) -> Option<Box<dyn MediaSource>> {
+    let conn = ServerConn::resolve(sources)?;
+    let source = Source::Server(sources.active_server_id().unwrap_or_default());
     Some(remote_source(db, source, &conn))
 }
 
@@ -912,15 +903,11 @@ pub fn local(db: Db, source: Source) -> Box<dyn MediaSource> {
     Box::new(LocalSource { db, source })
 }
 
-/// The [`MediaSource`] backing a given [`Source`] key — the single factory.
-/// Local needs no creds; a server resolves its creds from `config` (falling back
-/// to the offline stand-in when none are usable, so favorites still queue).
-/// Building a server source stands up an HTTP client, so resolve once and hold
-/// the result (the cached [`ActiveSource`]) rather than calling per render.
-pub fn resolve(db: Db, config: &AppConfig, source: &Source) -> Box<dyn MediaSource> {
+/// The single factory: a server without usable creds in `sources` gets the offline stand-in, and building one stands up an HTTP client, so hold the result.
+pub fn resolve(db: Db, sources: &Sources, source: &Source) -> Box<dyn MediaSource> {
     match source {
         Source::LocalLibrary(_) => local(db, source.clone()),
-        Source::Server(id) => match ServerConn::resolve(config) {
+        Source::Server(id) => match ServerConn::resolve(sources) {
             Some(conn) => remote_source(db, Source::Server(id.clone()), &conn),
             None => Box::new(OfflineServerSource {
                 db,
@@ -931,6 +918,6 @@ pub fn resolve(db: Db, config: &AppConfig, source: &Source) -> Box<dyn MediaSour
 }
 
 /// The [`MediaSource`] for the app's active source.
-pub fn active(db: Db, config: &AppConfig) -> Box<dyn MediaSource> {
-    resolve(db, config, &config.active_source)
+pub fn active(db: Db, sources: &Sources) -> Box<dyn MediaSource> {
+    resolve(db, sources, &sources.active)
 }

@@ -554,16 +554,9 @@ pub fn config_to_proto(value: &config::AppConfig) -> Config {
             .iter()
             .map(saved_folder_source_to_proto)
             .collect(),
-        active_source: Some(source_ref_to_proto(&value.active_source)),
         source_explicitly_set: value.source_explicitly_set,
-        server_folders: value
-            .server_folders
-            .iter()
-            .map(|(k, v)| (k.clone(), StringList { values: v.clone() }))
-            .collect(),
         theme: value.theme.clone(),
         live_theme_path: value.live_theme_path.clone(),
-        device_id: value.device_id.clone(),
         sort_order: sort_order_to_proto(&value.sort_order) as i32,
         album_sort: value
             .album_sort
@@ -659,16 +652,9 @@ pub fn config_from_proto(value: &Config) -> config::AppConfig {
             .iter()
             .map(saved_folder_source_from_proto)
             .collect(),
-        active_source: source_ref_from_proto(value.active_source.as_ref()),
         source_explicitly_set: value.source_explicitly_set,
-        server_folders: value
-            .server_folders
-            .iter()
-            .map(|(k, v)| (k.clone(), v.values.clone()))
-            .collect(),
         theme: value.theme.clone(),
         live_theme_path: value.live_theme_path.clone(),
-        device_id: value.device_id.clone(),
         sort_order: sort_order_from_proto(value.sort_order),
         album_sort: value
             .album_sort

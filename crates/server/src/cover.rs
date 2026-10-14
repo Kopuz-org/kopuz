@@ -1,18 +1,8 @@
-//! Source-agnostic cover resolution (issue #347 / #35).
-//!
-//! The UI calls these instead of branching on local-file-vs-remote-URL or
-//! `match service` per row: the source layer owns where a cover *lives* and how
-//! to turn it into a renderable URL. Local resolves the on-disk file to an
-//! `artwork://` asset; a server resolves its remote image URL (per service).
-//!
-//! These are sync free functions, not [`MediaSource`](crate::source::MediaSource)
-//! methods, because they run per-row in long lists — they must not allocate a
-//! `Box<dyn>` per cover. Capabilities are a trait method (resolved once); cover
-//! resolution is a hot, allocation-light function keyed on the config + service.
+//! Source-agnostic cover resolution against the active server, as free functions because they run per row and must not allocate a `Box<dyn MediaSource>`.
 
 use std::path::{Path, PathBuf};
 
-use config::{AppConfig, MusicService};
+use config::{MusicServer, MusicService};
 use reader::{CoverRef, Track};
 use utils::CoverUrl;
 
@@ -107,11 +97,11 @@ pub enum Located {
 }
 
 /// Locate a cover's bytes: an on-disk file, or a URL to fetch.
-pub fn locate(config: &AppConfig, cover: CoverRef, max_width: u32) -> Option<Located> {
+pub fn locate(server: Option<&MusicServer>, cover: CoverRef, max_width: u32) -> Option<Located> {
     if let CoverRef::Local(path) = cover {
         return Some(Located::File(path));
     }
-    match resolve(config, cover, max_width)? {
+    match resolve(server, cover, max_width)? {
         // Neither is fetchable: a data URL carries its own bytes, and
         // `artwork://` is the app's scheme for asking the daemon -- which is
         // whoever is calling this.
@@ -120,9 +110,8 @@ pub fn locate(config: &AppConfig, cover: CoverRef, max_width: u32) -> Option<Loc
     }
 }
 
-/// Resolve a typed cover reference to a renderable URL.
-pub fn resolve(config: &AppConfig, cover: CoverRef, max_width: u32) -> Option<CoverUrl> {
-    let server = config.server.as_ref();
+/// Resolve a typed cover reference to a renderable URL against the active server, if any.
+pub fn resolve(server: Option<&MusicServer>, cover: CoverRef, max_width: u32) -> Option<CoverUrl> {
     let url = match cover {
         CoverRef::Local(path) => return utils::format_artwork_url(Some(&path)),
         CoverRef::EmbeddedUrl(url) => remote_artwork_url_at_size(url, max_width),
@@ -185,12 +174,12 @@ pub fn resolve(config: &AppConfig, cover: CoverRef, max_width: u32) -> Option<Co
 /// `artwork://` path makes the artwork server `open()` it as a filename (→
 /// `ENAMETOOLONG`), and a stale local path would hit the remote resolver.
 pub fn from_path(
-    config: &AppConfig,
+    server: Option<&MusicServer>,
     cover_path: Option<&Path>,
     max_width: u32,
 ) -> Option<CoverUrl> {
     let stored = cover_path?.to_string_lossy();
-    resolve(config, CoverRef::parse(&stored), max_width)
+    resolve(server, CoverRef::parse(&stored), max_width)
 }
 
 /// Resolve a track's cover, dispatching on the **track's own source** (not the
@@ -199,8 +188,8 @@ pub fn from_path(
 /// its cover via `track.cover`: a local row's `cover_path` is projected from its
 /// album by the DB read layer (so it's a filesystem path), a server row carries
 /// the per-service remote ref. No caller-side album lookup.
-pub fn track(config: &AppConfig, track: &Track, max_width: u32) -> Option<CoverUrl> {
-    resolve(config, CoverRef::for_track(track), max_width)
+pub fn track(server: Option<&MusicServer>, track: &Track, max_width: u32) -> Option<CoverUrl> {
+    resolve(server, CoverRef::for_track(track), max_width)
 }
 
 #[cfg(test)]
@@ -208,12 +197,8 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    fn local_active() -> AppConfig {
-        AppConfig {
-            active_source: config::Source::default(),
-            server: None,
-            ..Default::default()
-        }
+    fn local_active() -> Option<MusicServer> {
+        None
     }
 
     fn subsonic_track(item_id: &str, cover: Option<&str>) -> Track {
@@ -242,31 +227,23 @@ mod tests {
         }
     }
 
-    fn subsonic_config(with_creds: bool) -> AppConfig {
-        AppConfig {
-            active_source: config::Source::default(),
-            server: Some(config::MusicServer {
-                url: "https://sub.example.com".into(),
-                service: MusicService::Subsonic,
-                access_token: with_creds.then(|| "pw".to_string()),
-                user_id: with_creds.then(|| "alice".to_string()),
-                ..Default::default()
-            }),
+    fn subsonic_config(with_creds: bool) -> Option<MusicServer> {
+        Some(MusicServer {
+            url: "https://sub.example.com".into(),
+            service: MusicService::Subsonic,
+            access_token: with_creds.then(|| "pw".to_string()),
+            user_id: with_creds.then(|| "alice".to_string()),
             ..Default::default()
-        }
+        })
     }
 
-    fn jellyfin_config() -> AppConfig {
-        AppConfig {
-            active_source: config::Source::default(),
-            server: Some(config::MusicServer {
-                url: "https://jelly.example.com".into(),
-                service: MusicService::Jellyfin,
-                access_token: Some("token".to_string()),
-                ..Default::default()
-            }),
+    fn jellyfin_config() -> Option<MusicServer> {
+        Some(MusicServer {
+            url: "https://jelly.example.com".into(),
+            service: MusicService::Jellyfin,
+            access_token: Some("token".to_string()),
             ..Default::default()
-        }
+        })
     }
 
     #[test]
@@ -274,20 +251,21 @@ mod tests {
         // `cover == "none"` is the no-embedded-cover sentinel; the typed
         // resolver falls back to a signed getCoverArt URL keyed by the track id.
         let track = subsonic_track("TR-42", Some("none"));
-        let got = super::track(&subsonic_config(true), &track, 800).expect("fallback cover url");
+        let got =
+            super::track(subsonic_config(true).as_ref(), &track, 800).expect("fallback cover url");
         let s: &str = &got;
         assert!(s.contains("getCoverArt"), "got: {s}");
         assert!(s.contains("TR-42"), "keyed by the track id: {s}");
         assert!(s.contains("alice"), "signed with the username: {s}");
 
         // Without credentials the fallback can't sign a request → no cover.
-        assert!(super::track(&subsonic_config(false), &track, 800).is_none());
+        assert!(super::track(subsonic_config(false).as_ref(), &track, 800).is_none());
     }
 
     #[test]
     fn subsonic_item_without_the_sentinel_uses_the_token_lookup() {
         let got = resolve(
-            &subsonic_config(true),
+            subsonic_config(true).as_ref(),
             CoverRef::SubsonicItem {
                 item_id: "AL-7".to_string(),
                 signed: false,
@@ -306,7 +284,7 @@ mod tests {
         // A Jellyfin ref must never resolve against a Subsonic server.
         assert!(
             resolve(
-                &subsonic_config(true),
+                subsonic_config(true).as_ref(),
                 CoverRef::JellyfinItem {
                     item_id: "AL-7".to_string(),
                     tag: None
@@ -327,7 +305,7 @@ mod tests {
             service: MusicService::SoundCloud,
             item_id: "SC-1".to_string(),
         };
-        let got = super::track(&local_active(), &track, 500).expect("artwork url");
+        let got = super::track(local_active().as_ref(), &track, 500).expect("artwork url");
         assert_eq!(&*got, url);
     }
 
@@ -339,7 +317,8 @@ mod tests {
         // a filename (the artwork server would open() it → ENAMETOOLONG).
         let url = "https://example.com/cover.jpg";
         let reff = format!("ytmusic:_:{}", CoverRef::encode_url(url));
-        let got = from_path(&local_active(), Some(Path::new(&reff)), 200).expect("resolves");
+        let got =
+            from_path(local_active().as_ref(), Some(Path::new(&reff)), 200).expect("resolves");
         assert_eq!(
             &*got, url,
             "self-contained remote ref → its URL, not artwork://"
@@ -349,7 +328,7 @@ mod tests {
     #[test]
     fn typed_jellyfin_ref_resolves_the_referenced_item_and_tag() {
         let got = resolve(
-            &jellyfin_config(),
+            jellyfin_config().as_ref(),
             CoverRef::JellyfinItem {
                 item_id: "album-42".to_string(),
                 tag: Some("primary-tag".to_string()),
@@ -365,8 +344,12 @@ mod tests {
     #[test]
     fn embedded_url_resolves_without_an_active_server() {
         let url = "https://images.example/cover.jpg";
-        let got = resolve(&local_active(), CoverRef::EmbeddedUrl(url.to_string()), 320)
-            .expect("embedded cover");
+        let got = resolve(
+            local_active().as_ref(),
+            CoverRef::EmbeddedUrl(url.to_string()),
+            320,
+        )
+        .expect("embedded cover");
         assert_eq!(&*got, url);
     }
 
@@ -375,7 +358,7 @@ mod tests {
         let url =
             "https://music.example/rest/getCoverArt.view?u=user&t=token&s=salt&id=cover-1&size=512";
         let got = resolve(
-            &local_active(),
+            local_active().as_ref(),
             CoverRef::EmbeddedUrl(url.to_string()),
             1920,
         )
@@ -404,7 +387,8 @@ mod tests {
     fn local_artwork_uses_the_shared_cached_protocol() {
         let path = Path::new("/music/album/cover.png");
         for max_width in [80, 1400] {
-            let cover = from_path(&local_active(), Some(path), max_width).expect("local cover");
+            let cover =
+                from_path(local_active().as_ref(), Some(path), max_width).expect("local cover");
             assert!(
                 cover.starts_with("artwork://")
                     || cover.starts_with("http://artwork.dioxus.localhost/"),

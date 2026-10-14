@@ -146,47 +146,54 @@ async fn config_round_trips_with_creds_in_servers_table() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
 
-    let cfg = AppConfig {
-        servers: vec![
-            SavedServer {
-                id: "srv-a".into(),
-                name: "Jelly".into(),
-                url: "https://jelly.example".into(),
-                service: MusicService::Jellyfin,
-                yt_browser: None,
-                yt_anonymous: false,
-                apple_music_storefront: "us".into(),
-                apple_music_language: "en".into(),
-            },
-            SavedServer {
-                id: "srv-b".into(),
-                name: "Yt".into(),
-                url: "https://music.youtube.com".into(),
-                service: MusicService::YtMusic,
-                yt_browser: Some(config::Browser::Brave),
-                yt_anonymous: false,
-                apple_music_storefront: "us".into(),
-                apple_music_language: "en".into(),
-            },
-        ],
-        server: Some(MusicServer {
+    let servers = [
+        SavedServer {
+            id: "srv-a".into(),
+            name: "Jelly".into(),
+            url: "https://jelly.example".into(),
+            service: MusicService::Jellyfin,
+            yt_browser: None,
+            yt_anonymous: false,
+            apple_music_storefront: "us".into(),
+            apple_music_language: "en".into(),
+        },
+        SavedServer {
+            id: "srv-b".into(),
             name: "Yt".into(),
             url: "https://music.youtube.com".into(),
             service: MusicService::YtMusic,
-            access_token: Some("TOPSECRET_COOKIE".into()),
-            user_id: Some("u-1".into()),
-            id: Some("srv-b".into()),
             yt_browser: Some(config::Browser::Brave),
             yt_anonymous: false,
             apple_music_storefront: "us".into(),
             apple_music_language: "en".into(),
-        }),
-        active_source: config::Source::Server("srv-b".into()),
+        },
+    ];
+    let cfg = AppConfig {
         theme: "midnight".into(),
         ..Default::default()
     };
 
     db.save_config(&cfg).await.unwrap();
+    for server in &servers {
+        db.save_server(server).await.unwrap();
+    }
+    db.save_active_server(&MusicServer {
+        name: "Yt".into(),
+        url: "https://music.youtube.com".into(),
+        service: MusicService::YtMusic,
+        access_token: Some("TOPSECRET_COOKIE".into()),
+        user_id: Some("u-1".into()),
+        id: Some("srv-b".into()),
+        yt_browser: Some(config::Browser::Brave),
+        yt_anonymous: false,
+        apple_music_storefront: "us".into(),
+        apple_music_language: "en".into(),
+    })
+    .await
+    .unwrap();
+    db.set_active_source(&Source::Server("srv-b".into()))
+        .await
+        .unwrap();
 
     // Play counts are written only by bump_listen_count and read back by listen_counts.
     for _ in 0..7 {
@@ -202,9 +209,10 @@ async fn config_round_trips_with_creds_in_servers_table() {
 
     let loaded = db.load_config().await.unwrap().expect("config present");
     assert_eq!(loaded.theme, "midnight");
-    assert_eq!(loaded.active_source.server_id(), Some("srv-b"));
-    assert_eq!(loaded.servers.len(), 2);
-    let active = loaded.server.as_ref().expect("active server hydrated");
+    let sources = db.load_sources().await.unwrap();
+    assert_eq!(sources.active.server_id(), Some("srv-b"));
+    assert_eq!(sources.servers.len(), 2);
+    let active = sources.server.as_ref().expect("active server hydrated");
     assert_eq!(active.id.as_deref(), Some("srv-b"));
     assert_eq!(active.access_token.as_deref(), Some("TOPSECRET_COOKIE"));
     assert_eq!(active.yt_browser, Some(config::Browser::Brave));
@@ -230,11 +238,10 @@ async fn config_round_trips_with_creds_in_servers_table() {
         .unwrap();
     assert_eq!(active, "srv-b");
 
-    // Removing a server from the list drops its row (the active one is kept).
-    let mut cfg2 = loaded;
-    cfg2.servers.retain(|s| s.id == "srv-b");
-    cfg2.server = None;
-    db.save_config(&cfg2).await.unwrap();
+    // A config save leaves the sources alone; deleting a server drops its row.
+    db.save_config(&loaded).await.unwrap();
+    assert_eq!(db.load_sources().await.unwrap(), sources);
+    db.delete_server("srv-a").await.unwrap();
     let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM servers")
         .fetch_one(&mut conn)
         .await
@@ -254,18 +261,20 @@ async fn named_local_source_round_trips_as_active() {
         directories: vec![PathBuf::from("/music/work")],
     };
     let cfg = AppConfig {
-        active_source: Source::LocalLibrary(local.id.clone()),
         local_sources: vec![local.clone()],
         ..Default::default()
     };
+    let active = Source::LocalLibrary(local.id.clone());
 
     db.save_config(&cfg).await.unwrap();
-    db.bump_listen_count(&cfg.active_source, "/music/work/a.flac")
+    db.set_active_source(&active).await.unwrap();
+    db.bump_listen_count(&active, "/music/work/a.flac")
         .await
         .unwrap();
     let loaded = db.load_config().await.unwrap().expect("config present");
+    let sources = db.load_sources().await.unwrap();
 
-    assert_eq!(loaded.active_source, Source::LocalLibrary(local.id.clone()));
+    assert_eq!(sources.active, active);
     assert_eq!(
         loaded.local_sources.len(),
         2,
@@ -273,7 +282,7 @@ async fn named_local_source_round_trips_as_active() {
     );
     assert_eq!(loaded.local_sources[0].id, config::DEFAULT_LOCAL_ID);
     assert_eq!(loaded.local_sources[1], local);
-    assert!(loaded.server.is_none());
+    assert!(sources.server.is_none());
     assert_eq!(
         db.listen_counts()
             .await
