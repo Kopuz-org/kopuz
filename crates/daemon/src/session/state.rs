@@ -140,11 +140,6 @@ impl Session {
             (pending.stage == TransitionStage::Fading).then(|| FadingState {
                 from_token: pending.from_token,
                 track: track.clone().unwrap_or_default(),
-                position_ms: self
-                    .player
-                    .fading_position()
-                    .unwrap_or_default()
-                    .as_millis() as u64,
             })
         });
         PlayerState {

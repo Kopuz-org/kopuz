@@ -1293,12 +1293,11 @@ async fn a_running_crossfade_publishes_a_live_anchor_for_the_outgoing_track() {
     })
     .await;
 
-    let fading = state.fading.expect("fading");
     let anchor = state.position.expect("anchor during the fade");
     assert!(anchor.playing, "a client keeps counting through the fade");
     assert!(
-        anchor.ms.abs_diff(fading.position_ms) < 300,
-        "the anchor is the outgoing track's live position: {anchor:?} vs {fading:?}"
+        anchor.ms >= 4_500,
+        "the anchor is the outgoing track's position near its end, not the incoming one's start: {anchor:?}"
     );
 }
 
