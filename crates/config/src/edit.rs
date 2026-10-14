@@ -269,6 +269,18 @@ impl SettingsEdit {
 }
 
 impl Settings {
+    /// The keys whose stored value differs between `self` and `other`; all of them if either fails to serialize.
+    pub fn changed_keys(&self, other: &Self) -> Vec<SettingKey> {
+        let (Ok(serde_json::Value::Object(mine)), Ok(serde_json::Value::Object(theirs))) =
+            (serde_json::to_value(self), serde_json::to_value(other))
+        else {
+            return SettingKey::iter().collect();
+        };
+        SettingKey::iter()
+            .filter(|key| mine.get(key.name()) != theirs.get(key.name()))
+            .collect()
+    }
+
     pub fn apply(&mut self, edit: SettingsEdit) {
         match edit {
             SettingsEdit::Playback(edit) => self.playback.apply(edit),
@@ -621,6 +633,7 @@ mod tests {
                 .map(|(key, _)| key)
                 .collect();
             assert_eq!(moved, vec![name], "{edit:?}");
+            assert_eq!(base.changed_keys(&next), vec![SettingKey::of(&edit)]);
         }
     }
 

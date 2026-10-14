@@ -617,6 +617,9 @@ prefer_active_device = Playback device
 prefer_active_device_help = When another device is already playing, take it over instead of starting playback here.
 settings_managed_notice = 일부 설정은 시스템 구성(Nix/hjem)에서 관리되며 여기에서 변경할 수 없습니다.
 setting_managed_by_system = 시스템 구성에서 관리됨
+setting_locked_by_file = { $path }에서 설정됨
+setting_locked_by_dropin = 추가 설정 파일 { $path }에서 설정됨
+setting_locked_by_env = { $var }에서 설정됨
 
 settings_interface = Interface
 interface_general = General

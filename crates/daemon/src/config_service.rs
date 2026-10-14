@@ -1,13 +1,18 @@
-//! ConfigService: authority over the running `Settings`, loaded from and saved to the settings files; it applies typed edits one by one, refuses the daemon-owned and layer-locked keys, and saves each change at once rather than debounced.
+//! ConfigService: authority over the running `Settings`, loaded from and saved to the settings files; it applies typed edits one by one, refuses the daemon-owned and layer-locked keys, saves each change at once rather than debounced, and takes in what changes on disk.
 
-use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, SystemTime};
 
-use api::{ApiError, ConfigView, EditOutcome, EditReport};
+use api::{ApiError, ConfigView, EditOutcome, EditReport, SettingLock};
+use config::store::FileLayers;
 use config::{SettingKey, SettingsEdit};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use crate::session::SessionHandle;
+
+/// How often the settings files are checked for a change made outside the daemon.
+const POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 pub struct ConfigService {
     db: db::Db,
@@ -16,15 +21,20 @@ pub struct ConfigService {
     session: OnceLock<SessionHandle>,
 }
 
-/// The running settings and the revision of their last saved change.
+/// The running settings, the layers they were read from with what those pin, and the revision of their last change.
 struct Held {
     settings: config::Settings,
+    layers: FileLayers,
+    locks: Vec<SettingLock>,
     revision: u64,
 }
 
 /// The settings every layer at `settings_path` adds up to.
-pub fn load_settings(settings_path: &std::path::Path) -> Result<config::Settings, ApiError> {
-    let layers = config::store::FileLayers::read(settings_path);
+pub fn load_settings(settings_path: &Path) -> Result<config::Settings, ApiError> {
+    settings_of(&FileLayers::read(settings_path))
+}
+
+fn settings_of(layers: &FileLayers) -> Result<config::Settings, ApiError> {
     layers
         .settings()
         .map_err(|error| ApiError::internal(format!("settings load failed: {error}")))
@@ -37,15 +47,72 @@ impl ConfigService {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|elapsed| elapsed.as_millis() as u64)
             .unwrap_or_default();
+        let layers = FileLayers::read(&settings_path);
         Self {
             db,
             settings_path,
             current: RwLock::new(Held {
                 settings: current,
+                locks: layers.locks(),
+                layers,
                 revision,
             }),
             session: OnceLock::new(),
         }
+    }
+
+    /// Re-read the layers and, only when the settings or what is pinned differ from what is held, publish them as a new revision; answers whether anything changed.
+    #[tracing::instrument(name = "config.reload", skip_all)]
+    pub async fn reload(&self) -> Result<bool, ApiError> {
+        let mut held = self.current.write().await;
+        let layers = held.layers.reread();
+        let settings = settings_of(&layers)?;
+        let locks = layers.locks();
+        held.layers = layers;
+        if settings == held.settings && locks == held.locks {
+            return Ok(false);
+        }
+        let changed = held.settings.changed_keys(&settings);
+        tracing::info!(
+            keys = %changed.iter().map(SettingKey::name).collect::<Vec<_>>().join(", "),
+            "settings changed on disk"
+        );
+        held.settings = settings;
+        held.locks = locks;
+        self.publish(&mut held, changed);
+        Ok(true)
+    }
+
+    /// Reload whenever a settings file appears, goes or is rewritten, until the session ends.
+    pub fn spawn_file_watch(
+        self: &Arc<Self>,
+        mut settings: tokio::sync::watch::Receiver<config::Settings>,
+    ) {
+        let service = self.clone();
+        tokio::spawn(async move {
+            let mut seen = file_stamps(&service.settings_path);
+            let mut ticks = tokio::time::interval(POLL_INTERVAL);
+            ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tokio::select! {
+                    _ = ticks.tick() => {}
+                    changed = settings.changed() => {
+                        if changed.is_err() {
+                            return;
+                        }
+                        continue;
+                    }
+                }
+                let stamps = file_stamps(&service.settings_path);
+                if stamps == seen {
+                    continue;
+                }
+                seen = stamps;
+                if let Err(error) = service.reload().await {
+                    tracing::warn!(%error, "re-reading the settings files failed");
+                }
+            }
+        });
     }
 
     /// Hand every later change to `session`, which then always holds what was saved last.
@@ -62,40 +129,42 @@ impl ConfigService {
         session.set_settings(held.settings.clone(), changed, held.revision);
     }
 
+    /// Write `keys` of `settings` into the settings file and take the layers in again, so what is held matches the disk.
     #[tracing::instrument(name = "config.save", skip_all)]
-    async fn save(&self, settings: &config::Settings) -> Result<(), ApiError> {
+    async fn save(
+        &self,
+        held: &mut RwLockWriteGuard<'_, Held>,
+        settings: &config::Settings,
+        keys: &[SettingKey],
+    ) -> Result<(), ApiError> {
         let failed = |error: String| ApiError::internal(format!("config save failed: {error}"));
         self.db
             .ensure_app_state()
             .await
             .map_err(|error| failed(error.to_string()))?;
-        config::store::save_settings(&self.settings_path, settings)
+        held.layers
+            .save(settings, keys)
             .map_err(|error| failed(format!("{}: {error}", self.settings_path.display())))?;
+        held.layers = held.layers.reread();
+        held.locks = held.layers.locks();
         Ok(())
     }
 
-    /// Every key a managed settings layer pins; a pinned name that is no setting is ignored.
-    fn locked_keys(&self) -> Vec<SettingKey> {
-        config::store::FileLayers::read(&self.settings_path)
-            .locked_keys
+    /// Refuse a write that a settings layer has pinned, naming each key the caller is about to change and what pins it.
+    pub async fn ensure_unlocked(&self, keys: &[SettingKey]) -> Result<(), ApiError> {
+        let held = self.current.read().await;
+        let refused: Vec<String> = keys
             .iter()
-            .filter_map(|name| SettingKey::named(name))
-            .collect()
-    }
-
-    /// Refuse a write that a managed settings file has pinned, naming the keys the caller is about to change.
-    pub fn ensure_unlocked(&self, keys: &[SettingKey]) -> Result<(), ApiError> {
-        let locked = self.locked_keys();
-        let refused: Vec<&str> = keys
-            .iter()
-            .filter(|key| locked.contains(key))
-            .map(SettingKey::name)
+            .filter_map(|key| {
+                let lock = held.locks.iter().find(|lock| lock.key == *key)?;
+                Some(format!("{} (by {})", key.name(), lock.by))
+            })
             .collect();
         if refused.is_empty() {
             Ok(())
         } else {
             Err(ApiError::invalid_input(format!(
-                "these settings are pinned by a managed file: {}",
+                "these settings are pinned: {}",
                 refused.join(", ")
             )))
         }
@@ -113,7 +182,8 @@ impl ConfigService {
         if next == held.settings {
             return Ok(next);
         }
-        self.save(&next).await?;
+        let changed = held.settings.changed_keys(&next);
+        self.save(&mut held, &next, &changed).await?;
         held.settings = next;
         self.publish(&mut held, keys.to_vec());
         Ok(held.settings.clone())
@@ -124,14 +194,13 @@ impl ConfigService {
     }
 
     pub async fn view(&self) -> Result<ConfigView, ApiError> {
-        let held = self.current.read().await;
-        Ok(view_of(&held, self.locked_keys()))
+        Ok(view_of(&*self.current.read().await))
     }
 
     /// Answer each edit in order: a daemon-owned key names the API that sets it, a pinned one is locked, and the rest apply unless their value breaks a rule; what applied is saved and published once.
     pub async fn edit(&self, edits: Vec<SettingsEdit>) -> Result<EditReport, ApiError> {
-        let locked = self.locked_keys();
         let mut held = self.current.write().await;
+        let locked: Vec<SettingKey> = held.locks.iter().map(|lock| lock.key).collect();
         let mut next = held.settings.clone();
         let mut changed: Vec<SettingKey> = Vec::new();
         let outcomes = edits
@@ -159,23 +228,64 @@ impl ConfigService {
             })
             .collect();
         if next != held.settings {
-            self.save(&next).await?;
+            self.save(&mut held, &next, &changed).await?;
             held.settings = next;
             self.publish(&mut held, changed);
         }
         Ok(EditReport {
             outcomes,
-            view: view_of(&held, locked),
+            view: view_of(&held),
         })
     }
 }
 
-fn view_of(held: &Held, locked: Vec<SettingKey>) -> ConfigView {
+fn view_of(held: &Held) -> ConfigView {
     ConfigView {
         settings: held.settings.clone(),
-        locked,
+        locks: held.locks.clone(),
         revision: held.revision,
     }
+}
+
+/// What the poller compares per layer file: the link's and the target's modification time, size, resolved path and writability, so an hjem switch between two store files (whose times are all the epoch) still shows.
+type FileStamp = (
+    PathBuf,
+    Option<SystemTime>,
+    Option<SystemTime>,
+    Option<u64>,
+    Option<PathBuf>,
+    bool,
+);
+
+fn file_stamps(settings_path: &Path) -> Vec<FileStamp> {
+    let mut paths = vec![
+        settings_path.to_path_buf(),
+        config::store::local_path_for(settings_path),
+    ];
+    if let Ok(entries) = std::fs::read_dir(config::store::dropin_dir_for(settings_path)) {
+        let mut dropins: Vec<PathBuf> = entries
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "toml"))
+            .collect();
+        dropins.sort();
+        paths.extend(dropins);
+    }
+    paths
+        .into_iter()
+        .map(|path| {
+            let link = std::fs::symlink_metadata(&path).ok();
+            let target = std::fs::metadata(&path).ok();
+            (
+                path.clone(),
+                link.and_then(|meta| meta.modified().ok()),
+                target.as_ref().and_then(|meta| meta.modified().ok()),
+                target.as_ref().map(std::fs::Metadata::len),
+                std::fs::canonicalize(&path).ok(),
+                target.is_some_and(|meta| meta.permissions().readonly()),
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -224,7 +334,7 @@ mod tests {
 
         let view = service.view().await.expect("view");
         assert_eq!(view.settings, held, "nothing is stripped from the view");
-        assert!(view.locked.is_empty());
+        assert!(view.locks.is_empty());
         let rendered = serde_json::to_string(&view.settings).expect("json");
         assert!(!rendered.contains("secret"), "{rendered}");
     }
@@ -266,7 +376,13 @@ mod tests {
             );
         }
         assert_eq!(report.outcomes[5], EditOutcome::Applied);
-        assert!(report.view.locked.contains(&SettingKey::Ui(UiKey::Theme)));
+        assert_eq!(
+            report.view.locks,
+            vec![SettingLock {
+                key: SettingKey::Ui(UiKey::Theme),
+                by: api::LockSource::Managed(settings.clone()),
+            }]
+        );
 
         let held = &report.view.settings;
         assert_eq!(held.playback.crossfade_seconds, 6);
@@ -399,11 +515,153 @@ mod tests {
         let service = ConfigService::new(database, settings, config::Settings::default());
 
         let local = SettingKey::Library(config::LibraryKey::LocalSources);
-        let err = service.ensure_unlocked(&[local]).expect_err("pinned");
+        let err = service.ensure_unlocked(&[local]).await.expect_err("pinned");
         assert_eq!(err.code, api::ErrorCode::InvalidInput);
         assert!(err.message.contains("local_sources"), "{}", err.message);
         service
             .ensure_unlocked(&[SettingKey::Playback(PlaybackKey::CrossfadeSeconds)])
+            .await
             .expect("a neighbour is free");
+    }
+
+    #[tokio::test]
+    async fn a_refusal_names_the_drop_in_that_pins_the_key() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let dropins = dir.path().join("settings.d");
+        std::fs::create_dir_all(&dropins).expect("drop-in dir");
+        let dropin = dropins.join("10-folders.toml");
+        std::fs::write(&dropin, "local_sources = []\n").expect("drop-in");
+        let database = db::init(&dir.path().join("cfg.db")).await.expect("db");
+        let service = ConfigService::new(
+            database,
+            dir.path().join("settings.toml"),
+            config::Settings::default(),
+        );
+
+        let local = SettingKey::Library(config::LibraryKey::LocalSources);
+        let err = service.ensure_unlocked(&[local]).await.expect_err("pinned");
+        let named = format!("local_sources (by the drop-in {})", dropin.display());
+        assert!(err.message.contains(&named), "{}", err.message);
+        assert!(!err.message.contains("managed"), "{}", err.message);
+    }
+
+    /// An install loaded the way boot loads it, with the sources service storing its device id in the state row first.
+    async fn loaded(dir: &tempfile::TempDir) -> (ConfigService, PathBuf) {
+        let path = dir.path().join("settings.toml");
+        let database = db::init(&dir.path().join("cfg.db")).await.expect("db");
+        crate::sources::load(&database).await.expect("sources");
+        let settings = load_settings(&path).expect("load");
+        (ConfigService::new(database, path.clone(), settings), path)
+    }
+
+    #[tokio::test]
+    async fn a_fresh_install_keeps_its_default_folder_through_a_save_and_a_restart() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let defaults = config::Settings::default().library.local_sources;
+        assert!(
+            defaults.iter().all(|source| !source.directories.is_empty()),
+            "{defaults:?}"
+        );
+        let (service, path) = loaded(&dir).await;
+        assert_eq!(service.snapshot().await.library.local_sources, defaults);
+        assert_eq!(
+            load_settings(&path).expect("restart").library.local_sources,
+            defaults,
+            "a restart before any save"
+        );
+
+        service.edit(vec![theme("nord")]).await.expect("edit");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            "theme = \"nord\"\n",
+            "the first save is as sparse as any other"
+        );
+        assert!(!service.reload().await.expect("reload"));
+        let restarted = load_settings(&path).expect("restart");
+        assert_eq!(restarted.library.local_sources, defaults);
+        assert_eq!(restarted.ui.theme, "nord");
+    }
+
+    /// The poller sees the daemon's own writes too, so taking them in again must neither publish nor move the revision.
+    #[tokio::test]
+    async fn reloading_the_daemons_own_save_changes_nothing() {
+        for booted in [false, true] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let service = match booted {
+                true => loaded(&dir).await.0,
+                false => service(&dir).await,
+            };
+            let saved = service
+                .edit(vec![theme("nord"), crossfade(4)])
+                .await
+                .expect("edit")
+                .view;
+            assert!(!service.reload().await.expect("reload"), "{booted}");
+            assert_eq!(service.view().await.expect("view"), saved);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_save_writes_only_the_keys_that_applied() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (service, path) = loaded(&dir).await;
+        std::fs::write(&path, "# mine\nlanguage = \"tr\"\nhero_height = 640\n").expect("write");
+        assert!(service.reload().await.expect("reload"));
+
+        service.edit(vec![theme("nord")]).await.expect("edit");
+
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            "hero_height = 640\nlanguage = \"tr\"\ntheme = \"nord\"\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_hand_edit_and_a_new_drop_in_reach_the_view_on_reload() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (service, path) = loaded(&dir).await;
+        let before = service.view().await.expect("view");
+        std::fs::write(&path, "crossfade_seconds = 7\n").expect("write");
+        let dropins = config::store::dropin_dir_for(&path);
+        std::fs::create_dir_all(&dropins).expect("mkdir");
+        let dropin = dropins.join("10-theme.toml");
+        std::fs::write(&dropin, "theme = \"dracula\"\n").expect("write");
+
+        assert!(service.reload().await.expect("reload"));
+        let view = service.view().await.expect("view");
+        assert_eq!(view.settings.playback.crossfade_seconds, 7);
+        assert_eq!(view.settings.ui.theme, "dracula");
+        assert_eq!(
+            view.locks,
+            vec![SettingLock {
+                key: SettingKey::Ui(UiKey::Theme),
+                by: api::LockSource::DropIn(dropin),
+            }]
+        );
+        assert!(view.revision > before.revision);
+        let report = service.edit(vec![theme("nord")]).await.expect("edit");
+        assert_eq!(report.outcomes, vec![EditOutcome::Locked]);
+
+        std::fs::remove_dir_all(&dropins).expect("unpin");
+        assert!(service.reload().await.expect("reload"));
+        let view = service.view().await.expect("view");
+        assert!(view.locks.is_empty());
+        assert_eq!(view.settings.ui.theme, config::Settings::default().ui.theme);
+        assert!(
+            !service.reload().await.expect("reload"),
+            "nothing moved since"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_torn_settings_file_keeps_what_was_held() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (service, path) = loaded(&dir).await;
+        std::fs::write(&path, "theme = \"nord\"\n").expect("write");
+        assert!(service.reload().await.expect("reload"));
+
+        std::fs::write(&path, "theme = \"dra").expect("torn write");
+        assert!(!service.reload().await.expect("reload"));
+        assert_eq!(service.snapshot().await.ui.theme, "nord");
     }
 }

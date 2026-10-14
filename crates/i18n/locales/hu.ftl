@@ -617,6 +617,9 @@ prefer_active_device = Playback device
 prefer_active_device_help = When another device is already playing, take it over instead of starting playback here.
 settings_managed_notice = Egyes beállításokat a rendszerkonfiguráció (Nix/hjem) kezel, és itt nem módosíthatók.
 setting_managed_by_system = A rendszerkonfiguráció kezeli
+setting_locked_by_file = Beállította: { $path }
+setting_locked_by_dropin = Beállította a kiegészítő fájl: { $path }
+setting_locked_by_env = Beállította: { $var }
 
 settings_interface = Interface
 interface_general = General

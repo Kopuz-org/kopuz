@@ -807,7 +807,6 @@ fn App() -> Element {
                         tracing::error!(%error, "could not read settings; saves are off this session");
                     }
                 }
-                i18n::set_locale(&settings.peek().ui.language);
 
                 initial_load_done.set(true);
                 // Pending offline likes push now, not on the first multi-minute reconcile interval.
@@ -877,8 +876,11 @@ fn App() -> Element {
         });
     }
 
+    // A language change remounts the scroll area at the top, so it is restored like a navigation.
+    let shown_language = use_memo(move || settings.read().ui.language.clone());
     use_effect(move || {
         let route = *current_route.read();
+        let _ = shown_language.read();
         // Read detail selections so this re-runs on list<->detail toggle, not just
         // on route change (album/artist list and detail are the same Route).
         let album_sel = selected_album_id.read().clone();
@@ -924,6 +926,12 @@ fn App() -> Element {
     provide_context(components::source_switcher::SettingsAnchor(settings_anchor));
     let mut settings_subpage = use_signal(|| None::<&'static str>);
     provide_context(components::tabbar::SettingsSubpage(settings_subpage));
+    provide_context(pages::settings::OpenCategory(use_signal(Default::default)));
+    use_effect(move || {
+        if *current_route.read() != Route::Settings && settings_subpage.peek().is_some() {
+            settings_subpage.set(None);
+        }
+    });
     let mut nav_history = use_signal(Vec::<components::NavSnapshot>::new);
     let mut nav_restoring = use_signal(|| false);
     let mut nav_last = use_signal(|| None::<components::NavSnapshot>);
@@ -1153,6 +1161,8 @@ fn App() -> Element {
         }
     });
 
+    let language = settings.read().ui.language.clone();
+    i18n::set_locale(&language);
     let is_rtl = i18n::is_rtl();
     let dir = if is_rtl { "rtl" } else { "ltr" };
     let content_row_class = "flex flex-1 overflow-hidden";
@@ -1313,11 +1323,10 @@ fn App() -> Element {
         });
     });
 
-    rsx! {
-        WindowsToolbarIconAssets {}
-        material3::SystemColors { settings, artwork: palette }
-
+    // i18n::t reads a global, so a new key remounts every component that would keep the old language's strings.
+    let shell = rsx! {
         div {
+            key: "{language}",
             id: "app-root",
             class: "relative z-0 flex flex-col h-screen text-white select-none overflow-x-hidden {theme_class}",
             // The activity draws edge to edge, so inset the whole column once here
@@ -1955,5 +1964,11 @@ fn App() -> Element {
                 }
             }
         }
+    };
+
+    rsx! {
+        WindowsToolbarIconAssets {}
+        material3::SystemColors { settings, artwork: palette }
+        {shell}
     }
 }

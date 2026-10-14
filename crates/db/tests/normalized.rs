@@ -725,7 +725,8 @@ async fn offline_copies_and_pins_live_in_their_own_tables() {
         .unwrap();
 
     let settings_path = config::store::settings_path_for(path.parent().unwrap());
-    config::store::save_settings(&settings_path, &config::Settings::default()).unwrap();
+    let every_key: Vec<config::SettingKey> = config::SettingKey::iter().collect();
+    config::store::save_settings(&settings_path, &config::Settings::default(), &every_key).unwrap();
 
     assert_eq!(
         db.offline_tracks()

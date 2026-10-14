@@ -70,13 +70,14 @@ pub use sources::{
     SourceLoginRequest,
 };
 
+pub use config::store::{LockSource, SettingLock};
 pub use config::{SettingKey, SettingsEdit};
 
-/// The layered settings, plus the keys a managed settings file pins (rendered locked in settings UIs).
+/// The layered settings, plus the keys a managed layer pins and which layer that is (rendered locked, citing it, in settings UIs).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ConfigView {
     pub settings: config::Settings,
-    pub locked: Vec<SettingKey>,
+    pub locks: Vec<SettingLock>,
     /// Rises with every saved change, so a client can tell an older view from a newer one.
     pub revision: u64,
 }

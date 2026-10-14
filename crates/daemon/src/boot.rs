@@ -276,6 +276,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         session.subscribe(),
         true,
     );
+    config_service.spawn_file_watch(session.settings_watch());
     let config_service_for_api = config_service.clone();
     let catalog = crate::CatalogService::new(database.clone(), session.clone(), library.clone());
     let radio_service = crate::RadioService::new(

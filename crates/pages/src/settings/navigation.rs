@@ -1,7 +1,8 @@
 use dioxus::prelude::*;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum SettingsCategory {
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum SettingsCategory {
+    #[default]
     General,
     Customization,
     Library,

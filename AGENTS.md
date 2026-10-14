@@ -37,13 +37,17 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
   hook. Pages render the wire rows themselves — `api::TrackInfo`,
   `AlbumInfo`, `PlaylistCatalog` — so there is no conversion layer to keep in
   step.
-- **Settings file:** `AppConfig` persists to the `app_config` blob AND a
-  standalone `settings.toml` next to the DB (`crates/config/src/store.rs`; the
-  dead legacy store was `config.json`, which the importer renames).
-  Load layers blob → file → `settings.d/*.toml` drop-ins → `KOPUZ_CONFIG_*`
-  env; values travel as `serde_json::Value` and convert at the TOML edge. An
-  hjem-managed file (store symlink / read-only) is never written and its keys
-  render locked in the settings UI.
+- **Settings file:** `config::Settings` (typed sections, flattened to top-level
+  keys) lives only in the TOML layers next to the DB (`crates/config/src/store.rs`):
+  defaults → `settings.local.toml` → `settings.toml` → `settings.d/*.toml`
+  drop-ins → `KOPUZ_CONFIG_*` env. State, credentials, sources and UI prefs are
+  not settings; they live in their own daemon stores and tables. Change settings
+  with typed `SettingsEdit`s through `edit_config`; a save writes only the keys
+  that changed, into `settings.toml`, or `settings.local.toml` when the main
+  file is hjem-managed (store symlink / read-only, never written). A key a
+  managed file, drop-in or env var pins is refused per edit and renders locked,
+  citing that file's path or the var's name. The daemon polls the files' mtimes
+  and reloads live; env is read once.
 
 ## Sources & covers (`crates/server`, daemon-only)
 
@@ -87,7 +91,7 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
 - `crates/daemon` — the core: session, library, catalog, radio, sources,
   mutations, jobs, artwork, and `LocalApi` over them. `crates/kopuzd` — the
   headless binary and the tonic shell.
-- `crates/config` — `AppConfig`, `Source`, `MusicService`, `MusicServer`.
+- `crates/config` — `Settings` and its typed edits, the settings store, `Source`, `MusicService`, `MusicServer`.
 - `crates/reader` — domain models (`Track`, `Album`, `TrackId`), scanner, tag
   IO. Daemon-side: what crosses to a frontend is `api::TrackInfo`.
 - `crates/db` — SQLite backend, `ReadStore` / `Storage`, migrations.

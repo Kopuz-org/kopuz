@@ -463,7 +463,9 @@ async fn fill_state(pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(
     tx.commit().await?;
 
     if let Some(path) = settings_path {
-        config::store::save_settings_file(path, &settings, &layers.locked_keys)
+        let every_key: Vec<config::SettingKey> = config::SettingKey::iter().collect();
+        layers
+            .save(&settings, &every_key)
             .map_err(|error| DbError::Io(format!("{}: {error}", path.display())))?;
     }
     Ok(())

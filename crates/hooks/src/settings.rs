@@ -26,7 +26,7 @@ struct Queue {
     in_flight: Signal<Vec<SettingsEdit>>,
     revision: Signal<u64>,
     loaded: Signal<bool>,
-    locked: Signal<Vec<SettingKey>>,
+    locked: Signal<Vec<api::SettingLock>>,
     generation: Signal<u64>,
 }
 
@@ -128,8 +128,8 @@ impl Queue {
             return;
         }
         self.revision.set(view.revision);
-        if *self.locked.peek() != view.locked {
-            self.locked.set(view.locked);
+        if *self.locked.peek() != view.locks {
+            self.locked.set(view.locks);
         }
         let mut next = view.settings;
         for edit in self
@@ -184,7 +184,8 @@ impl Queue {
                     match outcome {
                         api::EditOutcome::Applied => {}
                         api::EditOutcome::Locked => {
-                            tracing::warn!(key, "a managed settings file pins this; reverted")
+                            let by = pinned_by(&report.view.locks, SettingKey::of(edit));
+                            tracing::warn!(key, "{by} pins this; reverted")
                         }
                         api::EditOutcome::Invalid { reason } => {
                             tracing::warn!(key, %reason, "the daemon refused this setting; reverted")
@@ -206,6 +207,14 @@ impl Queue {
             }
         }
     }
+}
+
+/// What pins `key` in the view that refused it, for the warning.
+fn pinned_by(locks: &[api::SettingLock], key: SettingKey) -> String {
+    locks.iter().find(|lock| lock.key == key).map_or_else(
+        || "a settings layer".to_string(),
+        |lock| lock.by.to_string(),
+    )
 }
 
 fn enqueue(pending: &mut Vec<SettingsEdit>, edit: SettingsEdit) {
@@ -267,5 +276,30 @@ mod tests {
     fn an_unanswered_edit_is_resent_unless_a_newer_one_replaced_it() {
         let unsent = unsent_of(&[crossfade(3), put("a")], &[crossfade(5)]);
         assert_eq!(unsent, vec![put("a"), crossfade(5)]);
+    }
+
+    #[test]
+    fn a_reverted_edit_names_the_layer_that_pins_it() {
+        let key = SettingKey::of(&crossfade(3));
+        let lock = |by| api::SettingLock { key, by };
+        let dropin = [lock(api::LockSource::DropIn(
+            "/x/settings.d/10-playback.toml".into(),
+        ))];
+        assert_eq!(
+            pinned_by(&dropin, key),
+            "the drop-in /x/settings.d/10-playback.toml"
+        );
+        let env = [lock(api::LockSource::Env(
+            "KOPUZ_CONFIG_CROSSFADE_SECONDS".into(),
+        ))];
+        assert_eq!(
+            pinned_by(&env, key),
+            "the environment variable KOPUZ_CONFIG_CROSSFADE_SECONDS"
+        );
+        let managed = [lock(api::LockSource::Managed("/x/settings.toml".into()))];
+        assert_eq!(
+            pinned_by(&managed, key),
+            "the managed settings file /x/settings.toml"
+        );
     }
 }
