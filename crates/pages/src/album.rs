@@ -299,17 +299,7 @@ fn AlbumDetail(
         None => {
             // Not saved yet — render the remote album directly if it resolved.
             if let Some(remote) = direct_remote_res.read().clone().flatten() {
-                let mut tracks = remote.tracks;
-                tracks.sort_by(|a, b| {
-                    a.disc_number
-                        .unwrap_or(1)
-                        .cmp(&b.disc_number.unwrap_or(1))
-                        .then_with(|| {
-                            a.track_number
-                                .unwrap_or(0)
-                                .cmp(&b.track_number.unwrap_or(0))
-                        })
-                });
+                let tracks = remote.tracks;
                 return rsx! {
                     div { class: "absolute inset-0 flex flex-col overflow-hidden p-8",
                         RemoteAlbumDetail {
@@ -368,21 +358,9 @@ fn AlbumDetail(
     let tracks = use_memo(move || {
         let offline = caps().downloads && *is_offline.read();
 
-        // Full album from the catalog remote (already in album order). Used
-        // whenever it resolved; the saved subset is the fallback.
+        // The catalog remote's full album, in the source's order, whenever it resolved; the saved subset otherwise.
         if !offline && let Some(remote) = remote_album_res.read().clone().flatten() {
-            let mut remote = remote.tracks;
-            remote.sort_by(|a, b| {
-                a.disc_number
-                    .unwrap_or(1)
-                    .cmp(&b.disc_number.unwrap_or(1))
-                    .then_with(|| {
-                        a.track_number
-                            .unwrap_or(0)
-                            .cmp(&b.track_number.unwrap_or(0))
-                    })
-            });
-            return remote;
+            return remote.tracks;
         }
 
         // The daemon orders an album by disc, track and title.

@@ -95,9 +95,7 @@ pub fn content_type_for(path: &std::path::Path) -> String {
     .to_string()
 }
 
-/// Every track key of an album, in album order, then whatever the caller
-/// wanted with them. The album's own tracks are a daemon read, so an action
-/// menu does not need the list on screen to act on it.
+/// An album's track keys in the daemon's album order (disc, track, title), handed to `then`; an action menu needs no list on screen.
 pub fn with_album_keys(album_id: String, then: impl FnOnce(Vec<String>) + 'static) {
     let api = consume_api();
     spawn(async move {
@@ -118,13 +116,7 @@ pub fn with_album_keys(album_id: String, then: impl FnOnce(Vec<String>) + 'stati
                 return;
             }
         };
-        let mut tracks = page.items;
-        tracks.sort_by(|left, right| {
-            left.track_number
-                .cmp(&right.track_number)
-                .then_with(|| left.title.cmp(&right.title))
-        });
-        then(tracks.into_iter().map(|track| track.key).collect());
+        then(page.items.into_iter().map(|track| track.key).collect());
     });
 }
 
