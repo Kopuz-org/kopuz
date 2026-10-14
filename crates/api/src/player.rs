@@ -66,13 +66,11 @@ pub struct BufferedRange {
     pub total: Option<u64>,
 }
 
-/// The outgoing session during a crossfade. While present, frontends keep
-/// displaying this track and drive the seek bar from `position_ms`.
+/// The outgoing session during a crossfade, which frontends keep displaying; the position anchor follows it meanwhile.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FadingState {
     pub from_token: u64,
     pub track: crate::TrackInfo,
-    pub position_ms: u64,
 }
 
 /// Playback happening outside the engine (Spotify in a browser).

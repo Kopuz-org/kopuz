@@ -118,7 +118,6 @@ pub fn player_state_to_proto(value: &api::PlayerState) -> PlayerState {
         fading: value.fading.as_ref().map(|fading| FadingState {
             from_token: fading.from_token,
             row: Some(track_info_to_proto(&fading.track)),
-            position_ms: fading.position_ms,
         }),
         external: value.external.as_ref().map(|external| ExternalPlayback {
             kind: external.kind.clone(),
@@ -146,7 +145,6 @@ pub fn player_state_from_proto(value: &PlayerState) -> api::PlayerState {
             Some(api::FadingState {
                 from_token: fading.from_token,
                 track: track_info_from_proto(fading.row.as_ref()?),
-                position_ms: fading.position_ms,
             })
         }),
         external: value

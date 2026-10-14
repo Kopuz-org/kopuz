@@ -57,7 +57,6 @@ pub(super) fn sample_state() -> api::PlayerState {
                 uid: "f".into(),
                 ..Default::default()
             },
-            position_ms: 1000,
         }),
         external: Some(api::ExternalPlayback {
             kind: "spotify".into(),

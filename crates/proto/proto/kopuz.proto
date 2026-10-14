@@ -369,8 +369,8 @@ message BufferedRange {
 
 message FadingState {
   reserved 2; // was a trimmed summary of `row`
+  reserved 3; // was the outgoing track's position, which the anchor carries
   uint64 from_token = 1;
-  uint64 position_ms = 3;
   TrackInfo row = 4;
 }
 
