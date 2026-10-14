@@ -255,11 +255,31 @@ pub fn catalog_detail_to_proto(value: &api::CatalogDetail) -> CatalogDetail {
         privacy: value
             .privacy
             .map(|privacy| playlist_privacy_to_proto(privacy) as i32),
-        album_type: value.album_type.clone(),
+        release_kind: release_kind_to_proto(value.release_kind) as i32,
         monthly_listeners: value.monthly_listeners.clone(),
         owner: value.owner.clone(),
         plays: value.plays.clone(),
         web_url: value.web_url.clone(),
+    }
+}
+
+pub fn release_kind_to_proto(value: Option<api::ReleaseKind>) -> ReleaseKind {
+    match value {
+        None => ReleaseKind::Unspecified,
+        Some(api::ReleaseKind::Album) => ReleaseKind::Album,
+        Some(api::ReleaseKind::Single) => ReleaseKind::Single,
+        Some(api::ReleaseKind::Ep) => ReleaseKind::Ep,
+        Some(api::ReleaseKind::Audiobook) => ReleaseKind::Audiobook,
+    }
+}
+
+pub fn release_kind_from_proto(value: i32) -> Option<api::ReleaseKind> {
+    match ReleaseKind::try_from(value).unwrap_or(ReleaseKind::Unspecified) {
+        ReleaseKind::Unspecified => None,
+        ReleaseKind::Album => Some(api::ReleaseKind::Album),
+        ReleaseKind::Single => Some(api::ReleaseKind::Single),
+        ReleaseKind::Ep => Some(api::ReleaseKind::Ep),
+        ReleaseKind::Audiobook => Some(api::ReleaseKind::Audiobook),
     }
 }
 
@@ -281,7 +301,7 @@ pub fn catalog_detail_from_proto(value: &CatalogDetail) -> api::CatalogDetail {
         chips: value.chips.iter().map(catalog_chip_from_proto).collect(),
         actions: catalog_actions_from_proto(value.actions.as_ref()),
         privacy: value.privacy.and_then(playlist_privacy_from_proto),
-        album_type: value.album_type.clone(),
+        release_kind: release_kind_from_proto(value.release_kind),
         monthly_listeners: value.monthly_listeners.clone(),
         owner: value.owner.clone(),
         plays: value.plays.clone(),
@@ -485,7 +505,7 @@ mod tests {
             id: "MPRE1".into(),
             title: "An album".into(),
             description: Some("About it".into()),
-            album_type: Some("EP".into()),
+            release_kind: Some(api::ReleaseKind::Ep),
             monthly_listeners: Some("1M monthly audience".into()),
             owner: Some("Someone".into()),
             plays: Some("2M views".into()),

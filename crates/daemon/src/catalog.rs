@@ -312,12 +312,17 @@ impl CatalogService {
                     artist_key,
                     subtitle: album.artist,
                     description: album.description,
-                    album_type: album.album_type,
                     artwork,
                     playback_id: album.audio_playlist_id,
                     year: album.year,
                     header: CatalogHeader::Detail,
                     actions: actions(album.actions),
+                    release_kind: album.kind.map(|kind| match kind {
+                        server::source::ReleaseKind::Album => api::ReleaseKind::Album,
+                        server::source::ReleaseKind::Single => api::ReleaseKind::Single,
+                        server::source::ReleaseKind::Ep => api::ReleaseKind::Ep,
+                        server::source::ReleaseKind::Audiobook => api::ReleaseKind::Audiobook,
+                    }),
                     tracks: album
                         .tracks
                         .iter()

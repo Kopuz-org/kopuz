@@ -880,7 +880,7 @@ fn play_counts_come_with_the_rows_that_show_them() {
 #[test]
 fn an_album_header_names_its_kind_and_describes_it() {
     let album = discover::parse_album("MPREb_K8qWMWVqXGi", &fixture!("album"));
-    assert_eq!(album.album_type.as_deref(), Some("Album"));
+    assert_eq!(album.kind, Some(crate::source::ReleaseKind::Album));
     assert!(
         album
             .description
@@ -890,7 +890,7 @@ fn an_album_header_names_its_kind_and_describes_it() {
         album.description
     );
     let single = discover::parse_album("MPREb_X1DQ1j0PPrX", &fixture!("single"));
-    assert_eq!(single.album_type.as_deref(), Some("Single"));
+    assert_eq!(single.kind, Some(crate::source::ReleaseKind::Single));
     assert_eq!(single.description, None);
 }
 

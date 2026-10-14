@@ -1340,8 +1340,9 @@ message CatalogDetail {
   optional string artist_key = 12;
   CatalogHeader header = 13;
   repeated CatalogChip chips = 14;
-  // For an album: "Album", "Single", "EP", as the source labels it.
-  optional string album_type = 17;
+  reserved 17; // was album_type, the kind as the source spelled it, which release_kind carries
+  // For an album, the kind of release its source files it as.
+  ReleaseKind release_kind = 22;
   // For an artist; subtitle carries its subscribers.
   optional string monthly_listeners = 18;
   optional string owner = 19;
@@ -1350,6 +1351,14 @@ message CatalogDetail {
   CatalogActions actions = 15;
   // Set for a playlist the account owns.
   optional PlaylistPrivacy privacy = 16;
+}
+
+enum ReleaseKind {
+  RELEASE_KIND_UNSPECIFIED = 0;
+  RELEASE_KIND_ALBUM = 1;
+  RELEASE_KIND_SINGLE = 2;
+  RELEASE_KIND_EP = 3;
+  RELEASE_KIND_AUDIOBOOK = 4;
 }
 
 // ---------------- radio ----------------

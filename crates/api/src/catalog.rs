@@ -165,8 +165,8 @@ pub struct CatalogDetail {
     pub artist_key: Option<String>,
     pub header: CatalogHeader,
     pub chips: Vec<CatalogChip>,
-    /// "Album", "Single", "EP", as the source labels it.
-    pub album_type: Option<String>,
+    /// For an album, the kind of release its source files it as.
+    pub release_kind: Option<ReleaseKind>,
     /// For an artist; `subtitle` carries its subscribers.
     pub monthly_listeners: Option<String>,
     pub owner: Option<String>,
@@ -176,4 +176,13 @@ pub struct CatalogDetail {
     pub actions: CatalogActions,
     /// Set for a playlist the account owns.
     pub privacy: Option<crate::PlaylistPrivacy>,
+}
+
+/// What kind of release a source files an album as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseKind {
+    Album,
+    Single,
+    Ep,
+    Audiobook,
 }
