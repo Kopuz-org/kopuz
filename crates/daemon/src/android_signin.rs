@@ -55,7 +55,7 @@ pub async fn sign_in(
             server::ytmusic::isolated_profile::SIGNIN_URL,
             "https://music.youtube.com",
         ),
-        MusicService::SoundCloud => ("https://soundcloud.com/signin", "https://soundcloud.com"),
+        MusicService::SoundCloud => ("https://soundcloud.com/signin", "https://m.soundcloud.com"),
         MusicService::AppleMusic => (
             server::applemusic::signin::SIGNIN_URL,
             "https://music.apple.com",
