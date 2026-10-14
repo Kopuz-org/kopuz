@@ -233,7 +233,10 @@ enum SessionCmd {
         changed: Vec<config::SettingKey>,
         revision: u64,
     },
-    SetSources(Arc<server::sources::Sources>),
+    SetSources {
+        sources: Arc<server::sources::Sources>,
+        adopted: Option<oneshot::Sender<()>>,
+    },
     QueueUnread,
     PreviewEqualizer(config::EqualizerSettings),
     PreviewReplayGain(config::ReplayGainSettings),
@@ -625,9 +628,25 @@ impl SessionHandle {
         });
     }
 
-    /// Adopt new sources (a SourceService change), parking the queue under the source left when the active one moves.
+    /// Adopt new sources (a SourceService change), parking the queue under the source left when the active one moves; the answer comes once every reader sees them.
+    pub(crate) fn adopt_sources(
+        &self,
+        sources: Arc<server::sources::Sources>,
+    ) -> oneshot::Receiver<()> {
+        let (adopted, done) = oneshot::channel();
+        let _ = self.cmd_tx.send(SessionCmd::SetSources {
+            sources,
+            adopted: Some(adopted),
+        });
+        done
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_sources(&self, sources: Arc<server::sources::Sources>) {
-        let _ = self.cmd_tx.send(SessionCmd::SetSources(sources));
+        let _ = self.cmd_tx.send(SessionCmd::SetSources {
+            sources,
+            adopted: None,
+        });
     }
 
     /// Flush the current queue snapshot to the store and wait for the write;
@@ -862,12 +881,15 @@ impl Session {
                 changed,
                 revision,
             } => self.apply_settings(*settings, changed, revision, state_tx),
-            SessionCmd::SetSources(sources) => {
+            SessionCmd::SetSources { sources, adopted } => {
                 if sources.active != self.sources.active {
                     self.swap_queue(&sources, state_tx).await;
                 }
                 self.sources = sources;
                 let _ = self.sources_tx.send(self.sources.clone());
+                if let Some(adopted) = adopted {
+                    let _ = adopted.send(());
+                }
             }
             SessionCmd::QueueUnread => self.queue_unread = true,
             SessionCmd::PreviewEqualizer(equalizer) => self.player.set_equalizer(equalizer),
