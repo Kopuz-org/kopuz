@@ -125,6 +125,8 @@ fn AlbumGrid(mut album_id: Signal<String>, mut open_album_menu: Signal<Option<St
             .unwrap_or_default()
     });
     let available_sort_fields = use_memo(move || hooks::sort::available_album_fields(&albums()));
+    // A source's first sync lists nothing until it lands, which is not an empty library.
+    let filling = hooks::jobs::use_library_filling();
 
     // Restore the grid scroll once after the albums first render; guarded so DB
     // reactivity re-runs don't keep snapping the view back to the saved offset.
@@ -150,7 +152,11 @@ fn AlbumGrid(mut album_id: Signal<String>, mut open_album_menu: Signal<Option<St
             id: "album-grid-scroll",
             class: "flex-1 min-h-0 overflow-y-auto pb-8",
             onscroll: move |e| crate::scroll_persist::save("albums", e.scroll_top()),
-            if let Some(Err(error)) = albums_res.read().clone() {
+            if albums_res.read().is_none() || (albums().is_empty() && filling()) {
+                div { class: "flex items-center justify-center py-12",
+                    i { class: "fa-solid fa-spinner fa-spin text-3xl text-white/20" }
+                }
+            } else if let Some(Err(error)) = albums_res.read().clone() {
                 crate::layout::ReadError { error }
             } else if albums().is_empty() {
                 p { class: "text-slate-500", "{i18n::t(\"no_albums_found\")}" }

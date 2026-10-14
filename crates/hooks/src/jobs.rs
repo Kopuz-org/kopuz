@@ -72,6 +72,20 @@ pub fn use_job_progress(kind: api::JobKind) -> Signal<JobProgress> {
     state
 }
 
+/// Whether a scan or sync that fills the library is running, so an empty listing is not the last word yet.
+pub fn use_library_filling() -> Memo<bool> {
+    let scan = use_job_progress(api::JobKind::Scan);
+    let library = use_job_progress(api::JobKind::LibrarySync);
+    let playlists = use_job_progress(api::JobKind::PlaylistSync);
+    let favorites = use_job_progress(api::JobKind::FavoritesSync);
+    use_memo(move || {
+        scan.read().running
+            || library.read().running
+            || playlists.read().running
+            || favorites.read().running
+    })
+}
+
 /// Start a job, ignoring the conflict a second start of the same kind
 /// returns -- one is already running, which is what the caller wanted.
 pub fn start(kind: api::JobKind) {
