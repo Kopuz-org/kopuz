@@ -168,6 +168,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             }
         });
     }
+    library.spawn_artist_photo_upkeep();
     config_service.attach_session(session.clone());
     scrobbler.attach_session(session.clone());
     {

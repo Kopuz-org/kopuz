@@ -49,6 +49,8 @@ impl LibraryService {
             if result.is_ok() && !ctx.cancelled() {
                 crate::auto_sync::mark_synced(&service.db, JobKind::LibrarySync, &sources.active)
                     .await;
+                let sweeper = service.clone();
+                tokio::spawn(async move { sweeper.sweep_artist_photos(true).await });
             }
             result
         })

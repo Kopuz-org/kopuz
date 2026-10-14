@@ -33,6 +33,8 @@ pub struct LibraryService {
     transient: std::sync::Mutex<TransientTracks>,
     /// Artists a photo lookup is out for, so a grid re-asking mid-batch does not send the same lookups again.
     artwork_in_flight: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    /// When each source's photos were last swept for, by source.
+    photo_sweeps: std::sync::Mutex<HashMap<String, std::time::Instant>>,
 }
 
 /// Tracks that exist but the database has never seen: a browse shelf, a
@@ -171,6 +173,7 @@ impl LibraryService {
             catalog: OnceLock::new(),
             transient: std::sync::Mutex::new(TransientTracks::default()),
             artwork_in_flight: Arc::default(),
+            photo_sweeps: std::sync::Mutex::default(),
         }
     }
 

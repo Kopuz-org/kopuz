@@ -185,6 +185,7 @@ pub fn use_artist(
     use_resource(move || {
         let _ = gens.generation(Table::Tracks);
         let _ = gens.generation(Table::Albums);
+        let _ = gens.generation(Table::Artists);
         let (api, s, artist) = (api.clone(), source(), artist());
         let span = tracing::info_span!("query.artist", source = s.as_str(), artist = ?artist);
         async move { Some(api.artist(artist?).await) }.instrument(span)
@@ -359,6 +360,7 @@ pub fn use_artists(
     use_resource(move || {
         let _ = gens.generation(Table::Tracks);
         let _ = gens.generation(Table::Albums);
+        let _ = gens.generation(Table::Artists);
         let (api, s, q) = (api.clone(), source(), query());
         let span = tracing::info_span!(
             "query.artists",

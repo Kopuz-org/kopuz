@@ -2,7 +2,6 @@
 //! search data, and async player task orchestration.
 
 pub mod api;
-pub mod artist_images;
 pub mod artwork;
 pub mod artwork_settings;
 pub mod config_view;

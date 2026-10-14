@@ -2318,6 +2318,7 @@ enum Table {
   TABLE_SERVERS = 6;
   TABLE_RECENTS = 7;
   TABLE_STATIONS = 8;
+  TABLE_ARTISTS = 9;
 }
 
 enum JobKind {
