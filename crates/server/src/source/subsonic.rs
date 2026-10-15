@@ -337,13 +337,7 @@ impl MediaSource for SubsonicSource {
     async fn validate(&self) -> AuthOutcome {
         match self.client.ping().await {
             Ok(()) => AuthOutcome::Valid,
-            Err(e)
-                if e.contains("Wrong username")
-                    || e.contains("not authorized")
-                    || e.contains("code 40") =>
-            {
-                AuthOutcome::Expired
-            }
+            Err(SourceError::Auth) => AuthOutcome::Expired,
             Err(_) => AuthOutcome::Unreachable,
         }
     }
