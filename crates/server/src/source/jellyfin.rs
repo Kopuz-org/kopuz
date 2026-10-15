@@ -52,14 +52,11 @@ impl MediaSource for JellyfinSource {
     }
 
     async fn keepalive(&self) -> Result<(), SourceError> {
-        self.client.ping().await.map_err(SourceError::from)
+        self.client.ping().await
     }
 
     async fn report_playback_start(&self, item_id: &str) -> Result<(), SourceError> {
-        self.client
-            .report_playback_start(item_id)
-            .await
-            .map_err(SourceError::from)
+        self.client.report_playback_start(item_id).await
     }
 
     async fn report_playback_stopped(
@@ -70,7 +67,6 @@ impl MediaSource for JellyfinSource {
         self.client
             .report_playback_stopped(item_id, position_ticks)
             .await
-            .map_err(SourceError::from)
     }
 
     async fn report_playback_progress(
@@ -82,7 +78,6 @@ impl MediaSource for JellyfinSource {
         self.client
             .report_playback_progress(item_id, position_ticks, is_paused)
             .await
-            .map_err(SourceError::from)
     }
 
     async fn fetch_library(&self) -> Result<LibrarySnapshot, SourceError> {
@@ -319,7 +314,7 @@ impl MediaSource for JellyfinSource {
     async fn validate(&self) -> AuthOutcome {
         match self.client.ping().await {
             Ok(()) => AuthOutcome::Valid,
-            Err(e) if e.contains("401") || e.contains("403") => AuthOutcome::Expired,
+            Err(SourceError::Auth) => AuthOutcome::Expired,
             Err(_) => AuthOutcome::Unreachable,
         }
     }
@@ -340,7 +335,6 @@ impl MediaSource for JellyfinSource {
         } else {
             self.client.unmark_favorite(item_id).await
         }
-        .map_err(SourceError::from)
     }
 
     async fn reorder_playlist(

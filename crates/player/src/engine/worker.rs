@@ -22,7 +22,7 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::units::Time;
 
-use super::{ActorMsg, SourceFactory};
+use super::{ActorMsg, Failure, SourceFactory};
 use crate::replaygain;
 
 pub(crate) enum WorkerCmd {
@@ -68,7 +68,7 @@ pub(crate) enum WorkerMsg {
     /// seek can't end the new ring.
     Eof { token: u64, epoch: u64 },
     /// Source construction / probe / codec setup failed before playback.
-    Failed { token: u64, error: String },
+    Failed { token: u64, error: Failure },
 }
 
 pub(crate) struct WorkerHandle {
@@ -96,7 +96,7 @@ pub(crate) fn spawn(
                 tracing::error!(token, "decode worker panicked");
                 let _ = msg_tx.send(ActorMsg::Worker(WorkerMsg::Failed {
                     token,
-                    error: "decode worker panicked".to_string(),
+                    error: "decode worker panicked".to_string().into(),
                 }));
             }
         })?;
@@ -149,14 +149,14 @@ fn run(
     let send = |msg: WorkerMsg| {
         let _ = msg_tx.send(ActorMsg::Worker(msg));
     };
-    let fail = |error: String| {
+    let fail = |error: Failure| {
         tracing::error!(token, error = %error, "decode worker failed");
         send(WorkerMsg::Failed { token, error });
     };
 
     let (source, hint) = match factory() {
         Ok(parts) => parts,
-        Err(e) => return fail(format!("failed to open source: {e}")),
+        Err(e) => return fail(Failure::opening(&e)),
     };
     let seekable = source.is_seekable();
 
@@ -168,11 +168,11 @@ fn run(
         MetadataOptions::default(),
     ) {
         Ok(format) => format,
-        Err(e) => return fail(format!("symphonia probe error: {e}")),
+        Err(e) => return fail(Failure::from(format!("symphonia probe error: {e}"))),
     };
 
     let Some(track) = format.first_track(TrackType::Audio) else {
-        return fail("no supported audio tracks found".to_string());
+        return fail(Failure::from("no supported audio tracks found".to_string()));
     };
     let mut track_id = track.id;
     // YouTube Music WebM/Opus streams reach the codec layer with channels
@@ -181,7 +181,7 @@ fn run(
     // "channels required." Parse OpusHead from extra_data, or fall back to
     // stereo at 48 kHz.
     let Some(audio_params) = audio_params_for_track(track) else {
-        return fail("no audio codec parameters".to_string());
+        return fail(Failure::from("no audio codec parameters".to_string()));
     };
     let source_sample_rate = audio_params.sample_rate;
 
@@ -196,7 +196,7 @@ fn run(
             // The libopus adapter consumes pre-skip but does not apply the
             // OpusHead gain. Keep this codec gain independent of ReplayGain.
             Ok(d) => (d, opus_output_gain(audio_params.extra_data.as_deref())),
-            Err(e) => return fail(format!("symphonia codec error: {e}")),
+            Err(e) => return fail(Failure::from(format!("symphonia codec error: {e}"))),
         },
     };
 
@@ -226,7 +226,7 @@ fn run(
                             format = f;
                             track_id = tid;
                         }
-                        Err(e) => return fail(e),
+                        Err(e) => return fail(Failure::from(e)),
                     }
                 }
             }
@@ -253,7 +253,7 @@ fn run(
                     track_id = tid;
                     continue;
                 }
-                Err(e) => return fail(e),
+                Err(e) => return fail(Failure::from(e)),
             }
         };
     }

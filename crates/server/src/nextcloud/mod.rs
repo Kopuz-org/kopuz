@@ -173,7 +173,8 @@ impl NextcloudClient {
     pub(crate) async fn scan(
         &self,
         roots: &[String],
-    ) -> Result<(Vec<NextcloudAlbum>, Vec<NextcloudTrack>), String> {
+    ) -> Result<(Vec<NextcloudAlbum>, Vec<NextcloudTrack>), crate::source::SourceError> {
+        use crate::source::SourceError;
         let roots = if roots.is_empty() {
             vec![self.guess_music_root().await?]
         } else {
@@ -193,8 +194,9 @@ impl NextcloudClient {
                 Ok(entries) => entries,
                 // A renamed or unshared root must not void the rest.
                 Err(e) => {
-                    tracing::warn!(root, error = %e, "nextcloud folder unreadable");
-                    failures.push(format!("{root}: {e}"));
+                    let error = source_error(e);
+                    tracing::warn!(root, %error, "nextcloud folder unreadable");
+                    failures.push((root, error));
                     continue;
                 }
             };
@@ -204,7 +206,21 @@ impl NextcloudClient {
         }
 
         if albums.is_empty() && tracks.is_empty() && !failures.is_empty() {
-            return Err(format!("could not list {}", failures.join("; ")));
+            let kind = |wanted: &SourceError| failures.iter().all(|(_, error)| error == wanted);
+            if kind(&SourceError::Auth) {
+                return Err(SourceError::Auth);
+            }
+            if kind(&SourceError::Connectivity) {
+                return Err(SourceError::Connectivity);
+            }
+            let listed: Vec<String> = failures
+                .iter()
+                .map(|(root, error)| format!("{root}: {error}"))
+                .collect();
+            return Err(SourceError::Backend(format!(
+                "could not list {}",
+                listed.join("; ")
+            )));
         }
 
         // Nested roots (a folder and its parent) would list a track twice.
@@ -442,16 +458,27 @@ impl NextcloudClient {
         EmbeddedArt::Found(cover.bytes, ext)
     }
 
-    async fn guess_music_root(&self) -> Result<String, String> {
+    async fn guess_music_root(&self) -> Result<String, crate::source::SourceError> {
+        use crate::source::SourceError;
         for candidate in ROOT_CANDIDATES {
-            if self.nc.files().exists(candidate).await.unwrap_or(false) {
-                return Ok((*candidate).to_string());
+            match self
+                .nc
+                .files()
+                .exists(candidate)
+                .await
+                .map_err(source_error)
+            {
+                Ok(true) => return Ok((*candidate).to_string()),
+                Ok(false) => {}
+                // No other candidate would get past a refused login or a server that does not answer.
+                Err(error @ (SourceError::Auth | SourceError::Connectivity)) => return Err(error),
+                Err(error) => tracing::debug!(candidate, %error, "nextcloud root probe failed"),
             }
         }
-        Err(format!(
+        Err(SourceError::Backend(format!(
             "no music folder found (looked for {}); pick one in Settings",
             ROOT_CANDIDATES.join(", ")
-        ))
+        )))
     }
 }
 

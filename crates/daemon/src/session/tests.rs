@@ -293,7 +293,7 @@ fn gated_failing_factory(gate: Arc<(Mutex<bool>, Condvar)>) -> SourceFactory {
         while *blocked {
             blocked = ready.wait(blocked).expect("gate wait");
         }
-        Err("synthetic source failure".to_string())
+        Err(std::io::Error::other("synthetic source failure"))
     })
 }
 
@@ -1745,6 +1745,29 @@ async fn play_history_is_announced_after_it_is_written() {
 }
 
 #[tokio::test]
+async fn a_track_whose_media_cannot_be_reached_says_so() {
+    for (kind, code) in [
+        (std::io::ErrorKind::NotFound, api::ErrorCode::NotFound),
+        (
+            std::io::ErrorKind::NotConnected,
+            api::ErrorCode::SourceUnreachable,
+        ),
+    ] {
+        let provider: FactoryOverride = Arc::new(move |_| {
+            Some(Box::new(move || Err(std::io::Error::new(kind, "shut"))) as SourceFactory)
+        });
+        let harness = harness_with_provider(|_| {}, provider);
+        harness
+            .api
+            .set_queue(replace(&["track-0"]))
+            .await
+            .expect("set queue");
+        let state = wait_state(&harness.api, "load failed", |state| state.error.is_some()).await;
+        assert_eq!(state.error.map(|error| error.code), Some(code), "{kind:?}");
+    }
+}
+
+#[tokio::test]
 async fn failed_crossfade_preparation_records_no_listen_and_can_retry() {
     let recorder = Arc::new(MemoryRecorder {
         recents: Mutex::new(Vec::new()),
@@ -3014,7 +3037,7 @@ async fn failed_gapless_preload_retries_only_after_the_outgoing_track_ends() {
                 if track.title == "track-b"
                     && provider_attempts.fetch_add(1, Ordering::Relaxed) == 0
                 {
-                    Box::new(|| Err("preload failed".into()))
+                    Box::new(|| Err(std::io::Error::other("preload failed")))
                 } else {
                     wav_factory(track.duration)
                 },

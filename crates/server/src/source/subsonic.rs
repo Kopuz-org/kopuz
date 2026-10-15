@@ -140,17 +140,11 @@ impl MediaSource for SubsonicSource {
     }
 
     async fn scrobble_now_playing(&self, item_id: &str) -> Result<(), SourceError> {
-        self.client
-            .scrobble_now_playing(item_id)
-            .await
-            .map_err(SourceError::from)
+        self.client.scrobble_now_playing(item_id).await
     }
 
     async fn scrobble(&self, item_id: &str) -> Result<(), SourceError> {
-        self.client
-            .scrobble(item_id)
-            .await
-            .map_err(SourceError::from)
+        self.client.scrobble(item_id).await
     }
 
     async fn fetch_library(&self) -> Result<LibrarySnapshot, SourceError> {
@@ -189,12 +183,17 @@ impl MediaSource for SubsonicSource {
                     artist_key: album.artist_id.clone(),
                 });
 
-                let songs = self.client.get_album_songs(&album.id).await.map_err(|e| {
-                    SourceError::Backend(format!(
-                        "failed to fetch songs for album {}: {e}",
-                        album.id
-                    ))
-                })?;
+                let songs = self
+                    .client
+                    .get_album_songs(&album.id)
+                    .await
+                    .map_err(|e| match e {
+                        SourceError::Backend(message) => SourceError::Backend(format!(
+                            "failed to fetch songs for album {}: {message}",
+                            album.id
+                        )),
+                        kind => kind,
+                    })?;
                 for song in songs {
                     if !seen.insert(song.id.clone()) {
                         continue;
@@ -326,10 +325,7 @@ impl MediaSource for SubsonicSource {
     }
 
     async fn fetch_favorites(&self) -> Result<Vec<String>, SourceError> {
-        self.client
-            .get_starred_song_ids()
-            .await
-            .map_err(SourceError::from)
+        self.client.get_starred_song_ids().await
     }
 
     async fn push_favorite(&self, item_id: &str, on: bool) -> Result<(), SourceError> {
@@ -338,7 +334,6 @@ impl MediaSource for SubsonicSource {
         } else {
             self.client.unstar(item_id).await
         }
-        .map_err(SourceError::from)
     }
 
     async fn reorder_playlist(
@@ -458,10 +453,7 @@ impl MediaSource for SubsonicSource {
         }
         let current = ids.get(current_index).copied();
         let position = (!ids.is_empty()).then_some(position_ms);
-        self.client
-            .save_play_queue(&ids, current, position)
-            .await
-            .map_err(SourceError::from)?;
+        self.client.save_play_queue(&ids, current, position).await?;
         Ok(true)
     }
 

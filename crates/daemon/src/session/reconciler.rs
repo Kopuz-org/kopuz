@@ -154,7 +154,11 @@ impl Session {
             }
             EngineEvent::Error { token, message } if token == self.intent.token() => {
                 tracing::warn!(%message, "engine reported a playback error");
-                if self.fail_load(token, message) {
+                if self.fail_load(
+                    token,
+                    super::load::engine_failure_code(message.kind),
+                    message,
+                ) {
                     self.publish(state_tx, false);
                 }
             }
