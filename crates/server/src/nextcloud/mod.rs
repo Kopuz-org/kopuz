@@ -92,8 +92,9 @@ pub async fn browse_folders(
     user_id: &str,
     password: &str,
     remote_path: &str,
-) -> Result<Vec<String>, String> {
-    NextcloudClient::new(server_url, user_id, password)?
+) -> Result<Vec<String>, crate::source::SourceError> {
+    NextcloudClient::new(server_url, user_id, password)
+        .map_err(crate::source::SourceError::InvalidInput)?
         .list_dirs(remote_path)
         .await
 }
@@ -216,14 +217,17 @@ impl NextcloudClient {
 
     /// Sub-directories of `path`, sorted by name, for the settings folder
     /// browser. Errors when the listing request fails.
-    pub(crate) async fn list_dirs(&self, path: &str) -> Result<Vec<String>, String> {
+    pub(crate) async fn list_dirs(
+        &self,
+        path: &str,
+    ) -> Result<Vec<String>, crate::source::SourceError> {
         let path = dav_path::normalise(path);
         let entries = self
             .nc
             .files()
             .propfind(&path, Depth::One, nextcloud::files::DEFAULT_PROPS)
             .await
-            .map_err(|e| format!("could not list {path}: {e}"))?;
+            .map_err(source_error)?;
 
         let mut dirs: Vec<String> = entries
             .into_iter()
@@ -518,6 +522,21 @@ fn extension_for_mime(content_type: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refused_credential_is_an_auth_failure() {
+        let dav = |status| nextcloud::Error::Dav {
+            method: "PROPFIND".into(),
+            path: "/".into(),
+            status,
+            body: String::new(),
+        };
+        assert_eq!(source_error(dav(401)), crate::source::SourceError::Auth);
+        assert!(matches!(
+            source_error(dav(500)),
+            crate::source::SourceError::Backend(_)
+        ));
+    }
 
     #[test]
     fn path_helpers_clamp_at_the_root() {

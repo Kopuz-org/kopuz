@@ -12,6 +12,8 @@ use reader::Track;
 use reader::models::TrackId;
 use serde_json::Value;
 
+use crate::source::SourceError;
+
 const API: &str = "https://api.spotify.com/v1";
 /// Web API page cap; 50 is the max for most list endpoints.
 const PAGE: u32 = 50;
@@ -43,6 +45,31 @@ async fn get_json(
     query: &[(&str, String)],
     ctx: &str,
 ) -> Result<Value, String> {
+    let resp = get_retrying(access, url, query, ctx)
+        .await
+        .map_err(|e| e.to_string())?;
+    ok_json(resp, ctx).await
+}
+
+/// [`get_json`], with a refused token and an unanswered request told apart.
+async fn fetch_json(
+    access: &str,
+    url: &str,
+    query: &[(&str, String)],
+    ctx: &str,
+) -> Result<Value, SourceError> {
+    let resp = get_retrying(access, url, query, ctx)
+        .await
+        .map_err(SourceError::from_request)?;
+    checked_json(resp, ctx).await
+}
+
+async fn get_retrying(
+    access: &str,
+    url: &str,
+    query: &[(&str, String)],
+    ctx: &str,
+) -> Result<reqwest::Response, reqwest::Error> {
     const MAX_RETRIES: u32 = 4;
     let mut attempt = 0;
     loop {
@@ -51,8 +78,7 @@ async fn get_json(
             .query(query)
             .bearer_auth(access)
             .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .await?;
         if resp.status().as_u16() == 429 && attempt < MAX_RETRIES {
             let wait = retry_after(&resp);
             attempt += 1;
@@ -65,23 +91,40 @@ async fn get_json(
             tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
             continue;
         }
-        return ok_json(resp, ctx).await;
+        return Ok(resp);
     }
 }
 
 /// Parse a 2xx JSON body, else a descriptive error carrying the status + body.
 async fn ok_json(resp: reqwest::Response, ctx: &str) -> Result<Value, String> {
+    read_json(resp, ctx).await.map_err(|(_, text)| text)
+}
+
+/// [`ok_json`], where only 401 is the token; a 403 is Spotify refusing the account, e.g. a player command without Premium.
+async fn checked_json(resp: reqwest::Response, ctx: &str) -> Result<Value, SourceError> {
+    read_json(resp, ctx).await.map_err(|(status, text)| {
+        match status.map(|status| status.as_u16()) {
+            Some(401) => SourceError::Auth,
+            _ => SourceError::Backend(text),
+        }
+    })
+}
+
+async fn read_json(
+    resp: reqwest::Response,
+    ctx: &str,
+) -> Result<Value, (Option<reqwest::StatusCode>, String)> {
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!("{ctx} failed ({status}): {body}"));
+        return Err((Some(status), format!("{ctx} failed ({status}): {body}")));
     }
     if status.as_u16() == 204 {
         return Ok(Value::Null);
     }
     resp.json::<Value>()
         .await
-        .map_err(|e| format!("{ctx}: couldn't parse response: {e}"))
+        .map_err(|e| (None, format!("{ctx}: couldn't parse response: {e}")))
 }
 
 /// Start playback of `uris` on the given Connect device. kopuz passes a single
@@ -556,8 +599,8 @@ pub struct ConnectDevice {
 }
 
 /// The account's currently available Connect devices.
-pub async fn devices(access: &str) -> Result<Vec<ConnectDevice>, String> {
-    let body = get_json(access, &format!("{API}/me/player/devices"), &[], "devices").await?;
+pub async fn devices(access: &str) -> Result<Vec<ConnectDevice>, SourceError> {
+    let body = fetch_json(access, &format!("{API}/me/player/devices"), &[], "devices").await?;
     Ok(body["devices"]
         .as_array()
         .map(|arr| {
@@ -576,15 +619,19 @@ pub async fn devices(access: &str) -> Result<Vec<ConnectDevice>, String> {
 }
 
 /// Move the live playback session to another Connect device.
-pub async fn transfer_playback(access: &str, device_id: &str, play: bool) -> Result<(), String> {
+pub async fn transfer_playback(
+    access: &str,
+    device_id: &str,
+    play: bool,
+) -> Result<(), SourceError> {
     let resp = client()
         .put(format!("{API}/me/player"))
         .bearer_auth(access)
         .json(&serde_json::json!({ "device_ids": [device_id], "play": play }))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
-    ok_json(resp, "transfer playback").await.map(|_| ())
+        .map_err(SourceError::from_request)?;
+    checked_json(resp, "transfer playback").await.map(|_| ())
 }
 
 async fn player_put(access: &str, path: &str, query: &[(&str, String)]) -> Result<(), String> {
@@ -774,6 +821,38 @@ fn parse_album(item: &Value) -> Option<reader::Album> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn answer(status: &'static str) -> reqwest::Response {
+        let server = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = server.local_addr().expect("address");
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            if let Ok((mut stream, _)) = server.accept().await {
+                let mut request = [0u8; 4096];
+                let _ = stream.read(&mut request).await;
+                let reply =
+                    format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                let _ = stream.write_all(reply.as_bytes()).await;
+            }
+        });
+        client()
+            .get(format!("http://{address}"))
+            .send()
+            .await
+            .expect("answered")
+    }
+
+    #[tokio::test]
+    async fn only_a_refused_token_is_an_auth_failure() {
+        let refused = checked_json(answer("401 Unauthorized").await, "devices").await;
+        assert_eq!(refused, Err(SourceError::Auth));
+        let premium = checked_json(answer("403 Forbidden").await, "transfer playback").await;
+        assert!(matches!(premium, Err(SourceError::Backend(_))));
+        let text = ok_json(answer("401 Unauthorized").await, "me").await;
+        assert!(text.is_err_and(|text| text.contains("401")));
+    }
 
     #[test]
     fn parse_track_maps_core_fields() {

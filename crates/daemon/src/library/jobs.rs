@@ -344,7 +344,7 @@ impl LibraryService {
                 progress_ctx.progress_throttled("scanning", None, None, Some(file));
             }))
             .await
-            .map_err(|error| ApiError::internal(error.to_string()))?;
+            .map_err(crate::sources::source_error)?;
 
         let merged_albums: Vec<reader::Album> =
             snapshot.albums.into_iter().map(merge_cover).collect();
@@ -357,7 +357,7 @@ impl LibraryService {
             source
                 .upsert_albums(chunk)
                 .await
-                .map_err(|error| ApiError::internal(error.to_string()))?;
+                .map_err(crate::sources::source_error)?;
             done += chunk.len() as u64;
             ctx.progress("persisting", Some(done), Some(total), None);
             self.invalidate(Table::Albums);
@@ -369,7 +369,7 @@ impl LibraryService {
             source
                 .upsert_tracks(chunk)
                 .await
-                .map_err(|error| ApiError::internal(error.to_string()))?;
+                .map_err(crate::sources::source_error)?;
             done += chunk.len() as u64;
             ctx.progress("persisting", Some(done), Some(total), None);
             self.invalidate(Table::Tracks);
@@ -411,12 +411,12 @@ impl LibraryService {
                 }),
             )
             .await
-            .map_err(|error| ApiError::internal(error.to_string()))?;
+            .map_err(crate::sources::source_error)?;
         if !covers.is_empty() && !ctx.cancelled() {
             source
                 .upsert_albums(&covers)
                 .await
-                .map_err(|error| ApiError::internal(error.to_string()))?;
+                .map_err(crate::sources::source_error)?;
             if let Some(session) = self.session.get() {
                 session.update_album_covers(&src, &covers);
             }
@@ -442,7 +442,7 @@ impl LibraryService {
                 source
                     .upsert_tracks(chunk)
                     .await
-                    .map_err(|error| ApiError::internal(error.to_string()))?;
+                    .map_err(crate::sources::source_error)?;
             }
             self.invalidate(Table::Albums);
             self.invalidate(Table::Tracks);

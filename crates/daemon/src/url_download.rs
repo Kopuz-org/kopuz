@@ -463,10 +463,12 @@ impl UrlDownloadService {
         }
         let downloader = YoutubeDownloader::new(youtube_cookies(&*self.sources.snapshot().await));
         let tracks = match youtube_download::parse_link(query) {
-            Some(link) => downloader.tracks(&link).await,
-            None => downloader.search(query).await,
-        }
-        .map_err(ApiError::internal)?;
+            Some(link) => downloader.tracks(&link).await.map_err(ApiError::internal)?,
+            None => downloader
+                .search(query)
+                .await
+                .map_err(crate::sources::source_error)?,
+        };
         Ok(tracks
             .iter()
             .map(|track| DownloadCandidate {

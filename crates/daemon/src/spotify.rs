@@ -119,7 +119,7 @@ impl SpotifySink {
         let selected = self.with_state(|state| state.selected.clone());
         let devices = server::spotify::api::devices(&access)
             .await
-            .map_err(ApiError::internal)?;
+            .map_err(crate::sources::source_error)?;
         Ok(devices
             .into_iter()
             // This app's own SDK device is offered as "this app", not as one
@@ -153,7 +153,7 @@ impl SpotifySink {
         let playing = self.session.state().phase == api::Phase::Playing;
         server::spotify::api::transfer_playback(&access, &target, playing)
             .await
-            .map_err(ApiError::internal)
+            .map_err(crate::sources::source_error)
     }
 
     /// Adopt a device that is already playing on its own, which is how a

@@ -1308,7 +1308,7 @@ impl SourceService {
             .ok_or_else(|| ApiError::new(ErrorCode::SourceAuthExpired, "not signed in"))?;
         let paths = server::nextcloud::browse_folders(&server.url, user, secret, path)
             .await
-            .map_err(ApiError::internal)?;
+            .map_err(source_error)?;
         Ok(paths
             .into_iter()
             .map(|path| SourceFolderEntry {

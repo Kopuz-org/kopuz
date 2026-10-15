@@ -167,7 +167,10 @@ impl YouTubeMusicClient {
         self.page_id.as_deref()
     }
 
-    pub async fn search_tracks(&self, query: &str) -> Result<Vec<Track>, String> {
+    pub async fn search_tracks(
+        &self,
+        query: &str,
+    ) -> Result<Vec<Track>, crate::source::SourceError> {
         self.account(async { search::music_search_tracks(query, self.cookies.as_deref()).await })
             .await
     }
