@@ -490,12 +490,18 @@ impl LibraryService {
             })
             .filter(|artist| !artist.trim().is_empty())
             .unwrap_or_else(|| "Live Radio".to_string());
+        let cover = station.and_then(|station| match &station.metadata {
+            Some(radio::manifest::MetadataSourceDef::Static(meta)) => {
+                meta.resolve(stream_id).2.map(str::to_string)
+            }
+            _ => None,
+        });
 
         Track {
             id: reader::TrackId::Local(std::path::PathBuf::from(format!(
                 "radio:{station_id}:{stream_id}"
             ))),
-            cover: None,
+            cover,
             album_id: String::new(),
             title,
             artist,
