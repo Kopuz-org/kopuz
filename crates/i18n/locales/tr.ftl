@@ -11,7 +11,7 @@ language = Dil
 library = Kütüphane
 playlists = Çalma Listeleri
 album = Albüm
-release_single = Single
+release_single = Tekli
 release_ep = EP
 artist = Sanatçı
 home = Ana Sayfa
@@ -586,7 +586,7 @@ interface_scale = Interface size
 interface_scale_description = Scales text and controls across the whole app.
 
 choose = Choose
-daemon_unreachable = Can't reach the kopuz daemon
+daemon_unreachable = Kopuz arka plan hizmetine ulaşılamıyor
 download_offline = Çevrimdışı İndir
 go_to_album = Albüme Git
 go_to_artist = Sanatçıya Git
@@ -602,9 +602,9 @@ settings_offline = Offline Downloads
 settings_player = Player
 settings_tools = Tools
 share = Share
-share_copied = Copied link
-share_no_page = Couldn't find a page for this track
-start_daemon = Start Daemon
+share_copied = Bağlantı kopyalandı
+share_no_page = Bu şarkı için bir sayfa bulunamadı
+start_daemon = Hizmeti başlat
 
 first_run_title = Welcome to Kopuz
 first_run_subtitle = Point Kopuz at your music and it takes care of the rest.
@@ -655,8 +655,8 @@ metadata_number_invalid = Enter a number, or leave it empty to clear the tag.
 metadata_batch_keep = Leave unchanged
 metadata_batch_count =
     { $count ->
-        [one] Editing { $count } track
-       *[other] Editing { $count } tracks
+        [one] { $count } şarkı düzenleniyor
+       *[other] { $count } şarkı düzenleniyor
     }
 interface_font = Interface font
 interface_font_description = The font family to draw the interface with.
@@ -732,7 +732,7 @@ stopping = Durduruluyor…
 starting = Starting…
 clear = Clear
 retry_failed = Retry failed
-retry_now = Retry now
+retry_now = Şimdi yeniden dene
 view = View
 undo = Undo
 quit = Quit
@@ -744,7 +744,7 @@ tray_show_hide = Kopuz'u Göster / Gizle
 tray_quit = Kopuz'dan Çık
 tray_unavailable_title = Tepsi simgesi kullanılamıyor
 tray_unavailable_message = Sistem tepsisi kullanılamıyor: appindicator kitaplığı bulunamadı. libayatana-appindicator (Debian/Ubuntu/Arch) ya da libappindicator-gtk3 (Fedora) paketini kurun. Pencereyi kapatmak, uygulamayı tepsiye küçültmek yerine kapatır.
-reconnecting_attempt = Reconnecting… (attempt { $attempt })
+reconnecting_attempt = Yeniden bağlanılıyor… (deneme { $attempt })
 downloads_summary = { $done } downloaded, { $failed } failed
 job_scan = Library scan
 job_library_sync = Library sync
@@ -812,16 +812,16 @@ discover_no_results_hint = Try fewer words, or switch source and look again.
 discover_show_less = Show less
 discover_genre_count =
     { $count ->
-        [one] { $count } genre
-       *[other] { $count } genres
+        [one] { $count } tür
+       *[other] { $count } tür
     }
 discover_read_failed = Couldn't load your library: { $error }
 palette_all_results = All results for "{ $query }" in Discover
 
 library_count =
     { $count ->
-        [one] { $count } item
-       *[other] { $count } items
+        [one] { $count } öğe
+       *[other] { $count } öğe
     }
 library_filter_placeholder = Filter the library…
 library_chip_downloaded = Downloaded
@@ -847,8 +847,8 @@ library_default_view = Grids open as
 library_default_view_description = Whether albums, artists and playlists start as tiles or as rows.
 library_artist_tracks =
     { $count ->
-        [one] { $count } track
-       *[other] { $count } tracks
+        [one] { $count } şarkı
+       *[other] { $count } şarkı
     }
 library_selected = { $count } selected
 library_whole_selection = Everything that matches
@@ -890,8 +890,8 @@ interface_skin_description = The shape of the interface: how round things are, h
 
 home_plays =
     { $count ->
-        [one] { $count } play
-       *[other] { $count } plays
+        [one] { $count } dinlenme
+       *[other] { $count } dinlenme
     }
 
 interface_ambient = Ambient light
@@ -921,8 +921,8 @@ upload_music = Upload music
 uploading_music = Uploading { $name }…
 music_uploaded =
     { $count ->
-        [one] Uploaded { $count } file.
-       *[other] Uploaded { $count } files.
+        [one] { $count } dosya yüklendi.
+       *[other] { $count } dosya yüklendi.
     }
 music_upload_too_large = Audio files must be no larger than 500 MiB.
 cloud_storage_loading = Loading storage usage…
@@ -930,11 +930,11 @@ cloud_storage_loading = Loading storage usage…
 smb_url_placeholder = smb://nas/Music
 smb_help = Connect to an SMB 2/3 share or subfolder, then sign in with your NAS account. Domain accounts can use DOMAIN\username. Files are read without mounting the share.
 invalid_smb_url = Enter smb://host/share or smb://host/share/folder, without credentials in the URL.
-sync_interval = Sync and rescan every
-sync_interval_never = Never
-sync_interval_minutes = { $count } min
-sync_interval_hours = { $count } h
-sync_interval_days = { $count } d
+sync_interval = Eşitleme ve yeniden tarama sıklığı
+sync_interval_never = Hiçbir zaman
+sync_interval_minutes = { $count } dk
+sync_interval_hours = { $count } sa
+sync_interval_days = { $count } g
 
 error_setting_locked = Bu ayar yönetilen bir ayar dosyasıyla sabitlenmiş, burada değiştirilemez.
 error_connect_not_offered = Bu entegrasyon bu yolla bağlanmıyor.
