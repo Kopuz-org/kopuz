@@ -150,7 +150,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         active_source: Some(active_source.clone()),
         station_registry: station_registry.clone(),
         queue_store: Some(queue_store.clone()),
-        recorder: Some(Arc::new(SourceRecorder::new(active_source.clone()))),
+        recorder: Some(Arc::new(SourceRecorder)),
         scrobbler: Some(scrobbler.clone()),
         offline,
     };
