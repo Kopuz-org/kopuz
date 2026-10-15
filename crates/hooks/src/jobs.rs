@@ -72,18 +72,34 @@ pub fn use_job_progress(kind: api::JobKind) -> Signal<JobProgress> {
     state
 }
 
-/// Start a job, ignoring the conflict a second start of the same kind
-/// returns -- one is already running, which is what the caller wanted.
+/// Whether a scan or sync that fills the library is running, so an empty listing is not the last word yet.
+pub fn use_library_filling() -> Memo<bool> {
+    let scan = use_job_progress(api::JobKind::Scan);
+    let library = use_job_progress(api::JobKind::LibrarySync);
+    let playlists = use_job_progress(api::JobKind::PlaylistSync);
+    let favorites = use_job_progress(api::JobKind::FavoritesSync);
+    use_memo(move || {
+        scan.read().running
+            || library.read().running
+            || playlists.read().running
+            || favorites.read().running
+    })
+}
+
+/// Toast a finished job's failure; the app root calls it once per event, so a failure is said once however many pages follow the job.
+pub fn say_failure(error: Option<&api::ErrorBody>) {
+    if let Some(error) = error {
+        crate::toast::toast_api_error(&error.clone().into());
+    }
+}
+
+/// Start a job; while one of `kind` runs, the daemon joins it instead.
 pub fn start(kind: api::JobKind) {
     let api = crate::api::consume_api();
     spawn(async move {
-        match api.start_job(kind).await {
-            Ok(_) => {}
-            Err(error) if error.code == api::ErrorCode::Conflict => {}
-            Err(error) => {
-                tracing::warn!(%error, ?kind, "could not start job");
-                crate::toast::toast_error(&error.to_string());
-            }
+        if let Err(error) = api.start_job(kind).await {
+            tracing::warn!(%error, ?kind, "could not start job");
+            crate::toast::toast_api_error(&error);
         }
     });
 }

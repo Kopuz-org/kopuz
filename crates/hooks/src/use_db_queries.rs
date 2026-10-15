@@ -48,6 +48,30 @@ pub fn all() -> Page {
     }
 }
 
+/// Run `query` for the active source and read its answer only while that source is still the active one, so a switch shows nothing until the new source answers.
+fn use_source_query<T, F>(
+    source: Memo<String>,
+    mut query: impl FnMut(String) -> F + 'static,
+) -> Memo<Option<T>>
+where
+    T: Clone + PartialEq + 'static,
+    F: std::future::Future<Output = T> + 'static,
+{
+    let answered = use_resource(move || {
+        let asked = source();
+        let answer = query(asked.clone());
+        async move { (asked, answer.await) }
+    });
+    use_memo(move || {
+        let current = source();
+        answered
+            .read()
+            .as_ref()
+            .filter(|(asked, _)| *asked == current)
+            .map(|(_, answer)| answer.clone())
+    })
+}
+
 /// Window into a track listing. `filter` selects source/sort/search; `page` is
 /// the visible slice (wire it from `virtual_scroll`'s `start_index`/window).
 pub fn use_tracks_window(filter: Memo<TrackFilter>, page: Memo<Page>) -> TracksWindow {
@@ -117,12 +141,12 @@ pub fn use_tracks_window(filter: Memo<TrackFilter>, page: Memo<Page>) -> TracksW
 pub fn use_album_tracks(
     source: Memo<String>,
     album_id: Memo<String>,
-) -> Resource<Vec<api::TrackInfo>> {
+) -> Memo<Option<Vec<api::TrackInfo>>> {
     let api = use_api();
     let gens = use_generations();
-    use_resource(move || {
+    use_source_query(source, move |s| {
         let _ = gens.generation(Table::Tracks);
-        let (api, s, id) = (api.clone(), source(), album_id());
+        let (api, id) = (api.clone(), album_id());
         let span = tracing::info_span!(
             "query.album_tracks",
             source = s.as_str(),
@@ -150,12 +174,12 @@ pub fn use_album_tracks(
 pub fn use_artist_tracks(
     source: Memo<String>,
     artist: Memo<Option<String>>,
-) -> Resource<Result<Vec<api::TrackInfo>, api::ApiError>> {
+) -> Memo<Option<Result<Vec<api::TrackInfo>, api::ApiError>>> {
     let api = use_api();
     let gens = use_generations();
-    use_resource(move || {
+    use_source_query(source, move |s| {
         let _ = gens.generation(Table::Tracks);
-        let (api, s, artist) = (api.clone(), source(), artist());
+        let (api, artist) = (api.clone(), artist());
         let span = tracing::info_span!(
             "query.artist_tracks",
             source = s.as_str(),
@@ -179,13 +203,14 @@ pub fn use_artist_tracks(
 pub fn use_artist(
     source: Memo<String>,
     artist: Memo<Option<String>>,
-) -> Resource<Option<Result<api::ArtistDetail, api::ApiError>>> {
+) -> Memo<Option<Option<Result<api::ArtistDetail, api::ApiError>>>> {
     let api = use_api();
     let gens = use_generations();
-    use_resource(move || {
+    use_source_query(source, move |s| {
         let _ = gens.generation(Table::Tracks);
         let _ = gens.generation(Table::Albums);
-        let (api, s, artist) = (api.clone(), source(), artist());
+        let _ = gens.generation(Table::Artists);
+        let (api, artist) = (api.clone(), artist());
         let span = tracing::info_span!("query.artist", source = s.as_str(), artist = ?artist);
         async move { Some(api.artist(artist?).await) }.instrument(span)
     })
@@ -195,12 +220,12 @@ pub fn use_artist(
 pub fn use_genre_tracks(
     source: Memo<String>,
     genre: Memo<String>,
-) -> Resource<Vec<api::TrackInfo>> {
+) -> Memo<Option<Vec<api::TrackInfo>>> {
     let api = use_api();
     let gens = use_generations();
-    use_resource(move || {
+    use_source_query(source, move |s| {
         let _ = gens.generation(Table::Tracks);
-        let (api, s, name) = (api.clone(), source(), genre());
+        let (api, name) = (api.clone(), genre());
         let span = tracing::info_span!(
             "query.genre_tracks",
             source = s.as_str(),
@@ -225,12 +250,15 @@ pub fn use_genre_tracks(
 }
 
 /// One track per artist, for the artist grid's tiles.
-pub fn use_artist_sample_tracks(source: Memo<String>, limit: u32) -> Resource<Vec<api::TrackInfo>> {
+pub fn use_artist_sample_tracks(
+    source: Memo<String>,
+    limit: u32,
+) -> Memo<Option<Vec<api::TrackInfo>>> {
     let api = use_api();
     let gens = use_generations();
-    use_resource(move || {
+    use_source_query(source, move |s| {
         let _ = gens.generation(Table::Tracks);
-        let (api, s) = (api.clone(), source());
+        let api = api.clone();
         let span = tracing::info_span!("query.artist_sample_tracks", source = s.as_str(), limit);
         async move {
             api.artist_sample_tracks(Page { offset: 0, limit })
@@ -243,12 +271,12 @@ pub fn use_artist_sample_tracks(source: Memo<String>, limit: u32) -> Resource<Ve
 }
 
 /// The genre with the most tracks, for the home page's heading.
-pub fn use_top_genre(source: Memo<String>) -> Resource<Option<String>> {
+pub fn use_top_genre(source: Memo<String>) -> Memo<Option<Option<String>>> {
     let api = use_api();
     let gens = use_generations();
-    use_resource(move || {
+    use_source_query(source, move |s| {
         let _ = gens.generation(Table::Tracks);
-        let (api, s) = (api.clone(), source());
+        let api = api.clone();
         let span = tracing::info_span!("query.top_genre", source = s.as_str());
         async move { api.top_genre().await.unwrap_or_default() }.instrument(span)
     })
@@ -258,12 +286,12 @@ pub fn use_top_genre(source: Memo<String>) -> Resource<Option<String>> {
 pub fn use_tracks_by_keys(
     source: Memo<String>,
     keys: Memo<Vec<String>>,
-) -> Resource<Vec<api::TrackInfo>> {
+) -> Memo<Option<Vec<api::TrackInfo>>> {
     let api = use_api();
     let gens = use_generations();
-    use_resource(move || {
+    use_source_query(source, move |s| {
         let _ = gens.generation(Table::Tracks);
-        let (api, s, k) = (api.clone(), source(), keys());
+        let (api, k) = (api.clone(), keys());
         let span = tracing::info_span!(
             "query.tracks_by_keys",
             source = s.as_str(),
@@ -283,13 +311,46 @@ pub fn use_tracks_by_keys(
     })
 }
 
-/// This source's recently-played tracks, newest first.
-pub fn use_recently_played(source: Memo<String>) -> Resource<Vec<api::TrackInfo>> {
+/// This source's tracks with a downloaded copy still on disk, by artist, asked for only while `enabled` says so.
+pub fn use_downloaded_tracks(
+    source: Memo<String>,
+    enabled: impl Fn() -> bool + 'static,
+) -> Memo<Option<Result<Vec<api::TrackInfo>, api::ApiError>>> {
     let api = use_api();
     let gens = use_generations();
-    use_resource(move || {
+    use_source_query(source, move |s| {
+        let _ = gens.generation(Table::Tracks);
+        let (api, on) = (api.clone(), enabled());
+        let span = tracing::info_span!(
+            "query.downloaded_tracks",
+            source = s.as_str(),
+            rows = tracing::field::Empty,
+        );
+        async move {
+            if !on {
+                tracing::Span::current().record("rows", 0);
+                return Ok(Vec::new());
+            }
+            let filter = TrackFilter {
+                downloaded: Some(true),
+                sort: api::TrackSort::Artist,
+                ..Default::default()
+            };
+            let rows = api.tracks(filter, all()).await?.items;
+            tracing::Span::current().record("rows", rows.len());
+            Ok(rows)
+        }
+        .instrument(span)
+    })
+}
+
+/// This source's recently-played tracks, newest first.
+pub fn use_recently_played(source: Memo<String>) -> Memo<Option<Vec<api::TrackInfo>>> {
+    let api = use_api();
+    let gens = use_generations();
+    use_source_query(source, move |s| {
         let _ = gens.generation(Table::Recents);
-        let (api, s) = (api.clone(), source());
+        let api = api.clone();
         let span = tracing::info_span!("query.recently_played", source = s.as_str());
         async move {
             api.recent_tracks(Page {
@@ -305,32 +366,41 @@ pub fn use_recently_played(source: Memo<String>) -> Resource<Vec<api::TrackInfo>
 }
 
 /// One album by id.
-pub fn use_album(source: Memo<String>, album_id: Memo<String>) -> Resource<Option<api::AlbumInfo>> {
+pub fn use_album(
+    source: Memo<String>,
+    album_id: Memo<String>,
+) -> Memo<Option<Option<api::AlbumInfo>>> {
     let api = use_api();
     let gens = use_generations();
-    use_resource(move || {
+    use_source_query(source, move |s| {
         let _ = gens.generation(Table::Albums);
-        let (api, s, id) = (api.clone(), source(), album_id());
+        let (api, id) = (api.clone(), album_id());
         let span = tracing::info_span!("query.album", source = s.as_str(), album_id = %id);
         async move { api.album(id).await.unwrap_or_default() }.instrument(span)
     })
 }
 
-/// Distinct artists for a source with track counts and photos, A→Z.
-pub fn use_artists(source: Memo<String>) -> Resource<Vec<api::ArtistInfo>> {
+/// The artists `query` selects for a source, with track and album counts and photos.
+pub fn use_artists(
+    source: Memo<String>,
+    query: Memo<api::ArtistQuery>,
+) -> Memo<Option<Vec<api::ArtistInfo>>> {
     let api = use_api();
     let gens = use_generations();
-    use_resource(move || {
+    use_source_query(source, move |s| {
         let _ = gens.generation(Table::Tracks);
-        let (api, s) = (api.clone(), source());
+        let _ = gens.generation(Table::Albums);
+        let _ = gens.generation(Table::Artists);
+        let (api, q) = (api.clone(), query());
         let span = tracing::info_span!(
             "query.artists",
             source = s.as_str(),
+            query = ?q,
             rows = tracing::field::Empty
         );
         async move {
             let rows = api
-                .artists(all())
+                .artists(q, all())
                 .await
                 .map(|page| page.artists)
                 .unwrap_or_default();
@@ -355,11 +425,13 @@ pub fn use_active_source() -> Memo<String> {
 
 /// The active source's play counts by track uid, re-read when tracks or
 /// recents change or the source does.
-pub fn use_listen_counts(source: Memo<String>) -> Resource<std::collections::HashMap<String, u64>> {
+pub fn use_listen_counts(
+    source: Memo<String>,
+) -> Memo<Option<std::collections::HashMap<String, u64>>> {
     let api = use_api();
     let gens = use_generations();
-    use_resource(move || {
-        let _ = (source(), gens.generation(Table::Tracks));
+    use_source_query(source, move |s| {
+        let _ = (s, gens.generation(Table::Tracks));
         let _ = gens.generation(Table::Recents);
         let api = api.clone();
         async move {
@@ -373,71 +445,69 @@ pub fn use_listen_counts(source: Memo<String>) -> Resource<std::collections::Has
 
 /// The playlist catalog for the active source, re-queried on a
 /// playlists/folders bump or a source switch.
-pub fn use_playlists() -> Resource<api::PlaylistCatalog> {
+pub fn use_playlists() -> Memo<Option<api::PlaylistCatalog>> {
     let api = use_api();
     let gens = use_generations();
     let source = use_active_source();
-    use_resource(move || {
+    use_source_query(source, move |s| {
         let _ = gens.generation(Table::Playlists);
         let _ = gens.generation(Table::Folders);
-        let (api, src) = (api.clone(), source());
+        let (api, src) = (api.clone(), s);
         let span = tracing::info_span!("query.playlists", source = %src.as_str());
         async move { api.playlists().await.unwrap_or_default() }.instrument(span)
     })
 }
 
-/// All albums for a source, re-queried when the albums table changes.
-/// The `limit` most recently added albums for a source. Tracked against the
-/// tracks table as well as the albums one: the order comes from each album's
-/// newest track, so a scan that only adds tracks to a known album still moves
-/// it up.
-pub fn use_recently_added_albums(
+/// Every album `query` selects, in its order, re-queried when the albums table changes; no query asks for nothing.
+pub fn use_albums(
     source: Memo<String>,
-    limit: u32,
-) -> Resource<Vec<api::AlbumInfo>> {
-    let api = use_api();
-    let gens = use_generations();
-    use_resource(move || {
-        let _ = gens.generation(Table::Albums);
-        let _ = gens.generation(Table::Tracks);
-        let (api, s) = (api.clone(), source());
-        let span = tracing::info_span!(
-            "query.albums_recently_added",
-            source = s.as_str(),
-            rows = tracing::field::Empty
-        );
-        async move {
-            let rows = api
-                .albums_recently_added(Page { offset: 0, limit })
-                .await
-                .map(|page| page.albums)
-                .unwrap_or_default();
-            tracing::Span::current().record("rows", rows.len());
-            rows
-        }
-        .instrument(span)
-    })
+    query: Memo<Option<api::AlbumQuery>>,
+) -> Memo<Option<Result<Vec<api::AlbumInfo>, api::ApiError>>> {
+    use_album_listing(source, query, all())
 }
 
-pub fn use_albums(source: Memo<String>) -> Resource<Vec<api::AlbumInfo>> {
+/// The first `limit` albums `query` selects, for a shelf that only shows the top of an order.
+pub fn use_albums_window(
+    source: Memo<String>,
+    query: Memo<Option<api::AlbumQuery>>,
+    limit: u32,
+) -> Memo<Option<Result<Vec<api::AlbumInfo>, api::ApiError>>> {
+    use_album_listing(source, query, Page { offset: 0, limit })
+}
+
+fn use_album_listing(
+    source: Memo<String>,
+    query: Memo<Option<api::AlbumQuery>>,
+    page: Page,
+) -> Memo<Option<Result<Vec<api::AlbumInfo>, api::ApiError>>> {
     let api = use_api();
     let gens = use_generations();
-    use_resource(move || {
+    use_source_query(source, move |s| {
         let _ = gens.generation(Table::Albums);
-        let (api, s) = (api.clone(), source());
+        let (api, q) = (api.clone(), query());
+        // A track-derived order moves when tracks do, with no album row changing.
+        if q.iter().flat_map(|q| &q.sort).any(|sort| {
+            matches!(
+                sort.field,
+                config::AlbumSortField::RecentlyAdded | config::AlbumSortField::TrackCount
+            )
+        }) {
+            let _ = gens.generation(Table::Tracks);
+        }
         let span = tracing::info_span!(
             "query.albums",
             source = s.as_str(),
+            query = ?q,
             rows = tracing::field::Empty
         );
         async move {
-            let rows = api
-                .albums(all())
-                .await
-                .map(|page| page.albums)
-                .unwrap_or_default();
+            let Some(q) = q else {
+                tracing::Span::current().record("rows", 0);
+                return Ok(Vec::new());
+            };
+            let rows = api.albums(q, page).await?.albums;
             tracing::Span::current().record("rows", rows.len());
-            rows
+            Ok(rows)
         }
         .instrument(span)
     })

@@ -32,9 +32,8 @@ pub struct Core {
     pub session: SessionHandle,
     pub artwork: Arc<crate::ArtworkService>,
     pub db: db::Db,
-    pub config: config::AppConfig,
-    /// The authority on the running config, as opposed to the `config`
-    /// snapshot above. A host needs it to flush the volume on the way out.
+    pub settings: config::Settings,
+    /// The authority on the running settings, as opposed to the `settings` snapshot above.
     pub config_service: Arc<ConfigService>,
     pub library: Arc<LibraryService>,
     pub jobs: Arc<JobRunner>,
@@ -110,14 +109,20 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     if using_default_database {
         db::legacy::migrate_json_store(&database, &db::config_dir()).await;
     }
-    let config = database.load_config().await?.unwrap_or_default();
-
     let settings_path =
         config::store::settings_path_for(db_path.parent().unwrap_or_else(|| Path::new(".")));
+    let settings = crate::config_service::load_settings(&settings_path)?;
+    let sources = Arc::new(crate::sources::load(&database).await?);
+    let credentials = crate::CredentialStore::load(&database).await?;
+    let offline = crate::OfflineIndex::load(&database).await?;
+    let downloads_pruned = offline.pruned();
+    let (volume, muted) = database.playback_state().await?;
+    let presence_pause = crate::integrations::PresencePause::load(&database).await?;
+
     let config_service = Arc::new(ConfigService::new(
         database.clone(),
         settings_path,
-        config.clone(),
+        settings.clone(),
     ));
     let station_registry = Arc::new(radio::registry::StationRegistry::default());
     let cover_cache = directories::ProjectDirs::from("moe", "kopuz", "kopuz")
@@ -126,42 +131,56 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let _ = std::fs::create_dir_all(&cover_cache);
     let library = Arc::new(LibraryService::new(
         database.clone(),
-        config.active_source.clone(),
+        sources.active.clone(),
         station_registry.clone(),
         cover_cache,
+        credentials.clone(),
     ));
     server::ytmusic::player::init_tier_store(database.clone());
     db::cache::init(database.clone());
     let active_source: server::source::ActiveSource =
-        Arc::from(server::source::active(database.clone(), &config));
+        Arc::from(server::source::active(database.clone(), &sources));
     let queue_store: Arc<dyn QueueStore> = Arc::new(DbQueueStore::new(database.clone()));
-    let scrobbler = crate::Scrobbler::new(database.clone());
+    let scrobbler = crate::Scrobbler::new(database.clone(), credentials.clone());
     let services = PlaybackServices {
-        config: config.clone(),
+        settings: settings.clone(),
+        volume,
+        muted,
+        sources: sources.clone(),
         active_source: Some(active_source.clone()),
         station_registry: station_registry.clone(),
         queue_store: Some(queue_store.clone()),
-        recorder: Some(Arc::new(SourceRecorder::new(active_source.clone()))),
+        recorder: Some(Arc::new(SourceRecorder)),
         scrobbler: Some(scrobbler.clone()),
+        offline,
     };
 
     let session = SessionHandle::try_spawn(library.clone(), services)
         .map_err(|error| format!("audio engine init failed: {error:?}"))?;
     library.attach_session(session.clone());
+    {
+        let session = session.clone();
+        tokio::spawn(async move {
+            loop {
+                downloads_pruned.notified().await;
+                session.invalidate(api::Table::Tracks);
+                session.invalidate(api::Table::Albums);
+            }
+        });
+    }
+    library.spawn_artist_photo_upkeep();
     config_service.attach_session(session.clone());
     scrobbler.attach_session(session.clone());
     {
         let scrobbler = scrobbler.clone();
-        let config = session.config_watch().borrow().clone();
         tokio::spawn(async move {
-            scrobbler.drain_queue(&config).await;
+            scrobbler.drain_queue().await;
         });
     }
     let jobs = Arc::new(JobRunner::new(session.clone()));
     let downloads = crate::DownloadsService::new(
         database.clone(),
         session.clone(),
-        config_service.clone(),
         directories::ProjectDirs::from("moe", "kopuz", "kopuz")
             .map(|dirs| dirs.cache_dir().join("offline_tracks"))
             .unwrap_or_else(|| std::env::temp_dir().join("kopuz-offline")),
@@ -169,16 +188,26 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let favorites = FavoritesService::new(database.clone(), session.clone());
     favorites.spawn_reconciler();
     let playlists = crate::PlaylistService::new(database.clone(), session.clone());
-    spawn_volume_persistence(&session, config_service.clone());
+    playlists.attach_favorites(favorites.clone());
+    spawn_playback_state_persistence(&session, database.clone());
     crate::os_media::spawn(&session);
     crate::integrations::spawn_jellyfin_reporter(
         &session,
         active_source.clone(),
-        session.config_watch(),
+        session.sources_watch(),
     );
-    crate::integrations::spawn_youtube_reporter(&session, database.clone(), session.config_watch());
-    crate::integrations::spawn_discord_presence(&session, session.config_watch());
-    let restored_source = session.config_watch().borrow().active_source.clone();
+    crate::integrations::spawn_youtube_reporter(
+        &session,
+        database.clone(),
+        session.sources_watch(),
+    );
+    crate::integrations::spawn_discord_presence(
+        &session,
+        session.settings_watch(),
+        session.sources_watch(),
+        presence_pause.watch(),
+    );
+    let restored_source = session.sources().active.clone();
     match queue_store.load(&restored_source).await {
         Ok(snapshot) if !snapshot.queue.is_empty() => {
             let restored = snapshot.queue.len();
@@ -222,54 +251,66 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .map(|dirs| dirs.data_dir().join("artwork-uploads"))
             .unwrap_or_else(|| std::env::temp_dir().join("kopuz-artwork-uploads")),
     );
-    let sources =
-        crate::SourceService::new(database.clone(), session.clone(), config_service.clone());
+    let sources = crate::SourceService::new(
+        database.clone(),
+        session.clone(),
+        config_service.clone(),
+        sources,
+    );
     sources.spawn_credential_upkeep();
-    sources.watch_active(session.config_watch());
+    sources.watch_active(session.sources_watch());
     crate::auto_sync::spawn(
         database.clone(),
         jobs.clone(),
         library.clone(),
         playlists.clone(),
         favorites.clone(),
-        session.config_watch(),
+        session.settings_watch(),
+        session.sources_watch(),
     );
-    // A failed settings read aborts boot above, so reaching here means the config is real.
+    // A failed settings read aborts boot above, so reaching here means the settings are real.
     crate::folder_scan::spawn(
         jobs.clone(),
         library.clone(),
-        session.config_watch(),
+        session.settings_watch(),
         session.subscribe(),
         true,
     );
+    config_service.spawn_file_watch(session.settings_watch());
     let config_service_for_api = config_service.clone();
     let catalog = crate::CatalogService::new(database.clone(), session.clone(), library.clone());
-    let radio_service =
-        crate::RadioService::new(config_service.clone(), library.clone(), session.clone());
+    let radio_service = crate::RadioService::new(
+        database.clone(),
+        config_service.clone(),
+        library.clone(),
+        session.clone(),
+    );
     library.attach_catalog(catalog.clone());
     artwork.attach_library(library.clone());
     artwork.attach_catalog(catalog.clone());
     artwork.attach_radio(radio_service.clone());
     // The registry starts empty and is built from config here, rather than
     // by whichever frontend happened to be open.
-    radio_service.watch_config(session.config_watch());
+    radio_service.watch_config(session.settings_watch());
     let radio_boot = radio_service.clone();
     tokio::spawn(async move {
         if let Err(error) = radio_boot.reload().await {
             tracing::warn!(%error, "radio registry could not be loaded");
         }
     });
-    let downloader = crate::UrlDownloadService::new(config_service.clone());
+    let downloader =
+        crate::UrlDownloadService::new(database.clone(), config_service.clone(), sources.clone());
     downloader.attach_rescan(library.clone(), jobs.clone());
     // Spotify plays itself, so the session is told where to send a track it
     // cannot decode. Nothing starts until one is actually queued.
-    let spotify = crate::SpotifySink::new(session.clone(), config_service.clone());
+    let spotify = crate::SpotifySink::new(session.clone(), sources.clone());
     session.set_external_sink(spotify.clone());
     spotify.spawn_discovery();
     let api = Arc::new(
         LocalApi::new(session.clone())
             .with_library(library.clone())
             .with_config(config_service.clone())
+            .with_prefs(crate::PrefsService::new(database.clone(), session.clone()))
             .with_jobs(jobs.clone())
             .with_favorites(favorites.clone())
             .with_downloads(downloads)
@@ -281,7 +322,11 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .with_sources(sources.clone())
             .with_downloader(downloader)
             .with_spotify(spotify)
-            .with_integrations(crate::IntegrationService::new(config_service_for_api)),
+            .with_integrations(crate::IntegrationService::new(
+                config_service_for_api,
+                credentials,
+                presence_pause,
+            )),
     );
 
     Ok(Core {
@@ -289,7 +334,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         session,
         artwork,
         db: database,
-        config,
+        settings,
         config_service,
         library,
         jobs,
@@ -300,49 +345,62 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     })
 }
 
-/// Persist volume changes the engine made. Volume arrives as a player
-/// command from whichever frontend is attached, so the daemon has to be the
-/// one that remembers it; the debounce keeps a drag off the database.
-fn spawn_volume_persistence(session: &SessionHandle, config: Arc<ConfigService>) {
-    let mut events = session.subscribe();
+/// How long a volume or mute change waits for the next one before it is written, so a slider drag is one write.
+const PLAYBACK_STATE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(750);
+
+fn playback_state(session: &SessionHandle) -> (f32, bool) {
     let state = session.state();
-    let mut last = (state.volume, state.muted);
+    (state.volume, state.muted)
+}
+
+/// Persist the volume and mute the engine moved to; a frontend only sends commands, so the daemon remembers them.
+fn spawn_playback_state_persistence(session: &SessionHandle, database: db::Db) {
+    let mut events = session.subscribe();
+    let mut last = playback_state(session);
+    let session = session.clone();
     tokio::spawn(async move {
         loop {
-            let (volume, muted) = match events.recv().await {
+            let next = match events.recv().await {
                 Ok(api::ApiEvent::PlayerState(state)) => (state.volume, state.muted),
                 Ok(_) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             };
-            if (volume - last.0).abs() < f32::EPSILON && muted == last.1 {
+            if (next.0 - last.0).abs() < f32::EPSILON && next.1 == last.1 {
                 continue;
             }
-            last = (volume, muted);
-            tokio::time::sleep(std::time::Duration::from_millis(750)).await;
-            if let Err(error) = config.set_volume(last.0, last.1).await {
-                tracing::warn!(%error, "volume persist failed");
+            tokio::time::sleep(PLAYBACK_STATE_DEBOUNCE).await;
+            // What arrived during the wait is older than the state read below.
+            while !matches!(
+                events.try_recv(),
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty
+                    | tokio::sync::broadcast::error::TryRecvError::Closed)
+            ) {}
+            last = playback_state(&session);
+            if let Err(error) = database.set_playback_state(last.0, last.1).await {
+                tracing::warn!(%error, "persisting the volume and mute failed");
             }
         }
     });
 }
 
-/// Persist the volume the engine is at right now, ahead of the debounce.
-///
-/// [`spawn_volume_persistence`] holds a change for 750 ms so that dragging a
-/// slider is one write instead of fifty, so a close inside that window leaves
-/// the newest value with nothing but the engine holding it. The service is
-/// also where a whole-config write reads volume back from, which is why the
-/// frontend's own copy cannot stand in for this.
-pub async fn flush_volume(session: &SessionHandle, config: &ConfigService) {
-    let state = session.state();
-    if let Err(error) = config.set_volume(state.volume, state.muted).await {
-        tracing::warn!(%error, "flushing the volume on shutdown failed");
+/// Persist the volume and mute the engine is at right now, ahead of the debounce a close can land inside.
+pub async fn flush_playback_state(session: &SessionHandle, database: &db::Db) {
+    let (volume, muted) = playback_state(session);
+    // An unchanged state writes nothing, so a never-configured library stays without a state row.
+    if let Ok((stored, stored_muted)) = database.playback_state().await
+        && (stored - volume).abs() < f32::EPSILON
+        && stored_muted == muted
+    {
+        return;
+    }
+    if let Err(error) = database.set_playback_state(volume, muted).await {
+        tracing::warn!(%error, "flushing the volume and mute on shutdown failed");
     }
 }
 
 /// Flush what the core owns. Callers that bound a socket unlink it themselves.
 pub async fn shutdown(core: Core) {
-    flush_volume(&core.session, &core.config_service).await;
+    flush_playback_state(&core.session, &core.db).await;
     core.session.persist_now().await;
 }

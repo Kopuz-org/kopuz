@@ -1,12 +1,13 @@
 use crate::shared::fmt_time;
-use config::AppConfig;
+use config::Settings;
 use dioxus::prelude::*;
 use hooks::use_player_controller::{BufferedRange, LoopMode, PlayerController};
 
 pub struct SeekDrag {
     pub display_progress: u64,
     pub progress_percent: f64,
-    pub is_radio: bool,
+    /// No known length to seek within: a radio stream, or a track whose source gave none.
+    pub no_length: bool,
     pub on_commit: Callback<FormEvent>,
     pub on_input: Callback<FormEvent>,
 }
@@ -86,7 +87,7 @@ pub fn use_seek_drag(
         0.0
     };
 
-    let is_radio = *current_song_duration.read() == u64::MAX;
+    let no_length = *current_song_duration.read() == u64::MAX;
 
     let on_commit = use_callback(move |evt: FormEvent| {
         if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
@@ -106,7 +107,7 @@ pub fn use_seek_drag(
     SeekDrag {
         display_progress,
         progress_percent,
-        is_radio,
+        no_length,
         on_commit,
         on_input,
     }
@@ -118,15 +119,11 @@ pub struct VolumeMute {
     pub is_muted: bool,
     pub toggle_mute: Callback<()>,
     pub on_wheel: Callback<WheelEvent>,
-    pub on_commit: Callback<FormEvent>,
     pub on_input: Callback<FormEvent>,
+    pub on_change: Callback<FormEvent>,
 }
 
-pub fn use_volume_mute(
-    config: Signal<AppConfig>,
-    volume: Signal<f32>,
-    persisted_volume: Signal<f32>,
-) -> VolumeMute {
+pub fn use_volume_mute(settings: Signal<Settings>, volume: Signal<f32>) -> VolumeMute {
     let mut ctrl = use_context::<PlayerController>();
     let muted = ctrl.muted;
     let initial_volume = *volume.read();
@@ -140,20 +137,15 @@ pub fn use_volume_mute(
         }
     });
 
-    let mut persisted_volume = persisted_volume;
-
     let toggle_mute = use_callback(move |_: ()| {
         let current = *volume.read();
         if *muted.read() {
             ctrl.set_muted(false);
-            persisted_volume.set(current);
         } else if current <= f32::EPSILON {
             let vol = *last_audible.read();
             ctrl.set_volume(vol);
-            persisted_volume.set(vol);
         } else {
             ctrl.set_muted(true);
-            persisted_volume.set(0.0);
         }
     });
 
@@ -163,29 +155,37 @@ pub fn use_volume_mute(
         if dy.abs() < f64::EPSILON {
             return;
         }
-        let step = config.read().volume_scroll_step.max(0.0);
+        let step = settings.read().playback.volume_scroll_step.max(0.0);
         let dir = if dy < 0.0 { 1.0 } else { -1.0 };
         let current = if *muted.read() { 0.0 } else { *volume.read() };
         let new_val = (current + dir * step).clamp(0.0, 1.0);
         ctrl.set_volume(new_val);
-        persisted_volume.set(new_val);
         if new_val > f32::EPSILON {
             last_audible.set(new_val);
         }
     });
 
-    let on_commit = use_callback(move |evt: FormEvent| {
+    // The level a drag started from, so a drag down to zero restores that and not the last step before zero.
+    let mut drag_from = use_signal(|| None::<f32>);
+    let on_input = use_callback(move |evt: FormEvent| {
         if let Ok(val) = evt.value().parse::<f32>() {
-            persisted_volume.set(val);
+            if drag_from.read().is_none() {
+                let before = if *muted.read() { 0.0 } else { *volume.read() };
+                drag_from.set(Some(before));
+            }
+            ctrl.set_volume(val);
         }
     });
 
-    let on_input = use_callback(move |evt: FormEvent| {
-        if let Ok(val) = evt.value().parse::<f32>() {
-            ctrl.set_volume(val);
-            if val > f32::EPSILON {
-                last_audible.set(val);
-            }
+    let on_change = use_callback(move |evt: FormEvent| {
+        let from = drag_from.write().take();
+        let Ok(val) = evt.value().parse::<f32>() else {
+            return;
+        };
+        if val > f32::EPSILON {
+            last_audible.set(val);
+        } else if let Some(from) = from.filter(|from| *from > f32::EPSILON) {
+            last_audible.set(from);
         }
     });
 
@@ -197,8 +197,8 @@ pub fn use_volume_mute(
         is_muted: is_muted || level <= f32::EPSILON,
         toggle_mute,
         on_wheel,
-        on_commit,
         on_input,
+        on_change,
     }
 }
 
@@ -330,12 +330,12 @@ pub fn SeekSlider(
     let seek = use_seek_drag(current_song_duration, current_song_progress);
     let display_progress = seek.display_progress;
     let progress_percent = seek.progress_percent;
-    let is_radio = seek.is_radio;
+    let no_length = seek.no_length;
     let on_commit = seek.on_commit;
     let on_input = seek.on_input;
     let is_loading = *ctrl.is_loading.read();
     let buffered_ranges = ctrl.buffered_ranges.read().clone();
-    let can_seek = !is_radio && !is_loading;
+    let can_seek = !no_length && !is_loading;
 
     match variant {
         ControlsVariant::Fullscreen => rsx! {
@@ -422,19 +422,18 @@ pub fn SeekSlider(
 
 #[component]
 pub fn VolumeSlider(
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     volume: Signal<f32>,
-    persisted_volume: Signal<f32>,
     variant: ControlsVariant,
 ) -> Element {
-    let vol = use_volume_mute(config, volume, persisted_volume);
+    let vol = use_volume_mute(settings, volume);
     let level = vol.level;
     let volume_percent = vol.volume_percent;
     let is_muted = vol.is_muted;
     let toggle_mute = vol.toggle_mute;
     let on_wheel = vol.on_wheel;
-    let on_commit = vol.on_commit;
     let on_input = vol.on_input;
+    let on_change = vol.on_change;
 
     match variant {
         ControlsVariant::Fullscreen => rsx! {
@@ -467,8 +466,8 @@ pub fn VolumeSlider(
                         step: "0.01",
                         value: "{level}",
                         class: "slider-hit absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer",
-                        onchange: move |evt| on_commit.call(evt),
                         oninput: move |evt| on_input.call(evt),
+                        onchange: move |evt| on_change.call(evt),
                     }
                 }
             }
@@ -497,8 +496,8 @@ pub fn VolumeSlider(
                         step: "0.01",
                         value: "{level}",
                         class: "slider-hit absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-10",
-                        onchange: move |evt| on_commit.call(evt),
                         oninput: move |evt| on_input.call(evt),
+                        onchange: move |evt| on_change.call(evt),
                     }
                 }
             }

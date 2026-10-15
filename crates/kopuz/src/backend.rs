@@ -85,14 +85,42 @@ pub fn start() -> Result<&'static Core, String> {
 #[cfg(not(target_os = "android"))]
 async fn serve_socket(core: &Core) {
     match kopuzd::default_socket_path() {
-        Some(socket) => {
-            if let Err(error) = kopuzd::listen(core, &socket).await {
-                tracing::warn!(%error, "the daemon socket is unavailable");
+        Some(socket) => match kopuzd::listen(core, &socket) {
+            Ok(serving) => {
+                *bound_socket() = Some(socket);
+                let served = serving.await;
+                // The listener unlinked the path as it dropped, and a later instance may have bound it since.
+                bound_socket().take();
+                if let Err(error) = served {
+                    tracing::warn!(%error, "the daemon socket stopped serving");
+                }
             }
-        }
+            Err(error) => tracing::warn!(%error, "the daemon socket is unavailable"),
+        },
         None => tracing::warn!("no address for the daemon socket"),
     }
     std::future::pending::<()>().await;
+}
+
+/// The socket this process bound, while it still serves it.
+#[cfg(not(target_os = "android"))]
+fn bound_socket() -> std::sync::MutexGuard<'static, Option<std::path::PathBuf>> {
+    static BOUND: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+    BOUND
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The process exits without unwinding the core thread, so the listener never drops and its path has to be unlinked here; a named pipe leaves no file.
+#[cfg(not(target_os = "android"))]
+fn release_socket() {
+    if let Some(path) = bound_socket().take()
+        && cfg!(unix)
+        && let Err(error) = std::fs::remove_file(&path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(%error, path = %path.display(), "could not remove the daemon socket");
+    }
 }
 
 /// Android hosts the core without serving it: `kopuzd` is a desktop-only
@@ -116,18 +144,13 @@ pub fn api() -> std::sync::Arc<dyn api::KopuzApi> {
         .expect("the core is started before anything asks it for something")
 }
 
-/// Flush what the core owns. The socket is released with the listener that
-/// bound it, so this only has to make the library durable.
-///
-/// The volume goes first, because the core debounces it: a close moments
-/// after a slider drag would otherwise persist the value from before the
-/// drag, whatever the window handed over in its config snapshot.
+/// Flush what the core owns; the volume and mute go first, since a close right after a slider drag lands inside their debounce.
 pub fn shutdown() {
     let Some(core) = CORE.get() else {
         return;
     };
     let session = core.session.clone();
-    let config = core.config_service.clone();
+    let database = core.db.clone();
     // Dioxus forbids block_on inside its runtime, so the flush gets a thread.
     let flush = std::thread::spawn(move || {
         let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
@@ -137,9 +160,31 @@ pub fn shutdown() {
             return;
         };
         runtime.block_on(async move {
-            daemon::boot::flush_volume(&session, &config).await;
+            daemon::boot::flush_playback_state(&session, &database).await;
             session.persist_now().await;
         });
     });
     let _ = flush.join();
+    #[cfg(not(target_os = "android"))]
+    release_socket();
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::{bound_socket, release_socket};
+
+    #[test]
+    fn a_clean_exit_unlinks_only_the_socket_this_process_bound() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ours = dir.path().join("kopuzd.sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&ours).expect("bind");
+        *bound_socket() = Some(ours.clone());
+        release_socket();
+        assert!(!ours.exists(), "the bound socket is gone");
+
+        let theirs = dir.path().join("other.sock");
+        let _other = std::os::unix::net::UnixListener::bind(&theirs).expect("bind");
+        release_socket();
+        assert!(theirs.exists(), "a second release touches nothing");
+    }
 }

@@ -8,14 +8,14 @@ use components::dots_menu::{DotsMenu, MenuAction};
 use components::folder_picker::FolderPickerModal;
 use components::playlist_detail::PlaylistDetail;
 use components::playlist_popups::AddPlaylistPopup;
-use config::{AppConfig, UiStyle};
+use config::{Settings, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::use_playlists;
 
 #[component]
 #[tracing::instrument(name = "render.playlists_page", skip_all)]
 pub fn PlaylistsPage(
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     mut selected_playlist_id: Signal<Option<String>>,
 ) -> Element {
     let nav_ctrl = use_context::<components::NavigationController>();
@@ -25,7 +25,6 @@ pub fn PlaylistsPage(
     let mut playlist_name = use_signal(String::new);
     let mut error = use_signal(|| Option::<String>::None);
     let mut saving = use_signal(|| false);
-    let mut playlist_refresh_trigger = use_signal(|| 0u64);
 
     let playlists_res = use_playlists();
 
@@ -51,13 +50,13 @@ pub fn PlaylistsPage(
                     // A server create mirrors into the DB but a re-sync still
                     // reconciles remote-side details, so the sync path re-fetches.
                     if caps().sync {
-                        playlist_refresh_trigger.with_mut(|v| *v += 1);
+                        hooks::jobs::start(hooks::JobKind::PlaylistSync);
                     }
                     show_add_playlist.set(false);
                     playlist_name.set(String::new());
                 }
                 Err(e) => {
-                    error.set(Some(e.to_string()));
+                    error.set(Some(components::forms::error_text(&e)));
                 }
             }
         });
@@ -74,7 +73,7 @@ pub fn PlaylistsPage(
         last_source.set(active_source.peek().clone());
     }
 
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
 
     rsx! {
         div { class: if cfg!(target_os = "android") { "px-4 pt-2 absolute inset-0 flex flex-col" } else if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
@@ -220,7 +219,7 @@ pub fn PlaylistsPage(
                                     })
                                     .unwrap_or_default();
                                 if let Err(error) = api.create_playlist(folder_name, refs).await {
-                                    hooks::toast::toast_error(&error.to_string());
+                                    hooks::toast::toast_api_error(&error);
                                 }
                             });
                             error.set(None);
@@ -229,11 +228,7 @@ pub fn PlaylistsPage(
                     }
                 }
 
-                PlaylistsGrid {
-                    config,
-                    selected_playlist_id,
-                    refresh_trigger: playlist_refresh_trigger,
-                }
+                PlaylistsGrid { selected_playlist_id }
             }
         }
     }
@@ -256,11 +251,7 @@ enum PlaylistCardAction {
 /// folders, else a flat remote list with downloads + remote sync. One component,
 /// gated on [`Capabilities`].
 #[component]
-fn PlaylistsGrid(
-    config: Signal<AppConfig>,
-    mut selected_playlist_id: Signal<Option<String>>,
-    refresh_trigger: Signal<u64>,
-) -> Element {
+fn PlaylistsGrid(mut selected_playlist_id: Signal<Option<String>>) -> Element {
     let caps = hooks::sources::use_capabilities();
     let is_offline = use_context::<Signal<bool>>();
     let downloads = hooks::downloads::use_downloads();
@@ -277,20 +268,10 @@ fn PlaylistsGrid(
     let rename_folder_id = use_signal(|| Option::<String>::None);
     let rename_folder_name = use_signal(String::new);
 
-    // The pull runs in the daemon, single-flight, so this only has to ask.
-    // The stamp that stops an automatic re-sync lives there too, which is why
-    // no dedup key or request id is kept here any more.
+    // The daemon schedules the pull itself; this page only follows it and offers a refresh.
     let sync_job = hooks::jobs::use_job_progress(hooks::JobKind::PlaylistSync);
     let is_syncing = use_memo(move || sync_job.read().running);
     let synced_so_far = use_memo(move || sync_job.read().current.unwrap_or(0) as usize);
-
-    use_effect(move || {
-        if caps().sync {
-            // Naming the trigger keeps the effect subscribed to it.
-            let _ = *refresh_trigger.read();
-            hooks::jobs::start(hooks::JobKind::PlaylistSync);
-        }
-    });
 
     let store = playlists_res.read().clone().unwrap_or_default();
 
@@ -319,26 +300,19 @@ fn PlaylistsGrid(
 
     // ---- Server (flat remote list) layout ----------------------------------
     let offline = caps().downloads && *is_offline.read();
-    let conf = config.read();
+    let stored = downloads.read().clone();
     let playlists: Vec<api::PlaylistInfo> = if offline {
         store
             .playlists
             .iter()
             .filter(|p| {
-                !p.track_keys.is_empty()
-                    && p.track_keys.iter().all(|tid| {
-                        conf.offline_tracks
-                            .get(tid)
-                            .map(|path| std::path::Path::new(path).exists())
-                            .unwrap_or(false)
-                    })
+                !p.track_keys.is_empty() && p.track_keys.iter().all(|tid| stored.is_stored(tid))
             })
             .cloned()
             .collect()
     } else {
         store.playlists.clone()
     };
-    drop(conf);
     let remote_catalog = caps().albums == api::AlbumPresentation::Remote;
     // The flat remote card has no overflow menu of its own, so radio is its one
     // entry — no kind-tagged action list needed here (unlike the folder card).
@@ -370,10 +344,12 @@ fn PlaylistsGrid(
                             div { class: "flex items-center gap-2",
                                 if syncing {
                                     i { class: "fa-solid fa-arrows-rotate fa-spin text-indigo-300" }
-                                    span { "Loading tracks — {done} / {total} playlists ({remaining} left)" }
+                                    span {
+                                        {i18n::t_with("playlists_loading_tracks", &[("done", done.into()), ("count", total.into()), ("remaining", remaining.into())])}
+                                    }
                                 } else if total > 0 {
                                     i { class: "fa-solid fa-check text-emerald-400" }
-                                    span { "{total} playlists synced" }
+                                    span { {i18n::t_with("playlists_synced_count", &[("count", total.into())])} }
                                 }
                             }
                             button {
@@ -383,7 +359,7 @@ fn PlaylistsGrid(
                                     hooks::jobs::start(hooks::JobKind::PlaylistSync);
                                 },
                                 i { class: "fa-solid fa-arrows-rotate mr-1" }
-                                "Refresh"
+                                {i18n::t("refresh")}
                             }
                         }
                     }
@@ -435,7 +411,7 @@ fn PlaylistsGrid(
                                 div { class: "flex items-start justify-between gap-2",
                                     div { class: "min-w-0 flex-1",
                                         h3 { class: "text-xl font-bold text-white mb-1 truncate", "{playlist.name}" }
-                                        p { class: "text-sm text-slate-400", "Server • {playlist.track_keys.len()} tracks" }
+                                        p { class: "text-sm text-slate-400", {i18n::t_with("playlist_track_count", &[("count", playlist.track_keys.len().into())])} }
                                     }
                                     if can_radio {
                                         {
@@ -449,7 +425,7 @@ fn PlaylistsGrid(
                                                         is_open: is_menu_open,
                                                         on_open: move |_| active_menu.set(Some(pid_menu.clone())),
                                                         on_close: move |_| active_menu.set(None),
-                                                        aria_label: i18n::t_with("more_actions_for", &[("name", playlist.name.clone())]),
+                                                        aria_label: i18n::t_with("more_actions_for", &[("name", playlist.name.clone().into())]),
                                                         button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
                                                         anchor: "right".to_string(),
                                                         on_action: move |_: usize| {
@@ -467,7 +443,7 @@ fn PlaylistsGrid(
                                 if caps().downloads {
                                     button {
                                         class: "absolute top-4 right-4 w-8 h-8 rounded-full bg-black/40 border border-white/10 flex items-center justify-center text-white/60 hover:text-white hover:border-white/30 transition-colors opacity-0 group-hover:opacity-100",
-                                        title: if all_downloaded { "Remove downloads" } else { "Download playlist for offline playback" },
+                                        title: if all_downloaded { i18n::t("remove_download") } else { i18n::t("download_offline") },
                                         disabled: is_dl,
                                         onclick: move |evt| {
                                             evt.stop_propagation();
@@ -634,7 +610,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                     div { class: "min-w-0 flex-1",
                         h3 { class: "text-xl font-bold text-white mb-1 truncate", "{name}" }
                         {
-                            let track_text = i18n::t_with("playlist_track_count", &[("count", count.to_string())]);
+                            let track_text = i18n::t_with("playlist_track_count", &[("count", count.into())]);
                             rsx! { p { class: "text-sm text-slate-400", "{track_text}" } }
                         }
                     }
@@ -644,7 +620,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                             is_open: is_menu_open,
                             on_open: move |_| active_menu.set(Some(pid_menu.clone())),
                             on_close: move |_| active_menu.set(None),
-                            aria_label: i18n::t_with("more_actions_for", &[("name", name.clone())]),
+                            aria_label: i18n::t_with("more_actions_for", &[("name", name.clone().into())]),
                             button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
                             anchor: "right".to_string(),
                             on_action: move |idx: usize| {
@@ -813,7 +789,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                             div { class: "flex items-start justify-between gap-2",
                                                 div { class: "min-w-0 flex-1",
                                                     h3 { class: "text-xl font-bold text-white mb-1 truncate", "{fname}" }
-                                                    p { class: "text-sm text-slate-400", "{count} playlists" }
+                                                    p { class: "text-sm text-slate-400", {i18n::t_with("playlist_folder_count", &[("count", count.into())])} }
                                                 }
                                                 div { onclick: move |evt| evt.stop_propagation(),
                                                     DotsMenu {
@@ -821,7 +797,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                                         is_open: is_menu_open,
                                                         on_open: move |_| active_menu.set(Some(fid_menu.clone())),
                                                         on_close: move |_| active_menu.set(None),
-                                                        aria_label: i18n::t_with("more_actions_for", &[("name", fname.clone())]),
+                                                        aria_label: i18n::t_with("more_actions_for", &[("name", fname.clone().into())]),
                                                         button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
                                                         anchor: "right".to_string(),
                                                         on_action: move |idx: usize| {

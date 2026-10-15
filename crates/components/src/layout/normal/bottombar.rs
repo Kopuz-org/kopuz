@@ -10,7 +10,7 @@ use hooks::favorites::toggle_favorite;
 
 #[component]
 pub fn BottombarNormal(
-    mut config: Signal<config::AppConfig>,
+    mut settings: Signal<config::Settings>,
     mut is_playing: Signal<bool>,
     mut is_fullscreen: Signal<bool>,
     mut current_song_duration: Signal<u64>,
@@ -20,7 +20,6 @@ pub fn BottombarNormal(
     mut current_song_title: Signal<String>,
     mut current_song_artist: Signal<String>,
     mut volume: Signal<f32>,
-    mut persisted_volume: Signal<f32>,
     mut is_rightbar_open: Signal<bool>,
     is_devices_open: Signal<bool>,
 ) -> Element {
@@ -130,7 +129,7 @@ pub fn BottombarNormal(
         "fa-regular fa-heart"
     };
 
-    let position = config.read().player_bar_position;
+    let position = settings.read().ui.player_bar_position;
     let border_class = match position {
         PlayerBarPosition::Bottom => "border-t border-white/5",
         PlayerBarPosition::Top => "border-b border-white/5",
@@ -142,18 +141,19 @@ pub fn BottombarNormal(
         PlayerBarPosition::Bottom => "top",
         PlayerBarPosition::Top => "bottom",
     };
-    let bar_as_fullscreen = *is_fullscreen.read() && config.read().fullscreen_use_player_bar;
+    let bar_as_fullscreen = *is_fullscreen.read() && settings.read().ui.fullscreen_use_player_bar;
     let lift_class = if bar_as_fullscreen {
         "relative z-[60]"
     } else {
         ""
     };
-    let bg_class =
-        if config.read().cover_art_background || !config.read().custom_background_path.is_empty() {
-            "bg-black/40"
-        } else {
-            "bg-black/60"
-        };
+    let bg_class = if settings.read().background.cover_art_background
+        || !settings.read().background.custom_background_path.is_empty()
+    {
+        "bg-black/40"
+    } else {
+        "bg-black/60"
+    };
 
     rsx! {
         div {
@@ -224,7 +224,7 @@ pub fn BottombarNormal(
 
             div {
                 class: "player-tools flex items-center justify-end gap-4 w-1/4",
-                VolumeSlider { config, volume, persisted_volume, variant: ControlsVariant::Bar }
+                VolumeSlider { settings, volume, variant: ControlsVariant::Bar }
                 button {
                     class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                     onclick: move |_| { let c = *is_rightbar_open.read(); is_rightbar_open.set(!c); },

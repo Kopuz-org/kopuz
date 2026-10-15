@@ -5,12 +5,13 @@
 //! in the daemon so a frontend never holds the whole library, and they answer
 //! with wire rows, so cover paths and local filesystem paths stay here.
 
-use std::path::PathBuf;
-
-use api::{AlbumInfo, AlbumPage, ApiError, ArtistInfo, ArtistPage, Page, SearchResults, TrackPage};
+use api::{
+    AlbumInfo, AlbumPage, AlbumQuery, ApiError, ArtistInfo, ArtistPage, ArtistQuery, Page,
+    SearchResults, TrackPage,
+};
 use reader::Album;
 
-use super::{LibraryService, db_error};
+use super::{LibraryService, album_query, artist_query, db_error, db_page};
 
 /// Paging a fully materialized list. The database returns whole collections
 /// for these (they are small next to the track table), so the window is
@@ -41,8 +42,7 @@ fn album_info(album: &Album) -> AlbumInfo {
 
 struct ArtistArt {
     images: db::ArtistImages,
-    covers: std::collections::HashMap<String, PathBuf>,
-    library_view: bool,
+    covers: std::collections::HashMap<String, reader::CoverRef>,
     source: config::Source,
 }
 
@@ -54,11 +54,11 @@ impl ArtistArt {
                 &artist,
                 &self.source,
                 &self.images,
-                self.covers.get(&artist.key).map(PathBuf::as_path),
-                self.library_view,
+                self.covers.get(&artist.key),
             ),
             name: artist.name,
             track_count: artist.tracks,
+            album_count: artist.albums,
         }
     }
 }
@@ -68,7 +68,7 @@ impl LibraryService {
         if keys.is_empty() {
             return Ok(Vec::new());
         }
-        let config = self.current_config();
+        let offline = self.offline();
         let rows = self
             .db
             .tracks_by_keys(&self.query_source(), keys)
@@ -76,7 +76,7 @@ impl LibraryService {
             .map_err(db_error)?;
         Ok(rows
             .iter()
-            .map(|track| crate::wire::track_info(track, &config))
+            .map(|track| crate::wire::track_info(track, &offline))
             .collect())
     }
 
@@ -85,7 +85,7 @@ impl LibraryService {
     /// still answers, because a catalog hit is exactly the row someone wants
     /// to share.
     pub async fn track_web_url(&self, key: &str) -> Result<Option<String>, ApiError> {
-        let config = self.current_config();
+        let sources = self.current_sources();
         let track = match self
             .db
             .tracks_by_keys(&self.query_source(), &[key.to_string()])
@@ -100,7 +100,7 @@ impl LibraryService {
                 None => return Ok(None),
             },
         };
-        if let Some(url) = server::source::active(self.db.clone(), &config).web_url(&track) {
+        if let Some(url) = server::source::active(self.db.clone(), &sources).web_url(&track) {
             return Ok(Some(url));
         }
         Ok(server::musicbrainz::track_page_url(
@@ -114,8 +114,8 @@ impl LibraryService {
     /// The source's page for an album, falling back to its first track's page
     /// for a source that has albums but no album pages.
     pub async fn album_web_url(&self, id: &str) -> Result<Option<String>, ApiError> {
-        let config = self.current_config();
-        let source = server::source::active(self.db.clone(), &config);
+        let sources = self.current_sources();
+        let source = server::source::active(self.db.clone(), &sources);
         if let Some(url) = source.album_web_url(id) {
             return Ok(Some(url));
         }
@@ -129,13 +129,16 @@ impl LibraryService {
         Ok(track.and_then(|track| source.web_url(&track)))
     }
 
-    pub async fn albums(&self, page: Page) -> Result<AlbumPage, ApiError> {
-        let source = self.query_source();
-        let rows = self.db.albums(&source).await.map_err(db_error)?;
-        let (total, items) = window(&rows, page);
+    pub async fn albums(&self, query: AlbumQuery, page: Page) -> Result<AlbumPage, ApiError> {
+        let query = album_query(self.query_source(), query);
+        let listing = self
+            .db
+            .albums_page(&query, db_page(page))
+            .await
+            .map_err(db_error)?;
         Ok(AlbumPage {
-            albums: items.iter().map(album_info).collect(),
-            total,
+            albums: listing.rows.iter().map(album_info).collect(),
+            total: listing.total,
         })
     }
 
@@ -163,7 +166,7 @@ impl LibraryService {
     }
 
     pub async fn album_tracks(&self, id: &str, page: Page) -> Result<TrackPage, ApiError> {
-        let config = self.current_config();
+        let offline = self.offline();
         let rows = self
             .db
             .album_tracks(&self.query_source(), id)
@@ -175,7 +178,7 @@ impl LibraryService {
             offset: page.offset,
             items: items
                 .iter()
-                .map(|track| crate::wire::track_info(track, &config))
+                .map(|track| crate::wire::track_info(track, &offline))
                 .collect(),
         })
     }
@@ -183,17 +186,17 @@ impl LibraryService {
     /// The artist grid. Its artwork chain ends in "one of this artist's album
     /// covers", so the covers and photos are loaded once for the page rather
     /// than per row -- the same walk `ArtworkService` does, on bulk data.
-    pub async fn artists(&self, page: Page) -> Result<ArtistPage, ApiError> {
-        let rows = self
+    pub async fn artists(&self, query: ArtistQuery, page: Page) -> Result<ArtistPage, ApiError> {
+        let query = artist_query(self.query_source(), query);
+        let listing = self
             .db
-            .artists(&self.query_source())
+            .artists_page(&query, db_page(page))
             .await
             .map_err(db_error)?;
-        let (total, items) = window(&rows, page);
         let art = self.artist_art(None).await?;
         Ok(ArtistPage {
-            artists: items.into_iter().map(|row| art.info(row)).collect(),
-            total,
+            artists: listing.rows.into_iter().map(|row| art.info(row)).collect(),
+            total: listing.total,
         })
     }
 
@@ -202,40 +205,27 @@ impl LibraryService {
         crate::artist_row::require(&self.db, &self.query_source(), artist).await
     }
 
-    /// One artist's header and billed albums.
+    /// One artist's header; its albums list through `albums` by artist key.
     pub async fn artist(&self, artist: &str) -> Result<api::ArtistDetail, ApiError> {
-        let source = self.query_source();
         let row = self.artist_row(artist).await?;
-        let albums = self
-            .db
-            .artist_albums(&source, &row.key)
-            .await
-            .map_err(db_error)?;
         let art = self.artist_art(Some(&row.key)).await?;
         Ok(api::ArtistDetail {
             info: art.info(row),
-            albums: albums.iter().map(album_info).collect(),
         })
     }
 
-    /// The photos and album covers an artist's artwork chain reads: for every artist, or just `one`.
+    /// The photos and fallback covers an artist's artwork chain reads: for every artist, or just `one`.
     async fn artist_art(&self, one: Option<&str>) -> Result<ArtistArt, ApiError> {
         let source = self.query_source();
-        let config = self.current_config();
-        let library_view = server::source::active(self.db.clone(), &config)
-            .capabilities()
-            .artist_view
-            == server::source::ArtistView::Library;
-        let covers: std::collections::HashMap<String, String> = match (library_view, one) {
-            (false, _) => std::collections::HashMap::new(),
-            (true, None) => self
+        let covers = match one {
+            None => self
                 .db
-                .artist_album_covers(&source)
+                .artist_fallback_covers(&source)
                 .await
                 .map_err(db_error)?,
-            (true, Some(key)) => self
+            Some(key) => self
                 .db
-                .artist_album_cover(&source, key)
+                .artist_fallback_cover(&source, key)
                 .await
                 .map_err(db_error)?
                 .map(|cover| (key.to_string(), cover))
@@ -244,17 +234,13 @@ impl LibraryService {
         };
         Ok(ArtistArt {
             images: self.db.artist_images().await.map_err(db_error)?,
-            covers: covers
-                .into_iter()
-                .map(|(key, cover)| (key, PathBuf::from(cover)))
-                .collect(),
-            library_view,
+            covers,
             source,
         })
     }
 
     pub async fn artist_tracks(&self, artist: &str, page: Page) -> Result<TrackPage, ApiError> {
-        let config = self.current_config();
+        let offline = self.offline();
         let row = self.artist_row(artist).await?;
         let rows = self
             .db
@@ -267,13 +253,13 @@ impl LibraryService {
             offset: page.offset,
             items: items
                 .iter()
-                .map(|track| crate::wire::track_info(track, &config))
+                .map(|track| crate::wire::track_info(track, &offline))
                 .collect(),
         })
     }
 
     pub async fn artist_sample_tracks(&self, page: Page) -> Result<TrackPage, ApiError> {
-        let config = self.current_config();
+        let offline = self.offline();
         let rows = self
             .db
             .artist_sample_tracks(&self.query_source(), page.limit)
@@ -285,7 +271,7 @@ impl LibraryService {
             offset: 0,
             items: rows
                 .iter()
-                .map(|track| crate::wire::track_info(track, &config))
+                .map(|track| crate::wire::track_info(track, &offline))
                 .collect(),
         })
     }
@@ -302,7 +288,7 @@ impl LibraryService {
     }
 
     pub async fn genre_tracks(&self, genre: &str, page: Page) -> Result<TrackPage, ApiError> {
-        let config = self.current_config();
+        let offline = self.offline();
         let rows = self
             .db
             .genre_tracks(&self.query_source(), genre)
@@ -314,13 +300,13 @@ impl LibraryService {
             offset: page.offset,
             items: items
                 .iter()
-                .map(|track| crate::wire::track_info(track, &config))
+                .map(|track| crate::wire::track_info(track, &offline))
                 .collect(),
         })
     }
 
     pub async fn recent_tracks(&self, page: Page) -> Result<TrackPage, ApiError> {
-        let config = self.current_config();
+        let offline = self.offline();
         let source = self.query_source();
         // Recents are a key list; the rows come back unordered, so they are
         // put back into play order here.
@@ -346,16 +332,17 @@ impl LibraryService {
                 .into_iter()
                 .skip(page.offset as usize)
                 .take(page.limit as usize)
-                .map(|track| crate::wire::track_info(track, &config))
+                .map(|track| crate::wire::track_info(track, &offline))
                 .collect(),
         })
     }
 
     pub async fn search(&self, query: &str) -> Result<SearchResults, ApiError> {
-        let config = self.current_config();
+        let sources = self.current_sources();
+        let offline = self.offline();
         // A remote source answers over the network, so search is the one read
         // here that goes through the source rather than straight to the DB.
-        let source = server::source::active(self.db.clone(), &config);
+        let source = server::source::active(self.db.clone(), &sources);
         let (mut tracks, albums) = source
             .search(query)
             .await
@@ -368,7 +355,7 @@ impl LibraryService {
         Ok(SearchResults {
             tracks: tracks
                 .iter()
-                .map(|track| crate::wire::track_info(track, &config))
+                .map(|track| crate::wire::track_info(track, &offline))
                 .collect(),
             albums: albums.iter().map(album_info).collect(),
         })

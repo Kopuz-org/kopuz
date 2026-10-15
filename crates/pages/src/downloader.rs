@@ -215,7 +215,7 @@ fn SearchResults(
         },
         Some(Ok(ref candidates)) if candidates.is_empty() => rsx! {
             p { class: "text-sm text-slate-500 py-4 text-center",
-                "{i18n::t_with(\"no_results_found\", &[(\"query\", query.clone())])}"
+                "{i18n::t_with(\"no_results_found\", &[(\"query\", query.clone().into())])}"
             }
         },
         Some(Ok(candidates)) => rsx! {
@@ -305,7 +305,7 @@ fn ActiveRow(progress: Signal<hooks::jobs::JobProgress>, url: String) -> Element
     } else if progress.phase == "downloading" {
         i18n::t_with(
             "downloader_status_downloading",
-            &[("percent", format!("{percent:.0}"))],
+            &[("percent", format!("{percent:.0}").into())],
         )
     } else {
         i18n::t("downloader_status_waiting")

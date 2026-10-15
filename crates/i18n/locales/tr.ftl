@@ -11,6 +11,8 @@ language = Dil
 library = Kütüphane
 playlists = Çalma Listeleri
 album = Albüm
+release_single = Tekli
+release_ep = EP
 artist = Sanatçı
 home = Ana Sayfa
 search = Ara
@@ -112,6 +114,7 @@ radio_empty = Benzer parça bulunamadı
 radio_failed = Radyo başlatılamadı
 remove_from_queue = Sıradan Kaldır
 downloading = İndiriliyor…
+downloading_progress = İndiriliyor: { $done } / { $total }
 more_actions_for = { $name } için diğer eylemler
 share_musicbrainz = Paylaş (MusicBrainz)
 share_link_copied = MusicBrainz bağlantısı kopyalandı
@@ -127,6 +130,7 @@ add_all_to_queue = Tümünü Sıraya Ekle
 add_all_to_playlist = Tümünü Çalma Listesine Ekle
 select_all = Tümünü seç
 select_all_tracks = Tüm parçaları seç
+deselect_all_tracks = Tüm parçaların seçimini kaldır
 remove_from_cache = Önbellekten Kaldır
 create = Oluştur
 save = Kaydet
@@ -156,6 +160,9 @@ lyrics_not_found = Sözler bulunamadı
 instrumental_break = Enstrümantal
 no_previous_songs = Önceki şarkı yok
 playlist_track_count = { $count } parça
+playlist_folder_count = { $count } çalma listesi
+playlists_synced_count = { $count } çalma listesi eşitlendi
+playlists_loading_tracks = Parçalar yükleniyor — çalma listeleri { $done } / { $count } ({ $remaining } kaldı)
 music_playlist_count = Müzik • { $count } parça
 showcase_song_count = { $count } şarkı
 
@@ -215,7 +222,6 @@ time = Süre
 genre = Tür
 plays = Çalma
 track_count = { $count } parça
-track_count_singular = 1 parça
 songs = şarkı
 min = dk
 
@@ -556,8 +562,13 @@ external_play_on = Şurada çal
 external_this_app = kopuz (bu uygulama)
 prefer_active_device = Playback device
 prefer_active_device_help = When another device is already playing, take it over instead of starting playback here.
-settings_managed_notice = Bazı ayarlar sistem yapılandırmanız (Nix/hjem) tarafından yönetiliyor ve buradan değiştirilemez.
+settings_managed_notice = Bazı ayarlar, uygulamanın yazamadığı bir ayar dosyasında (salt okunur ya da Nix/hjem tarafından yönetilen) belirlenmiş ve buradan değiştirilemez.
 setting_managed_by_system = Sistem yapılandırması tarafından yönetiliyor
+settings_dropin_notice = Bazı ayarlar ek yapılandırma dosyaları (drop-in) tarafından belirleniyor ve buradan değiştirilemez.
+settings_env_notice = Bazı ayarlar KOPUZ_CONFIG_* ortam değişkenleri tarafından belirleniyor ve buradan değiştirilemez.
+setting_locked_by_file = Ayarlayan: { $path }
+setting_locked_by_dropin = Ayarlayan ek dosya: { $path }
+setting_locked_by_env = Ayarlayan ortam değişkeni: { $var }
 
 settings_interface = Interface
 interface_general = General
@@ -575,7 +586,7 @@ interface_scale = Interface size
 interface_scale_description = Scales text and controls across the whole app.
 
 choose = Choose
-daemon_unreachable = Can't reach the kopuz daemon
+daemon_unreachable = Kopuz arka plan hizmetine ulaşılamıyor
 download_offline = Çevrimdışı İndir
 go_to_album = Albüme Git
 go_to_artist = Sanatçıya Git
@@ -591,9 +602,9 @@ settings_offline = Offline Downloads
 settings_player = Player
 settings_tools = Tools
 share = Share
-share_copied = Copied link
-share_no_page = Couldn't find a page for this track
-start_daemon = Start Daemon
+share_copied = Bağlantı kopyalandı
+share_no_page = Bu şarkı için bir sayfa bulunamadı
+start_daemon = Hizmeti başlat
 
 first_run_title = Welcome to Kopuz
 first_run_subtitle = Point Kopuz at your music and it takes care of the rest.
@@ -642,7 +653,11 @@ waiting_for_browser = Waiting for your browser…
 signed_in = Signed in
 metadata_number_invalid = Enter a number, or leave it empty to clear the tag.
 metadata_batch_keep = Leave unchanged
-metadata_batch_count = Editing { $count } tracks
+metadata_batch_count =
+    { $count ->
+        [one] { $count } şarkı düzenleniyor
+       *[other] { $count } şarkı düzenleniyor
+    }
 interface_font = Interface font
 interface_font_description = The font family to draw the interface with.
 interface_font_placeholder = Theme default
@@ -712,17 +727,24 @@ notifications = Notifications
 activity_idle = Nothing running
 downloads_idle = No downloads yet
 notifications_empty = No notifications yet
-stop = Stop
-stopping = Stopping…
+stop = Durdur
+stopping = Durduruluyor…
 starting = Starting…
 clear = Clear
 retry_failed = Retry failed
-retry_now = Retry now
+retry_now = Şimdi yeniden dene
 view = View
 undo = Undo
 quit = Quit
-scanning_library = Scanning library…
-reconnecting_attempt = Reconnecting… (attempt { $attempt })
+scanning_library = Kitaplık taranıyor…
+network_offline_banner = İnternet bağlantısı yok — çevrimdışı moda geçildi
+network_online_banner = Yeniden çevrimiçi — sunucu moduna geçildi
+keep_server_mode = Sunucu modunda kal
+tray_show_hide = Kopuz'u Göster / Gizle
+tray_quit = Kopuz'dan Çık
+tray_unavailable_title = Tepsi simgesi kullanılamıyor
+tray_unavailable_message = Sistem tepsisi kullanılamıyor: appindicator kitaplığı bulunamadı. libayatana-appindicator (Debian/Ubuntu/Arch) ya da libappindicator-gtk3 (Fedora) paketini kurun. Pencereyi kapatmak, uygulamayı tepsiye küçültmek yerine kapatır.
+reconnecting_attempt = Yeniden bağlanılıyor… (deneme { $attempt })
 downloads_summary = { $done } downloaded, { $failed } failed
 job_scan = Library scan
 job_library_sync = Library sync
@@ -788,11 +810,19 @@ discover_clear_search = Clear search
 discover_results_for = Results for "{ $query }"
 discover_no_results_hint = Try fewer words, or switch source and look again.
 discover_show_less = Show less
-discover_genre_count = { $count } genres
+discover_genre_count =
+    { $count ->
+        [one] { $count } tür
+       *[other] { $count } tür
+    }
 discover_read_failed = Couldn't load your library: { $error }
 palette_all_results = All results for "{ $query }" in Discover
 
-library_count = { $count } items
+library_count =
+    { $count ->
+        [one] { $count } öğe
+       *[other] { $count } öğe
+    }
 library_filter_placeholder = Filter the library…
 library_chip_downloaded = Downloaded
 library_chip_years = Years
@@ -815,7 +845,11 @@ library_tile_medium = Medium
 library_tile_large = Large
 library_default_view = Grids open as
 library_default_view_description = Whether albums, artists and playlists start as tiles or as rows.
-library_artist_tracks = { $count } tracks
+library_artist_tracks =
+    { $count ->
+        [one] { $count } şarkı
+       *[other] { $count } şarkı
+    }
 library_selected = { $count } selected
 library_whole_selection = Everything that matches
 library_read_failed = Could not read the library
@@ -854,7 +888,11 @@ downloader_history = URL downloads
 interface_skin = Skin
 interface_skin_description = The shape of the interface: how round things are, how tall a row sits.
 
-home_plays = { $count } plays
+home_plays =
+    { $count ->
+        [one] { $count } dinlenme
+       *[other] { $count } dinlenme
+    }
 
 interface_ambient = Ambient light
 interface_ambient_description = Let the current cover cast its colour across the window.
@@ -881,10 +919,41 @@ clippsly_help = Create an App Password at clippsly.app, then sign in with your C
 cloud_storage_usage = Cloud storage: { $used } of { $total } used
 upload_music = Upload music
 uploading_music = Uploading { $name }…
-music_uploaded = Uploaded { $count } file(s).
+music_uploaded =
+    { $count ->
+        [one] { $count } dosya yüklendi.
+       *[other] { $count } dosya yüklendi.
+    }
 music_upload_too_large = Audio files must be no larger than 500 MiB.
 cloud_storage_loading = Loading storage usage…
 
 smb_url_placeholder = smb://nas/Music
 smb_help = Connect to an SMB 2/3 share or subfolder, then sign in with your NAS account. Domain accounts can use DOMAIN\username. Files are read without mounting the share.
 invalid_smb_url = Enter smb://host/share or smb://host/share/folder, without credentials in the URL.
+sync_interval = Eşitleme ve yeniden tarama sıklığı
+sync_interval_never = Hiçbir zaman
+sync_interval_minutes = { $count } dk
+sync_interval_hours = { $count } sa
+sync_interval_days = { $count } g
+
+error_setting_locked = Bu ayar yönetilen bir ayar dosyasıyla sabitlenmiş, burada değiştirilemez.
+error_connect_not_offered = Bu entegrasyon bu yolla bağlanmıyor.
+error_api_key_missing = Önce API anahtarını ve gizli anahtarı girin.
+error_sign_in_not_started = Servis oturum açmayı başlatmadı. API anahtarını ve bağlantınızı kontrol edin.
+error_browser_not_opened = Oturum açmak için tarayıcı açılamadı.
+error_sign_in_timed_out = Oturum açma zamanında onaylanmadı.
+error_browser_profile_gone = Bu tarayıcı profili artık yok.
+error_browser_cookies_unreadable = Bu tarayıcı profilinin çerezleri okunamadı.
+error_browser_profile_signed_out = Bu tarayıcı profili servise giriş yapmamış. Orada giriş yapın ya da token'ınızı yapıştırın.
+error_browser_profile_no_token = Servis bu profil için token göstermedi. Token'ı kendiniz yapıştırın.
+error_integration_unreachable = Servise ulaşılamadı. Bağlantınızı kontrol edin.
+error_credential_rejected = Servis bu token'ı kabul etmiyor. Kendi token'ınızı yapıştırın.
+error_default_source_undeletable = Varsayılan klasör kaynağı silinemez.
+error_empty_source_folder = Kaynak klasörü boş bırakılamaz.
+error_code_invalid_input = Kabul edilmedi: { $detail }
+error_code_not_found = Bu artık yok.
+error_code_conflict = Zaten kullanımda ya da sürüyor: { $detail }
+error_code_source_auth_expired = Kaynak oturum açmayı kabul etmedi. Ayarlar'dan yeniden oturum açın.
+error_code_source_unreachable = Kaynağa ulaşılamadı. Bağlantınızı kontrol edin.
+error_code_unsupported = Burada desteklenmiyor: { $detail }
+error_code_internal = Bir şeyler ters gitti: { $detail }

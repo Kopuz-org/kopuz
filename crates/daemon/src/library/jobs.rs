@@ -25,26 +25,32 @@ fn added_at_stamps(tracks: &[reader::Track]) -> Vec<(String, i64)> {
 }
 
 impl LibraryService {
-    pub fn spawn_scan(self: &Arc<Self>, runner: &JobRunner) -> Result<JobRef, ApiError> {
+    pub fn spawn_scan(
+        self: &Arc<Self>,
+        runner: &JobRunner,
+        trigger: Trigger,
+    ) -> Result<JobRef, ApiError> {
         let service = self.clone();
-        runner.start(JobKind::Scan, move |ctx| async move {
+        runner.start_as(JobKind::Scan, trigger, move |ctx| async move {
             let config = service.current_config();
             service.run_scan(&ctx, &config).await
         })
     }
 
-    pub fn spawn_remote_sync(self: &Arc<Self>, runner: &JobRunner) -> Result<JobRef, ApiError> {
+    pub fn spawn_remote_sync(
+        self: &Arc<Self>,
+        runner: &JobRunner,
+        trigger: Trigger,
+    ) -> Result<JobRef, ApiError> {
         let service = self.clone();
-        runner.start(JobKind::LibrarySync, move |ctx| async move {
-            let config = service.current_config();
-            let result = service.run_remote_sync(&ctx, &config).await;
+        runner.start_as(JobKind::LibrarySync, trigger, move |ctx| async move {
+            let sources = service.current_sources();
+            let result = service.run_remote_sync(&ctx, &sources).await;
             if result.is_ok() && !ctx.cancelled() {
-                crate::auto_sync::mark_synced(
-                    &service.db,
-                    JobKind::LibrarySync,
-                    &config.active_source,
-                )
-                .await;
+                crate::auto_sync::mark_synced(&service.db, JobKind::LibrarySync, &sources.active)
+                    .await;
+                let sweeper = service.clone();
+                tokio::spawn(async move { sweeper.sweep_artist_photos(true).await });
             }
             result
         })
@@ -56,7 +62,7 @@ impl LibraryService {
     /// enabled) network cover fetching. The job runner's single-flight
     /// replaces the app's epoch supersession; cancellation is checked between
     /// phases and chunks.
-    pub async fn run_scan(&self, ctx: &JobCtx, config: &config::AppConfig) -> Result<(), ApiError> {
+    pub async fn run_scan(&self, ctx: &JobCtx, config: &config::Settings) -> Result<(), ApiError> {
         let db_error = |error: db::DbError| ApiError::internal(format!("database error: {error}"));
         for (source, configured_dirs) in Self::scan_roots(config) {
             if ctx.cancelled() {
@@ -229,15 +235,15 @@ impl LibraryService {
             self.persist_resolved_covers(ctx, &source, &library.albums, &missing_local)
                 .await;
 
-            if config.auto_fetch_covers && !ctx.cancelled() {
+            if config.library.auto_fetch_covers && !ctx.cancelled() {
                 ctx.progress("fetching covers", None, None, None);
                 let lastfm_key = {
-                    let key = config.lastfm_api_key.trim().to_owned();
+                    let key = self.credentials.snapshot().lastfm_api_key.trim().to_owned();
                     (!key.is_empty()).then_some(key)
                 };
                 let fetcher = reader::cover_fetcher::CoverFetcher::new(
                     self.cover_cache.clone(),
-                    config.cover_fetch_strategy,
+                    config.library.cover_fetch_strategy,
                     lastfm_key,
                     progress.clone(),
                 );
@@ -300,10 +306,10 @@ impl LibraryService {
     pub async fn run_remote_sync(
         &self,
         ctx: &JobCtx,
-        config: &config::AppConfig,
+        sources: &server::sources::Sources,
     ) -> Result<(), ApiError> {
         let source: server::source::ActiveSource =
-            Arc::from(server::source::active(self.db.clone(), config));
+            Arc::from(server::source::active(self.db.clone(), sources));
         if !source.capabilities().sync {
             return Err(ApiError::unsupported(
                 "the active source has no library sync",
@@ -338,7 +344,7 @@ impl LibraryService {
                 progress_ctx.progress_throttled("scanning", None, None, Some(file));
             }))
             .await
-            .map_err(|error| ApiError::internal(error.to_string()))?;
+            .map_err(crate::sources::source_error)?;
 
         let merged_albums: Vec<reader::Album> =
             snapshot.albums.into_iter().map(merge_cover).collect();
@@ -351,7 +357,7 @@ impl LibraryService {
             source
                 .upsert_albums(chunk)
                 .await
-                .map_err(|error| ApiError::internal(error.to_string()))?;
+                .map_err(crate::sources::source_error)?;
             done += chunk.len() as u64;
             ctx.progress("persisting", Some(done), Some(total), None);
             self.invalidate(Table::Albums);
@@ -363,18 +369,24 @@ impl LibraryService {
             source
                 .upsert_tracks(chunk)
                 .await
-                .map_err(|error| ApiError::internal(error.to_string()))?;
+                .map_err(crate::sources::source_error)?;
             done += chunk.len() as u64;
             ctx.progress("persisting", Some(done), Some(total), None);
             self.invalidate(Table::Tracks);
         }
-        let unlinked = self.db.unlinked_artist_keys(&src).await.map_err(db_error)?;
         let linked = self.db.linked_artist_keys(&src).await.map_err(db_error)?;
-        for (artist, url) in &snapshot.artist_images {
-            let Some(key) = super::artist_art::credit_key(artist, &linked, &unlinked) else {
+        for (artist, url) in &snapshot.artists {
+            let (Some(key), Some(url)) = (super::artist_art::credit_key(artist, &linked), url)
+            else {
                 continue;
             };
             let _ = source.set_artist_image(&key, "server", Some(url)).await;
+        }
+        // After the tracks: a listing renames only the rows they filed, and outranks their credits.
+        match source.name_listed_artists(&snapshot.artists).await {
+            Ok(0) => {}
+            Ok(_) => self.invalidate(Table::Artists),
+            Err(error) => tracing::warn!(%error, "could not name the listed artists"),
         }
         let keep_keys: Vec<String> = snapshot
             .tracks
@@ -399,12 +411,12 @@ impl LibraryService {
                 }),
             )
             .await
-            .map_err(|error| ApiError::internal(error.to_string()))?;
+            .map_err(crate::sources::source_error)?;
         if !covers.is_empty() && !ctx.cancelled() {
             source
                 .upsert_albums(&covers)
                 .await
-                .map_err(|error| ApiError::internal(error.to_string()))?;
+                .map_err(crate::sources::source_error)?;
             if let Some(session) = self.session.get() {
                 session.update_album_covers(&src, &covers);
             }
@@ -430,7 +442,7 @@ impl LibraryService {
                 source
                     .upsert_tracks(chunk)
                     .await
-                    .map_err(|error| ApiError::internal(error.to_string()))?;
+                    .map_err(crate::sources::source_error)?;
             }
             self.invalidate(Table::Albums);
             self.invalidate(Table::Tracks);

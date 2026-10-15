@@ -1,4 +1,4 @@
-use config::AppConfig;
+use config::Settings;
 use dioxus::document::eval;
 use dioxus::prelude::*;
 use hooks::PlayerController;
@@ -33,7 +33,7 @@ pub fn QueueRow(
     on_move_up: EventHandler<MouseEvent>,
     on_move_down: EventHandler<MouseEvent>,
 ) -> Element {
-    let config = use_context::<Signal<AppConfig>>();
+    let settings = use_context::<Signal<Settings>>();
     let base_class = match layout {
         LayoutMode::Fullscreen => {
             if is_reorder_source {
@@ -91,7 +91,7 @@ pub fn QueueRow(
                 }
             }
 
-            if config.read().show_row_images {
+            if settings.read().ui.show_row_images {
                 div {
                     class: "rounded-md overflow-hidden flex-shrink-0 shadow-sm",
                     style: {
@@ -240,7 +240,7 @@ const FULLSCREEN_ITEM_HEIGHT: f64 = 76.0;
 #[component]
 pub fn QueueListView(
     items: Vec<api::TrackInfo>,
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     current_queue_index: Signal<usize>,
     layout: LayoutMode,
 ) -> Element {

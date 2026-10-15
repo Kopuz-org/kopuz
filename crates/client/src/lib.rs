@@ -116,16 +116,10 @@ impl GrpcApi {
     /// header cannot carry is the one thing reported here.
     pub fn connect_tcp(address: impl Into<String>, token: &str) -> Result<Self, ApiError> {
         let address = address.into();
-        let header =
-            MetadataValue::try_from(format!("Bearer {}", token.trim())).map_err(|_| ApiError {
-                code: api::ErrorCode::InvalidInput,
-                message: "the daemon token is not printable ASCII".into(),
-            })?;
+        let header = MetadataValue::try_from(format!("Bearer {}", token.trim()))
+            .map_err(|_| ApiError::invalid_input("the daemon token is not printable ASCII"))?;
         let channel = Endpoint::from_shared(format!("http://{address}"))
-            .map_err(|error| ApiError {
-                code: api::ErrorCode::InvalidInput,
-                message: format!("{address}: {error}"),
-            })?
+            .map_err(|error| ApiError::invalid_input(format!("{address}: {error}")))?
             .connect_lazy();
         Ok(Self {
             address: Address::Tcp(address),
@@ -333,10 +327,10 @@ impl api::LibraryApi for GrpcApi {
             .collect())
     }
 
-    async fn albums(&self, page: Page) -> Result<api::AlbumPage, ApiError> {
+    async fn albums(&self, query: api::AlbumQuery, page: Page) -> Result<api::AlbumPage, ApiError> {
         let albums = self
             .client()
-            .get_albums(Request::new(convert::page_to_proto(page)))
+            .get_albums(Request::new(convert::albums_request_to_proto(&query, page)))
             .await
             .map_err(wire_error)?;
         Ok(convert::album_page_from_proto(albums.get_ref()))
@@ -376,10 +370,16 @@ impl api::LibraryApi for GrpcApi {
         Ok(convert::track_page_from_proto(tracks.get_ref()))
     }
 
-    async fn artists(&self, page: Page) -> Result<api::ArtistPage, ApiError> {
+    async fn artists(
+        &self,
+        query: api::ArtistQuery,
+        page: Page,
+    ) -> Result<api::ArtistPage, ApiError> {
         let artists = self
             .client()
-            .get_artists(Request::new(convert::page_to_proto(page)))
+            .get_artists(Request::new(convert::artists_request_to_proto(
+                &query, page,
+            )))
             .await
             .map_err(wire_error)?;
         Ok(convert::artist_page_from_proto(artists.get_ref()))
@@ -731,15 +731,18 @@ impl api::ConfigApi for GrpcApi {
         Ok(convert::config_view_from_proto(view.get_ref()))
     }
 
-    async fn set_config(&self, config: config::AppConfig) -> Result<ConfigView, ApiError> {
-        let view = self
+    async fn edit_config(
+        &self,
+        edits: Vec<config::SettingsEdit>,
+    ) -> Result<api::EditReport, ApiError> {
+        let report = self
             .client()
-            .set_config(Request::new(proto::SetConfigRequest {
-                config: Some(convert::config_to_proto(&config)),
+            .edit_config(Request::new(proto::EditConfigRequest {
+                edits: edits.iter().map(convert::config_edit_to_proto).collect(),
             }))
             .await
             .map_err(wire_error)?;
-        Ok(convert::config_view_from_proto(view.get_ref()))
+        Ok(convert::edit_report_from_proto(report.get_ref()))
     }
 
     async fn preview_equalizer(
@@ -753,6 +756,17 @@ impl api::ConfigApi for GrpcApi {
         Ok(())
     }
 
+    async fn preview_replay_gain(
+        &self,
+        replay_gain: config::ReplayGainSettings,
+    ) -> Result<(), ApiError> {
+        self.client()
+            .preview_replay_gain(Request::new(convert::replay_gain_to_proto(replay_gain)))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
     async fn daemon_status(&self) -> Result<api::DaemonStatus, ApiError> {
         let status = self
             .client()
@@ -760,6 +774,38 @@ impl api::ConfigApi for GrpcApi {
             .await
             .map_err(wire_error)?;
         Ok(convert::daemon_status_from_proto(status.get_ref()))
+    }
+}
+
+#[async_trait::async_trait]
+impl api::PrefsApi for GrpcApi {
+    async fn frontend_prefs(&self, frontend: String) -> Result<Vec<api::FrontendPref>, ApiError> {
+        let list = self
+            .client()
+            .get_frontend_prefs(Request::new(proto::GetFrontendPrefsRequest { frontend }))
+            .await
+            .map_err(wire_error)?;
+        Ok(list
+            .get_ref()
+            .prefs
+            .iter()
+            .map(convert::frontend_pref_from_proto)
+            .collect())
+    }
+
+    async fn set_frontend_prefs(
+        &self,
+        frontend: String,
+        entries: Vec<api::PrefEntry>,
+    ) -> Result<(), ApiError> {
+        self.client()
+            .set_frontend_prefs(Request::new(proto::SetFrontendPrefsRequest {
+                frontend,
+                entries: entries.iter().map(convert::pref_entry_to_proto).collect(),
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
     }
 }
 

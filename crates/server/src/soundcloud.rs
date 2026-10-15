@@ -73,12 +73,12 @@ async fn scrape_client_id(http: &reqwest::Client) -> Result<String, String> {
         .get(WEB_HOST)
         .send()
         .await
-        .map_err(|e| format!("SoundCloud homepage HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud homepage HTTP: {}", e.without_url()))?
         .error_for_status()
-        .map_err(|e| format!("SoundCloud homepage HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud homepage HTTP: {}", e.without_url()))?
         .text()
         .await
-        .map_err(|e| format!("SoundCloud homepage body: {e}"))?;
+        .map_err(|e| format!("SoundCloud homepage body: {}", e.without_url()))?;
 
     let mut scripts = Vec::new();
     for chunk in html.split("<script") {
@@ -175,12 +175,12 @@ async fn api_search(http: &reqwest::Client, query: &str, cid: &str) -> Result<Va
         .query(&[("q", query), ("client_id", cid), ("limit", "50")])
         .send()
         .await
-        .map_err(|e| format!("SoundCloud search HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud search HTTP: {}", e.without_url()))?
         .error_for_status()
-        .map_err(|e| format!("SoundCloud search HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud search HTTP: {}", e.without_url()))?
         .json::<Value>()
         .await
-        .map_err(|e| format!("SoundCloud search JSON: {e}"))
+        .map_err(|e| format!("SoundCloud search JSON: {}", e.without_url()))
 }
 
 /// A resolved, playable SoundCloud stream. Progressive is the keyless 128 kbps
@@ -215,9 +215,7 @@ pub(crate) async fn resolve_stream(
 
     let track_auth = track.get("track_authorization").and_then(|v| v.as_str());
 
-    if let Some(tc) = transcodings.iter().find(|tc| {
-        transcoding_protocol(tc) == Some("hls") && transcoding_mime(tc) == Some("audio/mp4")
-    }) {
+    if let Some(tc) = transcodings.iter().find(|tc| is_hls_aac(tc)) {
         // Best-effort: if the AAC/HLS transcoding can't be resolved, fall
         // through to the progressive MP3 stream rather than failing the play.
         if let Some(hls_url) = tc.get("url").and_then(|v| v.as_str()) {
@@ -264,12 +262,12 @@ async fn resolve_media_url(
     let resolved = req
         .send()
         .await
-        .map_err(|e| format!("SoundCloud stream resolve HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud stream resolve HTTP: {}", e.without_url()))?
         .error_for_status()
-        .map_err(|e| format!("SoundCloud stream resolve HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud stream resolve HTTP: {}", e.without_url()))?
         .json::<Value>()
         .await
-        .map_err(|e| format!("SoundCloud stream resolve JSON: {e}"))?;
+        .map_err(|e| format!("SoundCloud stream resolve JSON: {}", e.without_url()))?;
 
     resolved
         .get("url")
@@ -292,12 +290,12 @@ async fn lookup_track(
     )
     .send()
     .await
-    .map_err(|e| format!("SoundCloud lookup HTTP: {e}"))?
+    .map_err(|e| format!("SoundCloud lookup HTTP: {}", e.without_url()))?
     .error_for_status()
-    .map_err(|e| format!("SoundCloud lookup HTTP: {e}"))?
+    .map_err(|e| format!("SoundCloud lookup HTTP: {}", e.without_url()))?
     .json::<Value>()
     .await
-    .map_err(|e| format!("SoundCloud lookup JSON: {e}"))
+    .map_err(|e| format!("SoundCloud lookup JSON: {}", e.without_url()))
 }
 
 /// Attach the web-app `Authorization: OAuth <token>` header for a signed-in
@@ -321,6 +319,17 @@ fn transcoding_mime(tc: &Value) -> Option<&str> {
         .and_then(|m| m.as_str())
 }
 
+/// The AAC HLS stream; its mime type carries codec parameters (`audio/mp4; codecs="mp4a.40.2"`).
+fn is_hls_aac(tc: &Value) -> bool {
+    transcoding_protocol(tc) == Some("hls")
+        && transcoding_mime(tc).is_some_and(|mime| mime.starts_with("audio/mp4"))
+}
+
+/// Whether [`resolve_stream`] can play this transcoding; most tracks now offer only HLS.
+fn is_playable(tc: &Value) -> bool {
+    transcoding_protocol(tc) == Some("progressive") || is_hls_aac(tc)
+}
+
 /// The SoundCloud track id (the typed identity's key).
 fn track_id(t: &Track) -> String {
     t.id.key().into_owned()
@@ -329,15 +338,12 @@ fn track_id(t: &Track) -> String {
 fn parse_track(item: &Value) -> Option<Track> {
     let track_id = item.get("id").and_then(|v| v.as_u64())?;
 
-    let has_progressive = item
+    let playable = item
         .get("media")
         .and_then(|m| m.get("transcodings"))
         .and_then(|t| t.as_array())
-        .is_some_and(|arr| {
-            arr.iter()
-                .any(|tc| transcoding_protocol(tc) == Some("progressive"))
-        });
-    if !has_progressive {
+        .is_some_and(|arr| arr.iter().any(is_playable));
+    if !playable {
         return None;
     }
 
@@ -428,12 +434,12 @@ async fn auth_get_json(
     apply_auth(http.get(url), token)
         .send()
         .await
-        .map_err(|e| format!("SoundCloud API HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud API HTTP: {}", e.without_url()))?
         .error_for_status()
-        .map_err(|e| format!("SoundCloud API HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud API HTTP: {}", e.without_url()))?
         .json::<Value>()
         .await
-        .map_err(|e| format!("SoundCloud API JSON: {e}"))
+        .map_err(|e| format!("SoundCloud API JSON: {}", e.without_url()))
 }
 
 /// Fetch the signed-in user's profile (`/me`).
@@ -631,9 +637,9 @@ pub(crate) async fn set_track_like(track_id: &str, like: bool, token: &str) -> R
     apply_auth(req, Some(token))
         .send()
         .await
-        .map_err(|e| format!("SoundCloud like HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud like HTTP: {}", e.without_url()))?
         .error_for_status()
-        .map_err(|e| format!("SoundCloud like HTTP: {e}"))?;
+        .map_err(|e| format!("SoundCloud like HTTP: {}", e.without_url()))?;
     Ok(())
 }
 
@@ -718,13 +724,27 @@ mod tests {
     }
 
     #[test]
-    fn parse_track_requires_progressive_transcoding() {
-        let hls_only = serde_json::json!({
+    fn parse_track_requires_a_playable_transcoding() {
+        let mpegurl_only = serde_json::json!({
             "id": 1, "title": "t", "kind": "track",
             "user": {"username": "u"},
-            "media": {"transcodings": [{"url": "x", "format": {"protocol": "hls"}}]}
+            "media": {"transcodings": [{"url": "x", "format": {"protocol": "hls", "mime_type": "audio/mpegurl"}}]}
         });
-        assert!(parse_track(&hls_only).is_none());
+        assert!(parse_track(&mpegurl_only).is_none());
+
+        // What api-v2 search answers for "snowgrave": AAC HLS only, no progressive.
+        let aac_hls = serde_json::json!({
+            "id": 7, "title": "SNOWGRAVE", "kind": "track",
+            "user": {"username": "u"},
+            "media": {"transcodings": [
+                {"url": "x", "format": {"protocol": "hls", "mime_type": "audio/mp4; codecs=\"mp4a.40.2\""}},
+                {"url": "y", "format": {"protocol": "hls", "mime_type": "audio/mpegurl"}}
+            ]}
+        });
+        assert_eq!(
+            parse_track(&aac_hls).map(|track| track.title),
+            Some("SNOWGRAVE".to_string())
+        );
 
         let ok = serde_json::json!({
             "id": 42, "title": "Song", "kind": "track",

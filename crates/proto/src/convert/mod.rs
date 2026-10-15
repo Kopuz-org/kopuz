@@ -7,6 +7,7 @@
 
 mod catalog;
 mod config;
+mod config_edit;
 mod enums;
 mod error;
 mod events;
@@ -14,6 +15,7 @@ mod jobs;
 mod library;
 mod player;
 mod playlists;
+mod prefs;
 mod queue;
 mod schema;
 mod service;
@@ -24,6 +26,7 @@ mod fixtures;
 
 pub use catalog::*;
 pub use config::*;
+pub use config_edit::*;
 pub use enums::*;
 pub use error::*;
 pub use events::*;
@@ -31,6 +34,7 @@ pub use jobs::*;
 pub use library::*;
 pub use player::*;
 pub use playlists::*;
+pub use prefs::*;
 pub use queue::*;
 pub use schema::*;
 pub use service::*;

@@ -29,10 +29,63 @@ use symphonia::core::formats::probe::Hint;
 /// Builds the media source on the decode worker thread, so slow constructions
 /// (HTTP buffering, HLS assembly) never block the actor or an async executor.
 pub type SourceFactory = Box<
-    dyn FnOnce() -> Result<(Box<dyn symphonia::core::io::MediaSource>, Hint), String>
+    dyn FnOnce() -> std::io::Result<(Box<dyn symphonia::core::io::MediaSource>, Hint)>
         + Send
         + 'static,
 >;
+
+/// What a failed load or stream comes down to for whoever shows it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FailureKind {
+    /// The media's host did not answer.
+    Unreachable,
+    /// The media is not where its track says.
+    NotFound,
+    Other,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Failure {
+    pub kind: FailureKind,
+    pub message: String,
+}
+
+impl Failure {
+    /// A source that could not be opened, kept apart by what the I/O error says about it.
+    pub fn opening(error: &std::io::Error) -> Self {
+        use std::io::ErrorKind;
+        let kind = match error.kind() {
+            ErrorKind::NotFound => FailureKind::NotFound,
+            ErrorKind::ConnectionRefused
+            | ErrorKind::ConnectionReset
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::NotConnected
+            | ErrorKind::TimedOut
+            | ErrorKind::HostUnreachable
+            | ErrorKind::NetworkUnreachable => FailureKind::Unreachable,
+            _ => FailureKind::Other,
+        };
+        Self {
+            kind,
+            message: format!("failed to open source: {error}"),
+        }
+    }
+}
+
+impl From<String> for Failure {
+    fn from(message: String) -> Self {
+        Self {
+            kind: FailureKind::Other,
+            message,
+        }
+    }
+}
+
+impl std::fmt::Display for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Transition {
@@ -65,7 +118,7 @@ pub struct LoadOutcome {
 /// Resolved once the source is playing (`Ok`) or failed to load (`Err`).
 /// Dropped without a send when the load is cancelled (superseded, stopped,
 /// shutdown) — cancellation is not an error.
-pub type LoadReply = tokio::sync::oneshot::Sender<Result<LoadOutcome, String>>;
+pub type LoadReply = tokio::sync::oneshot::Sender<Result<LoadOutcome, Failure>>;
 
 pub struct LoadRequest {
     pub token: u64,
@@ -130,6 +183,14 @@ pub enum Event {
     Ended {
         token: u64,
     },
+    /// The device asked for audio the decoder had not delivered yet (a stream rebuffering, a seek loading), so the position stands still.
+    Stalled {
+        token: u64,
+    },
+    /// Audio flows again after a `Stalled`.
+    Resumed {
+        token: u64,
+    },
     /// A crossfade finished, or a gapless session took over at the last sample
     /// of the one before it, and the outgoing session was torn down. `token` is
     /// the now-sole (incoming) session; `from_token` the retired outgoing one.
@@ -140,7 +201,7 @@ pub enum Event {
     },
     Error {
         token: u64,
-        message: String,
+        message: Failure,
     },
 }
 

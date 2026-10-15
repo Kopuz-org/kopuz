@@ -170,7 +170,7 @@ impl MediaSource for SpotifySource {
         Ok(LibrarySnapshot {
             albums,
             tracks,
-            artist_images: Vec::new(),
+            artists: Vec::new(),
         })
     }
 

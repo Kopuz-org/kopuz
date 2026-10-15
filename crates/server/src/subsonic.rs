@@ -2,6 +2,8 @@ use rand::{RngExt, distr::Alphanumeric};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
+use crate::source::SourceError;
+
 const SUBSONIC_API_VERSION: &str = "1.16.1";
 const CLIENT_NAME: &str = "kopuz";
 
@@ -357,8 +359,8 @@ impl SubsonicClient {
         }
     }
 
-    pub async fn ping(&self) -> Result<(), String> {
-        self.call::<EmptyData>("ping.view", vec![])
+    pub async fn ping(&self) -> Result<(), SourceError> {
+        self.request::<EmptyData>("ping.view", vec![], DEFAULT_TIMEOUT)
             .await
             .map(|_| ())
     }
@@ -367,7 +369,7 @@ impl SubsonicClient {
         &self,
         offset: usize,
         size: usize,
-    ) -> Result<Vec<SubsonicAlbum>, String> {
+    ) -> Result<Vec<SubsonicAlbum>, SourceError> {
         let data = self
             .call::<GetAlbumList2Data>(
                 "getAlbumList2.view",
@@ -381,7 +383,7 @@ impl SubsonicClient {
         Ok(data.album_list2.album)
     }
 
-    pub async fn get_album_songs(&self, album_id: &str) -> Result<Vec<SubsonicSong>, String> {
+    pub async fn get_album_songs(&self, album_id: &str) -> Result<Vec<SubsonicSong>, SourceError> {
         let data = self
             .call::<GetAlbumData>(
                 "getAlbum.view",
@@ -402,7 +404,7 @@ impl SubsonicClient {
         &self,
         song_id: &str,
         count: usize,
-    ) -> Result<Vec<SubsonicSong>, String> {
+    ) -> Result<Vec<SubsonicSong>, SourceError> {
         if self.has_sonic_similarity().await {
             match self.get_sonic_similar_tracks(song_id, count).await {
                 Ok(songs) if !songs.is_empty() => return Ok(songs),
@@ -443,7 +445,7 @@ impl SubsonicClient {
         &self,
         song_id: &str,
         count: usize,
-    ) -> Result<Vec<SubsonicSong>, String> {
+    ) -> Result<Vec<SubsonicSong>, SourceError> {
         let data = self
             .call_within::<GetSonicSimilarTracksData>(
                 "getSonicSimilarTracks.view",
@@ -464,7 +466,7 @@ impl SubsonicClient {
         &self,
         song_id: &str,
         count: usize,
-    ) -> Result<Vec<SubsonicSong>, String> {
+    ) -> Result<Vec<SubsonicSong>, SourceError> {
         let data = self
             .call_within::<GetSimilarSongsData>(
                 "getSimilarSongs.view",
@@ -480,7 +482,7 @@ impl SubsonicClient {
 
     /// One song by id. Radio uses it to put the seed at the head of the queue:
     /// `getSimilarSongs2` never includes the seed itself.
-    pub async fn get_song(&self, song_id: &str) -> Result<Option<SubsonicSong>, String> {
+    pub async fn get_song(&self, song_id: &str) -> Result<Option<SubsonicSong>, SourceError> {
         let data = self
             .call::<GetSongData>(
                 "getSong.view",
@@ -490,7 +492,7 @@ impl SubsonicClient {
         Ok(data.song)
     }
 
-    pub async fn get_playlists(&self) -> Result<Vec<SubsonicPlaylist>, String> {
+    pub async fn get_playlists(&self) -> Result<Vec<SubsonicPlaylist>, SourceError> {
         let data = self
             .call::<GetPlaylistsData>("getPlaylists.view", vec![])
             .await?;
@@ -500,7 +502,7 @@ impl SubsonicClient {
     pub async fn get_playlist_entries(
         &self,
         playlist_id: &str,
-    ) -> Result<Vec<SubsonicSong>, String> {
+    ) -> Result<Vec<SubsonicSong>, SourceError> {
         let data = self
             .call::<GetPlaylistData>(
                 "getPlaylist.view",
@@ -510,7 +512,11 @@ impl SubsonicClient {
         Ok(data.playlist.map(|p| p.entry).unwrap_or_default())
     }
 
-    pub async fn create_playlist(&self, name: &str, item_ids: &[&str]) -> Result<String, String> {
+    pub async fn create_playlist(
+        &self,
+        name: &str,
+        item_ids: &[&str],
+    ) -> Result<String, SourceError> {
         let mut params = vec![("name".to_string(), name.to_string())];
         for item_id in item_ids {
             params.push(("songId".to_string(), (*item_id).to_string()));
@@ -524,10 +530,16 @@ impl SubsonicClient {
             return Ok(playlist.id);
         }
 
-        Err("Subsonic createPlaylist did not return a playlist id".to_string())
+        Err(SourceError::Backend(
+            "Subsonic createPlaylist did not return a playlist id".to_string(),
+        ))
     }
 
-    pub async fn add_to_playlist(&self, playlist_id: &str, item_id: &str) -> Result<(), String> {
+    pub async fn add_to_playlist(
+        &self,
+        playlist_id: &str,
+        item_id: &str,
+    ) -> Result<(), SourceError> {
         self.call::<EmptyData>(
             "updatePlaylist.view",
             vec![
@@ -543,7 +555,7 @@ impl SubsonicClient {
         &self,
         playlist_id: &str,
         song_index: usize,
-    ) -> Result<(), String> {
+    ) -> Result<(), SourceError> {
         self.call::<EmptyData>(
             "updatePlaylist.view",
             vec![
@@ -560,7 +572,7 @@ impl SubsonicClient {
         playlist_id: &str,
         ordered_song_ids: &[&str],
         total_tracks: usize,
-    ) -> Result<(), String> {
+    ) -> Result<(), SourceError> {
         let mut params: Vec<(String, String)> =
             vec![("playlistId".to_string(), playlist_id.to_string())];
         for i in 0..total_tracks {
@@ -574,7 +586,7 @@ impl SubsonicClient {
             .map(|_| ())
     }
 
-    pub async fn get_artists(&self) -> Result<Vec<SubsonicArtist>, String> {
+    pub async fn get_artists(&self) -> Result<Vec<SubsonicArtist>, SourceError> {
         let data = self
             .call::<GetArtistsData>("getArtists.view", vec![])
             .await?;
@@ -586,7 +598,7 @@ impl SubsonicClient {
             .collect())
     }
 
-    pub async fn get_starred_song_ids(&self) -> Result<Vec<String>, String> {
+    pub async fn get_starred_song_ids(&self) -> Result<Vec<String>, SourceError> {
         let data = self
             .call::<GetStarred2Data>("getStarred2.view", vec![])
             .await?;
@@ -596,13 +608,13 @@ impl SubsonicClient {
             .unwrap_or_default())
     }
 
-    pub async fn star(&self, item_id: &str) -> Result<(), String> {
+    pub async fn star(&self, item_id: &str) -> Result<(), SourceError> {
         self.call::<EmptyData>("star.view", vec![("id".to_string(), item_id.to_string())])
             .await
             .map(|_| ())
     }
 
-    pub async fn unstar(&self, item_id: &str) -> Result<(), String> {
+    pub async fn unstar(&self, item_id: &str) -> Result<(), SourceError> {
         self.call::<EmptyData>("unstar.view", vec![("id".to_string(), item_id.to_string())])
             .await
             .map(|_| ())
@@ -635,7 +647,7 @@ impl SubsonicClient {
         Ok(url.to_string())
     }
 
-    pub async fn scrobble_now_playing(&self, item_id: &str) -> Result<(), String> {
+    pub async fn scrobble_now_playing(&self, item_id: &str) -> Result<(), SourceError> {
         self.call::<EmptyData>(
             "scrobble.view",
             vec![
@@ -647,7 +659,7 @@ impl SubsonicClient {
         .map(|_| ())
     }
 
-    pub async fn scrobble(&self, item_id: &str) -> Result<(), String> {
+    pub async fn scrobble(&self, item_id: &str) -> Result<(), SourceError> {
         self.call::<EmptyData>(
             "scrobble.view",
             vec![
@@ -679,7 +691,7 @@ impl SubsonicClient {
         Ok(url.to_string())
     }
 
-    pub async fn get_play_queue(&self) -> Result<Option<SubsonicPlayQueue>, String> {
+    pub async fn get_play_queue(&self) -> Result<Option<SubsonicPlayQueue>, SourceError> {
         let data = self
             .call::<GetPlayQueueData>("getPlayQueue.view", vec![])
             .await?;
@@ -692,7 +704,7 @@ impl SubsonicClient {
         item_ids: &[&str],
         current_id: Option<&str>,
         position_ms: Option<u64>,
-    ) -> Result<(), String> {
+    ) -> Result<(), SourceError> {
         let mut params: Vec<(String, String)> = item_ids
             .iter()
             .map(|id| ("id".to_string(), (*id).to_string()))
@@ -735,18 +747,27 @@ impl SubsonicClient {
         &self,
         endpoint: &str,
         extra_params: Vec<(String, String)>,
-    ) -> Result<T, String> {
+    ) -> Result<T, SourceError> {
         self.call_within(endpoint, extra_params, DEFAULT_TIMEOUT)
             .await
     }
 
-    #[tracing::instrument(name = "subsonic.call", skip_all, fields(endpoint = %endpoint))]
     async fn call_within<T: DeserializeOwned + Default>(
+        &self,
+        endpoint: &str,
+        extra_params: Vec<(String, String)>,
+        timeout: std::time::Duration,
+    ) -> Result<T, SourceError> {
+        self.request(endpoint, extra_params, timeout).await
+    }
+
+    #[tracing::instrument(name = "subsonic.call", skip_all, fields(endpoint = %endpoint))]
+    async fn request<T: DeserializeOwned + Default>(
         &self,
         endpoint: &str,
         mut extra_params: Vec<(String, String)>,
         timeout: std::time::Duration,
-    ) -> Result<T, String> {
+    ) -> Result<T, SourceError> {
         let url = format!("{}/rest/{}", self.base_url, endpoint);
 
         let mut params = self.auth_params();
@@ -759,32 +780,134 @@ impl SubsonicClient {
             .timeout(timeout)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(SourceError::from_request)?;
 
         if !resp.status().is_success() {
-            return Err(format!("Subsonic request failed: {}", resp.status()));
+            return Err(SourceError::from_status(resp.status(), "Subsonic request"));
         }
 
-        let parsed: SubsonicEnvelope<T> = resp.json().await.map_err(|e| e.to_string())?;
+        let parsed: SubsonicEnvelope<T> = resp
+            .json()
+            .await
+            .map_err(|error| SourceError::Backend(redacted(error)))?;
 
         if parsed.response.status.eq_ignore_ascii_case("ok") {
             return Ok(parsed.response.data);
         }
 
-        if let Some(err) = parsed.response.error {
-            return Err(format!(
-                "Subsonic request failed ({}): {}",
-                err.code, err.message
-            ));
+        match parsed.response.error {
+            Some(err) => Err(envelope_error(err.code, &err.message)),
+            None => Err(SourceError::Backend(
+                "Subsonic request failed with unknown error".to_string(),
+            )),
         }
-
-        Err("Subsonic request failed with unknown error".to_string())
     }
+}
+
+/// 40 is wrong credentials, 44 an invalid API key (OpenSubsonic) and 50 an account not allowed to do it.
+fn envelope_error(code: i32, message: &str) -> SourceError {
+    match code {
+        40 | 44 | 50 => SourceError::Auth,
+        _ => SourceError::Backend(format!("Subsonic request failed ({code}): {message}")),
+    }
+}
+
+/// A request error as text without its URL, whose query carries the user name, token and salt.
+fn redacted(error: reqwest::Error) -> String {
+    error.without_url().to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_no_credentials(error: &str) {
+        for secret in ["someone", "u=", "t=", "s="] {
+            assert!(!error.contains(secret), "{secret} in {error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_call_keeps_the_credentials_out_of_its_error() {
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let address = closed.local_addr().expect("address");
+        drop(closed);
+        let unreachable = SubsonicClient::new(&format!("http://{address}"), "someone", "hunter2");
+        let error = unreachable.ping().await.expect_err("nothing listens");
+        assert_eq!(error, SourceError::Connectivity);
+        assert_no_credentials(&error.to_string());
+        assert_eq!(
+            unreachable.get_album_list(0, 10).await.err(),
+            Some(SourceError::Connectivity),
+            "a library call keeps the kind too"
+        );
+
+        let server = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = server.local_addr().expect("address");
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            if let Ok((mut stream, _)) = server.accept().await {
+                let mut request = [0u8; 4096];
+                let _ = stream.read(&mut request).await;
+                let _ = stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nnot",
+                    )
+                    .await;
+            }
+        });
+        let garbled = SubsonicClient::new(&format!("http://{address}"), "someone", "hunter2");
+        let error = garbled.ping().await.expect_err("not json");
+        assert_no_credentials(&error.to_string());
+    }
+
+    /// One canned HTTP answer on a local port, for a client to call.
+    async fn answering(status: &str, body: &str) -> String {
+        let server = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = server.local_addr().expect("address");
+        let reply = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            if let Ok((mut stream, _)) = server.accept().await {
+                let mut request = [0u8; 4096];
+                let _ = stream.read(&mut request).await;
+                let _ = stream.write_all(reply.as_bytes()).await;
+            }
+        });
+        format!("http://{address}")
+    }
+
+    #[tokio::test]
+    async fn wrong_credentials_are_an_auth_failure() {
+        let body = r#"{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":40,"message":"Wrong username or password"}}}"#;
+        let url = answering("200 OK", body).await;
+        let client = SubsonicClient::new(&url, "someone", "hunter2");
+        assert_eq!(client.ping().await, Err(SourceError::Auth));
+
+        let url = answering("401 Unauthorized", "").await;
+        let client = SubsonicClient::new(&url, "someone", "hunter2");
+        assert_eq!(client.ping().await, Err(SourceError::Auth));
+    }
+
+    #[test]
+    fn only_a_credential_code_is_an_auth_failure() {
+        for code in [40, 44, 50] {
+            assert_eq!(envelope_error(code, "m"), SourceError::Auth, "{code}");
+        }
+        for code in [0, 10, 30, 41, 70] {
+            assert!(
+                matches!(envelope_error(code, "m"), SourceError::Backend(_)),
+                "{code}"
+            );
+        }
+    }
 
     fn parse<T: DeserializeOwned + Default>(body: serde_json::Value) -> T {
         let envelope: SubsonicEnvelope<T> =

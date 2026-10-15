@@ -61,7 +61,13 @@ pub fn DownloadOverlay() -> Element {
         .iter()
         .filter(|row| row.state == api::DownloadItemState::Failed)
         .count();
-    let title_text = format!("Downloading {} / {}", view.done, view.total.max(view.done));
+    let title_text = i18n::t_with(
+        "downloading_progress",
+        &[
+            ("done", view.done.into()),
+            ("total", view.total.max(view.done).into()),
+        ],
+    );
 
     rsx! {
         div {
@@ -83,7 +89,7 @@ pub fn DownloadOverlay() -> Element {
                             evt.stop_propagation();
                             hooks::downloads::cancel();
                         },
-                        "Stop"
+                        {i18n::t("stop")}
                     }
                     i {
                         class: format!(

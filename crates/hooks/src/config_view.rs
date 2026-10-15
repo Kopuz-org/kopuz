@@ -1,40 +1,33 @@
-//! What a managed settings file pins.
-//!
-//! A settings row renders locked when a config key is set by a file the app
-//! must not write. The daemon reads those layers, so the list comes from it
-//! rather than from the frontend opening the same files.
+//! What a managed settings layer pins, as the daemon's view says; the app never opens those layers itself.
 
+use api::{LockSource, SettingLock};
+use config::SettingKey;
 use dioxus::prelude::*;
 
-use crate::api::use_api;
-
-/// The keys a managed settings file owns. Empty when nothing is managed.
+/// The keys a managed settings layer owns, each with the layer that pins it. Empty when nothing is managed.
 #[derive(Clone, Copy)]
-pub struct LockedKeys(pub Signal<Vec<String>>);
+pub struct LockedKeys(pub Signal<Vec<SettingLock>>);
 
 impl LockedKeys {
-    pub fn is_locked(&self, key: &str) -> bool {
-        self.0.read().iter().any(|locked| locked == key)
+    pub fn is_locked(&self, key: SettingKey) -> bool {
+        self.0.read().iter().any(|lock| lock.key == key)
+    }
+
+    /// For a row that names its key as stored, as a daemon field spec does.
+    pub fn is_name_locked(&self, name: &str) -> bool {
+        self.lock_of_name(name).is_some()
+    }
+
+    /// The layer pinning the key stored under `name`, for a row to cite.
+    pub fn lock_of_name(&self, name: &str) -> Option<LockSource> {
+        self.0
+            .read()
+            .iter()
+            .find(|lock| lock.key.name() == name)
+            .map(|lock| lock.by.clone())
     }
 
     pub fn any(&self) -> bool {
         !self.0.read().is_empty()
     }
-}
-
-/// Provide the locked-key list to the tree. Read once: a managed file is
-/// managed for the life of the process.
-pub fn use_locked_keys_provider() -> LockedKeys {
-    let api = use_api();
-    let keys = use_context_provider(|| LockedKeys(Signal::new(Vec::new())));
-    use_future(move || {
-        let api = api.clone();
-        let mut signal = keys.0;
-        async move {
-            if let Ok(view) = api.config().await {
-                signal.set(view.locked_keys);
-            }
-        }
-    });
-    keys
 }

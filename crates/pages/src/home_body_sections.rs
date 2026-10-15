@@ -5,7 +5,7 @@ use super::*;
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_server_section(
     key: &str,
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     edit: bool,
     is_vaxry: bool,
     listen_now_style: ListenNowStyle,
@@ -28,7 +28,6 @@ pub(super) fn render_server_section(
     match key {
         "hero" => rsx! {
             ServerHeroBanner {
-                config,
                 edit,
                 is_vaxry,
                 hero_entry,
@@ -95,7 +94,7 @@ pub(super) fn render_server_section(
             scroll_container,
         ),
         "playlists" => render_playlists(
-            config,
+            settings,
             is_vaxry,
             recent_playlists,
             on_select_playlist,
@@ -108,13 +107,13 @@ pub(super) fn render_server_section(
 
 #[component]
 fn ServerHeroBanner(
-    mut config: Signal<AppConfig>,
     edit: bool,
     is_vaxry: bool,
     hero_entry: Option<(Track, Option<Album>, Option<String>)>,
     hero_cover: Option<String>,
     on_play_album: EventHandler<String>,
 ) -> Element {
+    let mut prefs = hooks::ui_prefs::use_ui_prefs();
     let mut is_resizing = use_signal(|| false);
     let mut hero_menu_open = use_signal(|| false);
     let mut start_y = use_signal(|| 0.0_f64);
@@ -158,7 +157,7 @@ fn ServerHeroBanner(
                     if let Some(y) = val.as_f64() {
                         let delta = y - sy;
                         let new_h = ((sh as f64) + delta).clamp(140.0, 800.0) as u32;
-                        config.write().hero_height = new_h;
+                        prefs.write().hero_height = new_h;
                     } else if val.as_str() == Some("stop") {
                         is_resizing.set(false);
                         break;
@@ -172,7 +171,7 @@ fn ServerHeroBanner(
         return rsx! {};
     }
 
-    let hero_height = config.read().hero_height;
+    let hero_height = prefs.read().hero_height;
     let section_class = if is_vaxry {
         "relative rounded-xl overflow-hidden mb-10"
     } else {
@@ -181,26 +180,15 @@ fn ServerHeroBanner(
     let section_style = format!("height: {hero_height}px;");
 
     let show_empty_state = hero_entry.is_none();
-    let hero_title = hero_entry
+    let (hero_title, hero_artist) = hero_entry
         .as_ref()
-        .map(|(track, _, _)| track.title.clone())
+        .map(|(track, album_opt, _)| featured_album_billing(track, album_opt.as_ref()))
         .unwrap_or_default();
-    // The banner's headline is the track's own title and artist, so its
-    // overflow menu acts on that track even though the play button and the
-    // heart cover the whole album.
-    let hero_track = hero_entry.as_ref().map(|(track, _, _)| track.clone());
-    let hero_artist = hero_entry
+    let hero_artist_key = hero_entry
         .as_ref()
-        .map(|(track, album_opt, _)| {
-            if !is_unknown_artist(&track.artist) {
-                return track.artist.clone();
-            }
-            album_opt
-                .as_ref()
-                .map(|a| a.artist.clone())
-                .unwrap_or_default()
-        })
-        .unwrap_or_default();
+        .and_then(|(_, album_opt, _)| album_opt.as_ref())
+        .and_then(|album| album.artist_key.clone());
+    let has_hero = hero_entry.is_some();
 
     rsx! {
         section {
@@ -208,7 +196,7 @@ fn ServerHeroBanner(
             style: "{section_style}",
             oncontextmenu: move |evt| {
                 evt.prevent_default();
-                if hero_track.is_some() {
+                if has_hero {
                     components::dots_menu::open_at_pointer(&evt);
                     hero_menu_open.set(true);
                 }
@@ -234,7 +222,7 @@ fn ServerHeroBanner(
                     }
                     h1 { class: "text-3xl md:text-5xl font-semibold tracking-tight text-white mb-4 leading-tight break-words", style: "overflow: hidden; text-overflow:ellipsis;white-space: nowrap;", "{hero_title}" }
                     if !hero_artist.is_empty() {
-                        p { class: "text-base md:text-lg text-white/60 mb-8 font-medium line-clamp-1 max-w-md", "{i18n::t_with(\"by_artist_full\", &[(\"artist\", hero_artist.clone())])}" }
+                        p { class: "text-base md:text-lg text-white/60 mb-8 font-medium line-clamp-1 max-w-md", "{i18n::t_with(\"by_artist_full\", &[(\"artist\", hero_artist.clone().into())])}" }
                     }
                     div { class: "flex items-center gap-4",
                         button {
@@ -295,9 +283,11 @@ fn ServerHeroBanner(
                                 }
                             }
                         }
-                        if let Some(track) = hero_track.clone() {
-                            components::track_actions::TrackActionsMenu {
-                                track,
+                        if has_hero {
+                            components::album_actions::AlbumActionsMenu {
+                                album_id: hero_album_id(),
+                                album_title: hero_title.clone(),
+                                artist_key: hero_artist_key.clone(),
                                 is_open: Some(hero_menu_open()),
                                 on_open: Some(EventHandler::new(move |_| hero_menu_open.set(true))),
                                 on_close: Some(EventHandler::new(move |_| hero_menu_open.set(false))),
@@ -318,7 +308,7 @@ fn ServerHeroBanner(
                     onmousedown: move |evt| {
                         evt.stop_propagation();
                         start_y.set(evt.client_coordinates().y);
-                        start_h.set(config.peek().hero_height);
+                        start_h.set(prefs.peek().hero_height);
                         is_resizing.set(true);
                     },
                     div { class: "w-10 h-1 rounded-full bg-white/60" }
@@ -732,7 +722,7 @@ fn render_albums_row(
 }
 
 fn render_playlists(
-    _config: Signal<AppConfig>,
+    _config: Signal<Settings>,
     is_vaxry: bool,
     recent_playlists: Vec<(String, String, usize, Option<String>)>,
     on_select_playlist: EventHandler<String>,
@@ -817,7 +807,7 @@ fn render_playlists(
                                                 is_open: is_menu_open,
                                                 on_open: move |_| active_card_menu.set(Some(open_key.clone())),
                                                 on_close: move |_| active_card_menu.set(None),
-                                                aria_label: i18n::t_with("more_actions_for", &[("name", name.clone())]),
+                                                aria_label: i18n::t_with("more_actions_for", &[("name", name.clone().into())]),
                                                 button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
                                                 anchor: "right".to_string(),
                                                 on_action: move |_: usize| {
@@ -834,7 +824,7 @@ fn render_playlists(
                                     h3 { class: "text-white font-bold truncate text-sm md:text-base px-1 group-hover:text-indigo-400 transition-colors", "{name}" }
                                     p { class: "text-xs md:text-sm text-white/40 truncate px-1 font-semibold mt-1",
                                         {
-                                            let track_text = i18n::t_with("music_playlist_count", &[("count", track_count.to_string())]);
+                                            let track_text = i18n::t_with("music_playlist_count", &[("count", track_count.into())]);
                                             rsx! { "{track_text}" }
                                         }
                                     }

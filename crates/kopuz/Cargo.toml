@@ -26,7 +26,7 @@ dioxus = { workspace = true, features = ["desktop"] }
 discord-rich-presence = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
-ctrlc = { workspace = true }
+ctrlc = { workspace = true, features = ["termination"] }
 webbrowser = { workspace = true }
 # The socket the app serves its core on, and the client that dials one.
 kopuzd = { workspace = true }

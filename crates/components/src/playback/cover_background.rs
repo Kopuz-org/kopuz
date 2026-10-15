@@ -1,4 +1,4 @@
-use config::AppConfig;
+use config::Settings;
 use dioxus::prelude::*;
 
 /// Art backdrop: the cover under user-configurable blur and a scrim so text
@@ -7,12 +7,12 @@ use dioxus::prelude::*;
 /// radius to keep blurred edge bleed outside the viewport.
 #[component]
 pub fn CoverArtBackground(cover: String) -> Element {
-    let config = use_context::<Signal<AppConfig>>();
+    let settings = use_context::<Signal<Settings>>();
     let (scrim, blur) = {
-        let conf = config.read();
+        let conf = settings.read();
         (
-            conf.cover_art_darkening.min(95),
-            conf.cover_art_blur.min(100),
+            conf.background.cover_art_darkening.min(95),
+            conf.background.cover_art_blur.min(100),
         )
     };
     let img_style = if blur > 0 {

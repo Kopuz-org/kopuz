@@ -12,6 +12,7 @@ use api::{Intent, Phase};
 use reader::Track;
 use server::playback_ref::PlaybackItemRef;
 
+use crate::credentials::{CredentialStore, Credentials};
 use crate::session::SessionHandle;
 
 const NOW_PLAYING_INTERVAL_SECS: u64 = 30;
@@ -19,6 +20,7 @@ const NOW_PLAYING_MAX_IDLE_SECS: u64 = 600;
 
 pub struct Scrobbler {
     db: db::Db,
+    credentials: CredentialStore,
     session: OnceLock<SessionHandle>,
 }
 
@@ -54,9 +56,10 @@ fn listen_additional_info(
 }
 
 impl Scrobbler {
-    pub fn new(db: db::Db) -> Arc<Self> {
+    pub fn new(db: db::Db, credentials: CredentialStore) -> Arc<Self> {
         Arc::new(Self {
             db,
+            credentials,
             session: OnceLock::new(),
         })
     }
@@ -104,7 +107,7 @@ impl Scrobbler {
         let Some(session) = self.session().cloned() else {
             return;
         };
-        let config = session.config_watch().borrow().clone();
+        let credentials = self.credentials.snapshot();
         let uid = track.id.uid();
         let item_ref = PlaybackItemRef::parse(&uid);
         if item_ref.is_radio() {
@@ -112,9 +115,10 @@ impl Scrobbler {
         }
         let is_server = item_ref.is_server();
         let item_id = is_server.then(|| item_ref.primary_id().unwrap_or_default().to_string());
+        let source = is_server.then(|| server::source::active(self.db.clone(), &session.sources()));
         let include_ids = !is_server;
 
-        self.spawn_playing_now_heartbeat(&session, &track, token, &config, include_ids);
+        self.spawn_playing_now_heartbeat(&session, &track, token, &credentials, include_ids);
 
         let scrobbler = self.clone();
         let span = tracing::info_span!(
@@ -124,7 +128,15 @@ impl Scrobbler {
         tokio::spawn(tracing::Instrument::instrument(
             async move {
                 scrobbler
-                    .submit_flow(session, track, token, item_id, include_ids, config)
+                    .submit_flow(
+                        session,
+                        track,
+                        token,
+                        item_id,
+                        include_ids,
+                        credentials,
+                        source,
+                    )
                     .await;
             },
             span,
@@ -138,7 +150,8 @@ impl Scrobbler {
         token: u64,
         item_id: Option<String>,
         include_ids: bool,
-        config: config::AppConfig,
+        credentials: Credentials,
+        source: Option<Box<dyn server::source::MediaSource>>,
     ) {
         let duration_secs = track.duration;
         let threshold_secs = std::cmp::min(240, duration_secs / 2);
@@ -151,18 +164,19 @@ impl Scrobbler {
             return;
         }
 
-        let source = item_id
-            .as_deref()
-            .map(|_| server::source::active(self.db.clone(), &config));
         if let (Some(source), Some(id)) = (&source, item_id.as_deref())
             && let Err(error) = source.scrobble_now_playing(id).await
         {
             tracing::warn!(%error, "now-playing scrobble failed");
         }
 
-        let lastfm_api_key = config.lastfm_api_key.clone();
-        let lastfm_api_secret = config.lastfm_api_secret.clone();
-        let lastfm_session_key = config.lastfm_session_key.clone();
+        let Credentials {
+            musicbrainz_token: token_mb,
+            lastfm_api_key,
+            lastfm_api_secret,
+            lastfm_session_key,
+            librefm_session_key,
+        } = credentials;
         let has_lastfm = !lastfm_api_key.is_empty() && !lastfm_api_secret.is_empty();
         if has_lastfm {
             let playing_now =
@@ -179,7 +193,6 @@ impl Scrobbler {
             }
         }
 
-        let librefm_session_key = config.librefm_session_key.clone();
         let has_librefm = !librefm_session_key.is_empty();
         if has_librefm {
             let playing_now = scrobble::librefm::make_playing_now(
@@ -290,7 +303,6 @@ impl Scrobbler {
             }
         }
 
-        let token_mb = config.musicbrainz_token.clone();
         if !token_mb.trim().is_empty() {
             let info = listen_additional_info(&track, include_ids);
             let queued_info: serde_json::Map<String, serde_json::Value> = info
@@ -328,7 +340,7 @@ impl Scrobbler {
         }
 
         if scrobble_ok {
-            self.drain_queue(&config).await;
+            self.drain_queue().await;
         }
     }
 
@@ -337,13 +349,13 @@ impl Scrobbler {
         session: &SessionHandle,
         track: &Track,
         token: u64,
-        config: &config::AppConfig,
+        credentials: &Credentials,
         include_ids: bool,
     ) {
         if track.duration < 30 {
             return;
         }
-        let mb_token = config.musicbrainz_token.clone();
+        let mb_token = credentials.musicbrainz_token.clone();
         if mb_token.trim().is_empty() {
             return;
         }
@@ -396,20 +408,21 @@ impl Scrobbler {
     }
 
     /// Startup drain: anything queued while offline gets resubmitted once.
-    pub async fn drain_queue(&self, config: &config::AppConfig) {
-        let has_lastfm = !config.lastfm_api_key.is_empty() && !config.lastfm_api_secret.is_empty();
+    pub async fn drain_queue(&self) {
+        let held = self.credentials.snapshot();
+        let has_lastfm = !held.lastfm_api_key.is_empty() && !held.lastfm_api_secret.is_empty();
         let creds = scrobble::queue::Credentials {
             lastfm: has_lastfm.then(|| {
                 (
-                    config.lastfm_api_key.clone(),
-                    config.lastfm_api_secret.clone(),
-                    config.lastfm_session_key.clone(),
+                    held.lastfm_api_key.clone(),
+                    held.lastfm_api_secret.clone(),
+                    held.lastfm_session_key.clone(),
                 )
             }),
-            librefm_session_key: (!config.librefm_session_key.is_empty())
-                .then(|| config.librefm_session_key.clone()),
-            listenbrainz_token: (!config.musicbrainz_token.trim().is_empty())
-                .then(|| config.musicbrainz_token.clone()),
+            librefm_session_key: (!held.librefm_session_key.is_empty())
+                .then(|| held.librefm_session_key.clone()),
+            listenbrainz_token: (!held.musicbrainz_token.trim().is_empty())
+                .then(|| held.musicbrainz_token.clone()),
         };
         scrobble::queue::drain(&self.db, &creds).await;
     }

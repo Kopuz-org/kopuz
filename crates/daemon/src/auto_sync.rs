@@ -1,17 +1,18 @@
-//! Syncs a remote source's library, playlists and favorites at startup and on source change once a day has passed.
+//! Syncs a remote source's library, playlists and favorites the first time it is active, then whenever the configured interval has passed.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use api::JobKind;
+use server::sources::Sources;
 use tokio::sync::watch;
+use tokio::time::Instant;
 
 use crate::favorites::FavoritesService;
-use crate::jobs::JobRunner;
+use crate::jobs::{JobRunner, Trigger};
 use crate::library::LibraryService;
 use crate::playlists::PlaylistService;
-
-const STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 
 const KINDS: [JobKind; 3] = [
     JobKind::LibrarySync,
@@ -26,7 +27,7 @@ fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
-fn stamp_key(kind: JobKind) -> Option<&'static str> {
+pub fn stamp_key(kind: JobKind) -> Option<&'static str> {
     match kind {
         JobKind::LibrarySync => Some("synced:library"),
         JobKind::PlaylistSync => Some("synced:playlists"),
@@ -58,11 +59,55 @@ pub(crate) async fn last_synced(
         .and_then(|raw| raw.parse().ok())
 }
 
-async fn is_due(db: &db::Db, kind: JobKind, source: &config::Source) -> bool {
-    match last_synced(db, kind, source).await {
-        Some(at) => unix_now().saturating_sub(at) >= STALE_AFTER.as_secs(),
-        None => true,
+/// How often the schedule runs; `None` when the setting is 0 (never).
+pub(crate) fn interval(config: &config::Settings) -> Option<Duration> {
+    match config.library.sync_interval_minutes {
+        0 => None,
+        minutes => Some(Duration::from_secs(u64::from(minutes) * 60)),
     }
+}
+
+/// Time left before a sync of `kind` is due again; zero when it is due now.
+async fn until_due(
+    db: &db::Db,
+    kind: JobKind,
+    source: &config::Source,
+    interval: Duration,
+) -> Duration {
+    match last_synced(db, kind, source).await {
+        Some(at) => interval.saturating_sub(Duration::from_secs(unix_now().saturating_sub(at))),
+        None => Duration::ZERO,
+    }
+}
+
+/// What a check found: the kinds due now, and how long until the earliest next one.
+#[derive(Debug, PartialEq, Eq)]
+struct Plan {
+    due: Vec<JobKind>,
+    next: Option<Duration>,
+}
+
+/// A due kind is about to run, so its next one is a full interval away; a kind never synced is due even with no interval.
+async fn plan(db: &db::Db, source: &config::Source, interval: Option<Duration>) -> Plan {
+    let mut due = Vec::new();
+    let mut next: Option<Duration> = None;
+    for kind in KINDS {
+        let Some(interval) = interval else {
+            if last_synced(db, kind, source).await.is_none() {
+                due.push(kind);
+            }
+            continue;
+        };
+        let left = until_due(db, kind, source, interval).await;
+        let wait = if left.is_zero() {
+            due.push(kind);
+            interval
+        } else {
+            left
+        };
+        next = Some(next.map_or(wait, |soonest| soonest.min(wait)));
+    }
+    Plan { due, next }
 }
 
 struct Syncs {
@@ -74,66 +119,142 @@ struct Syncs {
 }
 
 impl Syncs {
-    async fn check(&self, config: &config::AppConfig) {
+    /// Start what is due; the answer is how long to wait before looking again.
+    async fn check(&self, config: &config::Settings, sources: &Sources) -> Option<Duration> {
         // A local library has nothing to pull; it has the file scan.
-        let active = server::source::active(self.db.clone(), config);
+        let active = server::source::active(self.db.clone(), sources);
         if !active.capabilities().sync {
-            return;
+            return None;
         }
-        let source = &config.active_source;
-        for kind in KINDS {
-            if !is_due(&self.db, kind, source).await {
-                continue;
-            }
+        let source = &sources.active;
+        let plan = plan(&self.db, source, interval(config)).await;
+        let mut blocked = false;
+        for kind in plan.due {
             let started = match kind {
-                JobKind::LibrarySync => self.library.spawn_remote_sync(&self.jobs),
-                JobKind::PlaylistSync => self.playlists.spawn_sync(&self.jobs),
-                JobKind::FavoritesSync => self.favorites.spawn_sync(&self.jobs),
+                JobKind::LibrarySync => self
+                    .library
+                    .spawn_remote_sync(&self.jobs, Trigger::Schedule),
+                JobKind::PlaylistSync => self.playlists.spawn_sync(&self.jobs, Trigger::Schedule),
+                JobKind::FavoritesSync => self.favorites.spawn_sync(&self.jobs, Trigger::Schedule),
                 _ => continue,
             };
             match started {
                 Ok(_) => tracing::info!(?kind, source = source.as_str(), "auto-sync started"),
                 // Usually a sync of this kind is already running.
-                Err(error) => tracing::debug!(%error, ?kind, "auto-sync not started"),
+                Err(error) => {
+                    tracing::debug!(%error, ?kind, "auto-sync not started");
+                    blocked = true;
+                }
             }
+        }
+        // A kind that could not start is still due, so look again soon instead of an interval from now.
+        if blocked {
+            return Some(
+                plan.next
+                    .map_or(RETRY_BLOCKED, |next| next.min(RETRY_BLOCKED)),
+            );
+        }
+        plan.next
+    }
+}
+
+const RETRY_BLOCKED: Duration = Duration::from_secs(60);
+
+/// What re-arms the schedule: the source, the interval, and whether the source can sync at all.
+fn arm_key(config: &config::Settings, sources: &Sources) -> (config::Source, u32, bool) {
+    (
+        sources.active.clone(),
+        config.library.sync_interval_minutes,
+        server::server_ops::ServerConn::resolve(sources).is_some(),
+    )
+}
+
+/// Sleeps to `deadline`, or forever when there is none.
+pub(crate) async fn until(deadline: Option<Instant>) {
+    match deadline {
+        Some(at) => tokio::time::sleep_until(at).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Run `check` now, when its own answer says it is time, and whenever the source, interval or sign-in changes.
+async fn drive<F, Fut>(
+    mut config: watch::Receiver<config::Settings>,
+    mut sources: watch::Receiver<Arc<Sources>>,
+    mut check: F,
+) where
+    F: FnMut(config::Settings, Arc<Sources>) -> Fut,
+    Fut: Future<Output = Option<Duration>>,
+{
+    let first = config.borrow_and_update().clone();
+    let first_sources = sources.borrow_and_update().clone();
+    let mut armed = arm_key(&first, &first_sources);
+    let mut deadline = check(first, first_sources)
+        .await
+        .map(|wait| Instant::now() + wait);
+    loop {
+        tokio::select! {
+            changed = config.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+            }
+            changed = sources.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+            }
+            () = until(deadline) => {
+                let current = config.borrow().clone();
+                let current_sources = sources.borrow().clone();
+                deadline = check(current, current_sources).await.map(|wait| Instant::now() + wait);
+                continue;
+            }
+        }
+        let next = config.borrow_and_update().clone();
+        let next_sources = sources.borrow_and_update().clone();
+        let key = arm_key(&next, &next_sources);
+        if key != armed {
+            armed = key;
+            deadline = check(next, next_sources)
+                .await
+                .map(|wait| Instant::now() + wait);
         }
     }
 }
 
-/// Check once now, then again whenever the active source changes.
+/// Sync at startup if due, then again each time the interval passes or the source or interval changes.
 pub fn spawn(
     db: db::Db,
     jobs: Arc<JobRunner>,
     library: Arc<LibraryService>,
     playlists: Arc<PlaylistService>,
     favorites: Arc<FavoritesService>,
-    mut config: watch::Receiver<config::AppConfig>,
+    config: watch::Receiver<config::Settings>,
+    sources: watch::Receiver<Arc<Sources>>,
 ) {
-    let syncs = Syncs {
+    let syncs = Arc::new(Syncs {
         db,
         jobs,
         library,
         playlists,
         favorites,
-    };
-    tokio::spawn(async move {
-        let first = config.borrow_and_update().clone();
-        let mut current = first.active_source.clone();
-        syncs.check(&first).await;
-        while config.changed().await.is_ok() {
-            let next = config.borrow_and_update().clone();
-            if next.active_source != current {
-                current = next.active_source.clone();
-                syncs.check(&next).await;
-            }
-        }
     });
+    tokio::spawn(drive(config, sources, move |config, sources| {
+        let syncs = syncs.clone();
+        async move { syncs.check(&config, &sources).await }
+    }));
 }
-
 #[cfg(test)]
 mod tests {
-    use super::{is_due, mark_synced, stamp_key};
+    use super::{Plan, Sources, drive, interval, mark_synced, plan, stamp_key, until_due};
     use api::JobKind;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+    use tokio::sync::watch;
+
+    const DAY: Duration = Duration::from_secs(24 * 60 * 60);
 
     fn server() -> config::Source {
         config::Source::Server("srv-1".into())
@@ -174,11 +295,46 @@ mod tests {
         db.upsert_tracks(&server(), &[track]).await.expect("upsert");
     }
 
+    async fn stamp_ago(db: &db::Db, kind: JobKind, ago: Duration) {
+        let at = super::unix_now() - ago.as_secs();
+        db.meta_put(stamp_key(kind).unwrap(), server().as_str(), &at.to_string())
+            .await
+            .unwrap();
+    }
+
+    #[test]
+    fn the_default_interval_is_the_old_day() {
+        assert_eq!(interval(&config::Settings::default()), Some(DAY));
+    }
+
+    #[test]
+    fn zero_minutes_is_no_interval() {
+        let config = config::Settings {
+            library: config::Library {
+                sync_interval_minutes: 0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(interval(&config), None);
+    }
+
     #[tokio::test]
     async fn a_source_never_synced_is_due() {
         let (db, _dir) = store().await;
         stock(&db).await;
-        assert!(is_due(&db, JobKind::LibrarySync, &server()).await);
+        let found = plan(&db, &server(), Some(DAY)).await;
+        assert_eq!(
+            found,
+            Plan {
+                due: vec![
+                    JobKind::LibrarySync,
+                    JobKind::PlaylistSync,
+                    JobKind::FavoritesSync
+                ],
+                next: Some(DAY),
+            }
+        );
     }
 
     #[tokio::test]
@@ -186,22 +342,90 @@ mod tests {
         let (db, _dir) = store().await;
         stock(&db).await;
         mark_synced(&db, JobKind::LibrarySync, &server()).await;
-        assert!(!is_due(&db, JobKind::LibrarySync, &server()).await);
+        let found = plan(&db, &server(), Some(DAY)).await;
+        assert!(!found.due.contains(&JobKind::LibrarySync));
+        assert!(found.due.contains(&JobKind::PlaylistSync));
+        let left = until_due(&db, JobKind::LibrarySync, &server(), DAY).await;
+        assert!(left > DAY - Duration::from_secs(60) && left <= DAY);
     }
 
     #[tokio::test]
-    async fn a_sync_older_than_a_day_is_due() {
+    async fn a_sync_older_than_the_interval_is_due() {
         let (db, _dir) = store().await;
         stock(&db).await;
-        let two_days_ago = super::unix_now() - 2 * 24 * 60 * 60;
-        db.meta_put(
-            stamp_key(JobKind::LibrarySync).unwrap(),
-            server().as_str(),
-            &two_days_ago.to_string(),
-        )
-        .await
-        .unwrap();
-        assert!(is_due(&db, JobKind::LibrarySync, &server()).await);
+        stamp_ago(&db, JobKind::LibrarySync, 2 * DAY).await;
+        assert!(
+            plan(&db, &server(), Some(DAY))
+                .await
+                .due
+                .contains(&JobKind::LibrarySync)
+        );
+        assert!(
+            !plan(&db, &server(), Some(3 * DAY))
+                .await
+                .due
+                .contains(&JobKind::LibrarySync)
+        );
+    }
+
+    /// The next wake is the soonest unsynced kind's expiry, not a fixed poll.
+    #[tokio::test]
+    async fn the_next_wake_is_when_the_soonest_sync_expires() {
+        let (db, _dir) = store().await;
+        let hour = Duration::from_secs(60 * 60);
+        for (kind, ago) in [
+            (JobKind::LibrarySync, hour),
+            (JobKind::PlaylistSync, 5 * hour),
+            (JobKind::FavoritesSync, 2 * hour),
+        ] {
+            stamp_ago(&db, kind, ago).await;
+        }
+        let found = plan(&db, &server(), Some(DAY)).await;
+        assert!(found.due.is_empty());
+        let next = found.next.expect("something is pending");
+        assert!(next <= 19 * hour && next > 19 * hour - Duration::from_secs(60));
+    }
+
+    /// A shorter interval makes the same stamp due, which is how a changed setting takes effect.
+    #[tokio::test]
+    async fn a_shorter_interval_makes_a_fresh_stamp_due() {
+        let (db, _dir) = store().await;
+        stamp_ago(&db, JobKind::LibrarySync, Duration::from_secs(2 * 60 * 60)).await;
+        let day = plan(&db, &server(), Some(DAY)).await;
+        assert!(!day.due.contains(&JobKind::LibrarySync));
+        let hour = plan(&db, &server(), Some(Duration::from_secs(60 * 60))).await;
+        assert!(hour.due.contains(&JobKind::LibrarySync));
+    }
+
+    #[tokio::test]
+    async fn a_zero_interval_still_syncs_a_source_never_synced_once() {
+        let (db, _dir) = store().await;
+        mark_synced(&db, JobKind::LibrarySync, &server()).await;
+        let found = plan(&db, &server(), None).await;
+        assert_eq!(
+            found,
+            Plan {
+                due: vec![JobKind::PlaylistSync, JobKind::FavoritesSync],
+                next: None,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_zero_interval_starts_nothing_and_schedules_nothing() {
+        let (db, _dir) = store().await;
+        stock(&db).await;
+        for kind in super::KINDS {
+            mark_synced(&db, kind, &server()).await;
+        }
+        let found = plan(&db, &server(), None).await;
+        assert_eq!(
+            found,
+            Plan {
+                due: Vec::new(),
+                next: None
+            }
+        );
     }
 
     /// A stamp belongs to one source; another stays due until it syncs itself.
@@ -211,6 +435,192 @@ mod tests {
         stock(&db).await;
         mark_synced(&db, JobKind::LibrarySync, &server()).await;
         let other = config::Source::Server("srv-2".into());
-        assert!(is_due(&db, JobKind::LibrarySync, &other).await);
+        assert!(
+            plan(&db, &other, Some(DAY))
+                .await
+                .due
+                .contains(&JobKind::LibrarySync)
+        );
+    }
+
+    fn config_every(minutes: u32) -> config::Settings {
+        config::Settings {
+            library: config::Library {
+                sync_interval_minutes: minutes,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    fn minutes(count: u64) -> Duration {
+        Duration::from_secs(count * 60)
+    }
+
+    /// Each check is counted and answered with the configured interval, as the real one does when nothing is stamped.
+    fn counting(
+        seen: Arc<AtomicUsize>,
+    ) -> impl FnMut(config::Settings, Arc<Sources>) -> std::future::Ready<Option<Duration>> {
+        move |config: config::Settings, _: Arc<Sources>| {
+            seen.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(interval(&config))
+        }
+    }
+
+    fn no_sources() -> (watch::Sender<Arc<Sources>>, watch::Receiver<Arc<Sources>>) {
+        watch::channel(Arc::new(Sources::default()))
+    }
+
+    async fn settle() {
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+
+    async fn pass(span: Duration) {
+        tokio::time::advance(span).await;
+        settle().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_interval_elapsing_runs_the_check_again_and_again() {
+        let (_tx, rx) = watch::channel(config_every(60));
+        let count = Arc::new(AtomicUsize::new(0));
+        let check = counting(count.clone());
+        let (_sources, srx) = no_sources();
+        tokio::spawn(drive(rx, srx, check));
+        settle().await;
+        assert_eq!(count.load(Ordering::SeqCst), 1, "startup check");
+
+        pass(minutes(59)).await;
+        assert_eq!(count.load(Ordering::SeqCst), 1, "not yet");
+        pass(minutes(2)).await;
+        assert_eq!(count.load(Ordering::SeqCst), 2, "an hour on");
+        pass(minutes(60)).await;
+        assert_eq!(count.load(Ordering::SeqCst), 3, "re-armed after firing");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn changing_the_interval_re_arms_the_timer() {
+        let (tx, rx) = watch::channel(config_every(60));
+        let count = Arc::new(AtomicUsize::new(0));
+        let check = counting(count.clone());
+        let (_sources, srx) = no_sources();
+        tokio::spawn(drive(rx, srx, check));
+        settle().await;
+        pass(minutes(10)).await;
+
+        tx.send_modify(|config| config.library.sync_interval_minutes = 5);
+        settle().await;
+        assert_eq!(count.load(Ordering::SeqCst), 2, "rechecked on the change");
+
+        pass(minutes(4)).await;
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            2,
+            "not before the new interval"
+        );
+        pass(minutes(2)).await;
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            3,
+            "the new interval, not the old hour"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_zero_interval_never_checks_again_until_it_is_raised() {
+        let (tx, rx) = watch::channel(config_every(60));
+        let count = Arc::new(AtomicUsize::new(0));
+        let check = counting(count.clone());
+        let (_sources, srx) = no_sources();
+        tokio::spawn(drive(rx, srx, check));
+        settle().await;
+
+        tx.send_modify(|config| config.library.sync_interval_minutes = 0);
+        settle().await;
+        assert_eq!(count.load(Ordering::SeqCst), 2, "the change is seen once");
+        pass(Duration::from_secs(7 * 24 * 60 * 60)).await;
+        assert_eq!(count.load(Ordering::SeqCst), 2, "a week of silence");
+
+        tx.send_modify(|config| config.library.sync_interval_minutes = 30);
+        settle().await;
+        assert_eq!(count.load(Ordering::SeqCst), 3, "turned back on");
+        pass(minutes(31)).await;
+        assert_eq!(count.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn starting_at_zero_checks_once_and_then_idles() {
+        let (_tx, rx) = watch::channel(config_every(0));
+        let count = Arc::new(AtomicUsize::new(0));
+        let check = counting(count.clone());
+        let (_sources, srx) = no_sources();
+        tokio::spawn(drive(rx, srx, check));
+        settle().await;
+        pass(Duration::from_secs(7 * 24 * 60 * 60)).await;
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+    }
+
+    /// Settings move often; a timer reset by every config write would never fire.
+    #[tokio::test(start_paused = true)]
+    async fn an_unrelated_config_write_neither_rechecks_nor_delays_the_timer() {
+        let (tx, rx) = watch::channel(config_every(60));
+        let count = Arc::new(AtomicUsize::new(0));
+        let check = counting(count.clone());
+        let (_sources, srx) = no_sources();
+        tokio::spawn(drive(rx, srx, check));
+        settle().await;
+        pass(minutes(30)).await;
+
+        tx.send_modify(|config| config.playback.crossfade_seconds = 3);
+        settle().await;
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        pass(minutes(31)).await;
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            2,
+            "still on the original schedule"
+        );
+    }
+
+    /// A signed-out server checks as unsyncable; signing back in is what has to wake the schedule.
+    #[tokio::test(start_paused = true)]
+    async fn signing_in_rechecks_at_once() {
+        let signed_out = Sources {
+            active: server(),
+            server: Some(config::MusicServer::new_with_service(
+                "yt".into(),
+                String::new(),
+                config::MusicService::YtMusic,
+            )),
+            ..Default::default()
+        };
+        let (_tx, rx) = watch::channel(config_every(60));
+        let (sources, srx) = watch::channel(Arc::new(signed_out));
+        let count = Arc::new(AtomicUsize::new(0));
+        let check = counting(count.clone());
+        tokio::spawn(drive(rx, srx, check));
+        settle().await;
+
+        sources.send_modify(|sources| {
+            if let Some(server) = Arc::make_mut(sources).server.as_mut() {
+                server.access_token = Some("cookie".into());
+            }
+        });
+        settle().await;
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_source_change_rechecks_at_once() {
+        let (_tx, rx) = watch::channel(config_every(60));
+        let count = Arc::new(AtomicUsize::new(0));
+        let check = counting(count.clone());
+        let (sources, srx) = no_sources();
+        tokio::spawn(drive(rx, srx, check));
+        settle().await;
+
+        sources.send_modify(|sources| Arc::make_mut(sources).active = server());
+        settle().await;
+        assert_eq!(count.load(Ordering::SeqCst), 2);
     }
 }

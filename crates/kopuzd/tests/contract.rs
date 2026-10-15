@@ -34,6 +34,15 @@ impl QueueMaterializer for StubLibrary {
                 .filter(|key| !key.contains("nope"))
                 .map(|key| track(key))
                 .collect()),
+            // Any other context resolves to two tracks named after its album, playlist or station.
+            QueueContext::Album { id } | QueueContext::Playlist { id } => Ok(vec![
+                track(&format!("/lib/{id}-0")),
+                track(&format!("/lib/{id}-1")),
+            ]),
+            QueueContext::Radio { station_id, .. } => Ok(vec![
+                track(&format!("/lib/{station_id}-0")),
+                track(&format!("/lib/{station_id}-1")),
+            ]),
             _ => Err(ApiError::unsupported("stub resolves raw tracks only")),
         }
     }
@@ -95,8 +104,12 @@ struct Pair {
     tcp: client::GrpcApi,
     tcp_address: String,
     token: kopuzd::Token,
-    config: Arc<ConfigService>,
     jobs: Arc<JobRunner>,
+    config_service: Arc<ConfigService>,
+    library: Arc<LibraryService>,
+    favorites: Arc<FavoritesService>,
+    playlists: Arc<daemon::PlaylistService>,
+    sources: Arc<daemon::SourceService>,
     database: db::Db,
     session: SessionHandle,
     _dir: tempfile::TempDir,
@@ -118,13 +131,17 @@ async fn spawn_pair() -> Pair {
     let config_service = Arc::new(ConfigService::new(
         database.clone(),
         dir.path().join("settings.toml"),
-        config::AppConfig::default(),
+        config::Settings::default(),
     ));
+    let credentials = daemon::CredentialStore::load(&database)
+        .await
+        .expect("credentials");
     let library = Arc::new(LibraryService::new(
         database.clone(),
         config::Source::default(),
         Arc::new(radio::registry::StationRegistry::default()),
         dir.path().join("covers"),
+        credentials.clone(),
     ));
     let player = Player::try_with_sink(Box::new(NullSink::new())).expect("headless player starts");
     let provider: FactoryOverride = Arc::new(|_| Some(wav_factory(6)));
@@ -152,17 +169,27 @@ async fn spawn_pair() -> Pair {
     let downloads = daemon::DownloadsService::new(
         database.clone(),
         session.clone(),
-        config_service.clone(),
         dir.path().join("offline"),
     );
-    let sources =
-        daemon::SourceService::new(database.clone(), session.clone(), config_service.clone());
-    sources.watch_active(session.config_watch());
-    let integrations = daemon::IntegrationService::new(config_service.clone());
-    let downloader = daemon::UrlDownloadService::new(config_service.clone());
+    let sources = daemon::SourceService::new(
+        database.clone(),
+        session.clone(),
+        config_service.clone(),
+        session.sources(),
+    );
+    sources.watch_active(session.sources_watch());
+    let presence_pause = daemon::PresencePause::load(&database)
+        .await
+        .expect("presence pause");
+    let integrations =
+        daemon::IntegrationService::new(config_service.clone(), credentials, presence_pause);
+    let downloader =
+        daemon::UrlDownloadService::new(database.clone(), config_service.clone(), sources.clone());
+    let prefs = daemon::PrefsService::new(database.clone(), session.clone());
     let build_api = |session: SessionHandle| {
         LocalApi::new(session)
             .with_config(config_service.clone())
+            .with_prefs(prefs.clone())
             .with_library(library.clone())
             .with_jobs(jobs.clone())
             .with_favorites(favorites.clone())
@@ -195,8 +222,12 @@ async fn spawn_pair() -> Pair {
         tcp: client::GrpcApi::connect_tcp(&tcp_address, token.secret()).expect("tcp client"),
         tcp_address,
         token,
-        config: config_service,
         jobs,
+        config_service,
+        library,
+        favorites,
+        playlists,
+        sources,
         database,
         session,
         _dir: dir,
@@ -217,9 +248,9 @@ async fn clippsly_pair() -> (Pair, String, tokio::task::JoinHandle<()>) {
         })
         .await
         .unwrap();
-    pair.config
-        .mutate_state(&["servers"], |config| {
-            config
+    pair.sources
+        .mutate(|sources| {
+            sources
                 .servers
                 .iter_mut()
                 .find(|row| row.id == source.id)
@@ -612,6 +643,299 @@ async fn panicked_jobs_finish_as_failed_and_emit_an_event() {
     .expect("job-finished event");
 }
 
+async fn wait_job(api: &dyn KopuzApi, kind: api::JobKind) -> api::JobStatus {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let jobs = api.jobs().await.expect("jobs");
+            if let Some(status) = jobs.into_iter().find(|status| status.kind == kind) {
+                return status;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the job shows up")
+}
+
+async fn all_jobs_settled(api: &dyn KopuzApi) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let jobs = api.jobs().await.expect("jobs");
+            if jobs.iter().all(|job| job.state != api::JobState::Running) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("jobs settle");
+}
+
+#[tokio::test]
+async fn a_job_says_whether_the_daemons_schedule_started_it_on_every_transport() {
+    use futures_util::StreamExt;
+    let pair = spawn_pair().await;
+    let mut wire_events = pair.wire.events();
+
+    let user = pair
+        .wire
+        .start_job(api::JobKind::Scan)
+        .await
+        .expect("a user's scan starts");
+    let scheduled = pair
+        .jobs
+        .start_as(
+            api::JobKind::Download,
+            daemon::jobs::Trigger::Schedule,
+            |_| async { Ok(()) },
+        )
+        .expect("a scheduled job starts");
+    all_jobs_settled(&pair.local).await;
+
+    let local = pair.local.jobs().await.expect("local jobs");
+    assert_eq!(local, pair.wire.jobs().await.expect("wire jobs"));
+    assert_eq!(local, pair.tcp.jobs().await.expect("tcp jobs"));
+    let flag = |id: &str| {
+        local
+            .iter()
+            .find(|job| job.id == id)
+            .map(|job| job.automatic)
+    };
+    assert_eq!(flag(&user.job_id), Some(false));
+    assert_eq!(flag(&scheduled.job_id), Some(true));
+
+    // The stream joins at the live position, so keep starting jobs until its events flow.
+    let (mut manual_seen, mut scheduled_seen) = (false, false);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while !(manual_seen && scheduled_seen) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for JobFinished events"
+        );
+        let _ = pair.wire.start_job(api::JobKind::Scan).await;
+        let _ = pair.jobs.start_as(
+            api::JobKind::Download,
+            daemon::jobs::Trigger::Schedule,
+            |_| async { Ok(()) },
+        );
+        while let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_millis(300), wire_events.next()).await
+        {
+            match event {
+                ApiEvent::JobFinished {
+                    kind: api::JobKind::Scan,
+                    automatic,
+                    ..
+                } => {
+                    assert!(!automatic, "a scan the user asked for");
+                    manual_seen = true;
+                }
+                ApiEvent::JobFinished {
+                    kind: api::JobKind::Download,
+                    automatic,
+                    ..
+                } => {
+                    assert!(automatic, "a job the schedule started");
+                    scheduled_seen = true;
+                }
+                ApiEvent::JobProgress(progress) => {
+                    assert_eq!(progress.automatic, progress.kind == api::JobKind::Download);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn starting_a_running_kind_joins_the_job_on_every_transport() {
+    let pair = spawn_pair().await;
+    let (finish, finished) = tokio::sync::oneshot::channel::<()>();
+    let running = pair
+        .jobs
+        .start_as(
+            api::JobKind::Scan,
+            daemon::jobs::Trigger::Schedule,
+            |_| async move {
+                let _ = finished.await;
+                Ok(())
+            },
+        )
+        .expect("the first scan starts");
+
+    let local = pair.local.start_job(api::JobKind::Scan).await;
+    let wire = pair.wire.start_job(api::JobKind::Scan).await;
+    let tcp = pair.tcp.start_job(api::JobKind::Scan).await;
+    assert_eq!(local.expect("joined locally"), running);
+    assert_eq!(wire.expect("joined on the wire"), running);
+    assert_eq!(tcp.expect("joined over tcp"), running);
+    let scans = pair
+        .local
+        .jobs()
+        .await
+        .expect("jobs")
+        .into_iter()
+        .filter(|job| job.kind == api::JobKind::Scan)
+        .count();
+    assert_eq!(scans, 1, "no second scan");
+
+    let _ = finish.send(());
+    all_jobs_settled(&pair.local).await;
+}
+
+const SYNC_INTERVAL: config::SettingKey =
+    config::SettingKey::Library(config::LibraryKey::SyncIntervalMinutes);
+
+async fn activate_jellyfin(pair: &Pair, minutes: u32) {
+    pair.config_service
+        .mutate_state(&[SYNC_INTERVAL], move |config| {
+            config.library.sync_interval_minutes = minutes;
+        })
+        .await
+        .expect("config saved");
+    pair.sources
+        .mutate(|sources| {
+            sources.server = Some(config::MusicServer {
+                name: "unreachable".into(),
+                url: "http://127.0.0.1:9".into(),
+                access_token: Some("token".into()),
+                user_id: Some("user".into()),
+                id: Some("srv-1".into()),
+                ..Default::default()
+            });
+            sources.active = config::Source::Server("srv-1".into());
+        })
+        .await
+        .expect("sources saved");
+}
+
+fn spawn_auto_sync(pair: &Pair) {
+    daemon::auto_sync::spawn(
+        pair.database.clone(),
+        pair.jobs.clone(),
+        pair.library.clone(),
+        pair.playlists.clone(),
+        pair.favorites.clone(),
+        pair.session.settings_watch(),
+        pair.session.sources_watch(),
+    );
+}
+
+#[tokio::test]
+async fn the_daemons_own_syncs_are_automatic_on_every_transport() {
+    let pair = spawn_pair().await;
+    activate_jellyfin(&pair, 60).await;
+    spawn_auto_sync(&pair);
+
+    for kind in [
+        api::JobKind::LibrarySync,
+        api::JobKind::PlaylistSync,
+        api::JobKind::FavoritesSync,
+    ] {
+        assert!(wait_job(&pair.local, kind).await.automatic, "{kind:?}");
+        assert!(
+            wait_job(&pair.wire, kind).await.automatic,
+            "{kind:?} on the wire"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_zero_sync_interval_still_syncs_a_source_never_synced() {
+    let pair = spawn_pair().await;
+    activate_jellyfin(&pair, 0).await;
+    spawn_auto_sync(&pair);
+
+    for kind in [
+        api::JobKind::LibrarySync,
+        api::JobKind::PlaylistSync,
+        api::JobKind::FavoritesSync,
+    ] {
+        assert!(wait_job(&pair.wire, kind).await.automatic, "{kind:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_zero_sync_interval_starts_no_syncs_of_a_synced_source() {
+    let pair = spawn_pair().await;
+    let source = config::Source::Server("srv-1".into());
+    // Synced long ago, so only the interval keeps the syncs from being due.
+    for kind in [
+        api::JobKind::LibrarySync,
+        api::JobKind::PlaylistSync,
+        api::JobKind::FavoritesSync,
+    ] {
+        let key = daemon::auto_sync::stamp_key(kind).expect("a sync kind");
+        pair.database
+            .meta_put(key, source.as_str(), "0")
+            .await
+            .expect("stamped");
+    }
+    activate_jellyfin(&pair, 0).await;
+    spawn_auto_sync(&pair);
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(pair.local.jobs().await.expect("jobs").is_empty());
+
+    // Raising it from 0 is a change the running schedule must notice.
+    let report = pair
+        .local
+        .edit_config(vec![config::SettingsEdit::Library(
+            config::LibraryEdit::SyncIntervalMinutes(60),
+        )])
+        .await
+        .expect("interval set");
+    assert_eq!(report.outcomes, vec![api::EditOutcome::Applied]);
+    assert!(
+        wait_job(&pair.wire, api::JobKind::LibrarySync)
+            .await
+            .automatic,
+        "the schedule re-armed"
+    );
+}
+
+#[tokio::test]
+async fn the_daemons_own_folder_scan_is_automatic_and_a_users_is_not() {
+    let pair = spawn_pair().await;
+    let music = tempfile::tempdir().expect("tempdir");
+    pair.config_service
+        .mutate_state(
+            &[config::SettingKey::Library(
+                config::LibraryKey::LocalSources,
+            )],
+            |config| {
+                config.library.local_sources =
+                    vec![config::SavedLocalSource::default_library(vec![
+                        music.path().to_path_buf(),
+                    ])];
+            },
+        )
+        .await
+        .expect("config saved");
+    daemon::folder_scan::spawn(
+        pair.jobs.clone(),
+        pair.library.clone(),
+        pair.session.settings_watch(),
+        pair.session.subscribe(),
+        true,
+    );
+    let scheduled = wait_job(&pair.local, api::JobKind::Scan).await;
+    assert!(scheduled.automatic);
+    all_jobs_settled(&pair.local).await;
+
+    let user = pair
+        .wire
+        .start_job(api::JobKind::Scan)
+        .await
+        .expect("a user's scan starts");
+    let jobs = pair.wire.jobs().await.expect("wire jobs");
+    let started = jobs
+        .iter()
+        .find(|job| job.id == user.job_id)
+        .expect("the user's scan is listed");
+    assert!(!started.automatic);
+}
+
 fn replace(keys: &[&str]) -> SetQueueRequest {
     SetQueueRequest {
         mode: QueueMode::Replace,
@@ -833,38 +1157,309 @@ async fn the_active_sources_status_is_the_daemons_probe() {
     assert_eq!(wire, local, "the wire reports what the daemon holds");
 }
 
+/// Every edit variant crosses the wire, so the same batch earns the same outcomes and leaves the same view on either transport.
 #[tokio::test]
-async fn config_view_and_set_agree_across_transports() {
+async fn config_view_and_edits_agree_across_transports() {
     let pair = spawn_pair().await;
 
     let local_view = pair.local.config().await.expect("local view");
     let wire_view = pair.wire.config().await.expect("wire view");
-    // The whole 68-field surface has to survive the proto round trip for
+    // The whole config surface has to survive the proto round trip for
     // these to be equal, so this is the guard on every field mapping.
     assert_eq!(local_view, wire_view);
-    assert!(local_view.config.lastfm_session_key.is_empty());
-    assert!(local_view.config.server.is_none());
 
-    let mut next = wire_view.config.clone();
-    next.crossfade_seconds = 7;
-    next.theme = "nord".to_string();
-    next.offline_quality = config::OfflineQuality::Kbps160;
-    let written = pair.wire.set_config(next).await.expect("set over the wire");
-    assert_eq!(written.config.crossfade_seconds, 7);
-    assert_eq!(written.config.theme, "nord");
+    let edits = config::edit_samples();
+    let wire = pair
+        .wire
+        .edit_config(edits.clone())
+        .await
+        .expect("wire edit");
+    let local = pair
+        .local
+        .edit_config(edits.clone())
+        .await
+        .expect("local edit");
+    assert_eq!(wire.outcomes.len(), edits.len());
+    assert_eq!(local.outcomes, wire.outcomes);
+    for (edit, outcome) in edits.iter().zip(&wire.outcomes) {
+        let owned = config::SettingKey::of(edit).daemon_owned();
+        assert_eq!(
+            matches!(outcome, api::EditOutcome::Invalid { .. }),
+            owned,
+            "{edit:?}: {outcome:?}"
+        );
+    }
     assert_eq!(
-        written.config.offline_quality,
+        local.view, wire.view,
+        "a no-op repeat leaves the view as is"
+    );
+    assert_eq!(pair.wire.config().await.expect("wire view"), local.view);
+    assert_eq!(pair.tcp.config().await.expect("tcp view"), local.view);
+}
+
+#[tokio::test]
+async fn edit_config_touches_only_named_keys_across_transports() {
+    let pair = spawn_pair().await;
+    let mut events = pair.session.subscribe();
+    let stale = pair.wire.config().await.expect("wire view");
+
+    let other = pair
+        .local
+        .edit_config(vec![config::SettingsEdit::Playback(
+            config::PlaybackEdit::CrossfadeSeconds(7),
+        )])
+        .await
+        .expect("local edit");
+    assert_eq!(other.view.settings.playback.crossfade_seconds, 7);
+    assert!(other.view.revision > stale.revision);
+
+    // The wire client never saw the crossfade change; its edits must not undo it.
+    let written = pair
+        .wire
+        .edit_config(vec![
+            config::SettingsEdit::Ui(config::UiEdit::Theme("nord".into())),
+            config::SettingsEdit::Library(config::LibraryEdit::OfflineQuality(
+                config::OfflineQuality::Kbps160,
+            )),
+        ])
+        .await
+        .expect("wire edit")
+        .view;
+    assert_eq!(written.settings.ui.theme, "nord");
+    assert_eq!(written.settings.playback.crossfade_seconds, 7);
+    assert_eq!(
+        written.settings.library.offline_quality,
         config::OfflineQuality::Kbps160
     );
+    assert_eq!(
+        written.revision,
+        other.view.revision + 1,
+        "one batch, one save"
+    );
+    assert_eq!(pair.local.config().await.expect("local view"), written);
+    assert_eq!(pair.tcp.config().await.expect("tcp view"), written);
 
-    let local_view = pair.local.config().await.expect("local view after set");
-    assert_eq!(local_view.config, written.config);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Ok(ApiEvent::ConfigChanged { revision }) = events.recv().await
+                && revision == written.revision
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("config-changed event carries the view revision");
 
-    // Credentials are absent from the wire, so writing a view straight back
-    // cannot erase them; the daemon keeps its own. (Seeding one is only
-    // possible below the API, so the depth test lives in config_service.)
-    assert!(written.config.lastfm_session_key.is_empty());
-    assert!(written.config.servers.is_empty());
+    let refused = vec![
+        config::SettingsEdit::Playback(config::PlaybackEdit::CrossfadeSeconds(13)),
+        config::SettingsEdit::Lyrics(config::LyricsEdit::LyricsDepthBlurStrength(5)),
+        config::SettingsEdit::Spotify(config::SpotifyEdit::SpotifyBrowser(Some("x".into()))),
+        config::SettingsEdit::Downloads(config::DownloadsEdit::DownloaderOutputDir("/x".into())),
+    ];
+    let local = pair
+        .local
+        .edit_config(refused.clone())
+        .await
+        .expect("local answers");
+    let wire = pair.wire.edit_config(refused).await.expect("wire answers");
+    assert_eq!(local.outcomes, wire.outcomes);
+    assert!(
+        local
+            .outcomes
+            .iter()
+            .all(|outcome| matches!(outcome, api::EditOutcome::Invalid { .. })),
+        "{:?}",
+        local.outcomes
+    );
+    assert_eq!(local.view, written, "refused edits change nothing");
+    assert_eq!(wire.view, written);
+}
+
+fn pref(key: &str, value: Option<&str>) -> api::PrefEntry {
+    api::PrefEntry {
+        key: key.into(),
+        value: value.map(Into::into),
+    }
+}
+
+fn stored(key: &str, value: &str) -> api::FrontendPref {
+    api::FrontendPref {
+        key: key.into(),
+        value: value.into(),
+    }
+}
+
+async fn next_prefs_event(
+    events: &mut tokio::sync::broadcast::Receiver<ApiEvent>,
+) -> (String, Vec<String>) {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Ok(ApiEvent::FrontendPrefsChanged { frontend, keys }) = events.recv().await {
+                break (frontend, keys);
+            }
+        }
+    })
+    .await
+    .expect("prefs-changed event")
+}
+
+#[tokio::test]
+async fn frontend_prefs_are_namespaced_and_agree_across_transports() {
+    let pair = spawn_pair().await;
+    let mut events = pair.session.subscribe();
+    assert!(
+        pair.wire
+            .frontend_prefs("gpui".into())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    pair.wire
+        .set_frontend_prefs(
+            "gpui".into(),
+            vec![
+                pref("skin", Some("dark")),
+                pref("layout", Some("{\"cols\": [1, 2]}")),
+                pref("blank", Some("")),
+            ],
+        )
+        .await
+        .expect("wire write");
+    assert_eq!(
+        next_prefs_event(&mut events).await,
+        (
+            "gpui".to_string(),
+            vec![
+                "skin".to_string(),
+                "layout".to_string(),
+                "blank".to_string()
+            ]
+        )
+    );
+
+    pair.local
+        .set_frontend_prefs("dioxus".into(), vec![pref("skin", Some("light"))])
+        .await
+        .expect("local write");
+    assert_eq!(
+        next_prefs_event(&mut events).await,
+        ("dioxus".to_string(), vec!["skin".to_string()])
+    );
+
+    let expected = vec![
+        stored("blank", ""),
+        stored("layout", "{\"cols\": [1, 2]}"),
+        stored("skin", "dark"),
+    ];
+    assert_eq!(
+        pair.local.frontend_prefs("gpui".into()).await.unwrap(),
+        expected
+    );
+    assert_eq!(
+        pair.wire.frontend_prefs("gpui".into()).await.unwrap(),
+        expected
+    );
+    assert_eq!(
+        pair.tcp.frontend_prefs("gpui".into()).await.unwrap(),
+        expected
+    );
+    assert_eq!(
+        pair.wire.frontend_prefs("dioxus".into()).await.unwrap(),
+        vec![stored("skin", "light")]
+    );
+
+    // A delete and a rewrite of an unchanged value: only the delete changed anything.
+    pair.wire
+        .set_frontend_prefs(
+            "gpui".into(),
+            vec![
+                pref("blank", None),
+                pref("skin", Some("dark")),
+                pref("never", None),
+            ],
+        )
+        .await
+        .expect("delete over the wire");
+    assert_eq!(
+        next_prefs_event(&mut events).await,
+        ("gpui".to_string(), vec!["blank".to_string()])
+    );
+    assert_eq!(
+        pair.local.frontend_prefs("gpui".into()).await.unwrap(),
+        vec![
+            stored("layout", "{\"cols\": [1, 2]}"),
+            stored("skin", "dark")
+        ]
+    );
+
+    // A write that changes nothing emits nothing.
+    pair.local
+        .set_frontend_prefs("gpui".into(), vec![pref("skin", Some("dark"))])
+        .await
+        .expect("no-op write");
+    pair.local
+        .set_frontend_prefs("gpui".into(), vec![pref("skin", Some("darker"))])
+        .await
+        .expect("real write");
+    assert_eq!(
+        next_prefs_event(&mut events).await,
+        ("gpui".to_string(), vec!["skin".to_string()]),
+        "the no-op write was silent"
+    );
+}
+
+#[tokio::test]
+async fn frontend_prefs_refuse_bad_input_identically_and_store_nothing() {
+    let pair = spawn_pair().await;
+    let mut events = pair.session.subscribe();
+    let too_long = "k".repeat(api::MAX_PREF_KEY_BYTES + 1);
+    let huge = "v".repeat(api::MAX_PREF_VALUE_BYTES + 1);
+    let cases: Vec<(String, Vec<api::PrefEntry>)> = vec![
+        (String::new(), vec![pref("k", Some("v"))]),
+        ("f".repeat(api::MAX_PREF_FRONTEND_BYTES + 1), vec![]),
+        ("gpui".into(), vec![pref("", Some("v"))]),
+        ("gpui".into(), vec![pref(&too_long, Some("v"))]),
+        ("gpui".into(), vec![pref("big", Some(&huge))]),
+        ("gpui".into(), vec![pref("k", Some("1")), pref("k", None)]),
+        // One bad entry refuses the good one before it.
+        (
+            "gpui".into(),
+            vec![pref("good", Some("v")), pref("", Some("v"))],
+        ),
+    ];
+    for (frontend, entries) in cases {
+        let local = pair
+            .local
+            .set_frontend_prefs(frontend.clone(), entries.clone())
+            .await
+            .expect_err("local refuses");
+        let wire = pair
+            .wire
+            .set_frontend_prefs(frontend, entries)
+            .await
+            .expect_err("wire refuses");
+        assert_eq!(local.code, ErrorCode::InvalidInput);
+        assert_eq!(wire.code, local.code);
+    }
+    for api in [&pair.local as &dyn KopuzApi, &pair.wire] {
+        assert_eq!(
+            api.frontend_prefs(String::new()).await.unwrap_err().code,
+            ErrorCode::InvalidInput
+        );
+        assert!(api.frontend_prefs("gpui".into()).await.unwrap().is_empty());
+    }
+
+    // Nothing was announced for any refused write.
+    pair.local
+        .set_frontend_prefs("gpui".into(), vec![pref("after", Some("v"))])
+        .await
+        .expect("a valid write");
+    assert_eq!(
+        next_prefs_event(&mut events).await,
+        ("gpui".to_string(), vec!["after".to_string()])
+    );
 }
 
 #[tokio::test]
@@ -957,7 +1552,7 @@ async fn run_scan(pair: &Pair) {
 /// The library's artist names and album titles, sorted.
 async fn shelves(api: &dyn KopuzApi) -> (Vec<String>, Vec<String>) {
     let mut artists: Vec<String> = api
-        .artists(Page::default())
+        .artists(api::ArtistQuery::default(), Page::default())
         .await
         .expect("artists")
         .artists
@@ -965,7 +1560,7 @@ async fn shelves(api: &dyn KopuzApi) -> (Vec<String>, Vec<String>) {
         .map(|artist| artist.name)
         .collect();
     let mut albums: Vec<String> = api
-        .albums(Page::default())
+        .albums(api::AlbumQuery::default(), Page::default())
         .await
         .expect("albums")
         .albums
@@ -1198,8 +1793,9 @@ async fn artists_are_keyed_by_identity_on_both_transports() {
         .await
         .expect("seed credited tracks");
 
-    let artists = pair.local.artists(all).await.expect("local");
-    assert_eq!(artists, pair.wire.artists(all).await.expect("wire"));
+    let query = api::ArtistQuery::default();
+    let artists = pair.local.artists(query.clone(), all).await.expect("local");
+    assert_eq!(artists, pair.wire.artists(query, all).await.expect("wire"));
     let adas: Vec<&api::ArtistInfo> = artists
         .artists
         .iter()
@@ -1292,12 +1888,24 @@ async fn library_reads_agree_across_transports() {
         pair.wire.tracks_by_keys(keys).await.expect("wire"),
     );
     assert_eq!(
-        pair.local.albums(all).await.expect("local"),
-        pair.wire.albums(all).await.expect("wire"),
+        pair.local
+            .albums(api::AlbumQuery::default(), all)
+            .await
+            .expect("local"),
+        pair.wire
+            .albums(api::AlbumQuery::default(), all)
+            .await
+            .expect("wire"),
     );
     assert_eq!(
-        pair.local.artists(all).await.expect("local"),
-        pair.wire.artists(all).await.expect("wire"),
+        pair.local
+            .artists(api::ArtistQuery::default(), all)
+            .await
+            .expect("local"),
+        pair.wire
+            .artists(api::ArtistQuery::default(), all)
+            .await
+            .expect("wire"),
     );
     assert_eq!(
         pair.local.genres().await.expect("local"),
@@ -1351,6 +1959,312 @@ async fn library_reads_agree_across_transports() {
         .await
         .expect("local empty");
     assert!(local_tracks.is_empty());
+}
+
+/// Filters, orders and windows travel the wire intact: whatever the daemon answers in process, the socket answers the same.
+#[tokio::test]
+async fn listing_queries_filter_sort_and_page_the_same_on_both_transports() {
+    use api::{AlbumQuery, ArtistQuery};
+    use config::{AlbumSortField, ArtistSortField, SortCriterion, SortDirection};
+    fn crit<F>(field: F, descending: bool) -> SortCriterion<F> {
+        let direction = if descending {
+            SortDirection::Desc
+        } else {
+            SortDirection::Asc
+        };
+        SortCriterion::new(field, direction)
+    }
+
+    let pair = spawn_pair().await;
+    let source = config::Source::default();
+    let on = |key: &str, title: &str, artist: &str, album_id: &str| Track {
+        title: title.into(),
+        artist: artist.into(),
+        artists: vec![artist.into()],
+        album_id: album_id.into(),
+        ..track(key)
+    };
+    let album = |id: &str, title: &str, artist: &str, genre: &str, year: u16| reader::Album {
+        id: id.into(),
+        title: title.into(),
+        artist: artist.into(),
+        genre: genre.into(),
+        year,
+        cover_path: None,
+        manual_cover: false,
+        artist_id: None,
+        artist_key: None,
+    };
+    pair.database
+        .upsert_tracks(
+            &source,
+            &[
+                on("/q/a1.flac", "Charlie", "Ada", "q-alpha"),
+                on("/q/a2.flac", "Bravo", "Ada", "q-alpha"),
+                on("/q/b1.flac", "Echo", "Boris", "q-beta"),
+                on("/q/c1.flac", "Delta", "Cyd", "q-gamma"),
+            ],
+        )
+        .await
+        .expect("seed tracks");
+    pair.database
+        .upsert_albums(
+            &source,
+            &[
+                album("q-alpha", "Alpha", "Ada", "Rock", 1991),
+                album("q-beta", "beta", "Boris", "Jazz", 2005),
+                album("q-gamma", "Gamma", "Cyd", "Rock", 2020),
+            ],
+        )
+        .await
+        .expect("seed albums");
+    pair.database
+        .set_offline_track("/q/b1.flac", Some("/offline/b1"))
+        .await
+        .expect("mark a download");
+
+    let window = Page {
+        offset: 1,
+        limit: 2,
+    };
+    let everything = Page {
+        offset: 0,
+        limit: 100,
+    };
+    let sorted = |field, descending| vec![crit(field, descending)];
+    let queries = [
+        AlbumQuery::default(),
+        AlbumQuery {
+            search: Some("ALP".into()),
+            ..Default::default()
+        },
+        AlbumQuery {
+            genre: Some("Rock".into()),
+            sort: sorted(AlbumSortField::Year, true),
+            ..Default::default()
+        },
+        AlbumQuery {
+            year_from: Some(2000),
+            year_to: Some(2010),
+            ..Default::default()
+        },
+        AlbumQuery {
+            sort: vec![
+                crit(AlbumSortField::TrackCount, true),
+                crit(AlbumSortField::Title, false),
+            ],
+            ..Default::default()
+        },
+        AlbumQuery {
+            sort: sorted(AlbumSortField::RecentlyAdded, true),
+            ..Default::default()
+        },
+    ];
+    for query in queries {
+        for page in [everything, window] {
+            let local = pair.local.albums(query.clone(), page).await.expect("local");
+            let wire = pair.wire.albums(query.clone(), page).await.expect("wire");
+            assert_eq!(local, wire, "{query:?} {page:?}");
+        }
+    }
+
+    let by_year = AlbumQuery {
+        sort: sorted(AlbumSortField::Year, true),
+        ..Default::default()
+    };
+    let listed = pair.wire.albums(by_year, window).await.expect("wire");
+    assert_eq!(
+        listed.total, 3,
+        "the total is the filtered set, not the window"
+    );
+    let titles: Vec<&str> = listed.albums.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(titles, ["beta", "Alpha"], "year descending, then cut");
+    let rock = AlbumQuery {
+        genre: Some("Rock".into()),
+        ..Default::default()
+    };
+    assert_eq!(
+        pair.wire
+            .albums(rock, everything)
+            .await
+            .expect("wire")
+            .total,
+        2
+    );
+
+    let ada = pair
+        .wire
+        .artists(
+            ArtistQuery {
+                search: Some("ada".into()),
+                ..Default::default()
+            },
+            everything,
+        )
+        .await
+        .expect("wire")
+        .artists
+        .remove(0);
+    assert_eq!((ada.track_count, ada.album_count), (2, 1));
+    let billed = AlbumQuery {
+        artist_key: Some(ada.key),
+        ..Default::default()
+    };
+    let local = pair
+        .local
+        .albums(billed.clone(), everything)
+        .await
+        .expect("local");
+    assert_eq!(
+        local,
+        pair.wire.albums(billed, everything).await.expect("wire")
+    );
+    assert_eq!(local.albums.len(), 1);
+
+    let artist_queries = [
+        ArtistQuery::default(),
+        ArtistQuery {
+            search: Some("o".into()),
+            ..Default::default()
+        },
+        ArtistQuery {
+            sort: vec![crit(ArtistSortField::Tracks, true)],
+            ..Default::default()
+        },
+        ArtistQuery {
+            sort: vec![crit(ArtistSortField::Albums, false)],
+            ..Default::default()
+        },
+        ArtistQuery {
+            sort: vec![crit(ArtistSortField::Name, true)],
+            ..Default::default()
+        },
+    ];
+    for query in artist_queries {
+        for page in [everything, window] {
+            let local = pair
+                .local
+                .artists(query.clone(), page)
+                .await
+                .expect("local");
+            let wire = pair.wire.artists(query.clone(), page).await.expect("wire");
+            assert_eq!(local, wire, "{query:?} {page:?}");
+        }
+    }
+    let by_tracks = ArtistQuery {
+        sort: vec![crit(ArtistSortField::Tracks, true)],
+        ..Default::default()
+    };
+    let top = pair
+        .wire
+        .artists(by_tracks, everything)
+        .await
+        .expect("wire");
+    assert_eq!(top.artists[0].name, "Ada");
+
+    let filters = [
+        TrackFilter {
+            downloaded: Some(true),
+            ..Default::default()
+        },
+        TrackFilter {
+            downloaded: Some(false),
+            ..Default::default()
+        },
+        TrackFilter {
+            year_from: Some(1990),
+            year_to: Some(1999),
+            ..Default::default()
+        },
+        TrackFilter {
+            sort: api::TrackSort::Title,
+            reverse: true,
+            ..Default::default()
+        },
+        TrackFilter {
+            genre: Some("Rock".into()),
+            year_from: Some(2000),
+            reverse: true,
+            ..Default::default()
+        },
+    ];
+    for filter in filters {
+        for page in [everything, window] {
+            let local = pair
+                .local
+                .tracks(filter.clone(), page)
+                .await
+                .expect("local");
+            let wire = pair.wire.tracks(filter.clone(), page).await.expect("wire");
+            assert_eq!(local, wire, "{filter:?} {page:?}");
+        }
+    }
+    let downloaded = pair
+        .wire
+        .tracks(
+            TrackFilter {
+                downloaded: Some(true),
+                ..Default::default()
+            },
+            everything,
+        )
+        .await
+        .expect("wire");
+    let keys: Vec<&str> = downloaded.items.iter().map(|t| t.key.as_str()).collect();
+    assert_eq!(keys, ["/q/b1.flac"]);
+    let nineties = pair
+        .wire
+        .tracks(
+            TrackFilter {
+                year_to: Some(1999),
+                ..Default::default()
+            },
+            everything,
+        )
+        .await
+        .expect("wire");
+    assert_eq!(nineties.total, 2, "the two tracks of the 1991 album");
+    let rock_since_2000 = pair
+        .wire
+        .tracks(
+            TrackFilter {
+                genre: Some("Rock".into()),
+                year_from: Some(2000),
+                ..Default::default()
+            },
+            everything,
+        )
+        .await
+        .expect("wire");
+    let keys: Vec<&str> = rock_since_2000
+        .items
+        .iter()
+        .map(|t| t.key.as_str())
+        .collect();
+    assert_eq!(
+        keys,
+        ["/q/c1.flac"],
+        "a genre listing honours the year bounds too"
+    );
+    let reversed = pair
+        .wire
+        .tracks(
+            TrackFilter {
+                sort: api::TrackSort::Title,
+                reverse: true,
+                ..Default::default()
+            },
+            Page {
+                offset: 0,
+                limit: 1,
+            },
+        )
+        .await
+        .expect("wire");
+    assert_eq!(
+        reversed.items[0].title, "Echo",
+        "a reversed title order starts at the last title"
+    );
 }
 
 #[tokio::test]
@@ -1605,6 +2519,45 @@ async fn queue_snapshot_and_edits_agree_across_transports() {
             .await
             .err()
             .map(|error| error.code),
+    );
+}
+
+/// With shuffle on, both transports list the rows in play order and `shuffle_order` maps them back.
+#[tokio::test]
+async fn shuffled_snapshot_is_play_order_on_both_transports() {
+    let pair = spawn_pair().await;
+    let keys: Vec<String> = (0..8).map(|i| format!("/lib/s{i}.flac")).collect();
+    pair.local
+        .set_queue(SetQueueRequest {
+            mode: QueueMode::Replace,
+            context: QueueContext::Tracks { keys: keys.clone() },
+            start_index: Some(0),
+            shuffle: Some(true),
+        })
+        .await
+        .expect("seed a shuffled queue");
+
+    let local = pair.local.queue_snapshot().await.expect("local snapshot");
+    let wire = pair.wire.queue_snapshot().await.expect("wire snapshot");
+    assert!(local.shuffle);
+    assert_eq!(local, wire);
+    assert_eq!(local.shuffle_order.len(), keys.len());
+    for (position, physical) in local.shuffle_order.iter().enumerate() {
+        assert_eq!(local.items[position].key, keys[*physical as usize]);
+    }
+    let window = pair
+        .wire
+        .queue_window(Page::default())
+        .await
+        .expect("window");
+    assert_eq!(
+        window
+            .items
+            .iter()
+            .map(|i| &i.track.key)
+            .collect::<Vec<_>>(),
+        wire.items.iter().map(|t| &t.key).collect::<Vec<_>>(),
+        "the window and the snapshot agree on play order"
     );
 }
 
@@ -2280,6 +3233,11 @@ async fn integrations_agree_across_transports_and_carry_no_secret() {
         !rendered.contains("a-key-nobody-should-see"),
         "no response may carry the secret: {rendered}"
     );
+    let settings = format!("{:?}", pair.wire.config().await.expect("wire view"));
+    assert!(
+        !settings.contains("a-key-nobody-should-see"),
+        "nor may the settings a client reads: {settings}"
+    );
 
     assert_eq!(
         pair.local
@@ -2403,5 +3361,254 @@ async fn both_transports_shake_hands_on_this_revision() {
             api::Handshake::Ready(status) => assert_eq!(status.proto_revision, api::WIRE_REVISION),
             mismatched => panic!("{mismatched:?}"),
         }
+    }
+}
+
+/// "Playing from" is the daemon's: whoever built the queue, every transport reads the same origin, and a raw track list has none.
+#[tokio::test]
+async fn a_queue_origin_is_the_same_on_both_transports() {
+    let pair = spawn_pair().await;
+    let from = |mode, context| SetQueueRequest {
+        mode,
+        context,
+        start_index: None,
+        shuffle: None,
+    };
+    let origin = async |api: &LocalApi| api.player_state().await.expect("state").queue.context;
+
+    let album = QueueContext::Album { id: "a".into() };
+    pair.wire
+        .set_queue(from(QueueMode::Replace, album.clone()))
+        .await
+        .expect("set queue over the wire");
+    assert_eq!(origin(&pair.local).await, Some(album.clone()));
+    assert_eq!(
+        pair.wire.player_state().await.expect("state").queue.context,
+        Some(album.clone())
+    );
+    let local = pair.local.queue_snapshot().await.expect("local snapshot");
+    let wire = pair.wire.queue_snapshot().await.expect("wire snapshot");
+    assert_eq!(local.context, Some(album.clone()));
+    assert_eq!(local, wire);
+
+    // Edits and appended tracks leave it alone, whichever transport made them.
+    pair.wire
+        .set_queue(from(
+            QueueMode::Append,
+            QueueContext::Tracks {
+                keys: vec!["/lib/extra.flac".into()],
+            },
+        ))
+        .await
+        .expect("append over the wire");
+    pair.local
+        .queue_edit(QueueEdit::Move { from: 2, to: 0 })
+        .await
+        .expect("move");
+    assert_eq!(
+        pair.wire.queue_snapshot().await.expect("snapshot").context,
+        Some(album)
+    );
+
+    let playlist = QueueContext::Playlist { id: "p".into() };
+    pair.local
+        .set_queue(from(QueueMode::Replace, playlist.clone()))
+        .await
+        .expect("set queue");
+    assert_eq!(
+        pair.wire.queue_snapshot().await.expect("snapshot").context,
+        Some(playlist)
+    );
+
+    let radio = QueueContext::Radio {
+        station_id: "s".into(),
+        stream_id: "st".into(),
+    };
+    pair.wire
+        .set_queue(from(QueueMode::Replace, radio.clone()))
+        .await
+        .expect("set queue");
+    assert_eq!(
+        pair.local.queue_snapshot().await.expect("snapshot").context,
+        Some(radio)
+    );
+
+    pair.wire
+        .set_queue(replace(&["/lib/raw-0", "/lib/raw-1"]))
+        .await
+        .expect("set queue");
+    assert_eq!(origin(&pair.local).await, None);
+    wait_state(&pair.local, "committed", |state| {
+        matches!(state.intent, Intent::Committed { .. })
+    })
+    .await;
+    let local = normalized(pair.local.player_state().await.expect("state"));
+    assert_eq!(
+        local,
+        normalized(pair.wire.player_state().await.expect("state"))
+    );
+}
+
+/// Mute is the daemon's: either transport sets it, both read it, and the level to return to is untouched.
+#[tokio::test]
+async fn mute_is_the_same_on_both_transports() {
+    use futures_util::StreamExt;
+    let pair = spawn_pair().await;
+    let level = pair.local.player_state().await.expect("state").volume;
+    assert!(!pair.wire.player_state().await.expect("state").muted);
+
+    pair.wire
+        .player_command(PlayerCommand::SetMuted { muted: true })
+        .await
+        .expect("mute over the wire");
+    for state in [
+        pair.local.player_state().await.expect("local"),
+        pair.wire.player_state().await.expect("wire"),
+    ] {
+        assert!(state.muted);
+        assert_eq!(state.volume, level);
+    }
+    assert_eq!(
+        normalized(pair.local.player_state().await.expect("local")),
+        normalized(pair.wire.player_state().await.expect("wire"))
+    );
+
+    // Setting a level unmutes, whichever transport asks.
+    pair.local
+        .player_command(PlayerCommand::SetVolume { volume: 0.25 })
+        .await
+        .expect("set volume");
+    let state = pair.wire.player_state().await.expect("wire");
+    assert!((state.muted, state.volume) == (false, 0.25));
+
+    pair.local
+        .set_queue(SetQueueRequest {
+            mode: QueueMode::Replace,
+            context: QueueContext::Album { id: "a".into() },
+            start_index: None,
+            shuffle: None,
+        })
+        .await
+        .expect("set queue");
+    let mut events = pair.wire.events();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut heard = false;
+    while !heard {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for a player_state event with the mute and origin"
+        );
+        pair.wire
+            .player_command(PlayerCommand::SetMuted { muted: true })
+            .await
+            .expect("mute");
+        while let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_millis(500), events.next()).await
+        {
+            if let ApiEvent::PlayerState(state) = event
+                && state.muted
+                && state.volume == 0.25
+                && state.queue.context.is_some()
+            {
+                heard = true;
+                break;
+            }
+        }
+    }
+}
+
+/// The upcoming edits are one daemon command each; both transports must land them on the same queue.
+#[tokio::test]
+async fn upcoming_edits_agree_across_transports() {
+    let pair = spawn_pair().await;
+    let keys: Vec<String> = (0..12).map(|i| format!("/lib/u{i:02}.flac")).collect();
+    pair.local
+        .set_queue(SetQueueRequest {
+            mode: QueueMode::Replace,
+            context: QueueContext::Tracks { keys: keys.clone() },
+            start_index: Some(0),
+            shuffle: Some(false),
+        })
+        .await
+        .expect("seed the queue");
+    pair.wire
+        .queue_edit(QueueEdit::Jump { index: 2 })
+        .await
+        .expect("jump over the wire");
+
+    let mut events = pair.session.subscribe();
+    pair.wire
+        .queue_edit(QueueEdit::ShuffleUpcoming)
+        .await
+        .expect("shuffle over the wire");
+    pair.local
+        .queue_edit(QueueEdit::ShuffleUpcoming)
+        .await
+        .expect("shuffle locally");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let mut queue_changes = 0;
+    while let Ok(event) = events.try_recv() {
+        if matches!(event, api::ApiEvent::QueueChanged { .. }) {
+            queue_changes += 1;
+        }
+    }
+    assert_eq!(queue_changes, 2, "each edit publishes the queue once");
+    let local = pair.local.queue_snapshot().await.expect("local snapshot");
+    let wire = pair.wire.queue_snapshot().await.expect("wire snapshot");
+    for snapshot in [&local, &wire] {
+        let got: Vec<String> = snapshot.items.iter().map(|i| i.key.clone()).collect();
+        assert_eq!(
+            got[..3],
+            keys[..3],
+            "history and the playing track stay put"
+        );
+        assert_eq!(snapshot.position, Some(2));
+        let mut rest = got[3..].to_vec();
+        rest.sort();
+        assert_eq!(rest, keys[3..], "the same tracks, reordered");
+    }
+    assert_eq!(
+        local.items.iter().map(|i| &i.key).collect::<Vec<_>>(),
+        wire.items.iter().map(|i| &i.key).collect::<Vec<_>>(),
+    );
+
+    pair.wire
+        .queue_edit(QueueEdit::ReplaceUpcoming {
+            keys: vec!["/lib/x.flac".into(), "/lib/y.flac".into()],
+        })
+        .await
+        .expect("replace over the wire");
+    let mut expected = keys[..3].to_vec();
+    expected.extend(["/lib/x.flac".to_string(), "/lib/y.flac".to_string()]);
+    for snapshot in [
+        pair.local.queue_snapshot().await.expect("local snapshot"),
+        pair.wire.queue_snapshot().await.expect("wire snapshot"),
+    ] {
+        let got: Vec<String> = snapshot.items.iter().map(|i| i.key.clone()).collect();
+        assert_eq!(got, expected);
+    }
+
+    pair.wire
+        .queue_edit(QueueEdit::ClearUpcoming)
+        .await
+        .expect("clear over the wire");
+    let snapshot = pair.local.queue_snapshot().await.expect("snapshot");
+    assert_eq!(snapshot.items.len(), 3);
+    assert_eq!(snapshot.position, Some(2));
+
+    // With nothing upcoming both transports accept the edit and neither publishes.
+    let rev = pair.local.player_state().await.expect("state").rev;
+    for edit in [
+        QueueEdit::ClearUpcoming,
+        QueueEdit::ShuffleUpcoming,
+        QueueEdit::ReplaceUpcoming { keys: Vec::new() },
+    ] {
+        let local = pair
+            .local
+            .queue_edit(edit.clone())
+            .await
+            .expect("local no-op");
+        let wire = pair.wire.queue_edit(edit).await.expect("wire no-op");
+        assert_eq!((local.rev, wire.rev), (rev, rev));
     }
 }

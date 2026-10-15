@@ -12,7 +12,9 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, S
 use crate::{DbError, ReadStore, Storage};
 
 mod cfg_store;
+mod collation;
 mod dump;
+mod frontend_prefs;
 mod migrations;
 mod queries;
 mod rows;
@@ -124,7 +126,8 @@ async fn open_pool(path: &Path) -> Result<SqlitePool, DbError> {
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
         .busy_timeout(std::time::Duration::from_secs(5))
-        .foreign_keys(true);
+        .foreign_keys(true)
+        .collation(collation::NAME, collation::compare);
     SqlitePoolOptions::new()
         .max_connections(5)
         .connect_with(opts)
@@ -144,8 +147,8 @@ fn with_ext(path: &Path, suffix: &str) -> std::path::PathBuf {
 
 #[async_trait::async_trait]
 impl ReadStore for Native {
-    async fn load_config(&self) -> Result<Option<config::AppConfig>, DbError> {
-        cfg_store::load_config(&self.pool(), &self.settings_path).await
+    async fn has_app_state(&self) -> Result<bool, DbError> {
+        cfg_store::has_app_state(&self.pool()).await
     }
 
     async fn tracks_page(
@@ -175,14 +178,6 @@ impl ReadStore for Native {
         limit: Option<u32>,
     ) -> Result<Vec<reader::Track>, DbError> {
         queries::artist_tracks(&self.pool(), source, artist, limit).await
-    }
-
-    async fn artist_albums(
-        &self,
-        source: &crate::Source,
-        artist: &str,
-    ) -> Result<Vec<reader::Album>, DbError> {
-        queries::artist_albums(&self.pool(), source, artist).await
     }
 
     async fn artist(
@@ -266,19 +261,31 @@ impl ReadStore for Native {
         queries::artists(&self.pool(), source).await
     }
 
-    async fn artist_album_covers(
+    async fn artists_page(
         &self,
-        source: &crate::Source,
-    ) -> Result<std::collections::HashMap<String, String>, DbError> {
-        queries::artist_album_covers(&self.pool(), source).await
+        query: &crate::ArtistQuery,
+        page: crate::Page,
+    ) -> Result<crate::Listing<crate::ArtistRow>, DbError> {
+        queries::artists_page(&self.pool(), query, page).await
     }
 
-    async fn artist_album_cover(
+    async fn artist_fallback_covers(
+        &self,
+        source: &crate::Source,
+    ) -> Result<std::collections::HashMap<String, reader::CoverRef>, DbError> {
+        queries::artist_fallback_covers(&self.pool(), source, None).await
+    }
+
+    async fn artist_fallback_cover(
         &self,
         source: &crate::Source,
         artist: &str,
-    ) -> Result<Option<String>, DbError> {
-        queries::artist_album_cover(&self.pool(), source, artist).await
+    ) -> Result<Option<reader::CoverRef>, DbError> {
+        Ok(
+            queries::artist_fallback_covers(&self.pool(), source, Some(artist))
+                .await?
+                .remove(artist),
+        )
     }
 
     async fn genres(&self, source: &crate::Source) -> Result<Vec<String>, DbError> {
@@ -299,6 +306,14 @@ impl ReadStore for Native {
 
     async fn albums(&self, source: &crate::Source) -> Result<Vec<reader::Album>, DbError> {
         queries::albums(&self.pool(), source).await
+    }
+
+    async fn albums_page(
+        &self,
+        query: &crate::AlbumQuery,
+        page: crate::Page,
+    ) -> Result<crate::Listing<reader::Album>, DbError> {
+        queries::albums_page(&self.pool(), query, page).await
     }
 
     async fn albums_recently_added(
@@ -348,6 +363,24 @@ impl ReadStore for Native {
         cfg_store::load_server(&self.pool(), id).await
     }
 
+    async fn load_sources(&self) -> Result<crate::StoredSources, DbError> {
+        cfg_store::load_sources(&self.pool()).await
+    }
+
+    async fn integration_credentials(
+        &self,
+    ) -> Result<std::collections::HashMap<String, String>, DbError> {
+        cfg_store::integration_credentials(&self.pool()).await
+    }
+
+    async fn playback_state(&self) -> Result<(f32, bool), DbError> {
+        cfg_store::playback_state(&self.pool()).await
+    }
+
+    async fn discord_presence_paused(&self) -> Result<Option<bool>, DbError> {
+        cfg_store::discord_presence_paused(&self.pool()).await
+    }
+
     async fn set_server_credentials(
         &self,
         id: &str,
@@ -372,12 +405,32 @@ impl ReadStore for Native {
     async fn scrobble_queue_all(&self) -> Result<Vec<crate::QueuedScrobbleRow>, DbError> {
         scrobble_queue::all(&self.pool()).await
     }
+
+    async fn frontend_prefs(&self, frontend: &str) -> Result<Vec<(String, String)>, DbError> {
+        frontend_prefs::all(&self.pool(), frontend).await
+    }
+
+    async fn listen_counts(&self) -> Result<std::collections::HashMap<String, u64>, DbError> {
+        cfg_store::listen_counts(&self.pool()).await
+    }
+
+    async fn offline_tracks(&self) -> Result<std::collections::HashMap<String, String>, DbError> {
+        cfg_store::offline_tracks(&self.pool()).await
+    }
+
+    async fn pinned_stations(&self) -> Result<Vec<String>, DbError> {
+        cfg_store::pinned_stations(&self.pool()).await
+    }
+
+    async fn downloader_history(&self) -> Result<Vec<config::DownloaderHistoryEntry>, DbError> {
+        cfg_store::downloader_history(&self.pool()).await
+    }
 }
 
 #[async_trait::async_trait]
 impl Storage for Native {
-    async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError> {
-        cfg_store::save_config(&self.pool(), cfg, &self.settings_path).await
+    async fn ensure_app_state(&self) -> Result<(), DbError> {
+        cfg_store::ensure_app_state(&self.pool()).await
     }
 
     async fn purge_source(&self, source: &crate::Source) -> Result<(), DbError> {
@@ -385,6 +438,43 @@ impl Storage for Native {
         cfg_store::purge_source(&mut tx, source.as_str()).await?;
         tx.commit().await?;
         Ok(())
+    }
+
+    async fn save_server(&self, server: &config::SavedServer) -> Result<(), DbError> {
+        cfg_store::save_server(&self.pool(), server).await
+    }
+
+    async fn save_active_server(&self, server: &config::MusicServer) -> Result<(), DbError> {
+        cfg_store::save_active_server(&self.pool(), server).await
+    }
+
+    async fn delete_server(&self, id: &str) -> Result<(), DbError> {
+        cfg_store::delete_server(&self.pool(), id).await
+    }
+
+    async fn set_active_source(&self, source: &crate::Source) -> Result<(), DbError> {
+        cfg_store::set_active_source(&self.pool(), source).await
+    }
+
+    async fn set_server_folders(&self, id: &str, folders: &[String]) -> Result<(), DbError> {
+        cfg_store::set_server_folders(&self.pool(), id, folders).await
+    }
+
+    async fn set_device_id(&self, device_id: &str) -> Result<(), DbError> {
+        cfg_store::set_device_id(&self.pool(), device_id).await
+    }
+
+    async fn set_integration_credential(&self, key: &str, value: &str) -> Result<(), DbError> {
+        let mut conn = self.pool().acquire().await?;
+        cfg_store::write_integration_credential(&mut conn, key, value).await
+    }
+
+    async fn set_playback_state(&self, volume: f32, muted: bool) -> Result<(), DbError> {
+        cfg_store::set_playback_state(&self.pool(), volume, muted).await
+    }
+
+    async fn set_discord_presence_paused(&self, paused: bool) -> Result<(), DbError> {
+        cfg_store::set_discord_presence_paused(&self.pool(), paused).await
     }
 
     async fn import_legacy_json(&self, config_dir: &Path) -> Result<crate::ImportReport, DbError> {
@@ -419,6 +509,14 @@ impl Storage for Native {
         name: &str,
     ) -> Result<bool, DbError> {
         writes::name_artist(&self.pool(), source, id, name).await
+    }
+
+    async fn name_artists(
+        &self,
+        source: &crate::Source,
+        named: &[(String, String)],
+    ) -> Result<usize, DbError> {
+        writes::name_artists(&self.pool(), source, named).await
     }
 
     async fn set_artist_image(
@@ -587,6 +685,27 @@ impl Storage for Native {
 
     async fn set_pinned_station(&self, id: &str, manifest: Option<&str>) -> Result<(), DbError> {
         writes::set_pinned_station(&self.pool(), id, manifest).await
+    }
+
+    async fn push_downloader_history(
+        &self,
+        entry: &config::DownloaderHistoryEntry,
+        limit: usize,
+    ) -> Result<(), DbError> {
+        cfg_store::push_downloader_history(&self.pool(), entry, limit).await
+    }
+
+    async fn clear_downloader_history(&self) -> Result<(), DbError> {
+        cfg_store::clear_downloader_history(&self.pool()).await
+    }
+
+    async fn set_frontend_prefs(
+        &self,
+        frontend: &str,
+        entries: &[(String, Option<String>)],
+        budget: usize,
+    ) -> Result<Option<Vec<String>>, DbError> {
+        frontend_prefs::set(&self.pool(), frontend, entries, budget).await
     }
 
     async fn cache_lyrics(
@@ -778,6 +897,19 @@ mod tests {
             .await
             .expect("migrate");
         (dir, pool)
+    }
+
+    #[tokio::test]
+    async fn the_locale_collation_sorts_accents_beside_their_letter() {
+        let (_dir, pool) = file_pool().await;
+        let names: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM (SELECT 'Zebra' AS name UNION ALL SELECT 'İbrahim' UNION ALL SELECT ' apple' UNION ALL SELECT 'Étoile' UNION ALL SELECT 'élan')
+             ORDER BY name COLLATE LOCALE",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("sorted");
+        assert_eq!(names, [" apple", "élan", "Étoile", "İbrahim", "Zebra"]);
     }
 
     /// sqlx does not know about a transaction it did not begin, so the guard

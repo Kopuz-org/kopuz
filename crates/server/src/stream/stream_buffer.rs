@@ -36,7 +36,7 @@ pub type BufferProgressCallback = Arc<dyn Fn(u64, u64, Option<u64>) + Send + Syn
 struct SharedState {
     buffer: Vec<u8>,
     done: bool,
-    error: Option<String>,
+    error: Option<(ErrorKind, String)>,
     total_size: Option<u64>,
     response_ready: bool,
     prebuffer_ready: bool,
@@ -111,7 +111,7 @@ impl StreamBuffer {
                 let mut hops = 0u8;
                 let result = loop {
                     if hops > 3 {
-                        break Err("too many playlist redirects".to_string());
+                        break Err((ErrorKind::Other, "too many playlist redirects".to_string()));
                     }
                     hops += 1;
                     let mut request = client.get(&url);
@@ -142,14 +142,32 @@ impl StreamBuffer {
                                     url = next;
                                 }
                                 None => {
-                                    break Err("playlist has no playable stream URL".to_string());
+                                    break Err((
+                                        ErrorKind::Other,
+                                        "playlist has no playable stream URL".to_string(),
+                                    ));
                                 }
                             }
                         }
-                        Ok(response) => break Err(format!("HTTP {}", response.status())),
+                        Ok(response) => {
+                            break Err((
+                                status_kind(response.status()),
+                                format!("HTTP {}", response.status()),
+                            ));
+                        }
                         // `without_url`: the URL a request failed on can carry
                         // credentials, and this string reaches the player UI.
-                        Err(e) => break Err(e.without_url().to_string()),
+                        Err(e) => {
+                            let e = e.without_url();
+                            // reqwest's own text stops at "error sending request"; the cause is in its sources.
+                            let mut chain = e.to_string();
+                            let mut source = std::error::Error::source(&e);
+                            while let Some(cause) = source {
+                                chain = format!("{chain}: {cause}");
+                                source = cause.source();
+                            }
+                            break Err((request_kind(&e), chain));
+                        }
                     }
                 };
 
@@ -211,7 +229,10 @@ impl StreamBuffer {
                             if total_buffered + chunk_len > MAX_BUFFER_SIZE {
                                 let (lock, notify) = &*state_clone;
                                 let mut state = lock.lock().await;
-                                state.error = Some("Buffer limit exceeded (1GB)".to_string());
+                                state.error = Some((
+                                    ErrorKind::Other,
+                                    "Buffer limit exceeded (1GB)".to_string(),
+                                ));
                                 state.done = true;
                                 state.prebuffer_ready = true;
                                 notify.notify_waiters();
@@ -267,7 +288,7 @@ impl StreamBuffer {
                     Err(e) => {
                         let (lock, notify) = &*state_clone;
                         let mut state = lock.lock().await;
-                        state.error = Some(e.to_string());
+                        state.error = Some(e);
                         state.done = true;
                         state.prebuffer_ready = true;
                         notify.notify_waiters();
@@ -314,6 +335,17 @@ impl StreamBuffer {
         }
     }
 
+    /// Why the request got no response, once [`Self::wait_for_response_headers`] returned; a source that failed here has nothing to probe.
+    pub fn response_error(&self) -> Option<IoError> {
+        let (lock, _) = &*self.state;
+        let state = lock.blocking_lock();
+        if state.response_ready {
+            return None;
+        }
+        let (kind, message) = state.error.as_ref()?;
+        Some(IoError::new(*kind, message.clone()))
+    }
+
     pub fn known_total_size(&self) -> Option<u64> {
         let (lock, _) = &*self.state;
         let state = lock.blocking_lock();
@@ -333,6 +365,24 @@ impl StreamBuffer {
             drop(state);
             std::thread::sleep(Duration::from_millis(5));
         }
+    }
+}
+
+/// A request that got no answer, told apart so playback can say the host is unreachable.
+fn request_kind(error: &reqwest::Error) -> ErrorKind {
+    if error.is_connect() {
+        ErrorKind::NotConnected
+    } else if error.is_timeout() {
+        ErrorKind::TimedOut
+    } else {
+        ErrorKind::Other
+    }
+}
+
+fn status_kind(status: reqwest::StatusCode) -> ErrorKind {
+    match status {
+        reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::GONE => ErrorKind::NotFound,
+        _ => ErrorKind::Other,
     }
 }
 
@@ -362,8 +412,8 @@ impl Read for StreamBuffer {
         loop {
             let state = lock.blocking_lock();
 
-            if let Some(err) = &state.error {
-                return Err(IoError::other(err.clone()));
+            if let Some((kind, err)) = &state.error {
+                return Err(IoError::new(*kind, err.clone()));
             }
 
             let current_len = state.buffer.len() as u64;
@@ -379,8 +429,8 @@ impl Read for StreamBuffer {
             }
 
             if state.done {
-                if let Some(err) = &state.error {
-                    return Err(IoError::other(err.clone()));
+                if let Some((kind, err)) = &state.error {
+                    return Err(IoError::new(*kind, err.clone()));
                 }
                 return Ok(0);
             }

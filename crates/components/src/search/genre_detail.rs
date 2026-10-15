@@ -3,7 +3,7 @@ use crate::showcase::{self};
 use crate::track_row::TrackRow;
 use crate::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use api::TrackInfo as Track;
-use config::{AppConfig, UiStyle};
+use config::{Settings, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
@@ -25,9 +25,8 @@ pub fn SearchGenreDetail(
     mut selected_track_for_playlist: Signal<Option<String>>,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-    let config = use_context::<Signal<AppConfig>>();
-    let offline_tracks = config.read().offline_tracks.clone();
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let settings = use_context::<Signal<Settings>>();
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
     let sort_state = use_signal(|| None);
     let sorted_genre_tracks = showcase::sorted_tracks(&genre_tracks, *sort_state.read());
     let genre_tracks_list: Vec<Track> = sorted_genre_tracks.clone();
@@ -86,13 +85,7 @@ pub fn SearchGenreDetail(
                             p {
                                 class: "text-sm mb-3",
                                 style: "color: rgba(255,255,255,0.45);",
-                                {
-                                    if genre_tracks.len() == 1 {
-                                        i18n::t("track_count_singular").to_string()
-                                    } else {
-                                        i18n::t_with("track_count", &[("count", genre_tracks.len().to_string())])
-                                    }
-                                }
+                                {i18n::t_with("track_count", &[("count", genre_tracks.len().into())])}
                             }
                             div { class: "flex items-center gap-2 flex-wrap",
                                 if !genre_tracks.is_empty() {
@@ -148,13 +141,7 @@ pub fn SearchGenreDetail(
                              h2 { class: "text-sm font-bold text-white/60 mb-2", "{i18n::t(\"genre\")}" }
                              h1 { class: "text-5xl font-bold text-white mb-4", "{genre}" }
                              p { class: "text-slate-400",
-                                 {
-                                     if genre_tracks.len() == 1 {
-                                         i18n::t("track_count_singular").to_string()
-                                     } else {
-                                         i18n::t_with("track_count", &[("count", genre_tracks.len().to_string())])
-                                     }
-                                 }
+                                 {i18n::t_with("track_count", &[("count", genre_tracks.len().into())])}
                              }
                          }
                     }
@@ -194,9 +181,7 @@ pub fn SearchGenreDetail(
                                  && track.duration_secs() == Some(current_song_duration);
                              let is_currently_playing: bool = matches_current_path || matches_current_metadata;
                              let is_menu_open = active_menu_track.read().as_ref() == Some(&track.uid);
-                             let is_downloaded = offline_tracks
-                                 .get(&track.key)
-                                 .is_some_and(|path| std::path::Path::new(path).exists());
+                             let is_downloaded = track.offline;
 
                              rsx! {
                                  TrackRow {

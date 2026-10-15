@@ -93,14 +93,19 @@ async fn migration_is_idempotent() {
 #[tokio::test]
 async fn migration_imports_servers_and_active_source() {
     let (db, dir) = import(LEGACY_CONFIG).await;
-    let cfg = db.load_config().await.unwrap().expect("config present");
+    assert!(db.has_app_state().await.unwrap(), "state present");
+    let sources = db.load_sources().await.unwrap();
 
-    assert_eq!(cfg.servers.len(), 2);
-    assert_eq!(cfg.active_source.server_id(), Some("s1"));
+    assert_eq!(sources.servers.len(), 2);
+    assert_eq!(sources.active.server_id(), Some("s1"));
     assert_eq!(
-        cfg.server.as_ref().and_then(|s| s.access_token.as_deref()),
+        sources
+            .server
+            .as_ref()
+            .and_then(|s| s.access_token.as_deref()),
         Some("tok")
     );
+    assert!(sources.device_id.is_some(), "the import stores a device id");
 
     let _ = std::fs::remove_dir_all(dir);
 }

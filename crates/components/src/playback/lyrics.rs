@@ -1,4 +1,4 @@
-use config::AppConfig;
+use config::Settings;
 use dioxus::{document::eval, prelude::*};
 use hooks::PlayerController;
 
@@ -410,7 +410,7 @@ fn build_display_lines(
 pub fn LyricsView(
     lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
     current_song_progress: Signal<u64>,
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     layout: LayoutMode,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
@@ -933,16 +933,16 @@ pub fn LyricsView(
                 loop {
                     // The clock runs ahead of the speakers; hold the lyrics back.
                     let (offset_secs, depth_blur_enabled, depth_blur_strength) = {
-                        let cfg = config.peek();
-                        let offset_secs = if cfg.lyrics_offset_auto {
+                        let cfg = settings.peek();
+                        let offset_secs = if cfg.lyrics.lyrics_offset_auto {
                             ctrl.output_latency_secs()
                         } else {
-                            f64::from(cfg.lyrics_offset_ms) / 1000.0
+                            f64::from(cfg.lyrics.lyrics_offset_ms) / 1000.0
                         };
                         (
                             offset_secs,
-                            cfg.lyrics_depth_blur,
-                            cfg.lyrics_depth_blur_strength,
+                            cfg.lyrics.lyrics_depth_blur,
+                            cfg.lyrics.lyrics_depth_blur_strength,
                         )
                     };
                     let current_time = ctrl.displayed_progress_secs_f64() - offset_secs;

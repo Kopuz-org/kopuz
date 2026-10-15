@@ -16,9 +16,9 @@ use api::{ApiError, ExternalDevice};
 use reader::Track;
 use server::spotify::host::{HostEvent, SpotifyHost};
 
-use crate::config_service::ConfigService;
 use crate::external::{ExternalPlayer, ExternalReport};
 use crate::session::SessionHandle;
+use crate::sources::SourceService;
 
 /// How often a selected Connect device is asked what it is doing. It is a
 /// remote poll, so it is slow enough not to be rude and fast enough that a
@@ -36,7 +36,7 @@ const COMMAND_GRACE: Duration = Duration::from_secs(3);
 pub struct SpotifySink {
     me: std::sync::OnceLock<std::sync::Weak<SpotifySink>>,
     session: SessionHandle,
-    config: Arc<ConfigService>,
+    sources: Arc<SourceService>,
     state: Mutex<State>,
 }
 
@@ -62,9 +62,9 @@ struct State {
     poll: Option<tokio::task::JoinHandle<()>>,
 }
 
-/// The Web API access token `config` holds for an active Spotify source.
-fn access_of(config: &config::AppConfig) -> Option<String> {
-    let server = config.server.as_ref()?;
+/// The Web API access token `sources` hold for an active Spotify source.
+fn access_of(sources: &server::sources::Sources) -> Option<String> {
+    let server = sources.server.as_ref()?;
     if server.service != config::MusicService::Spotify {
         return None;
     }
@@ -74,11 +74,11 @@ fn access_of(config: &config::AppConfig) -> Option<String> {
 }
 
 impl SpotifySink {
-    pub fn new(session: SessionHandle, config: Arc<ConfigService>) -> Arc<Self> {
+    pub fn new(session: SessionHandle, sources: Arc<SourceService>) -> Arc<Self> {
         let sink = Arc::new(Self {
             me: std::sync::OnceLock::new(),
             session,
-            config,
+            sources,
             state: Mutex::new(State::default()),
         });
         let _ = sink.me.set(Arc::downgrade(&sink));
@@ -100,7 +100,7 @@ impl SpotifySink {
 
     /// The account's access token, when Spotify is the active server.
     fn access(&self) -> Option<String> {
-        access_of(&self.session.config_watch().borrow())
+        access_of(&self.session.sources())
     }
 
     fn require_access(&self) -> Result<String, ApiError> {
@@ -119,7 +119,7 @@ impl SpotifySink {
         let selected = self.with_state(|state| state.selected.clone());
         let devices = server::spotify::api::devices(&access)
             .await
-            .map_err(ApiError::internal)?;
+            .map_err(crate::sources::source_error)?;
         Ok(devices
             .into_iter()
             // This app's own SDK device is offered as "this app", not as one
@@ -153,7 +153,7 @@ impl SpotifySink {
         let playing = self.session.state().phase == api::Phase::Playing;
         server::spotify::api::transfer_playback(&access, &target, playing)
             .await
-            .map_err(ApiError::internal)
+            .map_err(crate::sources::source_error)
     }
 
     /// Adopt a device that is already playing on its own, which is how a
@@ -163,8 +163,9 @@ impl SpotifySink {
     fn adopt(self: &Arc<Self>, device_id: String) {
         let wanted = self
             .session
-            .config_watch()
+            .settings_watch()
             .borrow()
+            .spotify
             .spotify_prefer_active_device;
         let adopt = self.with_state(|state| {
             let prefer = wanted && !state.chosen && state.selected.is_none();
@@ -263,7 +264,13 @@ impl SpotifySink {
             self.with_state(|state| state.starting = false);
             return;
         };
-        let browser = self.session.config_watch().borrow().spotify_browser.clone();
+        let browser = self
+            .session
+            .settings_watch()
+            .borrow()
+            .spotify
+            .spotify_browser
+            .clone();
         let sink = self.clone();
         tokio::spawn(async move {
             match SpotifyHost::start(access, browser).await {
@@ -444,12 +451,11 @@ impl SpotifySink {
         })
     }
 
-    /// Swap the stored token for a fresh one. The credential never leaves the
-    /// daemon, so this is a config write only it can make.
+    /// Swap the stored token for a fresh one; the credential never leaves the daemon, so only it can make this write.
     async fn refresh(&self) -> Result<(), ApiError> {
         let (packed, client_id) = {
-            let config = self.session.config_watch().borrow().clone();
-            let server = config
+            let sources = self.session.sources();
+            let server = sources
                 .server
                 .as_ref()
                 .filter(|server| server.service == config::MusicService::Spotify)
@@ -473,9 +479,9 @@ impl SpotifySink {
             .await
             .map_err(ApiError::internal)?;
         let saved = self
-            .config
-            .mutate_state(&["server"], move |config| {
-                if let Some(server) = config.server.as_mut()
+            .sources
+            .mutate(move |sources| {
+                if let Some(server) = sources.server.as_mut()
                     && server.service == config::MusicService::Spotify
                     && server.url == client_id
                 {

@@ -19,6 +19,7 @@ use crate::session::SessionHandle;
 pub struct PlaylistService {
     db: db::Db,
     session: SessionHandle,
+    favorites: std::sync::OnceLock<Arc<crate::FavoritesService>>,
 }
 
 fn source_error(error: server::source::SourceError) -> ApiError {
@@ -39,22 +40,34 @@ fn db_error(error: db::DbError) -> ApiError {
 
 impl PlaylistService {
     pub fn new(db: db::Db, session: SessionHandle) -> Arc<Self> {
-        Arc::new(Self { db, session })
+        Arc::new(Self {
+            db,
+            session,
+            favorites: std::sync::OnceLock::new(),
+        })
     }
 
-    fn config(&self) -> config::AppConfig {
-        self.session.config_watch().borrow().clone()
+    /// Late-bound like the artwork service's siblings; without it a sync skips the favorites pull.
+    pub fn attach_favorites(&self, favorites: Arc<crate::FavoritesService>) {
+        let _ = self.favorites.set(favorites);
+    }
+
+    fn active(&self) -> config::Source {
+        self.session.sources().active.clone()
     }
 
     fn active_source(&self) -> server::source::ActiveSource {
-        Arc::from(server::source::active(self.db.clone(), &self.config()))
+        Arc::from(server::source::active(
+            self.db.clone(),
+            &self.session.sources(),
+        ))
     }
 
     pub async fn catalog(&self) -> Result<PlaylistCatalog, ApiError> {
-        let config = self.config();
+        let sources = self.session.sources();
         let store = self
             .db
-            .load_playlists(&config.active_source)
+            .load_playlists(&sources.active)
             .await
             .map_err(db_error)?;
         // A playlist with no cover of its own borrows its first track's, so
@@ -66,7 +79,7 @@ impl PlaylistService {
             .collect();
         let first_tracks: std::collections::HashMap<String, reader::Track> = self
             .db
-            .tracks_by_keys(&config.active_source, &first_keys)
+            .tracks_by_keys(&sources.active, &first_keys)
             .await
             .map_err(db_error)?
             .into_iter()
@@ -79,7 +92,7 @@ impl PlaylistService {
                 .map(|playlist| PlaylistInfo {
                     artwork: crate::artwork::playlist_ref(
                         &playlist,
-                        &config,
+                        sources.server.as_ref(),
                         playlist
                             .tracks
                             .first()
@@ -109,7 +122,7 @@ impl PlaylistService {
         playlist_id: &str,
         index: usize,
     ) -> Result<reader::Track, ApiError> {
-        let source = self.config().active_source;
+        let source = self.active();
         let entry = self
             .entries(playlist_id)
             .await?
@@ -130,7 +143,7 @@ impl PlaylistService {
 
     async fn entries(&self, playlist_id: &str) -> Result<Vec<reader::PlaylistEntry>, ApiError> {
         self.db
-            .playlist_entries(&self.config().active_source, playlist_id)
+            .playlist_entries(&self.active(), playlist_id)
             .await
             .map_err(db_error)
     }
@@ -339,10 +352,11 @@ impl PlaylistService {
     pub fn spawn_sync(
         self: &Arc<Self>,
         runner: &crate::jobs::JobRunner,
+        trigger: crate::jobs::Trigger,
     ) -> Result<api::JobRef, ApiError> {
         let service = self.clone();
-        runner.start(api::JobKind::PlaylistSync, move |ctx| async move {
-            let source = service.config().active_source;
+        runner.start_as(api::JobKind::PlaylistSync, trigger, move |ctx| async move {
+            let source = service.active();
             let result = service.sync(&ctx).await;
             if result.is_ok() && !ctx.cancelled() {
                 crate::auto_sync::mark_synced(&service.db, api::JobKind::PlaylistSync, &source)
@@ -359,9 +373,21 @@ impl PlaylistService {
                 "the active source has no playlist sync",
             ));
         }
+        // A server's liked-songs playlist is built from its favorites, so those come first; nobody asked for them, so the pull keeps its staleness gate.
+        if let Some(favorites) = self.favorites.get()
+            && let Err(error) = favorites
+                .sync(
+                    server::sync::SyncReason::Interval,
+                    crate::favorites::Import::UnlessRecent,
+                    Some(ctx),
+                )
+                .await
+        {
+            tracing::warn!(%error, "favorites pull before the playlist sync failed");
+        }
         let existing = self
             .db
-            .load_playlists(&self.config().active_source)
+            .load_playlists(&self.active())
             .await
             .map_err(db_error)?
             .playlists;

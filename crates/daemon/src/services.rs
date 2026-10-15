@@ -7,8 +7,8 @@
 //! no change at all on the other side of the API.
 
 use api::schema::{ChoiceOption, FieldKind, FieldSpec, FieldValue, Icon, Problem, Text, value_of};
-use api::{ServiceInfo, ServiceRef, SignInKind, SourceDraft};
-use config::{AppConfig, Browser, MusicService, SavedServer};
+use api::{ErrorReason, ServiceInfo, ServiceRef, SignInKind, SourceDraft};
+use config::{Browser, MusicService, SavedServer, Settings};
 
 /// The field keys a form and its answers agree on.
 pub const URL: &str = "url";
@@ -105,7 +105,7 @@ pub fn folders() -> ServiceInfo {
         icon: Icon::Class("fa-solid fa-folder-tree".into()),
         accent: "#6366f1".to_string(),
         experimental: false,
-        fields: vec![directories_field(&[])],
+        fields: vec![folder_source_field(&[])],
     }
 }
 
@@ -128,15 +128,32 @@ pub fn directories_field(paths: &[String]) -> FieldSpec {
     }
 }
 
+/// The folders of a folder source, which live in the settings file, so a layer that pins them renders the field locked.
+pub fn folder_source_field(paths: &[String]) -> FieldSpec {
+    FieldSpec {
+        config_key: Some(
+            config::SettingKey::Library(config::LibraryKey::LocalSources)
+                .name()
+                .to_string(),
+        ),
+        ..directories_field(paths)
+    }
+}
+
 /// What is wrong with a folder source's answers.
-pub fn check_folders(draft: &SourceDraft) -> Vec<Problem> {
+pub fn check_folders(draft: &SourceDraft) -> Vec<FormProblem> {
     let mut problems = Vec::new();
     if draft.name.trim().is_empty() {
-        problems.push(Problem::on("name", Text::key("server_name_required")));
+        problems.push(FormProblem::on("name", ErrorReason::SourceNameRequired));
     }
     let paths = folder_paths(&draft.values);
-    if paths.is_empty() || paths.iter().any(|path| path.trim().is_empty()) {
-        problems.push(Problem::on(DIRECTORIES, Text::key("folder_required")));
+    if paths.iter().any(|path| path.trim().is_empty()) {
+        problems.push(FormProblem::on(DIRECTORIES, ErrorReason::EmptySourceFolder));
+    } else if paths.is_empty() {
+        problems.push(FormProblem::on(
+            DIRECTORIES,
+            ErrorReason::SourceFolderRequired,
+        ));
     }
     problems
 }
@@ -421,7 +438,7 @@ fn webview_fields(mut fields: Vec<FieldSpec>) -> Vec<FieldSpec> {
 }
 
 /// The options a configured source has, with the values it currently holds.
-pub fn settings(server: &ServerView<'_>, config: &AppConfig) -> Vec<FieldSpec> {
+pub fn settings(server: &ServerView<'_>, config: &Settings) -> Vec<FieldSpec> {
     let browser = server.browser.map(|browser| browser.id().to_string());
     let fields = match server.service {
         MusicService::YtMusic | MusicService::SoundCloud if !server.anonymous => {
@@ -466,6 +483,7 @@ pub fn settings(server: &ServerView<'_>, config: &AppConfig) -> Vec<FieldSpec> {
                 FieldSpec {
                     value: Some(
                         config
+                            .spotify
                             .spotify_browser
                             .clone()
                             .unwrap_or_else(|| AUTOMATIC.to_string()),
@@ -481,7 +499,7 @@ pub fn settings(server: &ServerView<'_>, config: &AppConfig) -> Vec<FieldSpec> {
                     )
                 },
                 FieldSpec {
-                    value: Some(config.spotify_prefer_active_device.to_string()),
+                    value: Some(config.spotify.spotify_prefer_active_device.to_string()),
                     config_key: Some("spotify_prefer_active_device".to_string()),
                     help: Some(Text::key("prefer_active_device_help")),
                     ..text_field(
@@ -531,26 +549,26 @@ fn anonymous_draft(draft: &SourceDraft) -> bool {
 }
 
 /// What saving this draft would need, and what is wrong with it.
-pub fn check(service: MusicService, draft: &SourceDraft) -> (SignInKind, Vec<Problem>) {
+pub fn check(service: MusicService, draft: &SourceDraft) -> (SignInKind, Vec<FormProblem>) {
     let mut problems = Vec::new();
     if draft.name.trim().is_empty() {
-        problems.push(Problem::on("name", Text::key("server_name_required")));
+        problems.push(FormProblem::on("name", ErrorReason::SourceNameRequired));
     }
     let value = |key: &str| value_of(&draft.values, key).unwrap_or_default().trim();
     match service {
         MusicService::Spotify => {
             if value(CLIENT_ID).is_empty() {
-                problems.push(Problem::on(
+                problems.push(FormProblem::on(
                     CLIENT_ID,
-                    Text::key("spotify_client_id_required"),
+                    ErrorReason::SpotifyClientIdRequired,
                 ));
             }
         }
         MusicService::AppleMusic => {
             if value(STOREFRONT).is_empty() {
-                problems.push(Problem::on(
+                problems.push(FormProblem::on(
                     STOREFRONT,
-                    Text::key("apple_music_storefront_required"),
+                    ErrorReason::AppleMusicStorefrontRequired,
                 ));
             }
             if value_of(&draft.values, AUTH_METHOD) == Some(MANUAL)
@@ -559,18 +577,18 @@ pub fn check(service: MusicService, draft: &SourceDraft) -> (SignInKind, Vec<Pro
                     .unwrap_or_default()
                     .is_empty()
             {
-                problems.push(Problem::on(TOKEN, Text::key("apple_music_token_required")));
+                problems.push(FormProblem::on(TOKEN, ErrorReason::AppleMusicTokenRequired));
             }
         }
         MusicService::YtMusic | MusicService::SoundCloud | MusicService::Clippsly => {}
         MusicService::Smb => {
             if server::smb::Location::parse(value(URL)).is_err() {
-                problems.push(Problem::on(URL, Text::key("invalid_smb_url")));
+                problems.push(FormProblem::on(URL, ErrorReason::InvalidSmbUrl));
             }
         }
         _ => {
             if !value(URL).starts_with("http") {
-                problems.push(Problem::on(URL, Text::key("invalid_server_url")));
+                problems.push(FormProblem::on(URL, ErrorReason::InvalidServerUrl));
             }
         }
     }
@@ -612,16 +630,17 @@ pub fn apply(service: MusicService, draft: &SourceDraft, saved: &mut SavedServer
 }
 
 /// Which settings keys belong to the config rather than the server row.
-pub fn config_keys(server: &SavedServer, values: &[FieldValue]) -> Vec<&'static str> {
+pub fn config_keys(server: &SavedServer, values: &[FieldValue]) -> Vec<config::SettingKey> {
+    use config::{SettingKey, SpotifyKey};
     if server.service != MusicService::Spotify {
         return Vec::new();
     }
     let mut keys = Vec::new();
     if value_of(values, PLAYBACK_BROWSER).is_some() {
-        keys.push("spotify_browser");
+        keys.push(SettingKey::Spotify(SpotifyKey::SpotifyBrowser));
     }
     if value_of(values, PREFER_ACTIVE_DEVICE).is_some() {
-        keys.push("spotify_prefer_active_device");
+        keys.push(SettingKey::Spotify(SpotifyKey::SpotifyPreferActiveDevice));
     }
     keys
 }
@@ -644,25 +663,54 @@ pub fn apply_server_settings(values: &[FieldValue], saved: &mut SavedServer) {
 }
 
 /// The same for the answers that live in the settings rather than on the row.
-pub fn apply_config_settings(service: MusicService, values: &[FieldValue], config: &mut AppConfig) {
+pub fn apply_config_settings(service: MusicService, values: &[FieldValue], config: &mut Settings) {
     if service != MusicService::Spotify {
         return;
     }
     if let Some(host) = value_of(values, PLAYBACK_BROWSER) {
-        config.spotify_browser = (host != AUTOMATIC).then(|| host.to_string());
+        config.spotify.spotify_browser = (host != AUTOMATIC).then(|| host.to_string());
     }
     if let Some(prefer) = value_of(values, PREFER_ACTIVE_DEVICE) {
-        config.spotify_prefer_active_device = prefer == "true";
+        config.spotify.spotify_prefer_active_device = prefer == "true";
     }
 }
 
 /// What a refusal says when a draft is saved without being checked first. A
 /// client renders the [`Problem`] itself; this is for the log.
-pub fn problem_text(problem: &Problem) -> String {
-    match &problem.label {
-        Text::Key(key) => key.clone(),
-        Text::Literal(text) => text.clone(),
+/// One thing wrong with a draft: a field a form marks and translates, and the reason a save that skipped the check is refused with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FormProblem {
+    pub field: &'static str,
+    pub reason: ErrorReason,
+}
+
+impl FormProblem {
+    pub fn on(field: &'static str, reason: ErrorReason) -> Self {
+        Self { field, reason }
     }
+
+    pub fn problem(&self) -> Problem {
+        Problem::on(self.field, Text::key(self.reason.message_key()))
+    }
+
+    pub fn error(&self) -> api::ApiError {
+        let message = match self.reason {
+            ErrorReason::SourceNameRequired => "a source needs a name",
+            ErrorReason::SourceFolderRequired => "a folder source needs at least one folder",
+            ErrorReason::EmptySourceFolder => "a source directory cannot be empty",
+            ErrorReason::SpotifyClientIdRequired => "a Spotify source needs a client id",
+            ErrorReason::AppleMusicStorefrontRequired => "an Apple Music source needs a storefront",
+            ErrorReason::AppleMusicTokenRequired => "an Apple Music token sign-in needs a token",
+            ErrorReason::InvalidSmbUrl => "not an SMB address",
+            ErrorReason::InvalidServerUrl => "the server address must be an http(s) URL",
+            _ => "the source form is not complete",
+        };
+        api::ApiError::invalid_input(message).because(self.reason)
+    }
+}
+
+pub fn problems(found: &[FormProblem]) -> Vec<Problem> {
+    found.iter().map(FormProblem::problem).collect()
 }
 
 #[cfg(test)]

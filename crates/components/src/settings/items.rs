@@ -1,5 +1,5 @@
 use config::{
-    AppConfig, BackBehavior, ChannelMode, DeviceChangeBehavior, ReplayGainMode, SampleRateMode,
+    BackBehavior, ChannelMode, DeviceChangeBehavior, ReplayGainMode, SampleRateMode, Settings,
 };
 use dioxus::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -10,9 +10,7 @@ static APP_SELECT_ID: AtomicUsize = AtomicUsize::new(0);
 pub fn SettingItem(
     title: String,
     control: Element,
-    /// The top-level `AppConfig` field this row edits. When the field is
-    /// pinned by a managed config layer (Nix/hjem file, drop-in, env var),
-    /// the row renders locked. Empty = never locked.
+    /// The top-level `Settings` key this row edits, rendered locked when a managed layer (Nix/hjem file, drop-in, env var) pins it; empty is never locked.
     #[props(default)]
     config_key: String,
     /// The other top-level fields a composite control edits (the Last.fm
@@ -26,10 +24,14 @@ pub fn SettingItem(
     stacked: bool,
     #[props(default)] nested: bool,
 ) -> Element {
-    let locked = try_consume_context::<hooks::config_view::LockedKeys>().is_some_and(|layers| {
-        (!config_key.is_empty() && layers.is_locked(&config_key))
-            || extra_config_keys.iter().any(|key| layers.is_locked(key))
+    let lock = try_consume_context::<hooks::config_view::LockedKeys>().and_then(|layers| {
+        std::iter::once(config_key.as_str())
+            .filter(|key| !key.is_empty())
+            .chain(extra_config_keys.iter().copied())
+            .find_map(|key| layers.lock_of_name(key))
     });
+    let locked = lock.is_some();
+    let cited = lock.as_ref().map(cite_lock).unwrap_or_default();
     let nested_class = if nested { "settings-row-nested" } else { "" };
     rsx! {
         div {
@@ -40,26 +42,44 @@ pub fn SettingItem(
                 if locked {
                     i {
                         class: "fa-solid fa-lock text-[10px] text-white/40",
-                        title: i18n::t("setting_managed_by_system"),
+                        title: "{cited}",
                     }
+                    span { class: "min-w-0 truncate text-[10px] text-white/40", title: "{cited}", "{cited}" }
                 }
             }
             if locked {
-                // `inert` is what actually disables the control: it takes the
-                // whole subtree out of the tab order and drops click/key
-                // events, so a managed setting can't be changed by keyboard
-                // either. The class/aria only cover the look and the a11y
-                // label.
+                // `inert` takes the subtree out of the tab order and drops click/key events, so a managed setting can't be changed by keyboard either.
                 div {
                     class: "opacity-50 pointer-events-none select-none",
                     inert: true,
                     aria_disabled: true,
-                    title: i18n::t("setting_managed_by_system"),
+                    title: "{cited}",
                     {control}
                 }
             } else {
                 {control}
             }
+        }
+    }
+}
+
+/// What a locked row says pins it: the managed file's or drop-in's path, or the env var's name.
+fn cite_lock(by: &config::store::LockSource) -> String {
+    use config::store::LockSource;
+    match by {
+        LockSource::Managed(path) if path.as_os_str().is_empty() => {
+            i18n::t("setting_managed_by_system")
+        }
+        LockSource::Managed(path) => i18n::t_with(
+            "setting_locked_by_file",
+            &[("path", path.display().to_string().into())],
+        ),
+        LockSource::DropIn(path) => i18n::t_with(
+            "setting_locked_by_dropin",
+            &[("path", path.display().to_string().into())],
+        ),
+        LockSource::Env(var) => {
+            i18n::t_with("setting_locked_by_env", &[("var", var.clone().into())])
         }
     }
 }
@@ -337,9 +357,10 @@ pub fn LanguageSelector(current_language: String, on_change: EventHandler<String
 
 #[component]
 pub fn ThemeSelector(current_theme: String, on_change: EventHandler<String>) -> Element {
-    let config = use_context::<Signal<AppConfig>>();
-    let mut custom: Vec<(String, String)> = config
+    let settings = use_context::<Signal<Settings>>();
+    let mut custom: Vec<(String, String)> = settings
         .read()
+        .ui
         .custom_themes
         .iter()
         .map(|(id, ct)| (id.clone(), ct.name.clone()))
@@ -578,7 +599,14 @@ pub fn range_style(value: f64, min: f64, max: f64) -> String {
 
 /// A dB slider with a signed monospace readout, for the two ReplayGain trims.
 #[component]
-pub fn GainSlider(value: f32, min: f32, max: f32, on_change: EventHandler<f32>) -> Element {
+pub fn GainSlider(
+    value: f32,
+    min: f32,
+    max: f32,
+    on_preview: EventHandler<f32>,
+    on_commit: EventHandler<f32>,
+) -> Element {
+    let parse = move |raw: String| raw.parse::<f32>().ok().map(|db| db.clamp(min, max));
     rsx! {
         div { class: "settings-slider flex items-center gap-3 min-w-[220px]",
             input {
@@ -590,8 +618,13 @@ pub fn GainSlider(value: f32, min: f32, max: f32, on_change: EventHandler<f32>) 
                 class: "w-40",
                 style: range_style(f64::from(value), f64::from(min), f64::from(max)),
                 oninput: move |evt| {
-                    if let Ok(parsed) = evt.value().parse::<f32>() {
-                        on_change.call(parsed.clamp(min, max));
+                    if let Some(db) = parse(evt.value()) {
+                        on_preview.call(db);
+                    }
+                },
+                onchange: move |evt| {
+                    if let Some(db) = parse(evt.value()) {
+                        on_commit.call(db);
                     }
                 }
             }
@@ -663,7 +696,7 @@ pub fn RadioRegistryDropdown(
                         {
                             let enabled_count = registries.iter().filter(|r| r.enabled).count();
                             let total = registries.len();
-                            i18n::t_with("radio_registries_active", &[("enabled_count", enabled_count.to_string()), ("total", total.to_string())])
+                            i18n::t_with("radio_registries_active", &[("enabled_count", enabled_count.into()), ("total", total.into())])
                         }
                     }
                 }

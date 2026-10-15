@@ -3,7 +3,7 @@ use crate::showcase::{self};
 use crate::track_row::TrackRow;
 use crate::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use api::{AlbumInfo as Album, TrackInfo as Track};
-use config::{AppConfig, UiStyle};
+use config::{Settings, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
@@ -25,9 +25,8 @@ pub fn SearchResults(
     on_select_album: EventHandler<String>,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-    let config = use_context::<Signal<AppConfig>>();
-    let offline_tracks = config.read().offline_tracks.clone();
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let settings = use_context::<Signal<Settings>>();
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
     let sort_state = use_signal(|| None);
     let sorted_tracks = showcase::sorted_tracks(&tracks, *sort_state.read());
     let search_queue: Vec<Track> = sorted_tracks.clone();
@@ -127,9 +126,7 @@ pub fn SearchResults(
                                     && track.duration_secs() == Some(current_song_duration);
                                 let is_currently_playing: bool = matches_current_path || matches_current_metadata;
                                 let is_menu_open = active_menu_track.read().as_ref() == Some(&track.uid);
-                                let is_downloaded = offline_tracks
-                                    .get(&track.key)
-                                    .is_some_and(|path| std::path::Path::new(path).exists());
+                                let is_downloaded = track.offline;
 
                                 rsx! {
                                     TrackRow {
@@ -211,7 +208,7 @@ pub fn SearchResults(
 
             if tracks.is_empty() && albums.is_empty() {
                 div { class: "text-center py-12 text-slate-500",
-                    p { "{i18n::t_with(\"no_results_found\", &[(\"query\", search_query.to_string())])}" }
+                    p { "{i18n::t_with(\"no_results_found\", &[(\"query\", search_query.to_string().into())])}" }
                 }
             }
         }

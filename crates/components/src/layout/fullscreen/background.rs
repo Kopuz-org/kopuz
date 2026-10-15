@@ -1,17 +1,17 @@
-use config::AppConfig;
+use config::Settings;
 use dioxus::prelude::*;
 
 pub(crate) fn use_fullscreen_background(
     palette: Signal<Option<Vec<utils::color::Color>>>,
 ) -> (Memo<String>, Memo<Option<String>>) {
-    let config = use_context::<Signal<AppConfig>>();
+    let settings = use_context::<Signal<Settings>>();
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
 
     let background_style = use_memo(move || {
-        let conf = config.read();
-        if conf.theme == "album-art"
-            && !conf.cover_art_background
-            && conf.custom_background_path.is_empty()
+        let conf = settings.read();
+        if conf.ui.theme == "album-art"
+            && !conf.background.cover_art_background
+            && conf.background.custom_background_path.is_empty()
         {
             utils::color::get_background_style(palette.read().as_deref())
         } else {
@@ -20,12 +20,12 @@ pub(crate) fn use_fullscreen_background(
     });
 
     let cover_background = use_memo(move || {
-        let conf = config.read();
-        if !conf.custom_background_path.is_empty() {
-            let path = std::path::PathBuf::from(&conf.custom_background_path);
+        let conf = settings.read();
+        if !conf.background.custom_background_path.is_empty() {
+            let path = std::path::PathBuf::from(&conf.background.custom_background_path);
             return utils::format_artwork_url(Some(&path)).map(|url| url.as_ref().to_string());
         }
-        if conf.cover_art_background {
+        if conf.background.cover_art_background {
             return ctrl.current_cover_url(hooks::artwork::Size::Full);
         }
         None

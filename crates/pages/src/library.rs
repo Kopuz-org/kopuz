@@ -12,7 +12,7 @@ use components::sort_control::SortControl;
 use components::stat_card::StatCard;
 use components::track_row::TrackRow;
 use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
-use config::{AppConfig, TrackSortField, UiStyle};
+use config::{Settings, TrackSortField, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{
     WindowRows, use_active_source, use_albums, use_artists, use_playlists, use_tracks_window,
@@ -34,7 +34,7 @@ fn window_padding(total_tracks: usize, window: &WindowRows) -> (f64, f64) {
 
 #[component]
 pub fn LibraryPage(
-    mut config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     on_rescan: EventHandler,
     mut is_playing: Signal<bool>,
     mut current_playing: Signal<u64>,
@@ -49,7 +49,8 @@ pub fn LibraryPage(
     let caps = hooks::sources::use_capabilities();
     let downloads = hooks::downloads::use_downloads();
 
-    let library_sort = use_signal(|| config.peek().library_sort.clone());
+    let mut prefs = hooks::ui_prefs::use_ui_prefs();
+    let library_sort = use_signal(|| prefs.peek().library_sort.clone());
     let filter = use_memo(move || {
         // The source is the daemon's; naming it here only keeps the memo
         // re-running across a switch.
@@ -61,13 +62,15 @@ pub fn LibraryPage(
     });
     use_effect(move || {
         let curr = library_sort.read().clone();
-        if config.peek().library_sort != curr {
-            config.write().library_sort = curr;
+        if prefs.peek().library_sort != curr {
+            prefs.write().library_sort = curr;
         }
     });
 
-    let albums_res = use_albums(source);
-    let artists_res = use_artists(source);
+    let albums_query = use_memo(|| Some(hooks::AlbumQuery::default()));
+    let artists_query = use_memo(hooks::ArtistQuery::default);
+    let albums_res = use_albums(source, albums_query);
+    let artists_res = use_artists(source, artists_query);
     let playlists_res = use_playlists();
 
     let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
@@ -104,26 +107,7 @@ pub fn LibraryPage(
     // flight is its business rather than a generation counter kept here.
     let sync_job = hooks::jobs::use_job_progress(hooks::JobKind::LibrarySync);
     let is_loading = use_memo(move || sync_job.read().running);
-    let mut has_fetched = use_signal(|| false);
-    let mut sync_server = move || {
-        has_fetched.set(true);
-        hooks::jobs::start(hooks::JobKind::LibrarySync);
-    };
-    // First visit with an empty server library → auto-pull once.
-    use_effect(move || {
-        if !caps().sync {
-            return;
-        }
-        if !*has_fetched.read()
-            && let Some(total) = *window.total.read()
-        {
-            if total == 0 {
-                sync_server();
-            } else {
-                has_fetched.set(true);
-            }
-        }
-    });
+    let sync_server = move || hooks::jobs::start(hooks::JobKind::LibrarySync);
 
     let mut ctrl = use_context::<PlayerController>();
     let mut active_menu_track = use_signal(|| None::<String>);
@@ -140,15 +124,13 @@ pub fn LibraryPage(
     // to the requested offset would shift those rows until the fetch completes.
     let (top_pad, bottom_pad) = window_padding(total_tracks, &window_rows);
     let all_selected = !is_empty && selected_tracks.read().len() >= total_tracks;
-    let currently_playing_idx: Option<usize> = {
+    let current_uid = {
         let current_index = *ctrl.current_queue_index.read();
-        ctrl.get_queue_index(current_index)
-            .filter(|_| ctrl.queue.read().len() == total_tracks)
+        ctrl.get_track_at(current_index).map(|t| t.uid)
     };
 
     let tracks_nodes = {
         let cap = caps();
-        let conf = config.read();
         let row_offset = window_rows.offset as usize;
         window_rows
             .rows
@@ -163,25 +145,14 @@ pub fn LibraryPage(
                 let track_path = track.key.clone();
                 let track_select = track.key.clone();
                 let track_key = track.uid.clone();
-                let is_currently_playing = currently_playing_idx == Some(idx)
-                    && ctrl
-                        .queue
-                        .read()
-                        .get(idx)
-                        .map(|q| q.uid == track.uid)
-                        .unwrap_or(false);
+                let is_currently_playing = current_uid.as_deref() == Some(track.uid.as_str());
                 let is_menu_open = active_menu_track.read().as_ref() == Some(&track.uid);
                 let is_selected = selected_tracks.read().contains(&track_path);
                 let cover_url = hooks::artwork::for_track(&track, hooks::artwork::Size::Thumb);
 
                 // Download state (servers only).
                 let item_id: String = track.key.clone();
-                let is_downloaded = cap.downloads
-                    && conf
-                        .offline_tracks
-                        .get(&item_id)
-                        .map(|p| std::path::Path::new(p).exists())
-                        .unwrap_or(false);
+                let is_downloaded = cap.downloads && track.offline;
                 let is_downloading = cap.downloads && downloads.read().is_active(&item_id);
                 let item_id_dl = item_id.clone();
 
@@ -241,11 +212,11 @@ pub fn LibraryPage(
                                 );
                             },
                             on_download: caps().downloads.then(|| EventHandler::new(move |_| {
-                                if !is_downloaded {
-                                    active_menu_track.set(None);
-                                    hooks::downloads::start(
-                                        vec![item_id_dl.clone()],
-                                    );
+                                active_menu_track.set(None);
+                                if is_downloaded {
+                                    hooks::downloads::remove(vec![item_id_dl.clone()]);
+                                } else {
+                                    hooks::downloads::start(vec![item_id_dl.clone()]);
                                 }
                             })),
                             on_play: move |_| {
@@ -267,7 +238,7 @@ pub fn LibraryPage(
             .collect::<Vec<_>>()
     };
 
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
     rsx! {
         div {
             class: if cfg!(target_os = "android") { "px-3 pt-3 absolute inset-0 flex flex-col overflow-x-hidden" } else if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
@@ -396,12 +367,9 @@ pub fn LibraryPage(
                 {
                     let album_count = albums_res
                         .read()
-                        .clone()
-                        .unwrap_or_default()
-                        .iter()
-                        .map(|a| a.title.to_lowercase())
-                        .collect::<HashSet<_>>()
-                        .len();
+                        .as_ref()
+                        .and_then(|albums| albums.as_ref().ok())
+                        .map_or(0, Vec::len);
                     let artist_count = artists_res.read().as_ref().map(|a| a.len()).unwrap_or(0);
                     let playlist_count = playlists_res
                         .read()

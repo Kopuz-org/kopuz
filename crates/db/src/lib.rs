@@ -41,6 +41,19 @@ pub fn artist_miss_name(source: &Source, artist_key: &str) -> String {
     format!("{}\u{1f}{artist_key}", source.as_str())
 }
 
+/// The configured sources as their tables hold them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StoredSources {
+    pub active: Source,
+    /// The active server with its credentials, when a server is active.
+    pub server: Option<config::MusicServer>,
+    pub servers: Vec<config::SavedServer>,
+    /// Library roots per server id; no entry means the backend auto-detects.
+    pub folders: std::collections::HashMap<String, Vec<String>>,
+    /// `None` until one is stored.
+    pub device_id: Option<String>,
+}
+
 /// A window into a list query (for virtual-scrolled big lists).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Page {
@@ -59,6 +72,8 @@ pub struct QueueSnapshot {
     pub shuffle_enabled: bool,
     /// Opaque; only the source that issued it reads it.
     pub radio_cursor: Option<String>,
+    /// What the queue was built from, opaque here: the daemon encodes and decodes it.
+    pub origin: Option<String>,
 }
 
 /// What the lyrics cache holds for a key: the words, or a miss and when it was recorded.
@@ -81,26 +96,34 @@ pub enum TrackSort {
     DateAdded,
     /// Most-played first (`listen_counts` join), ties by title.
     PlayCount,
+    /// Disc → track → title: the order an album plays in.
+    TrackNumber,
     /// Stacked user criteria (library sort control): the first field decides,
     /// the rest break ties. Empty falls back to [`TrackSort::ArtistAlbum`].
     Fields(Vec<config::SortCriterion<config::TrackSortField>>),
 }
 
-/// What a windowed track listing selects: which source, how it's sorted, and
-/// an optional case-insensitive search across title/artist/album. Drives
-/// `WHERE`/`ORDER BY` so only the needed rows are materialized. Narrower
-/// listings (one album, one artist, one genre, a folder) have dedicated
-/// `Storage` methods instead of filter fields — there is deliberately no way
-/// to pull a whole source and filter it in memory.
+/// What a windowed track listing selects, all of it in SQL so only the page is materialized.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TrackFilter {
     pub source: Source,
     pub sort: TrackSort,
     pub search: String,
+    /// Only the tracks of this album (`source_album_id`).
+    pub album: Option<String>,
+    /// Only the tracks on albums of this genre.
+    pub genre: Option<String>,
     /// Restrict to favorites (`Some(true)`) or non-favorites (`Some(false)`).
     /// Matched against the local favorites mirror, which every source keeps
     /// under its own `source.as_str()` key.
     pub favorite: Option<bool>,
+    /// Restrict to tracks with a downloaded copy (`Some(true)`) or without one (`Some(false)`).
+    pub downloaded: Option<bool>,
+    /// Inclusive bounds on the year of the track's album; a track whose album has no year matches neither.
+    pub year_from: Option<u16>,
+    pub year_to: Option<u16>,
+    /// Flip every term of `sort`, so the listing runs in exactly the opposite order.
+    pub reverse: bool,
 }
 
 impl TrackFilter {
@@ -110,6 +133,44 @@ impl TrackFilter {
             ..Default::default()
         }
     }
+}
+
+/// A window of a listing, with how many rows the whole filtered set holds.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Listing<T> {
+    pub total: u32,
+    pub rows: Vec<T>,
+}
+
+/// What an album listing selects; filter and order run in SQL, so `total` counts the filtered set.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AlbumQuery {
+    pub source: Source,
+    /// Case-insensitive (ASCII) match on the title or the billed artist's text.
+    pub search: String,
+    pub genre: Option<String>,
+    /// Inclusive bounds; an album with no year matches neither.
+    pub year_from: Option<u16>,
+    pub year_to: Option<u16>,
+    /// Only albums billed to this artist, by key.
+    pub artist_key: Option<String>,
+    /// Only these albums, by source album id; an empty list matches none.
+    pub ids: Option<Vec<String>>,
+    /// Only those with a downloaded track (`Some(true)`), or only those with none.
+    pub downloaded: Option<bool>,
+    /// The first criterion decides, the rest break ties; artist then title settle what is left.
+    pub sort: Vec<config::SortCriterion<config::AlbumSortField>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ArtistQuery {
+    pub source: Source,
+    /// Case-insensitive (ASCII) match on the artist's name.
+    pub search: String,
+    /// Only those with a downloaded track (`Some(true)`), or only those with none.
+    pub downloaded: Option<bool>,
+    /// The first criterion decides, the rest break ties; name then key settle what is left.
+    pub sort: Vec<config::SortCriterion<config::ArtistSortField>>,
 }
 
 /// Errors surfaced by the storage layer. String-wrapped so the type is identical
@@ -160,6 +221,8 @@ pub struct ArtistRow {
     pub source_id: Option<String>,
     pub name: String,
     pub tracks: u32,
+    /// The albums billed to this artist.
+    pub albums: u32,
 }
 
 /// Per-artist images: `(overrides, photos)`. `overrides` are user-set custom
@@ -176,10 +239,8 @@ pub type ArtistImages = (
 /// a supertrait of [`Storage`], so any `dyn Storage` is also a `dyn ReadStore`.
 #[async_trait::async_trait]
 pub trait ReadStore: Send + Sync {
-    /// Load the persisted `AppConfig`: the single-row JSON blob overlaid with
-    /// the settings file, drop-ins, and `KOPUZ_CONFIG_*` env vars. `None` if
-    /// the app has never been configured (no blob and no file layers).
-    async fn load_config(&self) -> Result<Option<config::AppConfig>, DbError>;
+    /// Whether the app_state row exists, which with no settings file either means the app was never configured.
+    async fn has_app_state(&self) -> Result<bool, DbError>;
 
     /// One window of a track listing (sorted + filtered in SQL — only this slice
     /// is materialized).
@@ -206,13 +267,6 @@ pub trait ReadStore: Send + Sync {
         artist: &str,
         limit: Option<u32>,
     ) -> Result<Vec<reader::Track>, DbError>;
-
-    /// The albums billed to one artist.
-    async fn artist_albums(
-        &self,
-        source: &Source,
-        artist: &str,
-    ) -> Result<Vec<reader::Album>, DbError>;
 
     /// One artist of `source`, or `None` when it has no such row.
     async fn artist(&self, source: &Source, artist: &str) -> Result<Option<ArtistRow>, DbError>;
@@ -280,18 +334,25 @@ pub trait ReadStore: Send + Sync {
     /// Every artist a track of the source credits, A→Z.
     async fn artists(&self, source: &Source) -> Result<Vec<ArtistRow>, DbError>;
 
-    /// One album cover per credited artist: what an artist with no photo renders.
-    async fn artist_album_covers(
+    /// One window of the artists a track of the source credits, filtered and sorted in SQL.
+    async fn artists_page(
+        &self,
+        query: &ArtistQuery,
+        page: Page,
+    ) -> Result<Listing<ArtistRow>, DbError>;
+
+    /// What each artist renders without a photo: its first covered album, else its first credited track's cover.
+    async fn artist_fallback_covers(
         &self,
         source: &Source,
-    ) -> Result<std::collections::HashMap<String, String>, DbError>;
+    ) -> Result<std::collections::HashMap<String, reader::CoverRef>, DbError>;
 
-    /// One artist's entry of [`ReadStore::artist_album_covers`].
-    async fn artist_album_cover(
+    /// One artist's entry of [`ReadStore::artist_fallback_covers`].
+    async fn artist_fallback_cover(
         &self,
         source: &Source,
         artist: &str,
-    ) -> Result<Option<String>, DbError>;
+    ) -> Result<Option<reader::CoverRef>, DbError>;
 
     /// Distinct non-empty album genres for a source, A→Z.
     async fn genres(&self, source: &Source) -> Result<Vec<String>, DbError>;
@@ -308,6 +369,13 @@ pub trait ReadStore: Send + Sync {
 
     /// All albums for a source, ordered by artist then title.
     async fn albums(&self, source: &Source) -> Result<Vec<reader::Album>, DbError>;
+
+    /// One window of an album listing, filtered and sorted in SQL.
+    async fn albums_page(
+        &self,
+        query: &AlbumQuery,
+        page: Page,
+    ) -> Result<Listing<reader::Album>, DbError>;
 
     /// At most `limit` albums for a source, most recently added first, on the
     /// same order as [`TrackSort::DateAdded`]. It is its own query because
@@ -339,8 +407,21 @@ pub trait ReadStore: Send + Sync {
     /// by server switching so stored creds are reused instead of re-prompting.
     async fn load_server(&self, id: &str) -> Result<Option<config::MusicServer>, DbError>;
 
-    /// Store one server's credentials on their own. `save_config` writes
-    /// only the active server's, so signing into another one needs this.
+    /// The active source, every saved server, their library roots and the device id.
+    async fn load_sources(&self) -> Result<StoredSources, DbError>;
+
+    /// Every stored integration credential, key to value.
+    async fn integration_credentials(
+        &self,
+    ) -> Result<std::collections::HashMap<String, String>, DbError>;
+
+    /// The volume and mute the engine was left at, or full and unmuted before anything saved them.
+    async fn playback_state(&self) -> Result<(f32, bool), DbError>;
+
+    /// Whether Discord presence stays up while playback is paused; `None` until it was toggled.
+    async fn discord_presence_paused(&self) -> Result<Option<bool>, DbError>;
+
+    /// Store one server's credentials on their own, whether or not it is active.
     async fn set_server_credentials(
         &self,
         id: &str,
@@ -372,18 +453,55 @@ pub trait ReadStore: Send + Sync {
 
     /// The whole offline scrobble backlog, oldest listen first (drain order).
     async fn scrobble_queue_all(&self) -> Result<Vec<QueuedScrobbleRow>, DbError>;
+
+    /// One frontend's stored preferences as `(key, value)`, key-ordered. The values are opaque to the daemon.
+    async fn frontend_prefs(&self, frontend: &str) -> Result<Vec<(String, String)>, DbError>;
+
+    /// Every play count, keyed by [`Source::listen_count_key`] over the track's uid.
+    async fn listen_counts(&self) -> Result<std::collections::HashMap<String, u64>, DbError>;
+
+    /// Every downloaded copy, item id to file path.
+    async fn offline_tracks(&self) -> Result<std::collections::HashMap<String, String>, DbError>;
+
+    /// The pinned stations' manifests, in pin order.
+    async fn pinned_stations(&self) -> Result<Vec<String>, DbError>;
+
+    /// The URL downloader's finished downloads, newest first.
+    async fn downloader_history(&self) -> Result<Vec<config::DownloaderHistoryEntry>, DbError>;
 }
 
 /// The persistence API: every mutation plus admin/dev ops, layered on top of the
 /// read-only [`ReadStore`]. One impl per target (sqlx native / in-mem stub).
 #[async_trait::async_trait]
 pub trait Storage: ReadStore {
-    /// Persist the whole `AppConfig`: the single-row JSON blob, plus a mirror
-    /// of the settings into the standalone config file when it is writable.
-    async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError>;
+    /// Create the app_state row if nothing has yet, so an install whose settings were saved never reads as unconfigured.
+    async fn ensure_app_state(&self) -> Result<(), DbError>;
 
     /// Drop every row a source left behind: its library, playlists, favorites, plays and photos.
     async fn purge_source(&self, source: &Source) -> Result<(), DbError>;
+
+    /// Add or rename a saved server and store its options; its credentials are left alone.
+    async fn save_server(&self, server: &config::SavedServer) -> Result<(), DbError>;
+
+    /// Store the active server whole: its row, its options and its credentials.
+    async fn save_active_server(&self, server: &config::MusicServer) -> Result<(), DbError>;
+
+    /// Forget a server and everything it left behind.
+    async fn delete_server(&self, id: &str) -> Result<(), DbError>;
+
+    async fn set_active_source(&self, source: &Source) -> Result<(), DbError>;
+
+    /// Replace a server's library roots; an empty list means auto-detect.
+    async fn set_server_folders(&self, id: &str, folders: &[String]) -> Result<(), DbError>;
+
+    async fn set_device_id(&self, device_id: &str) -> Result<(), DbError>;
+
+    /// Store one integration credential; an empty value clears it.
+    async fn set_integration_credential(&self, key: &str, value: &str) -> Result<(), DbError>;
+
+    async fn set_playback_state(&self, volume: f32, muted: bool) -> Result<(), DbError>;
+
+    async fn set_discord_presence_paused(&self, paused: bool) -> Result<(), DbError>;
 
     /// One-shot import of the legacy `*.json` store at `config_dir` into the DB,
     /// then rename each imported file to `*.json.bak` and drop a sentinel. No-op
@@ -417,6 +535,13 @@ pub trait Storage: ReadStore {
 
     /// Name the artist `source` issued `id` for as the source's own record does; answers whether the name changed.
     async fn name_artist(&self, source: &Source, id: &str, name: &str) -> Result<bool, DbError>;
+
+    /// Name each `(id, name)` artist of a source's own listing as [`Storage::name_artist`] does; answers how many changed.
+    async fn name_artists(
+        &self,
+        source: &Source,
+        named: &[(String, String)],
+    ) -> Result<usize, DbError>;
 
     /// Set (`Some`) or remove (`None`) one artist's image. `kind` is
     /// `"server" | "local" | "custom"`.
@@ -559,6 +684,24 @@ pub trait Storage: ReadStore {
 
     /// Pin (`Some` manifest) a station after the others, or unpin it (`None`).
     async fn set_pinned_station(&self, id: &str, manifest: Option<&str>) -> Result<(), DbError>;
+
+    /// Record a finished download at the head of the history, keeping the newest `limit`.
+    async fn push_downloader_history(
+        &self,
+        entry: &config::DownloaderHistoryEntry,
+        limit: usize,
+    ) -> Result<(), DbError>;
+
+    /// Forget the whole downloader history.
+    async fn clear_downloader_history(&self) -> Result<(), DbError>;
+
+    /// Set (`Some`) or delete (`None`) a frontend's preferences in one transaction; answers the changed keys, or `None` (nothing written) when the frontend would hold more than `budget` bytes.
+    async fn set_frontend_prefs(
+        &self,
+        frontend: &str,
+        entries: &[(String, Option<String>)],
+        budget: usize,
+    ) -> Result<Option<Vec<String>>, DbError>;
 
     /// Store a lyrics lookup's conclusion; `None` records a miss stamped now.
     async fn cache_lyrics(

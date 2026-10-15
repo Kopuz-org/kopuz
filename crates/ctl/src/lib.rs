@@ -157,6 +157,20 @@ pub enum Job {
     PlaylistSync,
 }
 
+/// A folder-list answer as the daemon reads it: a JSON list of paths passes through, and anything else is one path.
+fn directories_value(key: &str, raw: &str) -> Result<String, ApiError> {
+    if !raw.trim_start().starts_with('[') {
+        return Ok(api::encode_directories(&[raw.to_string()]));
+    }
+    serde_json::from_str::<Vec<String>>(raw)
+        .map(|paths| api::encode_directories(&paths))
+        .map_err(|_| {
+            ApiError::invalid_input(format!(
+                "--field {key} takes a path or a JSON list of paths, like {key}='[\"/music\",\"/more\"]'"
+            ))
+        })
+}
+
 fn parse_field(value: &str) -> Result<FieldValue, String> {
     let (key, value) = value.split_once('=').ok_or("use KEY=VALUE for --field")?;
     if key.trim().is_empty() {
@@ -441,7 +455,7 @@ async fn execute_source(
                 .find(|entry| entry.id == service)
                 .ok_or_else(|| ApiError::not_found("no such service; use kopuzctl services"))?;
             let mut seen = std::collections::HashSet::new();
-            for field in &fields {
+            for field in &mut fields {
                 let spec = offered
                     .fields
                     .iter()
@@ -456,6 +470,9 @@ async fn execute_source(
                 }
                 if !seen.insert(field.key.clone()) {
                     return Err(ApiError::invalid_input("duplicate setup field"));
+                }
+                if matches!(spec.kind, api::FieldKind::Directories) {
+                    field.value = directories_value(&field.key, &field.value)?;
                 }
             }
             let mut secrets = Vec::new();
@@ -617,6 +634,26 @@ mod tests {
                 .unwrap()
                 .kind(),
             clap::error::ErrorKind::DisplayHelp
+        );
+    }
+
+    #[test]
+    fn a_folder_field_takes_a_plain_path_or_a_json_list() {
+        let decoded = |raw: &str| {
+            directories_value("directories", raw).map(|value| api::decode_directories(&value))
+        };
+        assert_eq!(decoded("/music").unwrap(), vec!["/music"]);
+        assert_eq!(decoded("/my music, live").unwrap(), vec!["/my music, live"]);
+        assert_eq!(
+            decoded(r#"["/a", "/b"]"#).unwrap(),
+            vec!["/a".to_string(), "/b".to_string()]
+        );
+        let error = decoded("[/a").unwrap_err();
+        assert_eq!(error.code, api::ErrorCode::InvalidInput);
+        assert!(
+            error.message.contains("JSON list of paths"),
+            "{}",
+            error.message
         );
     }
 

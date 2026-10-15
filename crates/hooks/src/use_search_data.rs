@@ -19,13 +19,18 @@ pub struct SearchData {
 pub fn use_search_data(search_query: Signal<String>) -> SearchData {
     let api = crate::api::use_api();
     let source = crate::use_db_queries::use_active_source();
-    let albums_res = crate::use_db_queries::use_albums(source);
+    let albums_query = use_memo(|| Some(api::AlbumQuery::default()));
+    let albums_res = crate::use_db_queries::use_albums(source, albums_query);
     let gens = crate::db_reactivity::use_generations();
 
     // One representative cover per genre, taken from an album that has one --
     // the row already says whether it does, so nothing here has to guess.
     let genres = use_memo(move || {
-        let albums = albums_res.read().clone().unwrap_or_default();
+        let albums = albums_res
+            .read()
+            .clone()
+            .and_then(Result::ok)
+            .unwrap_or_default();
         let mut by_genre: std::collections::HashMap<String, Option<utils::CoverUrl>> =
             std::collections::HashMap::new();
         for album in &albums {

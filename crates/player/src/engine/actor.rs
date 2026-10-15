@@ -15,8 +15,8 @@ use super::rt::{GainRamp, Retired, RtCmd, RtSession, RtState};
 use super::sink::{AudioSink, DataCallbackFactory, SinkConfig};
 use super::worker::{WorkerCmd, WorkerHandle, WorkerMsg};
 use super::{
-    Command, EngineStatus, Event, FadingStatus, LoadOutcome, LoadReply, LoadRequest, Phase,
-    Transition,
+    Command, EngineStatus, Event, FadingStatus, Failure, LoadOutcome, LoadReply, LoadRequest,
+    Phase, Transition,
 };
 use crate::player::PlayerInitError;
 #[cfg(any(target_os = "android", target_os = "linux", target_os = "macos"))]
@@ -130,6 +130,9 @@ struct Session {
     written: Arc<AtomicU64>,
     played: Arc<AtomicU64>,
     eof_flag: Arc<AtomicBool>,
+    starved: Arc<AtomicBool>,
+    /// Reported as stalled; `played` at that moment, which audio flowing again moves past.
+    stalled_at: Option<u64>,
     /// Linear ReplayGain factor the audio callback reads for this session.
     gain: Arc<AtomicU32>,
     /// The track's own tagged values, kept so a settings change can recompute
@@ -173,6 +176,7 @@ struct RingParts {
     written: Arc<AtomicU64>,
     played: Arc<AtomicU64>,
     eof: Arc<AtomicBool>,
+    starved: Arc<AtomicBool>,
     rt_session: RtSession,
 }
 
@@ -184,17 +188,20 @@ fn make_ring(config: SinkConfig, gain: Arc<AtomicU32>) -> RingParts {
     let written = Arc::new(AtomicU64::new(0));
     let played = Arc::new(AtomicU64::new(0));
     let eof = Arc::new(AtomicBool::new(false));
+    let starved = Arc::new(AtomicBool::new(false));
     RingParts {
         producer,
         written,
         played: played.clone(),
         eof: eof.clone(),
+        starved: starved.clone(),
         rt_session: RtSession {
             consumer,
             played,
             applied_gain: GainRamp::new(f32::from_bits(gain.load(Ordering::Relaxed))),
             gain,
             eof,
+            starved,
         },
     }
 }
@@ -484,7 +491,7 @@ impl Actor {
         let worker = match super::worker::spawn(token, factory, self.self_tx.clone()) {
             Ok(worker) => worker,
             Err(e) => {
-                let message = format!("failed to spawn decode worker: {e}");
+                let message = Failure::from(format!("failed to spawn decode worker: {e}"));
                 if let Some(reply) = reply {
                     let _ = reply.send(Err(message.clone()));
                 }
@@ -602,11 +609,11 @@ impl Actor {
             }
             Err(error) => {
                 if let Some(reply) = reply {
-                    let _ = reply.send(Err(error.clone()));
+                    let _ = reply.send(Err(error.clone().into()));
                 }
                 self.emit(Event::Error {
                     token,
-                    message: error,
+                    message: error.into(),
                 });
                 // The pending load is gone; without this the status keeps
                 // advertising it (and a transition) forever.
@@ -737,6 +744,7 @@ impl Actor {
             written,
             played,
             eof,
+            starved,
             rt_session,
         } = make_ring(config, gain.clone());
         let _ = worker.cmd_tx.send(WorkerCmd::Start {
@@ -754,6 +762,8 @@ impl Actor {
             written,
             played,
             eof_flag: eof,
+            starved,
+            stalled_at: None,
             gain,
             replay_gain,
             service_replay_gain,
@@ -887,6 +897,8 @@ impl Actor {
         current.written = ring.written;
         current.played = ring.played;
         current.eof_flag = ring.eof;
+        current.starved = ring.starved;
+        current.stalled_at = current.stalled_at.map(|_| 0);
         current.base_micros = target.as_micros() as u64;
         current.eof = false;
         // Seeking an ended session revives its parked worker.
@@ -966,7 +978,7 @@ impl Actor {
                     self.retire_session(current);
                     self.emit(Event::Error {
                         token,
-                        message: "output stream lost".to_string(),
+                        message: "output stream lost".to_string().into(),
                     });
                 }
                 // The user chooses whether a device CHANGE keeps playing on the
@@ -997,7 +1009,7 @@ impl Actor {
                 self.rt_rings_outstanding = 0;
                 self.emit(Event::Error {
                     token,
-                    message: format!("output device lost: {e}"),
+                    message: format!("output device lost: {e}").into(),
                 });
             }
         }
@@ -1019,6 +1031,7 @@ impl Actor {
         }
         self.reap_rt_retired();
         self.latch_drain_complete();
+        self.report_stall();
         self.emit_throttled_position();
 
         // Finished detached workers just get dropped (JoinHandle drop detaches);
@@ -1101,6 +1114,29 @@ impl Actor {
             self.emit(Event::Ended { token });
             self.publish();
         }
+    }
+
+    /// A stall is the callback running dry before the end of the track; it lasts until audio plays past where it stopped.
+    fn report_stall(&mut self) {
+        let paused = self.paused.load(Ordering::Relaxed);
+        let Some(current) = self.current.as_mut() else {
+            return;
+        };
+        let starved = current.starved.swap(false, Ordering::Relaxed);
+        let played = current.played.load(Ordering::Relaxed);
+        let token = current.token;
+        let event = match current.stalled_at {
+            Some(at) if !starved && played > at => {
+                current.stalled_at = None;
+                Event::Resumed { token }
+            }
+            None if starved && !paused && !current.eof && !current.ended => {
+                current.stalled_at = Some(played);
+                Event::Stalled { token }
+            }
+            _ => return,
+        };
+        self.emit(event);
     }
 
     /// Position once per second while playing — subscribers render seconds,

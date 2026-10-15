@@ -1,5 +1,5 @@
 use api::TrackInfo as Track;
-use config::AppConfig;
+use config::Settings;
 use dioxus::prelude::*;
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -120,7 +120,7 @@ pub fn sorted_track_indices(tracks: &[Track], sort_state: SortState) -> Vec<usiz
 }
 
 fn compare_text(left: &str, right: &str) -> Ordering {
-    left.to_lowercase().cmp(&right.to_lowercase())
+    utils::collation::compare(left, right)
 }
 
 #[derive(Props, Clone, PartialEq)]
@@ -150,6 +150,9 @@ pub struct ShowcaseProps {
     pub on_delete_all: Option<EventHandler<()>>,
     #[props(default = false)]
     pub is_album: bool,
+    /// The album these tracks are, in the daemon's order: playing them all unsorted plays the album, so the queue knows where it came from.
+    #[props(default)]
+    pub album_id: Option<String>,
     #[props(default)]
     pub release_year: Option<u16>,
     #[props(default = false)]
@@ -174,8 +177,8 @@ pub struct ShowcaseProps {
 
 #[component]
 pub fn Showcase(props: ShowcaseProps) -> Element {
-    let config = use_context::<Signal<AppConfig>>();
-    match config.read().ui_style {
+    let settings = use_context::<Signal<Settings>>();
+    match settings.read().ui.ui_style {
         config::UiStyle::Vaxry => rsx! {
             crate::vaxry::showcase::ShowcaseVaxry { ..props }
         },
@@ -187,7 +190,24 @@ pub fn Showcase(props: ShowcaseProps) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use super::track_row_number;
+    use super::{SortDirection, SortField, Track, sorted_track_indices, track_row_number};
+
+    #[test]
+    fn a_title_sort_collates_like_the_daemons_listings() {
+        let tracks: Vec<Track> = ["Zeynep", "Émile", "apple", "Banana"]
+            .into_iter()
+            .map(|title| Track {
+                title: title.into(),
+                ..Default::default()
+            })
+            .collect();
+        let order: Vec<&str> =
+            sorted_track_indices(&tracks, Some((SortField::Title, SortDirection::Asc)))
+                .into_iter()
+                .map(|index| tracks[index].title.as_str())
+                .collect();
+        assert_eq!(order, ["apple", "Banana", "Émile", "Zeynep"]);
+    }
 
     #[test]
     fn album_rows_prefer_the_metadata_track_number() {

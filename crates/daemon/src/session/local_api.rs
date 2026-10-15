@@ -1,6 +1,7 @@
 //! `LocalApi`: the in-process implementation of [`api::KopuzApi`].
 
 use super::*;
+use crate::jobs::Trigger;
 
 /// In-process implementation of [`api::KopuzApi`] over a running session.
 pub struct LocalApi {
@@ -9,6 +10,7 @@ pub struct LocalApi {
     pub(super) started: std::time::Instant,
     pub(super) library: Option<Arc<crate::library::LibraryService>>,
     pub(super) config: Option<Arc<crate::config_service::ConfigService>>,
+    pub(super) prefs: Option<Arc<crate::prefs::PrefsService>>,
     pub(super) jobs: Option<Arc<crate::jobs::JobRunner>>,
     pub(super) downloads: Option<Arc<crate::downloads::DownloadsService>>,
     pub(super) favorites: Option<Arc<crate::favorites::FavoritesService>>,
@@ -30,6 +32,7 @@ impl LocalApi {
             started: std::time::Instant::now(),
             library: None,
             config: None,
+            prefs: None,
             jobs: None,
             downloads: None,
             favorites: None,
@@ -53,6 +56,17 @@ impl LocalApi {
     pub fn with_config(mut self, config: Arc<crate::config_service::ConfigService>) -> Self {
         self.config = Some(config);
         self
+    }
+
+    pub fn with_prefs(mut self, prefs: Arc<crate::prefs::PrefsService>) -> Self {
+        self.prefs = Some(prefs);
+        self
+    }
+
+    fn prefs(&self) -> Result<&crate::prefs::PrefsService, ApiError> {
+        self.prefs
+            .as_deref()
+            .ok_or_else(|| ApiError::unsupported("this daemon runs without a prefs service"))
     }
 
     pub fn with_jobs(mut self, jobs: Arc<crate::jobs::JobRunner>) -> Self {
@@ -279,13 +293,12 @@ impl api::PlayerApi for LocalApi {
 
     async fn queue_snapshot(&self) -> Result<api::QueueSnapshot, ApiError> {
         let mirror = self.session.queue_mirror().await;
-        let config = self.session.config_watch().borrow().clone();
         Ok(api::QueueSnapshot {
             rev: self.session.state().queue.rev,
             items: mirror
                 .tracks
                 .iter()
-                .map(|track| crate::wire::track_info(track, &config))
+                .map(|track| crate::wire::track_info(track, self.session.offline()))
                 .collect(),
             shuffle_order: mirror
                 .shuffle_order
@@ -294,6 +307,7 @@ impl api::PlayerApi for LocalApi {
                 .collect(),
             position: (!mirror.tracks.is_empty()).then_some(mirror.position as u32),
             shuffle: mirror.shuffle,
+            context: mirror.context,
         })
     }
 
@@ -343,8 +357,8 @@ impl api::LibraryApi for LocalApi {
         self.library()?.tracks_by_keys(&keys).await
     }
 
-    async fn albums(&self, page: Page) -> Result<api::AlbumPage, ApiError> {
-        self.library()?.albums(page).await
+    async fn albums(&self, query: api::AlbumQuery, page: Page) -> Result<api::AlbumPage, ApiError> {
+        self.library()?.albums(query, page).await
     }
 
     async fn albums_recently_added(&self, page: Page) -> Result<api::AlbumPage, ApiError> {
@@ -359,8 +373,12 @@ impl api::LibraryApi for LocalApi {
         self.library()?.album_tracks(&id, page).await
     }
 
-    async fn artists(&self, page: Page) -> Result<api::ArtistPage, ApiError> {
-        self.library()?.artists(page).await
+    async fn artists(
+        &self,
+        query: api::ArtistQuery,
+        page: Page,
+    ) -> Result<api::ArtistPage, ApiError> {
+        self.library()?.artists(query, page).await
     }
 
     async fn catalog(&self, continuation: Option<String>) -> Result<api::CatalogPage, ApiError> {
@@ -504,7 +522,7 @@ impl api::LibraryApi for LocalApi {
 
     async fn stats(&self) -> Result<api::StatsView, ApiError> {
         match &self.library {
-            Some(library) => Ok(library.stats()),
+            Some(library) => library.stats().await,
             None => Err(ApiError::unsupported("no library service")),
         }
     }
@@ -536,7 +554,7 @@ impl api::ArtworkApi for LocalApi {
     ) -> Result<Vec<api::FieldSpec>, ApiError> {
         let service = self.config_service()?;
         let keys = crate::artwork::settings::written_keys(&values);
-        service.ensure_unlocked(&keys)?;
+        service.ensure_unlocked(&keys).await?;
         let updated = service
             .mutate_state(&keys, move |config| {
                 crate::artwork::settings::apply(&values, config)
@@ -557,14 +575,11 @@ impl api::ConfigApi for LocalApi {
         }
     }
 
-    async fn set_config(&self, config: config::AppConfig) -> Result<api::ConfigView, ApiError> {
-        let Some(service) = &self.config else {
-            return Err(ApiError::unsupported(
-                "this daemon runs without a config service",
-            ));
-        };
-        let (view, _, _) = service.set(config).await?;
-        Ok(view)
+    async fn edit_config(
+        &self,
+        edits: Vec<config::SettingsEdit>,
+    ) -> Result<api::EditReport, ApiError> {
+        self.config_service()?.edit(edits).await
     }
 
     async fn preview_equalizer(
@@ -572,6 +587,14 @@ impl api::ConfigApi for LocalApi {
         equalizer: config::EqualizerSettings,
     ) -> Result<(), ApiError> {
         self.session.preview_equalizer(equalizer);
+        Ok(())
+    }
+
+    async fn preview_replay_gain(
+        &self,
+        replay_gain: config::ReplayGainSettings,
+    ) -> Result<(), ApiError> {
+        self.session.preview_replay_gain(replay_gain);
         Ok(())
     }
 
@@ -585,6 +608,21 @@ impl api::ConfigApi for LocalApi {
 }
 
 #[async_trait::async_trait]
+impl api::PrefsApi for LocalApi {
+    async fn frontend_prefs(&self, frontend: String) -> Result<Vec<api::FrontendPref>, ApiError> {
+        self.prefs()?.get(&frontend).await
+    }
+
+    async fn set_frontend_prefs(
+        &self,
+        frontend: String,
+        entries: Vec<api::PrefEntry>,
+    ) -> Result<(), ApiError> {
+        self.prefs()?.set(&frontend, entries).await
+    }
+}
+
+#[async_trait::async_trait]
 impl api::JobApi for LocalApi {
     async fn start_job(&self, kind: api::JobKind) -> Result<api::JobRef, ApiError> {
         let Some(runner) = &self.jobs else {
@@ -592,21 +630,21 @@ impl api::JobApi for LocalApi {
                 "this daemon runs without a job runner",
             ));
         };
-        match kind {
+        let started = match kind {
             api::JobKind::Scan => match &self.library {
-                Some(library) => library.spawn_scan(runner),
+                Some(library) => library.spawn_scan(runner, Trigger::User),
                 None => Err(ApiError::unsupported("no library service")),
             },
             api::JobKind::LibrarySync => match &self.library {
-                Some(library) => library.spawn_remote_sync(runner),
+                Some(library) => library.spawn_remote_sync(runner, Trigger::User),
                 None => Err(ApiError::unsupported("no library service")),
             },
             api::JobKind::FavoritesSync => match &self.favorites {
-                Some(favorites) => favorites.spawn_sync(runner),
+                Some(favorites) => favorites.spawn_sync(runner, Trigger::User),
                 None => Err(ApiError::unsupported("no favorites service")),
             },
             api::JobKind::PlaylistSync => match &self.playlists {
-                Some(playlists) => playlists.spawn_sync(runner),
+                Some(playlists) => playlists.spawn_sync(runner, Trigger::User),
                 None => Err(ApiError::unsupported("no playlist service")),
             },
             // These carry their own request, so they start through their own
@@ -614,7 +652,12 @@ impl api::JobApi for LocalApi {
             api::JobKind::Download | api::JobKind::UrlDownload | api::JobKind::Unknown => {
                 Err(ApiError::unsupported("this job kind has no direct starter"))
             }
-        }
+        };
+        // These kinds carry no request, so a second start is the same job and joins it.
+        started.or_else(|error| match error.code {
+            api::ErrorCode::Conflict => runner.running(kind).ok_or(error),
+            _ => Err(error),
+        })
     }
 
     async fn download_url(&self, url: String, format: String) -> Result<api::JobRef, ApiError> {
@@ -649,7 +692,7 @@ impl api::JobApi for LocalApi {
     }
 
     async fn downloader_history(&self) -> Result<Vec<api::DownloadHistoryEntry>, ApiError> {
-        Ok(self.downloader()?.history().await)
+        self.downloader()?.history().await
     }
 
     async fn clear_downloader_history(&self) -> Result<(), ApiError> {

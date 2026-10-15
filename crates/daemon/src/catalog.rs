@@ -61,12 +61,11 @@ impl CatalogService {
         })
     }
 
-    fn config(&self) -> config::AppConfig {
-        self.session.config_watch().borrow().clone()
-    }
-
     fn source(&self) -> server::source::ActiveSource {
-        Arc::from(server::source::active(self.db.clone(), &self.config()))
+        Arc::from(server::source::active(
+            self.db.clone(),
+            &self.session.sources(),
+        ))
     }
 
     /// The image for a tile, if one was remembered from a page this session
@@ -93,12 +92,7 @@ impl CatalogService {
     }
 
     /// Convert a browse page `listed` served, registering its songs and tile images so later requests resolve them.
-    fn page(
-        &self,
-        mut home: DiscoverHome,
-        listed: &config::Source,
-        config: &config::AppConfig,
-    ) -> CatalogPage {
+    fn page(&self, mut home: DiscoverHome, listed: &config::Source) -> CatalogPage {
         let songs = home
             .shelves
             .iter_mut()
@@ -130,7 +124,7 @@ impl CatalogService {
                     items: shelf
                         .items
                         .into_iter()
-                        .map(|item| self.item(item, config))
+                        .map(|item| self.item(item))
                         .collect(),
                 })
                 .collect(),
@@ -138,7 +132,7 @@ impl CatalogService {
         }
     }
 
-    fn item(&self, item: DiscoverItem, config: &config::AppConfig) -> CatalogItem {
+    fn item(&self, item: DiscoverItem) -> CatalogItem {
         match item {
             // A song's artwork is the track's own, so the tile and the queue
             // row cannot disagree about which picture belongs to it.
@@ -148,7 +142,7 @@ impl CatalogService {
                 title: track.title.clone(),
                 subtitle: Some(track.artist.clone()),
                 artwork: crate::artwork::track_ref(&track),
-                track: Some(crate::wire::track_info(&track, config)),
+                track: Some(crate::wire::track_info(&track, self.session.offline())),
             },
             DiscoverItem::Playlist {
                 playlist_id,
@@ -204,14 +198,13 @@ impl CatalogService {
     }
 
     pub async fn catalog(&self, continuation: Option<&str>) -> Result<CatalogPage, ApiError> {
-        let config = self.config();
         let source = self.source();
         let home = match continuation {
             Some(token) => source.discover_continuation(token).await,
             None => source.discover_home().await,
         }
         .map_err(source_error)?;
-        Ok(self.page(home, source.source(), &config))
+        Ok(self.page(home, source.source()))
     }
 
     pub async fn detail(&self, request: CatalogDetailRequest) -> Result<CatalogDetail, ApiError> {
@@ -220,34 +213,20 @@ impl CatalogService {
                 "a catalog entity is opened by its id",
             ));
         }
-        let config = self.config();
+        let offline = self.session.offline();
         let source = self.source();
         match request.kind {
             CatalogItemKind::Album => {
-                // An album reached by its own browse id resolves directly; one
-                // reached by a library ref needs the lookup first; and a saved
-                // album from a source that stores no browse id is found by what
-                // it is called, which is why the id alone is enough here.
                 let mut album = match source
                     .fetch_album_by_ref(&request.id)
                     .await
                     .map_err(source_error)?
                 {
                     Some(album) => album,
-                    None => match self.saved_album(&request.id).await {
-                        Some((title, artist)) => match source
-                            .fetch_album_by_meta(&title, &artist)
-                            .await
-                            .map_err(source_error)?
-                        {
-                            Some(album) => album,
-                            None => return Err(ApiError::not_found("no such catalog album")),
-                        },
-                        None => source
-                            .fetch_album(&request.id)
-                            .await
-                            .map_err(source_error)?,
-                    },
+                    None => source
+                        .fetch_album(&request.id)
+                        .await
+                        .map_err(source_error)?,
                 };
                 crate::wire::listed_by(source.source(), &mut album.tracks);
                 self.library.register_transient(&album.tracks);
@@ -262,10 +241,15 @@ impl CatalogService {
                     artwork,
                     playback_id: album.audio_playlist_id,
                     year: album.year,
+                    release_kind: album.kind.map(|kind| match kind {
+                        server::source::ReleaseKind::Album => api::ReleaseKind::Album,
+                        server::source::ReleaseKind::Single => api::ReleaseKind::Single,
+                        server::source::ReleaseKind::Ep => api::ReleaseKind::Ep,
+                    }),
                     tracks: album
                         .tracks
                         .iter()
-                        .map(|track| crate::wire::track_info(track, &config))
+                        .map(|track| crate::wire::track_info(track, offline))
                         .collect(),
                     ..Default::default()
                 })
@@ -291,7 +275,7 @@ impl CatalogService {
                     tracks: page
                         .tracks
                         .iter()
-                        .map(|track| crate::wire::track_info(track, &config))
+                        .map(|track| crate::wire::track_info(track, offline))
                         .collect(),
                     continuation: page.next,
                     ..Default::default()
@@ -317,6 +301,7 @@ impl CatalogService {
                     .await
                     .unwrap_or(false)
                 {
+                    self.session.invalidate(api::Table::Artists);
                     self.session.invalidate(api::Table::Tracks);
                 }
                 let page = self.page(
@@ -325,7 +310,6 @@ impl CatalogService {
                         continuation: None,
                     },
                     source.source(),
-                    &config,
                 );
                 let artwork =
                     self.remember_thumbnail(&artist.channel_id, artist.banner_thumbnail.as_deref());
@@ -402,18 +386,11 @@ impl CatalogService {
         Ok(page)
     }
 
-    /// The title and artist of a saved album, for a source whose albums are
-    /// stored without a browse id and can only be looked up by name.
-    async fn saved_album(&self, id: &str) -> Option<(String, String)> {
-        let album = self.library.album(id).await.ok().flatten()?;
-        (!album.title.trim().is_empty()).then_some((album.title, album.artist))
-    }
-
     /// The seed itself, when the mix did not include it.
     async fn seed_track(&self, key: &str) -> Result<reader::Track, ApiError> {
         if let Some(track) = self
             .db
-            .tracks_by_keys(&self.config().active_source, &[key.to_string()])
+            .tracks_by_keys(&self.session.sources().active, &[key.to_string()])
             .await
             .map_err(|error| ApiError::internal(format!("database error: {error}")))?
             .into_iter()

@@ -17,7 +17,7 @@ pub fn start(url: String, format: String, mut failure: Signal<Option<String>>) {
             Ok(_) => failure.set(None),
             Err(error) => {
                 tracing::warn!(%error, "the download was refused");
-                failure.set(Some(error.to_string()));
+                failure.set(Some(crate::toast::describe(&error)));
             }
         }
     });
@@ -36,7 +36,7 @@ pub fn use_search(query: Signal<String>) -> Resource<Result<Vec<api::DownloadCan
             }
             api.search_downloads(query)
                 .await
-                .map_err(|error| error.to_string())
+                .map_err(|error| crate::toast::describe(&error))
         }
     })
 }
@@ -68,7 +68,7 @@ pub fn set_setting(value: api::FieldValue, mut done: Signal<u64>) {
             Ok(_) => done += 1,
             Err(error) => {
                 tracing::warn!(%error, "saving a downloader setting failed");
-                crate::toast::toast_error(&error.to_string());
+                crate::toast::toast_api_error(&error);
             }
         }
     });
@@ -91,7 +91,7 @@ pub fn clear_history(mut done: Signal<u64>) {
             Ok(()) => done += 1,
             Err(error) => {
                 tracing::warn!(%error, "clearing the download history failed");
-                crate::toast::toast_error(&error.to_string());
+                crate::toast::toast_api_error(&error);
             }
         }
     });

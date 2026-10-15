@@ -11,6 +11,8 @@ language = ഭാഷ
 library = ലൈബ്രറി
 playlists = പ്ലേലിസ്റ്റുകൾ
 album = ആൽബം
+release_single = സിംഗിൾ
+release_ep = EP
 artist = കലാകാരൻ
 home = ഹോം
 search = തിരയുക
@@ -165,6 +167,7 @@ radio_empty = സമാനമായ പാട്ടുകളൊന്നും �
 radio_failed = റേഡിയോ ആരംഭിക്കാനായില്ല
 remove_from_queue = ക്യൂവിൽ നിന്ന് നീക്കം ചെയ്യുക
 downloading = ഡൗൺലോഡ് ചെയ്യുന്നു…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = { $name } എന്നതിനുള്ള കൂടുതൽ പ്രവർത്തനങ്ങൾ
 share_musicbrainz = പങ്കിടുക (MusicBrainz)
 share_link_copied = MusicBrainz ലിങ്ക് പകർത്തി
@@ -180,6 +183,7 @@ add_all_to_queue = എല്ലാം ക്യൂവിലേക്ക് ച�
 add_all_to_playlist = എല്ലാം പ്ലേലിസ്റ്റിലേക്ക് ചേർക്കുക
 select_all = എല്ലാം തിരഞ്ഞെടുക്കുക
 select_all_tracks = എല്ലാ ട്രാക്കുകളും തിരഞ്ഞെടുക്കുക
+deselect_all_tracks = Deselect all tracks
 remove_from_cache = കാഷിൽ നിന്ന് നീക്കം ചെയ്യുക
 create = സൃഷ്ടിക്കുക
 save = സംരക്ഷിക്കുക
@@ -213,9 +217,36 @@ loading_lyrics = വരികൾ ലോഡ് ചെയ്യുന്നു...
 lyrics_not_found = വരികൾ കണ്ടെത്തിയില്ല
 instrumental_break = ഇൻസ്ട്രുമെന്റൽ
 no_previous_songs = മുൻ പാട്ടുകളൊന്നുമില്ല
-playlist_track_count = { $count } ട്രാക്കുകൾ
-music_playlist_count = സംഗീതം • { $count } ട്രാക്കുകൾ
-showcase_song_count = { $count } പാട്ടുകൾ
+playlist_track_count =
+    { $count ->
+        [one] { $count } ട്രാക്ക്
+       *[other] { $count } ട്രാക്കുകൾ
+    }
+playlist_folder_count =
+    { $count ->
+        [one] { $count } playlist
+       *[other] { $count } playlists
+    }
+playlists_synced_count =
+    { $count ->
+        [one] { $count } playlist synced
+       *[other] { $count } playlists synced
+    }
+playlists_loading_tracks =
+    { $count ->
+        [one] Loading tracks — { $done } / { $count } playlist ({ $remaining } left)
+       *[other] Loading tracks — { $done } / { $count } playlists ({ $remaining } left)
+    }
+music_playlist_count =
+    { $count ->
+        [one] സംഗീതം • { $count } ട്രാക്ക്
+       *[other] സംഗീതം • { $count } ട്രാക്കുകൾ
+    }
+showcase_song_count =
+    { $count ->
+        [one] { $count } പാട്ട്
+       *[other] { $count } പാട്ടുകൾ
+    }
 
 # Modal Titles
 add_playlist = പ്ലേലിസ്റ്റ് ചേർക്കുക
@@ -272,8 +303,11 @@ title = ശീർഷകം
 time = സമയം
 genre = വിഭാഗം
 plays = പ്ലേകൾ
-track_count = { $count } ട്രാക്കുകൾ
-track_count_singular = 1 ട്രാക്ക്
+track_count =
+    { $count ->
+        [one] { $count } ട്രാക്ക്
+       *[other] { $count } ട്രാക്കുകൾ
+    }
 songs = പാട്ടുകൾ
 min = മിനിറ്റ്
 
@@ -308,8 +342,16 @@ unknown_genre = അജ്ഞാതം
 no_tracks_in_library = നിങ്ങളുടെ ലൈബ്രറിയിൽ ട്രാക്കുകളൊന്നും കണ്ടെത്തിയില്ല.
 no_songs_here = ഇവിടെ പാട്ടുകളൊന്നുമില്ല.
 syncing_with_server = സെർവറുമായി സമന്വയിപ്പിക്കുന്നു...
-yt_syncing_progress = സമന്വയിപ്പിക്കുന്നു — ഇതുവരെ { $count } ട്രാക്കുകൾ ലോഡ് ചെയ്തു
-yt_synced_total = { $count } ഇഷ്ടപ്പെട്ട ട്രാക്കുകൾ സമന്വയിപ്പിച്ചു
+yt_syncing_progress =
+    { $count ->
+        [one] സമന്വയിപ്പിക്കുന്നു — ഇതുവരെ { $count } ട്രാക്ക് ലോഡ് ചെയ്തു
+       *[other] സമന്വയിപ്പിക്കുന്നു — ഇതുവരെ { $count } ട്രാക്കുകൾ ലോഡ് ചെയ്തു
+    }
+yt_synced_total =
+    { $count ->
+        [one] { $count } ഇഷ്ടപ്പെട്ട ട്രാക്ക് സമന്വയിപ്പിച്ചു
+       *[other] { $count } ഇഷ്ടപ്പെട്ട ട്രാക്കുകൾ സമന്വയിപ്പിച്ചു
+    }
 refresh = പുതുക്കുക
 discover = കണ്ടെത്തുക
 discover_more_loading = കൂടുതൽ ലോഡ് ചെയ്യുന്നു…
@@ -550,8 +592,13 @@ external_play_on = ഇവിടെ പ്ലേ ചെയ്യുക
 external_this_app = kopuz (ഈ ആപ്പ്)
 prefer_active_device = Playback device
 prefer_active_device_help = When another device is already playing, take it over instead of starting playback here.
-settings_managed_notice = ചില ക്രമീകരണങ്ങൾ സിസ്റ്റം കോൺഫിഗറേഷൻ (Nix/hjem) നിയന്ത്രിക്കുന്നു; അവ ഇവിടെ മാറ്റാൻ കഴിയില്ല.
+settings_managed_notice = Some settings are set by a settings file the app can't write (read-only, or managed by Nix/hjem) and can't be changed here.
 setting_managed_by_system = സിസ്റ്റം കോൺഫിഗറേഷൻ നിയന്ത്രിക്കുന്നത്
+settings_dropin_notice = Some settings are set by drop-in files and can't be changed here.
+settings_env_notice = Some settings are set by KOPUZ_CONFIG_* environment variables and can't be changed here.
+setting_locked_by_file = Set by { $path }
+setting_locked_by_dropin = Set by a drop-in, { $path }
+setting_locked_by_env = Set by { $var }
 
 settings_interface = Interface
 interface_general = General
@@ -636,7 +683,11 @@ waiting_for_browser = Waiting for your browser…
 signed_in = Signed in
 metadata_number_invalid = Enter a number, or leave it empty to clear the tag.
 metadata_batch_keep = Leave unchanged
-metadata_batch_count = Editing { $count } tracks
+metadata_batch_count =
+    { $count ->
+        [one] Editing { $count } track
+       *[other] Editing { $count } tracks
+    }
 interface_font = Interface font
 interface_font_description = The font family to draw the interface with.
 interface_font_placeholder = Theme default
@@ -716,6 +767,13 @@ view = View
 undo = Undo
 quit = Quit
 scanning_library = Scanning library…
+network_offline_banner = No internet connection — switched to offline mode
+network_online_banner = Back online — switched to server mode
+keep_server_mode = Keep server mode
+tray_show_hide = Show / Hide Kopuz
+tray_quit = Quit Kopuz
+tray_unavailable_title = Tray icon unavailable
+tray_unavailable_message = System tray unavailable: appindicator library not found. Install libayatana-appindicator (Debian/Ubuntu/Arch) or libappindicator-gtk3 (Fedora). Closing the window will quit the app instead of minimizing to tray.
 reconnecting_attempt = Reconnecting… (attempt { $attempt })
 downloads_summary = { $done } downloaded, { $failed } failed
 job_scan = Library scan
@@ -782,11 +840,19 @@ discover_clear_search = Clear search
 discover_results_for = Results for "{ $query }"
 discover_no_results_hint = Try fewer words, or switch source and look again.
 discover_show_less = Show less
-discover_genre_count = { $count } genres
+discover_genre_count =
+    { $count ->
+        [one] { $count } genre
+       *[other] { $count } genres
+    }
 discover_read_failed = Couldn't load your library: { $error }
 palette_all_results = All results for "{ $query }" in Discover
 
-library_count = { $count } items
+library_count =
+    { $count ->
+        [one] { $count } item
+       *[other] { $count } items
+    }
 library_filter_placeholder = Filter the library…
 library_chip_downloaded = Downloaded
 library_chip_years = Years
@@ -809,7 +875,11 @@ library_tile_medium = Medium
 library_tile_large = Large
 library_default_view = Grids open as
 library_default_view_description = Whether albums, artists and playlists start as tiles or as rows.
-library_artist_tracks = { $count } tracks
+library_artist_tracks =
+    { $count ->
+        [one] { $count } track
+       *[other] { $count } tracks
+    }
 library_selected = { $count } selected
 library_whole_selection = Everything that matches
 library_read_failed = Could not read the library
@@ -848,7 +918,11 @@ downloader_history = URL downloads
 interface_skin = Skin
 interface_skin_description = The shape of the interface: how round things are, how tall a row sits.
 
-home_plays = { $count } plays
+home_plays =
+    { $count ->
+        [one] { $count } play
+       *[other] { $count } plays
+    }
 
 interface_ambient = Ambient light
 interface_ambient_description = Let the current cover cast its colour across the window.
@@ -875,10 +949,41 @@ clippsly_help = Create an App Password at clippsly.app, then sign in with your C
 cloud_storage_usage = Cloud storage: { $used } of { $total } used
 upload_music = Upload music
 uploading_music = Uploading { $name }…
-music_uploaded = Uploaded { $count } file(s).
+music_uploaded =
+    { $count ->
+        [one] Uploaded { $count } file.
+       *[other] Uploaded { $count } files.
+    }
 music_upload_too_large = Audio files must be no larger than 500 MiB.
 cloud_storage_loading = Loading storage usage…
 
 smb_url_placeholder = smb://nas/Music
 smb_help = Connect to an SMB 2/3 share or subfolder, then sign in with your NAS account. Domain accounts can use DOMAIN\username. Files are read without mounting the share.
 invalid_smb_url = Enter smb://host/share or smb://host/share/folder, without credentials in the URL.
+sync_interval = Sync and rescan every
+sync_interval_never = Never
+sync_interval_minutes = { $count } min
+sync_interval_hours = { $count } h
+sync_interval_days = { $count } d
+
+error_setting_locked = A managed settings file pins this setting, so it cannot be changed here.
+error_connect_not_offered = This integration does not connect that way.
+error_api_key_missing = Set the API key and secret first.
+error_sign_in_not_started = The service did not start the sign-in. Check the API key and your connection.
+error_browser_not_opened = Could not open a browser for the sign-in.
+error_sign_in_timed_out = The sign-in was not approved in time.
+error_browser_profile_gone = That browser profile is no longer there.
+error_browser_cookies_unreadable = Could not read the cookies of that browser profile.
+error_browser_profile_signed_out = That browser profile is not signed in to the service. Sign in there, or paste your token instead.
+error_browser_profile_no_token = The service did not show a token for that profile. Paste it instead.
+error_integration_unreachable = Could not reach the service. Check your connection.
+error_credential_rejected = The service does not accept that token. Paste your token instead.
+error_default_source_undeletable = The default folder source cannot be deleted.
+error_empty_source_folder = A source folder cannot be empty.
+error_code_invalid_input = Not accepted: { $detail }
+error_code_not_found = That is no longer there.
+error_code_conflict = Already in use or in progress: { $detail }
+error_code_source_auth_expired = The source did not accept the sign-in. Sign in again in Settings.
+error_code_source_unreachable = The source could not be reached. Check your connection.
+error_code_unsupported = Not supported here: { $detail }
+error_code_internal = Something went wrong: { $detail }

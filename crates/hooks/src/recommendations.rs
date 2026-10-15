@@ -25,7 +25,7 @@ pub fn dont_recommend(mut ctrl: PlayerController) {
     let api = consume_api();
     spawn(async move {
         if let Err(error) = api.dont_recommend(key).await {
-            crate::toast::toast_error(&error.to_string());
+            crate::toast::toast_api_error(&error);
         }
         ctrl.play_next();
     });

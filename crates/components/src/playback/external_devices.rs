@@ -174,7 +174,7 @@ pub fn ExternalDevicesPanel(
             };
             if let Err(error) = api.select_external_device(asked, device_id).await {
                 tracing::warn!(%error, "moving playback to another device failed");
-                hooks::toast::toast_error(&error.to_string());
+                hooks::toast::toast_api_error(&error);
             }
             devices.restart();
         });

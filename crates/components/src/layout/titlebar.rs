@@ -1,4 +1,4 @@
-use config::AppConfig;
+use config::Settings;
 use dioxus::desktop::window;
 use dioxus::prelude::*;
 
@@ -36,8 +36,8 @@ const RESIZE_HANDLES: [(&str, dioxus::desktop::tao::window::ResizeDirection); 8]
 pub fn ResizeHandles() -> Element {
     #[cfg(target_os = "linux")]
     {
-        let config = use_context::<Signal<AppConfig>>();
-        if config.read().titlebar_mode == config::TitlebarMode::System {
+        let settings = use_context::<Signal<Settings>>();
+        if settings.read().ui.titlebar_mode == config::TitlebarMode::System {
             return rsx! {};
         }
 
@@ -71,8 +71,8 @@ pub fn ResizeHandles() -> Element {
 #[component]
 pub fn Titlebar() -> Element {
     {
-        let config = use_context::<Signal<AppConfig>>();
-        if config.read().titlebar_mode != config::TitlebarMode::Custom {
+        let settings = use_context::<Signal<Settings>>();
+        if settings.read().ui.titlebar_mode != config::TitlebarMode::Custom {
             return rsx! {};
         }
         let minimize_text = i18n::t("minimize").to_string();

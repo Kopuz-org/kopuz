@@ -7,24 +7,24 @@ use components::playlist_modal::PlaylistModal;
 use components::sort_control::SortControl;
 use components::track_list_view::TrackListView;
 use components::view_mode_toggle::ViewModeToggle;
-use config::{AlbumViewMode, AppConfig};
+use config::AlbumViewMode;
 use dioxus::prelude::*;
-use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{use_active_source, use_album, use_albums, use_tracks_by_keys};
-use std::collections::HashSet;
+use hooks::use_db_queries::{use_active_source, use_album, use_album_tracks, use_albums};
 
 /// Copy a link to the clipboard and flash a small toast. Used by the catalog album
 /// page's share button (the `track_row` clipboard helper is crate-private to
 /// `components`, so the page carries its own tiny copy).
 fn copy_album_link(url: String) {
     let value = serde_json::to_string(&url).unwrap_or_else(|_| "\"\"".to_string());
+    let copied =
+        serde_json::to_string(&i18n::t("share_copied")).unwrap_or_else(|_| "\"\"".to_string());
     let js = format!(
         "navigator.clipboard.writeText({value}).then(() => {{\
             let t = document.getElementById('kopuz-toast');\
             if (!t) {{ t = document.createElement('div'); t.id = 'kopuz-toast';\
                 t.style.cssText = 'position:fixed;left:50%;bottom:88px;transform:translateX(-50%);background:rgba(20,20,20,0.95);color:#fff;padding:10px 18px;border-radius:8px;font:14px system-ui,sans-serif;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,0.4);pointer-events:none;border:1px solid rgba(255,255,255,0.1);';\
                 document.body.appendChild(t); }}\
-            t.textContent = 'Copied link'; t.style.opacity = '1';\
+            t.textContent = {copied}; t.style.opacity = '1';\
             clearTimeout(t._h); t._h = setTimeout(() => {{ t.style.opacity = '0'; }}, 1800);\
         }}).catch((e) => console.error('clipboard writeText failed', e));"
     );
@@ -33,32 +33,13 @@ fn copy_album_link(url: String) {
 
 #[component]
 pub fn Album(
-    config: Signal<AppConfig>,
     album_id: Signal<String>,
     mut queue: Signal<Vec<api::TrackInfo>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let source = use_active_source();
-    let caps = hooks::sources::use_capabilities();
     let nav_ctrl = use_context::<components::NavigationController>();
 
     let open_album_menu = use_signal(|| None::<String>);
-
-    let albums_res = use_albums(source);
-
-    // First visit to a server with an empty cache → pull once.
-    let mut has_fetched = use_signal(|| false);
-    use_effect(move || {
-        if !caps().sync || *has_fetched.read() {
-            return;
-        }
-        if let Some(albums) = albums_res.read().clone() {
-            has_fetched.set(true);
-            if albums.is_empty() {
-                hooks::jobs::start(hooks::JobKind::LibrarySync);
-            }
-        }
-    });
 
     rsx! {
         div {
@@ -71,7 +52,6 @@ pub fn Album(
                     }
 
                     AlbumGrid {
-                        config,
                         album_id,
                         open_album_menu,
                     }
@@ -79,7 +59,6 @@ pub fn Album(
                 }
             } else {
                 AlbumDetail {
-                    config,
                     album_id_str: album_id.read().clone(),
                     queue,
                     current_queue_index,
@@ -91,78 +70,44 @@ pub fn Album(
 }
 
 #[component]
-fn AlbumGrid(
-    mut config: Signal<AppConfig>,
-    mut album_id: Signal<String>,
-    mut open_album_menu: Signal<Option<String>>,
-) -> Element {
+fn AlbumGrid(mut album_id: Signal<String>, mut open_album_menu: Signal<Option<String>>) -> Element {
     let source = use_active_source();
     let caps = hooks::sources::use_capabilities();
     let is_offline = use_context::<Signal<bool>>();
-    let albums_res = use_albums(source);
-
-    let album_sort = use_signal(|| config.peek().album_sort.clone());
+    let mut prefs = hooks::ui_prefs::use_ui_prefs();
+    let album_sort = use_signal(|| prefs.peek().album_sort.clone());
     use_effect(move || {
         let curr = album_sort.read().clone();
-        if config.peek().album_sort != curr {
-            config.write().album_sort = curr;
+        if prefs.peek().album_sort != curr {
+            prefs.write().album_sort = curr;
         }
     });
-    let view_mode = use_signal(|| config.peek().album_view_mode);
+    let albums_query = use_memo(move || {
+        Some(hooks::AlbumQuery {
+            sort: album_sort.read().clone(),
+            downloaded: (caps().downloads && *is_offline.read()).then_some(true),
+            ..Default::default()
+        })
+    });
+    let albums_res = use_albums(source, albums_query);
+    let view_mode = use_signal(|| prefs.peek().album_view_mode);
     use_effect(move || {
         let curr = *view_mode.read();
-        if config.peek().album_view_mode != curr {
-            config.write().album_view_mode = curr;
+        if prefs.peek().album_view_mode != curr {
+            prefs.write().album_view_mode = curr;
         }
-    });
-    let available_sort_fields = use_memo(move || {
-        hooks::sort::available_album_fields(&albums_res.read().clone().unwrap_or_default())
-    });
-
-    // Offline (server): only albums with downloaded tracks. Album ids come from
-    // the downloaded tracks themselves. The grid dedupes by title — the detail
-    // re-aggregates same-titled albums.
-    let offline_keys = use_memo(move || -> Vec<String> {
-        if !(caps().downloads && *is_offline.read()) {
-            return Vec::new();
-        }
-        config
-            .read()
-            .offline_tracks
-            .iter()
-            .filter(|(_, p)| std::path::Path::new(p).exists())
-            .map(|(id, _)| id.clone())
-            .collect()
-    });
-    let offline_tracks_res = use_tracks_by_keys(source, offline_keys);
-    let downloaded_album_ids = use_memo(move || -> HashSet<String> {
-        if !(caps().downloads && *is_offline.read()) {
-            return HashSet::new();
-        }
-        offline_tracks_res
-            .read()
-            .clone()
-            .unwrap_or_default()
-            .iter()
-            .map(|t| t.album_id.clone())
-            .collect()
     });
 
     let albums = use_memo(move || {
-        let offline = caps().downloads && *is_offline.read();
-        let downloaded = downloaded_album_ids();
-        let mut seen = HashSet::new();
-        let mut albums = albums_res
+        albums_res
             .read()
             .clone()
+            .and_then(Result::ok)
             .unwrap_or_default()
-            .into_iter()
-            .filter(|a| !offline || downloaded.contains(&a.id))
-            .filter(|a| seen.insert(a.title.trim().to_lowercase()))
-            .collect::<Vec<_>>();
-        hooks::sort::sort_albums(&mut albums, &album_sort.read());
-        albums
     });
+    let available_sort_fields = use_memo(move || hooks::sort::available_album_fields(&albums()));
+    // A source's first sync lists nothing until it lands, which is not an empty library.
+    let filling = hooks::jobs::use_library_filling();
 
     // Restore the grid scroll once after the albums first render; guarded so DB
     // reactivity re-runs don't keep snapping the view back to the saved offset.
@@ -188,7 +133,13 @@ fn AlbumGrid(
             id: "album-grid-scroll",
             class: "flex-1 min-h-0 overflow-y-auto pb-8",
             onscroll: move |e| crate::scroll_persist::save("albums", e.scroll_top()),
-            if albums().is_empty() {
+            if albums_res.read().is_none() || (albums().is_empty() && filling()) {
+                div { class: "flex items-center justify-center py-12",
+                    i { class: "fa-solid fa-spinner fa-spin text-3xl text-white/20" }
+                }
+            } else if let Some(Err(error)) = albums_res.read().clone() {
+                crate::layout::ReadError { error }
+            } else if albums().is_empty() {
                 p { class: "text-slate-500", "{i18n::t(\"no_albums_found\")}" }
             } else {
                 div {
@@ -260,20 +211,9 @@ fn AlbumGrid(
                                             delete_label: Some(remove_label.clone()),
                                             on_delete: {
                                                 let id = id_for_menu.clone();
-                                                let title = album.title.clone();
                                                 Some(EventHandler::new(move |_| {
                                                     open_album_menu.set(None);
-                                                    if cap.delete_from_disk {
-                                                        hooks::library_actions::delete_album(id.clone(), true);
-                                                    } else {
-                                                        // A server splits one release across
-                                                        // same-titled albums, so dropping the
-                                                        // cache means dropping all of them.
-                                                        let all = albums_res.read().clone().unwrap_or_default();
-                                                        for album in all.iter().filter(|album| album.title == title) {
-                                                            hooks::library_actions::delete_album(album.id.clone(), false);
-                                                        }
-                                                    }
+                                                    hooks::library_actions::delete_album(id.clone(), cap.delete_from_disk);
                                                 }))
                                             },
                                         }
@@ -291,14 +231,12 @@ fn AlbumGrid(
 
 #[component]
 fn AlbumDetail(
-    config: Signal<AppConfig>,
     album_id_str: String,
     mut queue: Signal<Vec<api::TrackInfo>>,
     current_queue_index: Signal<usize>,
     on_close: EventHandler<()>,
 ) -> Element {
     let nav_ctrl = use_context::<components::NavigationController>();
-    let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
     let api = hooks::use_api();
     let caps = hooks::sources::use_capabilities();
@@ -307,7 +245,7 @@ fn AlbumDetail(
 
     let album_id_memo = use_memo(use_reactive!(|album_id_str| album_id_str));
     let album_res = use_album(source, album_id_memo);
-    let albums_res = use_albums(source);
+    let tracks_res = use_album_tracks(source, album_id_memo);
 
     // Discover albums are opened by the source's own browse id and aren't in the
     // library until saved. When the library has no row for the id, fetch the album
@@ -342,25 +280,15 @@ fn AlbumDetail(
         None => {
             // Not saved yet — render the remote album directly if it resolved.
             if let Some(remote) = direct_remote_res.read().clone().flatten() {
-                let mut tracks = remote.tracks;
-                tracks.sort_by(|a, b| {
-                    a.disc_number
-                        .unwrap_or(1)
-                        .cmp(&b.disc_number.unwrap_or(1))
-                        .then_with(|| {
-                            a.track_number
-                                .unwrap_or(0)
-                                .cmp(&b.track_number.unwrap_or(0))
-                        })
-                });
+                let tracks = remote.tracks;
                 return rsx! {
                     div { class: "absolute inset-0 flex flex-col overflow-hidden p-8",
                         RemoteAlbumDetail {
-                            config,
                             title: remote.title,
                             artist: remote.subtitle.unwrap_or_default(),
                             artist_key: remote.artist_key,
                             year: remote.year,
+                            release_kind: remote.release_kind,
                             album_id: Some(remote.id),
                             remote_cover: hooks::artwork::url(remote.artwork.as_ref(), hooks::artwork::Size::Thumb),
                             tracks,
@@ -375,47 +303,6 @@ fn AlbumDetail(
             }
             return rsx! { div { "{i18n::t(\"album_not_found\")}" } };
         }
-    };
-
-    // The grid dedupes albums by title, so the detail aggregates every
-    // same-titled album's tracks.
-    let info_title = album.title.clone();
-    let matching_ids = use_memo(move || -> Vec<String> {
-        let title = info_title.clone();
-        let ids: Vec<String> = albums_res
-            .read()
-            .clone()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|a| a.title == title)
-            .map(|a| a.id)
-            .collect();
-        ids
-    });
-    let tracks_res = {
-        let api = api.clone();
-        use_resource(move || {
-            let _ = gens.generation(Table::Tracks);
-            let ids = matching_ids();
-            let api = api.clone();
-            async move {
-                let mut out = Vec::new();
-                for id in ids {
-                    let page = api
-                        .album_tracks(
-                            id,
-                            api::Page {
-                                offset: 0,
-                                limit: u32::MAX,
-                            },
-                        )
-                        .await
-                        .unwrap_or_default();
-                    out.extend(page.items);
-                }
-                out
-            }
-        })
     };
 
     // Catalog sources store albums under a title+artist hash with no
@@ -448,43 +335,20 @@ fn AlbumDetail(
 
     let tracks = use_memo(move || {
         let offline = caps().downloads && *is_offline.read();
-        let conf = config.read();
 
-        // Full album from the catalog remote (already in album order). Used
-        // whenever it resolved; the saved subset is the fallback.
+        // The catalog remote's full album, in the source's order, whenever it resolved; the saved subset otherwise.
         if !offline && let Some(remote) = remote_album_res.read().clone().flatten() {
-            let mut remote = remote.tracks;
-            remote.sort_by(|a, b| {
-                a.disc_number
-                    .unwrap_or(1)
-                    .cmp(&b.disc_number.unwrap_or(1))
-                    .then_with(|| {
-                        a.track_number
-                            .unwrap_or(0)
-                            .cmp(&b.track_number.unwrap_or(0))
-                    })
-            });
-            return remote;
+            return remote.tracks;
         }
 
-        let mut tracks: Vec<api::TrackInfo> = tracks_res
+        // The daemon orders an album by disc, track and title.
+        tracks_res
             .read()
             .clone()
             .unwrap_or_default()
             .into_iter()
-            .filter(|t| !offline || conf.offline_tracks.contains_key(&t.key))
-            .collect();
-        tracks.sort_by(|a, b| {
-            a.disc_number
-                .unwrap_or(1)
-                .cmp(&b.disc_number.unwrap_or(1))
-                .then_with(|| {
-                    a.track_number
-                        .unwrap_or(0)
-                        .cmp(&b.track_number.unwrap_or(0))
-                })
-        });
-        tracks
+            .filter(|t| !offline || t.offline)
+            .collect::<Vec<api::TrackInfo>>()
     });
 
     let album_title = album.title.clone();
@@ -540,6 +404,7 @@ fn AlbumDetail(
         .and_then(|a| a.year.clone())
         .or_else(|| (album.year > 0).then(|| album.year.to_string()));
     let remote_album_id = remote_album.as_ref().map(|a| a.id.clone());
+    let remote_kind = remote_album.as_ref().and_then(|a| a.release_kind);
     let remote_artist_key = remote_album
         .as_ref()
         .and_then(|a| a.artist_key.clone())
@@ -549,11 +414,11 @@ fn AlbumDetail(
         div { class: "absolute inset-0 flex flex-col overflow-hidden p-8",
             if cap.albums == api::AlbumPresentation::Remote {
                 RemoteAlbumDetail {
-                    config,
                     title: remote_title,
                     artist: remote_artist,
                     artist_key: remote_artist_key,
                     year: remote_year,
+                    release_kind: remote_kind,
                     album_id: remote_album_id,
                     remote_cover: cover_url_remote,
                     tracks: tracks(),
@@ -570,6 +435,8 @@ fn AlbumDetail(
                 })),
                 cover_url,
                 is_album: true,
+                // Only the daemon's own album order plays as the album; an offline subset is a plain list.
+                album_id: (!(cap.downloads && *is_offline.read())).then(|| album.id.clone()),
                 release_year: (album.year > 0).then_some(album.year),
                 tracks: tracks(),
                 on_close,
@@ -619,10 +486,7 @@ fn AlbumDetail(
                             return;
                         }
 
-                        let downloaded = config.read().offline_tracks.get(key)
-                            .map(|p| std::path::Path::new(p).exists())
-                            .unwrap_or(false);
-                        if downloaded {
+                        if t.offline {
                             hooks::downloads::remove(vec![key.to_string()]);
                         } else {
                             hooks::downloads::start(vec![key.to_string()]);
@@ -657,16 +521,21 @@ fn AlbumDetail(
 /// download behave exactly as everywhere else.
 #[component]
 fn RemoteAlbumDetail(
-    config: Signal<AppConfig>,
     title: String,
     artist: String,
     artist_key: Option<String>,
     year: Option<String>,
+    release_kind: Option<api::ReleaseKind>,
     album_id: Option<String>,
     remote_cover: Option<utils::CoverUrl>,
     tracks: Vec<api::TrackInfo>,
     on_close: EventHandler<()>,
 ) -> Element {
+    let release_label = release_kind.map(|kind| match kind {
+        api::ReleaseKind::Album => i18n::t("album"),
+        api::ReleaseKind::Single => i18n::t("release_single"),
+        api::ReleaseKind::Ep => i18n::t("release_ep"),
+    });
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let nav_ctrl = use_context::<components::NavigationController>();
     let downloads = hooks::downloads::use_downloads();
@@ -676,8 +545,7 @@ fn RemoteAlbumDetail(
     let mut show_playlist_modal = use_signal(|| false);
     let mut playlist_track = use_signal(|| None::<String>);
 
-    let total: u64 = tracks.iter().filter_map(|t| t.duration_secs()).sum();
-    let dur_min = total / 60;
+    let dur_min = api::total_duration_secs(&tracks).map(|secs| secs / 60);
     let song_count = tracks.len();
     let artist_name = artist;
     let names_artist = artist_key.is_some();
@@ -694,17 +562,12 @@ fn RemoteAlbumDetail(
         let idx = *ctrl.current_queue_index.read();
         ctrl.get_track_at(idx).map(|t| t.uid)
     };
-    let offline_tracks = config.read().offline_tracks.clone();
+    // Catalog rows are not re-read when a download lands, so the stored list is what's current.
+    let stored = downloads.read().clone();
 
     // Whether every album track is downloaded for offline — drives the download
     // button's toggle (download all ⇄ remove all).
-    let all_downloaded = !tracks.is_empty()
-        && tracks.iter().all(|t| {
-            offline_tracks
-                .get(&t.key)
-                .map(|p| std::path::Path::new(p).exists())
-                .unwrap_or(false)
-        });
+    let all_downloaded = !tracks.is_empty() && tracks.iter().all(|t| stored.is_stored(&t.key));
 
     let tracks_play_all = tracks.clone();
     let tracks_download_all = tracks.clone();
@@ -761,13 +624,15 @@ fn RemoteAlbumDetail(
                         }
                         h1 { class: "text-3xl font-semibold tracking-tight text-white leading-[1.1] break-words", "{title}" }
                         div { class: "text-sm text-slate-400 flex flex-wrap items-center gap-x-2 justify-center md:justify-start",
-                            if year.is_some() {
-                                span { class: "uppercase tracking-wide text-xs font-semibold text-white/40", "{i18n::t(\"album\")}" }
+                            if let Some(label) = release_label {
+                                span { class: "uppercase tracking-wide text-xs font-semibold text-white/40", "{label}" }
                                 span { class: "text-white/30", "•" }
                             }
-                            span { "{i18n::t_with(\"showcase_song_count\", &[(\"count\", song_count.to_string())])}" }
-                            span { class: "text-white/30", "•" }
-                            span { "{dur_min} {i18n::t(\"min\")}" }
+                            span { {i18n::t_with("showcase_song_count", &[("count", song_count.into())])} }
+                            if let Some(minutes) = dur_min {
+                                span { class: "text-white/30", "•" }
+                                span { "{minutes} {i18n::t(\"min\")}" }
+                            }
                             if let Some(y) = year {
                                 span { class: "text-white/30", "•" }
                                 span { "{y}" }
@@ -848,10 +713,7 @@ fn RemoteAlbumDetail(
                             let is_menu_open = active_menu.read().as_ref() == Some(&track.uid);
                             let is_current = current_id.as_ref() == Some(&track.uid);
                             let key = track.key.clone();
-                            let is_downloaded = offline_tracks
-                                .get(&key)
-                                .map(|p| std::path::Path::new(p).exists())
-                                .unwrap_or(false);
+                            let is_downloaded = stored.is_stored(&key);
                             let row_tracks = tracks.clone();
                             let menu_id = track.uid.clone();
                             let pl_id = track.uid.clone();
@@ -891,10 +753,7 @@ fn RemoteAlbumDetail(
                                             return;
                                         }
 
-                                        let downloaded = config.read().offline_tracks.get(k)
-                                            .map(|p| std::path::Path::new(p).exists())
-                                            .unwrap_or(false);
-                                        if downloaded {
+                                        if downloads.peek().is_stored(k) {
                                             hooks::downloads::remove(vec![k.to_string()]);
                                         } else {
                                             hooks::downloads::start(vec![k.to_string()]);

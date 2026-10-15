@@ -4,7 +4,7 @@ use components::selection_bar::SelectionBar;
 use components::showcase::{self, SortField};
 use components::track_row::TrackRow;
 use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
-use config::{AppConfig, UiStyle};
+use config::{Settings, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{use_active_source, use_favorites, use_tracks_by_keys};
 use hooks::use_player_controller::PlayerController;
@@ -19,7 +19,7 @@ const ITEM_HEIGHT: f64 = 60.0;
 /// remote-sync/download affordances gated on [`Capabilities`].
 #[component]
 pub fn FavoritesBody(
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     mut queue: Signal<Vec<api::TrackInfo>>,
     search_query: Signal<String>,
 ) -> Element {
@@ -101,7 +101,7 @@ pub fn FavoritesBody(
 
     let displayed_tracks_for_selection = sorted_displayed_tracks.clone();
     let is_empty = displayed_tracks.is_empty();
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
 
     // Window the rows: only the visible slice (plus buffer) exists in the
     // DOM — the full 800+ row list made every scroll frame repaint a huge
@@ -134,13 +134,7 @@ pub fn FavoritesBody(
             let matches_current_path = currently_playing_path.as_ref() == Some(&track.uid);
 
             let item_id: String = track.key.clone();
-            let is_downloaded = cap.downloads
-                && config
-                    .read()
-                    .offline_tracks
-                    .get(&item_id)
-                    .map(|p| std::path::Path::new(p).exists())
-                    .unwrap_or(false);
+            let is_downloaded = cap.downloads && track.offline;
             let is_downloading = cap.downloads && downloads.read().is_active(&item_id);
             let item_id_dl = item_id.clone();
 
@@ -198,11 +192,11 @@ pub fn FavoritesBody(
                         );
                     },
                     on_download: cap.downloads.then(|| EventHandler::new(move |_| {
-                        if !is_downloaded {
-                            active_menu_track.set(None);
-                            hooks::downloads::start(
-                                vec![item_id_dl.clone()],
-                            );
+                        active_menu_track.set(None);
+                        if is_downloaded {
+                            hooks::downloads::remove(vec![item_id_dl.clone()]);
+                        } else {
+                            hooks::downloads::start(vec![item_id_dl.clone()]);
                         }
                     })),
                     on_play: move |_| {
@@ -345,12 +339,12 @@ pub fn FavoritesBody(
                                 if syncing {
                                     i { class: "fa-solid fa-arrows-rotate fa-spin text-indigo-300" }
                                     span {
-                                        "{i18n::t_with(\"yt_syncing_progress\", &[(\"count\", synced.to_string())])}"
+                                        "{i18n::t_with(\"yt_syncing_progress\", &[(\"count\", synced.into())])}"
                                     }
                                 } else if total > 0 {
                                     i { class: "fa-solid fa-check text-emerald-400" }
                                     span {
-                                        "{i18n::t_with(\"yt_synced_total\", &[(\"count\", total.to_string())])}"
+                                        "{i18n::t_with(\"yt_synced_total\", &[(\"count\", total.into())])}"
                                     }
                                 }
                             }
@@ -388,7 +382,7 @@ pub fn FavoritesBody(
                         let add_hint = i18n::t("heart_track_to_add");
                         let no_results = i18n::t_with(
                             "no_results_found",
-                            &[("query", search_query.read().trim().to_string())],
+                            &[("query", search_query.read().trim().to_string().into())],
                         );
                         rsx! {
                             div {

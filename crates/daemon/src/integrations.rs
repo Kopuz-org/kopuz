@@ -9,12 +9,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use api::{
-    ApiError, ApiEvent, ConnectKind, FieldKind, FieldSpec, FieldValue, Icon, IntegrationInfo,
-    Phase, PlayerState, Text, value_of,
+    ApiError, ApiEvent, ConnectKind, ErrorReason, FieldKind, FieldSpec, FieldValue, Icon,
+    IntegrationInfo, Phase, PlayerState, Text, value_of,
 };
 use reader::Track;
 use tokio::sync::{broadcast, watch};
 
+use crate::credentials::{CredentialStore, Credentials};
 use crate::session::{PlaybackRecorder, SessionHandle};
 
 const DISCORD_APP_ID: &str = "1470087339639443658";
@@ -23,28 +24,30 @@ const JELLYFIN_KEEPALIVE_TICKS: u32 = 6;
 const DISCORD_TICK_SECS: u64 = 30;
 const YOUTUBE_REPORT_SECS: u64 = 1;
 
-/// Durable recents + listen counts over the active source, matching the
-/// pump: recents record under the DB key, listen counts under the uid.
-pub struct SourceRecorder {
-    source: server::source::ActiveSource,
-}
-
-impl SourceRecorder {
-    pub fn new(source: server::source::ActiveSource) -> Self {
-        Self { source }
-    }
-}
+/// Durable recents + listen counts over the source a track played from,
+/// matching the pump: recents record under the DB key, listen counts under the uid.
+pub struct SourceRecorder;
 
 #[async_trait::async_trait]
 impl PlaybackRecorder for SourceRecorder {
-    async fn record_recent(&self, track: &Track) {
-        if let Err(error) = self.source.record_recent(&track.id.key()).await {
+    async fn record_recent(&self, source: Option<&server::source::ActiveSource>, track: &Track) {
+        let Some(source) = source else {
+            return;
+        };
+        if let Err(error) = source.record_recent(&track.id.key()).await {
             tracing::warn!(%error, "recent record failed");
         }
     }
 
-    async fn bump_listen_count(&self, track: &Track) {
-        if let Err(error) = self.source.bump_listen_count(&track.id.key()).await {
+    async fn bump_listen_count(
+        &self,
+        source: Option<&server::source::ActiveSource>,
+        track: &Track,
+    ) {
+        let Some(source) = source else {
+            return;
+        };
+        if let Err(error) = source.bump_listen_count(&track.id.key()).await {
             tracing::warn!(%error, "listen count persist failed");
         }
     }
@@ -78,7 +81,7 @@ async fn next_state(
 pub fn spawn_jellyfin_reporter(
     session: &SessionHandle,
     source: server::source::ActiveSource,
-    config: watch::Receiver<config::AppConfig>,
+    sources: watch::Receiver<Arc<server::sources::Sources>>,
 ) -> tokio::task::JoinHandle<()> {
     let mut events = session.subscribe();
     tokio::spawn(async move {
@@ -90,7 +93,7 @@ pub fn spawn_jellyfin_reporter(
         report.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
-            let jellyfin_configured = config
+            let jellyfin_configured = sources
                 .borrow()
                 .server
                 .as_ref()
@@ -174,9 +177,9 @@ pub fn spawn_jellyfin_reporter(
     })
 }
 
-fn youtube_signed_in(config: &config::AppConfig) -> bool {
-    matches!(config.active_source, config::Source::Server(_))
-        && config.server.as_ref().is_some_and(|server| {
+fn youtube_signed_in(sources: &server::sources::Sources) -> bool {
+    matches!(sources.active, config::Source::Server(_))
+        && sources.server.as_ref().is_some_and(|server| {
             server.service == config::MusicService::YtMusic
                 && !server.yt_anonymous
                 && server
@@ -187,12 +190,12 @@ fn youtube_signed_in(config: &config::AppConfig) -> bool {
 }
 
 /// Reports plays to YouTube History while a signed-in YouTube Music source is
-/// active. The source is built from the config at the start of each play, so a
+/// active. The source is built from the saved sources at the start of each play, so a
 /// sign-out stops reporting at the next state change.
 pub fn spawn_youtube_reporter(
     session: &SessionHandle,
     db: db::Db,
-    config: watch::Receiver<config::AppConfig>,
+    sources: watch::Receiver<Arc<server::sources::Sources>>,
 ) -> tokio::task::JoinHandle<()> {
     let mut events = session.subscribe();
     let session = session.clone();
@@ -217,7 +220,7 @@ pub fn spawn_youtube_reporter(
                         Err(broadcast::error::RecvError::Closed) => break,
                     };
                     let received = Instant::now();
-                    let live_id = (youtube_signed_in(&config.borrow())
+                    let live_id = (youtube_signed_in(&sources.borrow())
                         && matches!(state.phase, Phase::Playing | Phase::Paused))
                     .then(|| {
                         state
@@ -242,7 +245,7 @@ pub fn spawn_youtube_reporter(
                         && let Some(id) = live_id
                     {
                         let source: server::source::ActiveSource =
-                            Arc::from(server::source::active(db.clone(), &config.borrow()));
+                            Arc::from(server::source::active(db.clone(), &sources.borrow()));
                         let _ = source.report_playback_start(&id).await;
                         current = Some((id, source));
                     }
@@ -301,18 +304,20 @@ impl Drop for DiscordState {
 /// resolution keyed by song so a late result never stamps the wrong track.
 pub fn spawn_discord_presence(
     session: &SessionHandle,
-    config: watch::Receiver<config::AppConfig>,
+    mut config: watch::Receiver<config::Settings>,
+    sources: watch::Receiver<Arc<server::sources::Sources>>,
+    mut paused: watch::Receiver<bool>,
 ) -> tokio::task::JoinHandle<()> {
     let mut events = session.subscribe();
     let session = session.clone();
     tokio::spawn(async move {
-        let presence = match discord_presence::Presence::new(DISCORD_APP_ID) {
-            Ok(presence) => Arc::new(presence),
-            Err(error) => {
-                tracing::info!(%error, "discord presence unavailable");
-                return;
-            }
-        };
+        let mut presence = None;
+        if !hold_connection(
+            &mut presence,
+            PresenceOptions::of(&config.borrow(), &paused).enabled,
+        ) {
+            return;
+        }
         let (cover_tx, mut cover_rx) =
             tokio::sync::mpsc::unbounded_channel::<(String, Option<String>)>();
         let mut discord = DiscordState {
@@ -329,6 +334,8 @@ pub fn spawn_discord_presence(
         let mut last_state: Option<(Box<PlayerState>, Instant)> = None;
         let mut keepalive = tokio::time::interval(Duration::from_secs(DISCORD_TICK_SECS));
         keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut pause_open = true;
+        let mut config_open = true;
 
         loop {
             tokio::select! {
@@ -336,7 +343,11 @@ pub fn spawn_discord_presence(
                     let Some(state) = state else { break };
                     let Some(state) = state else { continue };
                     let received = Instant::now();
-                    project(&presence, &config.borrow(), &state, received, &mut discord, &session, &cover_tx);
+                    let service = sources.borrow().active_service();
+                    let options = PresenceOptions::of(&config.borrow(), &paused);
+                    if !present(&mut presence, options, service, &state, received, &mut discord, &session, &cover_tx) {
+                        break;
+                    }
                     last_state = Some((state, received));
                 }
                 resolved = cover_rx.recv() => {
@@ -346,32 +357,144 @@ pub fn spawn_discord_presence(
                         discord.cover = url;
                         discord.cover_sent = false;
                         if let Some((state, received)) = &last_state {
-                            project(&presence, &config.borrow(), state, *received, &mut discord, &session, &cover_tx);
+                            let service = sources.borrow().active_service();
+                            let options = PresenceOptions::of(&config.borrow(), &paused);
+                            if !present(&mut presence, options, service, state, *received, &mut discord, &session, &cover_tx) {
+                                break;
+                            }
                         }
                     }
                 }
+                changed = paused.changed(), if pause_open => {
+                    // A dropped sender would make every later `changed` return at once.
+                    if changed.is_err() {
+                        pause_open = false;
+                        continue;
+                    }
+                    if let Some((state, received)) = &last_state {
+                        let service = sources.borrow().active_service();
+                        let options = PresenceOptions::of(&config.borrow(), &paused);
+                        if !present(&mut presence, options, service, state, *received, &mut discord, &session, &cover_tx) {
+                            break;
+                        }
+                    }
+                }
+                changed = config.changed(), if config_open => {
+                    if changed.is_err() {
+                        config_open = false;
+                        continue;
+                    }
+                    let options = PresenceOptions::of(&config.borrow(), &paused);
+                    if options.enabled == presence.is_some() {
+                        continue;
+                    }
+                    let kept = match &last_state {
+                        Some((state, received)) => {
+                            let service = sources.borrow().active_service();
+                            present(&mut presence, options, service, state, *received, &mut discord, &session, &cover_tx)
+                        }
+                        None => hold_connection(&mut presence, options.enabled),
+                    };
+                    if !kept {
+                        break;
+                    }
+                }
                 _ = keepalive.tick(), if discord.last_enabled => {
-                    presence.tick();
+                    if let Some(presence) = &presence {
+                        presence.tick();
+                    }
                 }
             }
         }
     })
 }
 
+/// Hold the Discord IPC connection only while presence is enabled; answers false when presence cannot exist on this platform.
+fn hold_connection(slot: &mut Option<Arc<discord_presence::Presence>>, enabled: bool) -> bool {
+    match (enabled, slot.is_some()) {
+        (true, false) => match discord_presence::Presence::new(DISCORD_APP_ID) {
+            Ok(presence) => {
+                *slot = Some(Arc::new(presence));
+                true
+            }
+            Err(error) => {
+                tracing::info!(%error, "discord presence unavailable");
+                false
+            }
+        },
+        (false, true) => {
+            if let Some(presence) = slot.take()
+                && let Err(error) = presence.disconnect()
+            {
+                tracing::debug!(%error, "closing the discord connection failed");
+            }
+            true
+        }
+        _ => true,
+    }
+}
+
+/// Project `state` over a connection opened for it, clearing the card before a disable closes the connection.
+#[allow(clippy::too_many_arguments)]
+fn present(
+    slot: &mut Option<Arc<discord_presence::Presence>>,
+    options: PresenceOptions,
+    service: Option<config::MusicService>,
+    state: &PlayerState,
+    received: Instant,
+    discord: &mut DiscordState,
+    session: &SessionHandle,
+    cover_tx: &tokio::sync::mpsc::UnboundedSender<(String, Option<String>)>,
+) -> bool {
+    if options.enabled && !hold_connection(slot, true) {
+        return false;
+    }
+    match slot.as_deref() {
+        Some(presence) => project(
+            presence, options, service, state, received, discord, session, cover_tx,
+        ),
+        None => {
+            discord.cancel_cover_lookup();
+            discord.cover_lookup_attempted = false;
+            discord.was_playing = state.phase == Phase::Playing;
+            discord.last_enabled = false;
+        }
+    }
+    hold_connection(slot, options.enabled)
+}
+
+/// What the presence card shows: the two settings, and the pause toggle the daemon keeps beside them.
+#[derive(Clone, Copy)]
+struct PresenceOptions {
+    enabled: bool,
+    paused: bool,
+    source: bool,
+}
+
+impl PresenceOptions {
+    fn of(config: &config::Settings, paused: &watch::Receiver<bool>) -> Self {
+        Self {
+            enabled: config.integrations.discord_presence.unwrap_or(true),
+            paused: *paused.borrow(),
+            source: config.integrations.discord_presence_source.unwrap_or(true),
+        }
+    }
+}
+
 fn project(
     presence: &discord_presence::Presence,
-    config: &config::AppConfig,
+    options: PresenceOptions,
+    service: Option<config::MusicService>,
     state: &PlayerState,
     received: Instant,
     discord: &mut DiscordState,
     session: &SessionHandle,
     cover_tx: &tokio::sync::mpsc::UnboundedSender<(String, Option<String>)>,
 ) {
-    let enabled = config.discord_presence.unwrap_or(true);
-    let paused_enabled = config.discord_presence_paused.unwrap_or(true);
-    let source_name = config.discord_presence_source.unwrap_or(true).then(|| {
-        config
-            .active_service()
+    let enabled = options.enabled;
+    let paused_enabled = options.paused;
+    let source_name = options.source.then(|| {
+        service
             .map_or("Local", |service| service.display_name())
             .to_string()
     });
@@ -512,20 +635,19 @@ fn toggle_field(key: &str, config_key: &str, value: bool) -> FieldSpec {
     }
 }
 
-/// A credential row: it carries no value out, only somewhere to type a new one.
-fn secret_field(key: &str, label: Text, placeholder: &str, config_key: &str) -> FieldSpec {
+/// A credential row: it carries no value out, only somewhere to type a new one. No settings layer holds a credential, so it has no settings key to lock.
+fn secret_field(key: &str, label: Text, placeholder: &str) -> FieldSpec {
     FieldSpec {
         key: key.to_string(),
         label,
         placeholder: Some(Text::key(placeholder)),
         kind: FieldKind::Secret,
-        config_key: Some(config_key.to_string()),
         ..Default::default()
     }
 }
 
-fn discord(config: &config::AppConfig) -> IntegrationInfo {
-    let presence = config.discord_presence.unwrap_or(true);
+fn discord(config: &config::Settings, paused: bool) -> IntegrationInfo {
+    let presence = config.integrations.discord_presence.unwrap_or(true);
     IntegrationInfo {
         id: DISCORD.to_string(),
         name: Text::key("discord_presence"),
@@ -534,26 +656,26 @@ fn discord(config: &config::AppConfig) -> IntegrationInfo {
         connect: ConnectKind::None,
         fields: vec![
             toggle_field(PRESENCE, "discord_presence", presence),
-            toggle_field(
-                PAUSED,
-                "discord_presence_paused",
-                config.discord_presence_paused.unwrap_or(true),
-            ),
+            // Runtime state rather than a setting, so no settings layer can lock it.
+            FieldSpec {
+                config_key: None,
+                ..toggle_field(PAUSED, "discord_presence_paused", paused)
+            },
             toggle_field(
                 PRESENCE_SOURCE,
                 "discord_presence_source",
-                config.discord_presence_source.unwrap_or(true),
+                config.integrations.discord_presence_source.unwrap_or(true),
             ),
         ],
     }
 }
 
-fn listenbrainz(config: &config::AppConfig) -> IntegrationInfo {
+fn listenbrainz(credentials: &Credentials) -> IntegrationInfo {
     IntegrationInfo {
         id: LISTENBRAINZ.to_string(),
         name: Text::key("listenbrainz"),
         icon: Icon::Class("fa-solid fa-compact-disc".into()),
-        configured: !config.musicbrainz_token.trim().is_empty(),
+        configured: !credentials.musicbrainz_token.trim().is_empty(),
         // Android has no desktop browser profile to take a session from.
         connect: if cfg!(target_os = "android") {
             ConnectKind::None
@@ -564,42 +686,39 @@ fn listenbrainz(config: &config::AppConfig) -> IntegrationInfo {
             TOKEN,
             Text::key("listenbrainz"),
             "listenbrainz_token_placeholder",
-            "musicbrainz_token",
         )],
     }
 }
 
-fn lastfm(config: &config::AppConfig) -> IntegrationInfo {
+fn lastfm(credentials: &Credentials) -> IntegrationInfo {
     IntegrationInfo {
         id: LASTFM.to_string(),
         name: Text::key("lastfm"),
         icon: Icon::Class("fa-brands fa-lastfm".into()),
         // A session key is what scrobbles; the api key alone only reaches the sign-in page.
-        configured: !config.lastfm_session_key.trim().is_empty(),
+        configured: !credentials.lastfm_session_key.trim().is_empty(),
         connect: ConnectKind::WebSignIn,
         fields: vec![
             secret_field(
                 API_KEY,
                 Text::key("lastfm_api_key_label"),
                 "lastfm_api_key_placeholder",
-                "lastfm_api_key",
             ),
             secret_field(
                 API_SECRET,
                 Text::key("lastfm_api_secret_label"),
                 "lastfm_api_secret_placeholder",
-                "lastfm_api_secret",
             ),
         ],
     }
 }
 
-fn librefm(config: &config::AppConfig) -> IntegrationInfo {
+fn librefm(credentials: &Credentials) -> IntegrationInfo {
     IntegrationInfo {
         id: LIBREFM.to_string(),
         name: Text::key("librefm"),
         icon: Icon::Class("fa-brands fa-lastfm".into()),
-        configured: !config.librefm_session_key.trim().is_empty(),
+        configured: !credentials.librefm_session_key.trim().is_empty(),
         connect: ConnectKind::WebSignIn,
         // Its api key and secret are compiled in, so there is nothing to fill in.
         fields: Vec::new(),
@@ -607,20 +726,25 @@ fn librefm(config: &config::AppConfig) -> IntegrationInfo {
 }
 
 /// What this build publishes, in the order a settings page lists it.
-fn all(config: &config::AppConfig) -> Vec<IntegrationInfo> {
+fn all(config: &config::Settings, credentials: &Credentials, paused: bool) -> Vec<IntegrationInfo> {
     let mut published = Vec::new();
     // Android has no Discord client to talk to, so the row is not offered there.
     if !cfg!(target_os = "android") {
-        published.push(discord(config));
+        published.push(discord(config, paused));
     }
-    published.push(listenbrainz(config));
-    published.push(lastfm(config));
-    published.push(librefm(config));
+    published.push(listenbrainz(credentials));
+    published.push(lastfm(credentials));
+    published.push(librefm(credentials));
     published
 }
 
-fn info_of(id: &str, config: &config::AppConfig) -> Result<IntegrationInfo, ApiError> {
-    all(config)
+fn info_of(
+    id: &str,
+    config: &config::Settings,
+    credentials: &Credentials,
+    paused: bool,
+) -> Result<IntegrationInfo, ApiError> {
+    all(config, credentials, paused)
         .into_iter()
         .find(|info| info.id == id)
         .ok_or_else(|| ApiError::not_found("no such integration"))
@@ -628,7 +752,7 @@ fn info_of(id: &str, config: &config::AppConfig) -> Result<IntegrationInfo, ApiE
 
 /// The settings keys an answer set would actually write. A field nobody
 /// answered writes nothing, and neither does a secret answered empty.
-fn write_keys<'a>(info: &'a IntegrationInfo, values: &[FieldValue]) -> Vec<&'a str> {
+fn write_keys(info: &IntegrationInfo, values: &[FieldValue]) -> Vec<config::SettingKey> {
     info.fields
         .iter()
         .filter(|field| match value_of(values, &field.key) {
@@ -636,6 +760,7 @@ fn write_keys<'a>(info: &'a IntegrationInfo, values: &[FieldValue]) -> Vec<&'a s
             None => false,
         })
         .filter_map(|field| field.config_key.as_deref())
+        .filter_map(config::SettingKey::named)
         .collect()
 }
 
@@ -655,46 +780,75 @@ fn set_toggle(values: &[FieldValue], key: &str, stored: &mut Option<bool>) {
     }
 }
 
-fn apply(id: &str, values: &[FieldValue], config: &mut config::AppConfig) {
+fn apply_presence(values: &[FieldValue], config: &mut config::Settings) {
+    set_toggle(values, PRESENCE, &mut config.integrations.discord_presence);
+    set_toggle(
+        values,
+        PRESENCE_SOURCE,
+        &mut config.integrations.discord_presence_source,
+    );
+}
+
+fn apply_credentials(id: &str, values: &[FieldValue], credentials: &mut Credentials) {
     match id {
-        DISCORD => {
-            set_toggle(values, PRESENCE, &mut config.discord_presence);
-            set_toggle(values, PAUSED, &mut config.discord_presence_paused);
-            set_toggle(values, PRESENCE_SOURCE, &mut config.discord_presence_source);
-        }
-        LISTENBRAINZ => set_secret(values, TOKEN, &mut config.musicbrainz_token),
+        LISTENBRAINZ => set_secret(values, TOKEN, &mut credentials.musicbrainz_token),
         LASTFM => {
-            set_secret(values, API_KEY, &mut config.lastfm_api_key);
-            set_secret(values, API_SECRET, &mut config.lastfm_api_secret);
+            set_secret(values, API_KEY, &mut credentials.lastfm_api_key);
+            set_secret(values, API_SECRET, &mut credentials.lastfm_api_secret);
         }
         _ => {}
     }
 }
 
-/// The keys clearing one writes, which is more than it publishes: a session
-/// key is held but never rendered.
-fn clear_keys(id: &str) -> Vec<&'static str> {
+/// Clearing drops more than an integration publishes: a session key is held but never rendered.
+fn clear_credentials(id: &str, credentials: &mut Credentials) {
     match id {
-        DISCORD => vec!["discord_presence"],
-        LISTENBRAINZ => vec!["musicbrainz_token"],
-        LASTFM => vec!["lastfm_api_key", "lastfm_api_secret", "lastfm_session_key"],
-        LIBREFM => vec!["librefm_session_key"],
-        _ => Vec::new(),
+        LISTENBRAINZ => credentials.musicbrainz_token.clear(),
+        LASTFM => {
+            credentials.lastfm_api_key.clear();
+            credentials.lastfm_api_secret.clear();
+            credentials.lastfm_session_key.clear();
+        }
+        LIBREFM => credentials.librefm_session_key.clear(),
+        _ => {}
     }
 }
 
-fn clear_stored(id: &str, config: &mut config::AppConfig) {
-    match id {
-        // Discord holds no credential, so unconfigured means presence off.
-        DISCORD => config.discord_presence = Some(false),
-        LISTENBRAINZ => config.musicbrainz_token.clear(),
-        LASTFM => {
-            config.lastfm_api_key.clear();
-            config.lastfm_api_secret.clear();
-            config.lastfm_session_key.clear();
-        }
-        LIBREFM => config.librefm_session_key.clear(),
-        _ => {}
+fn database_error(error: db::DbError) -> ApiError {
+    ApiError::internal(format!("database error: {error}"))
+}
+
+/// Whether Discord presence stays up while playback is paused; stored before the presence task sees it.
+#[derive(Clone)]
+pub struct PresencePause {
+    db: db::Db,
+    held: Arc<watch::Sender<bool>>,
+    writer: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl PresencePause {
+    pub async fn load(db: &db::Db) -> Result<Self, db::DbError> {
+        let paused = db.discord_presence_paused().await?.unwrap_or(true);
+        Ok(Self {
+            db: db.clone(),
+            held: Arc::new(watch::channel(paused).0),
+            writer: Arc::new(tokio::sync::Mutex::new(())),
+        })
+    }
+
+    pub fn get(&self) -> bool {
+        *self.held.borrow()
+    }
+
+    pub fn watch(&self) -> watch::Receiver<bool> {
+        self.held.subscribe()
+    }
+
+    pub async fn set(&self, paused: bool) -> Result<(), db::DbError> {
+        let _writing = self.writer.lock().await;
+        self.db.set_discord_presence_paused(paused).await?;
+        self.held.send_replace(paused);
+        Ok(())
     }
 }
 
@@ -706,15 +860,38 @@ fn clear_stored(id: &str, config: &mut config::AppConfig) {
 /// and asks whether one is configured, never what it holds.
 pub struct IntegrationService {
     config: Arc<crate::config_service::ConfigService>,
+    credentials: CredentialStore,
+    presence_pause: PresencePause,
 }
 
 impl IntegrationService {
-    pub fn new(config: Arc<crate::config_service::ConfigService>) -> Arc<Self> {
-        Arc::new(Self { config })
+    pub fn new(
+        config: Arc<crate::config_service::ConfigService>,
+        credentials: CredentialStore,
+        presence_pause: PresencePause,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            config,
+            credentials,
+            presence_pause,
+        })
     }
 
     pub async fn list(&self) -> Vec<IntegrationInfo> {
-        all(&self.config.snapshot().await)
+        all(
+            &self.config.snapshot().await,
+            &self.credentials.snapshot(),
+            self.presence_pause.get(),
+        )
+    }
+
+    async fn info(&self, id: &str) -> Result<IntegrationInfo, ApiError> {
+        info_of(
+            id,
+            &self.config.snapshot().await,
+            &self.credentials.snapshot(),
+            self.presence_pause.get(),
+        )
     }
 
     /// Answer an integration's fields. An absent key is left alone, and so is
@@ -724,27 +901,54 @@ impl IntegrationService {
         id: &str,
         values: Vec<FieldValue>,
     ) -> Result<IntegrationInfo, ApiError> {
-        let info = info_of(id, &self.config.snapshot().await)?;
-        self.config.ensure_unlocked(&write_keys(&info, &values))?;
-        let target = id.to_string();
-        let updated = self
-            .config
-            .mutate_state(&[INTEGRATIONS_KEY], move |config| {
-                apply(&target, &values, config)
-            })
+        let info = self.info(id).await?;
+        self.config
+            .ensure_unlocked(&write_keys(&info, &values))
             .await?;
-        info_of(id, &updated)
+        if id == DISCORD {
+            if let Some(paused) = value_of(&values, PAUSED) {
+                self.presence_pause
+                    .set(paused == "true")
+                    .await
+                    .map_err(database_error)?;
+            }
+            if [PRESENCE, PRESENCE_SOURCE]
+                .iter()
+                .any(|key| value_of(&values, key).is_some())
+            {
+                self.config
+                    .mutate_state(&PRESENCE_KEYS, move |config| {
+                        apply_presence(&values, config)
+                    })
+                    .await?;
+            }
+        } else {
+            let target = id.to_string();
+            self.credentials
+                .update(move |credentials| apply_credentials(&target, &values, credentials))
+                .await
+                .map_err(database_error)?;
+        }
+        self.info(id).await
     }
 
     pub async fn clear(&self, id: &str) -> Result<(), ApiError> {
-        info_of(id, &self.config.snapshot().await)?;
-        self.config.ensure_unlocked(&clear_keys(id))?;
-        let target = id.to_string();
-        self.config
-            .mutate_state(&[INTEGRATIONS_KEY], move |config| {
-                clear_stored(&target, config)
-            })
-            .await?;
+        self.info(id).await?;
+        if id == DISCORD {
+            self.config.ensure_unlocked(&PRESENCE_KEYS[..1]).await?;
+            // Discord holds no credential, so unconfigured means presence off.
+            self.config
+                .mutate_state(&PRESENCE_KEYS[..1], |config| {
+                    config.integrations.discord_presence = Some(false)
+                })
+                .await?;
+        } else {
+            let target = id.to_string();
+            self.credentials
+                .update(move |credentials| clear_credentials(&target, credentials))
+                .await
+                .map_err(database_error)?;
+        }
         Ok(())
     }
 
@@ -754,46 +958,39 @@ impl IntegrationService {
     /// to approve, then trade the token for a session key -- a browser and a
     /// poll loop, which is why it is not a frontend's job.
     pub async fn authenticate(&self, id: &str) -> Result<IntegrationInfo, ApiError> {
-        let config = self.config.snapshot().await;
-        let info = info_of(id, &config)?;
-        if matches!(info.connect, ConnectKind::None) {
+        let info = self.info(id).await?;
+        if info.connect != ConnectKind::WebSignIn {
             return Err(ApiError::unsupported(
-                "this integration takes a token rather than a web sign-in",
-            ));
+                "this integration does not connect with a web sign-in",
+            )
+            .because(ErrorReason::ConnectNotOffered));
         }
         let librefm = id == LIBREFM;
-        let session_setting = if librefm {
-            "librefm_session_key"
-        } else {
-            "lastfm_session_key"
-        };
-        self.config.ensure_unlocked(&[session_setting])?;
         let (api_key, api_secret) = if librefm {
             (
                 scrobble::librefm::API_KEY.to_string(),
                 scrobble::librefm::API_SECRET.to_string(),
             )
         } else {
-            (
-                config.lastfm_api_key.clone(),
-                config.lastfm_api_secret.clone(),
-            )
+            let held = self.credentials.snapshot();
+            (held.lastfm_api_key, held.lastfm_api_secret)
         };
         if api_key.trim().is_empty() || api_secret.trim().is_empty() {
-            return Err(ApiError::invalid_input("set the API key and secret first"));
+            return Err(ApiError::invalid_input("set the API key and secret first")
+                .because(ErrorReason::ApiKeyMissing));
         }
         let session_key = web_sign_in(id, &api_key, &api_secret).await?;
-        let updated = self
-            .config
-            .mutate_state(&[INTEGRATIONS_KEY], move |config| {
+        self.credentials
+            .update(move |credentials| {
                 if librefm {
-                    config.librefm_session_key = session_key;
+                    credentials.librefm_session_key = session_key;
                 } else {
-                    config.lastfm_session_key = session_key;
+                    credentials.lastfm_session_key = session_key;
                 }
             })
-            .await?;
-        info_of(id, &updated)
+            .await
+            .map_err(database_error)?;
+        self.info(id).await
     }
 
     /// Take an integration's credential from one of [`browser_profiles`] and
@@ -804,35 +1001,40 @@ impl IntegrationService {
         id: &str,
         profile: &str,
     ) -> Result<IntegrationInfo, ApiError> {
-        let info = info_of(id, &self.config.snapshot().await)?;
+        let info = self.info(id).await?;
         // ListenBrainz is the only one offering it, so the token is its.
         if id != LISTENBRAINZ || info.connect != ConnectKind::BrowserProfile {
             return Err(ApiError::unsupported(
                 "this integration does not connect from a browser profile",
-            ));
+            )
+            .because(ErrorReason::ConnectNotOffered));
         }
-        self.config.ensure_unlocked(&["musicbrainz_token"])?;
         let profile = server::cookies::browser_profiles()
             .into_iter()
             .find(|candidate| candidate.dir.to_string_lossy() == profile)
-            .ok_or_else(|| ApiError::not_found("that browser profile is no longer there"))?;
+            .ok_or_else(|| {
+                ApiError::not_found("that browser profile is no longer there")
+                    .because(ErrorReason::BrowserProfileGone)
+            })?;
         let token = listenbrainz_token_from(&profile).await?;
         let user = scrobble::listenbrainz::validate_token(&token)
             .await
-            .map_err(|error| ApiError::internal(format!("could not reach ListenBrainz: {error}")))?
+            .map_err(|error| {
+                ApiError::internal(format!("could not reach ListenBrainz: {error}"))
+                    .because(ErrorReason::IntegrationUnreachable)
+            })?
             .ok_or_else(|| {
                 ApiError::invalid_input(
                     "ListenBrainz does not recognise the token from that profile. Paste your token instead.",
                 )
+                .because(ErrorReason::CredentialRejected)
             })?;
         tracing::info!(%user, browser = profile.browser.id(), "connected to listenbrainz from a browser");
-        let updated = self
-            .config
-            .mutate_state(&[INTEGRATIONS_KEY], move |config| {
-                config.musicbrainz_token = token;
-            })
-            .await?;
-        info_of(id, &updated)
+        self.credentials
+            .update(move |credentials| credentials.musicbrainz_token = token)
+            .await
+            .map_err(database_error)?;
+        self.info(id).await
     }
 }
 
@@ -860,6 +1062,7 @@ async fn listenbrainz_token_from(
                 profile.name,
                 profile.browser.label()
             ))
+            .because(ErrorReason::BrowserCookiesUnreadable)
         })?;
     let header = scrobble::listenbrainz::session_header(
         cookies.iter().map(|c| (c.name.as_str(), c.value.as_str())),
@@ -870,6 +1073,7 @@ async fn listenbrainz_token_from(
             profile.name,
             profile.browser.label()
         ))
+        .because(ErrorReason::BrowserProfileSignedOut)
     })?;
     scrobble::listenbrainz::token_from_session(&header)
         .await
@@ -877,11 +1081,15 @@ async fn listenbrainz_token_from(
             ApiError::invalid_input(
                 "listenbrainz.org did not show a token for that profile. Paste it from listenbrainz.org/settings instead.",
             )
+            .because(ErrorReason::BrowserProfileNoToken)
         })
 }
 
-/// What an integration write reports as changed, so the running scrobbler picks it up.
-const INTEGRATIONS_KEY: &str = "integrations";
+/// What a presence write reports as changed, so the session republishes the config.
+const PRESENCE_KEYS: [config::SettingKey; 2] = [
+    config::SettingKey::Integrations(config::IntegrationsKey::DiscordPresence),
+    config::SettingKey::Integrations(config::IntegrationsKey::DiscordPresenceSource),
+];
 
 /// Open the approval page, then poll for the session key. The person has to
 /// click through in a browser, so the wait is generous and bounded.
@@ -893,14 +1101,19 @@ async fn web_sign_in(id: &str, api_key: &str, api_secret: &str) -> Result<String
     } else {
         scrobble::lastfm::get_auth_token(api_key).await
     }
-    .map_err(|error| ApiError::internal(error.to_string()))?;
+    .map_err(|error| {
+        ApiError::internal(format!("could not start the sign-in: {error}"))
+            .because(ErrorReason::SignInNotStarted)
+    })?;
     let url = if librefm {
         scrobble::librefm::auth_url(api_key, &token)
     } else {
         scrobble::lastfm::auth_url(api_key, &token)
     };
-    webbrowser::open(&url)
-        .map_err(|error| ApiError::internal(format!("could not open a browser: {error}")))?;
+    webbrowser::open(&url).map_err(|error| {
+        ApiError::internal(format!("could not open a browser: {error}"))
+            .because(ErrorReason::BrowserNotOpened)
+    })?;
     for _ in 0..60 {
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         let session = if librefm {
@@ -912,32 +1125,34 @@ async fn web_sign_in(id: &str, api_key: &str, api_secret: &str) -> Result<String
             return Ok(session);
         }
     }
-    Err(ApiError::internal("the sign-in was not approved in time"))
+    Err(ApiError::internal("the sign-in was not approved in time")
+        .because(ErrorReason::SignInTimedOut))
 }
 
 #[cfg(target_os = "android")]
 async fn web_sign_in(_id: &str, _api_key: &str, _api_secret: &str) -> Result<String, ApiError> {
-    Err(ApiError::unsupported(
-        "web sign-in runs in the app on Android",
-    ))
+    Err(
+        ApiError::unsupported("web sign-in runs in the app on Android")
+            .because(ErrorReason::ConnectNotOffered),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn youtube(token: &str, anonymous: bool) -> config::AppConfig {
-        let mut config = config::AppConfig {
-            active_source: config::Source::Server("yt".into()),
+    fn youtube(token: &str, anonymous: bool) -> server::sources::Sources {
+        let mut sources = server::sources::Sources {
+            active: config::Source::Server("yt".into()),
             ..Default::default()
         };
-        config.server = Some(config::MusicServer {
+        sources.server = Some(config::MusicServer {
             service: config::MusicService::YtMusic,
             access_token: Some(token.into()),
             yt_anonymous: anonymous,
             ..config::MusicServer::new("YouTube Music".into(), String::new())
         });
-        config
+        sources
     }
 
     #[test]
@@ -946,7 +1161,102 @@ mod tests {
         assert!(!youtube_signed_in(&youtube("", true)));
         assert!(!youtube_signed_in(&youtube("", false)));
         let mut local = youtube("SAPISID=abc", false);
-        local.active_source = config::Source::LocalLibrary("local".into());
+        local.active = config::Source::LocalLibrary("local".into());
         assert!(!youtube_signed_in(&local));
+    }
+
+    fn answer(key: &str, value: &str) -> FieldValue {
+        FieldValue {
+            key: key.to_string(),
+            value: value.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_disabled_presence_opens_no_connection() {
+        let mut slot = None;
+        assert!(hold_connection(&mut slot, false));
+        assert!(
+            slot.is_none(),
+            "nothing dials Discord while presence is off"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_pause_toggle_reaches_the_presence_task_and_the_database() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let database = db::init(&dir.path().join("presence.db")).await.expect("db");
+        let config = Arc::new(crate::config_service::ConfigService::new(
+            database.clone(),
+            dir.path().join("settings.toml"),
+            config::Settings::default(),
+        ));
+        let credentials = CredentialStore::load(&database).await.expect("credentials");
+        let pause = PresencePause::load(&database).await.expect("pause");
+        assert!(pause.get(), "presence stays up while paused by default");
+        let mut presence_task = pause.watch();
+        let service = IntegrationService::new(config.clone(), credentials, pause.clone());
+
+        let info = service
+            .set_settings(DISCORD, vec![answer(PAUSED, "false")])
+            .await
+            .expect("toggle");
+
+        presence_task
+            .changed()
+            .await
+            .expect("the presence task hears it");
+        assert!(!*presence_task.borrow());
+        let field = info
+            .fields
+            .iter()
+            .find(|field| field.key == PAUSED)
+            .expect("paused field");
+        assert_eq!(field.value.as_deref(), Some("false"));
+        assert_eq!(field.config_key, None);
+        assert_eq!(
+            database.discord_presence_paused().await.expect("stored"),
+            Some(false)
+        );
+        let reloaded = PresencePause::load(&database).await.expect("reload");
+        assert!(!reloaded.get(), "the toggle survives a restart");
+        assert_eq!(
+            config.snapshot().await.integrations.discord_presence,
+            Some(true),
+            "the presence setting is left alone"
+        );
+    }
+
+    #[tokio::test]
+    async fn only_a_web_sign_in_integration_starts_a_web_sign_in() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let database = db::init(&dir.path().join("sign-in.db")).await.expect("db");
+        let config = Arc::new(crate::config_service::ConfigService::new(
+            database.clone(),
+            dir.path().join("settings.toml"),
+            config::Settings::default(),
+        ));
+        let credentials = CredentialStore::load(&database).await.expect("credentials");
+        let pause = PresencePause::load(&database).await.expect("pause");
+        let service = IntegrationService::new(config, credentials, pause);
+
+        for id in [LISTENBRAINZ, DISCORD] {
+            let refused = service
+                .authenticate(id)
+                .await
+                .expect_err("no web sign-in to run");
+            assert_eq!(refused.code, api::ErrorCode::Unsupported, "{id}");
+            assert_eq!(refused.reason, Some(ErrorReason::ConnectNotOffered), "{id}");
+        }
+        let keyless = service
+            .authenticate(LASTFM)
+            .await
+            .expect_err("no API key to sign in with");
+        assert_eq!(keyless.reason, Some(ErrorReason::ApiKeyMissing));
+        let unknown = service
+            .authenticate("nope")
+            .await
+            .expect_err("unknown integration");
+        assert_eq!(unknown.code, api::ErrorCode::NotFound);
     }
 }

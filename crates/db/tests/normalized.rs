@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use config::{AppConfig, Browser, MusicServer, MusicService, SavedServer};
+use config::{Browser, MusicServer, MusicService, SavedServer};
 use db::Source;
 use reader::models::{ArtistCredit, PlaylistEntry, Track, TrackId};
 
@@ -161,8 +161,8 @@ async fn musicbrainz_ids_round_trip_and_clear() {
     assert_eq!(read(db).await.musicbrainz_recording_id, None);
 }
 
-fn server(token: Option<&str>) -> AppConfig {
-    AppConfig {
+fn server(token: Option<&str>) -> db::StoredSources {
+    db::StoredSources {
         servers: vec![SavedServer {
             id: "s1".into(),
             name: "am".into(),
@@ -185,27 +185,74 @@ fn server(token: Option<&str>) -> AppConfig {
             apple_music_storefront: "jp".into(),
             apple_music_language: "en".into(),
         }),
-        active_source: config::Source::Server("s1".into()),
+        active: config::Source::Server("s1".into()),
         ..Default::default()
     }
+}
+
+async fn save_sources(db: &db::Db, sources: &db::StoredSources) {
+    for saved in &sources.servers {
+        db.save_server(saved).await.unwrap();
+    }
+    if let Some(server) = &sources.server {
+        db.save_active_server(server).await.unwrap();
+    }
+    db.set_active_source(&sources.active).await.unwrap();
 }
 
 #[tokio::test]
 async fn a_server_round_trips_through_its_credentials_and_settings() {
     let db = db::init(&unique_db()).await.unwrap();
-    let cfg = server(Some("token"));
-    db.save_config(&cfg).await.unwrap();
+    let saved = server(Some("token"));
+    save_sources(&db, &saved).await;
+    db.ensure_app_state().await.unwrap();
 
-    let loaded = db.load_config().await.unwrap().unwrap();
+    let loaded = db.load_sources().await.unwrap();
 
-    assert_eq!(loaded.servers, cfg.servers);
-    assert_eq!(loaded.server, cfg.server);
+    assert_eq!(loaded.servers, saved.servers);
+    assert_eq!(loaded.server, saved.server);
+    assert_eq!(loaded.active, saved.active);
+}
+
+#[tokio::test]
+async fn a_folder_list_round_trips_and_an_empty_one_clears_it() {
+    let db = db::init(&unique_db()).await.unwrap();
+    save_sources(&db, &server(Some("token"))).await;
+    let roots = ["/Music".to_string(), "/Archive".to_string()];
+
+    db.set_server_folders("s1", &roots).await.unwrap();
+    db.set_server_folders("gone", &roots).await.unwrap();
+    let folders = db.load_sources().await.unwrap().folders;
+    assert_eq!(folders.get("s1").map(Vec::as_slice), Some(&roots[..]));
+    assert!(
+        !folders.contains_key("gone"),
+        "an unknown server names nothing"
+    );
+
+    db.set_server_folders("s1", &[]).await.unwrap();
+    assert!(db.load_sources().await.unwrap().folders.is_empty());
+}
+
+#[tokio::test]
+async fn the_device_id_is_stored_once_and_a_config_save_keeps_it() {
+    let db = db::init(&unique_db()).await.unwrap();
+    assert_eq!(db.load_sources().await.unwrap().device_id, None);
+
+    db.set_device_id("dev-1").await.unwrap();
+    db.ensure_app_state().await.unwrap();
+    db.set_active_source(&config::Source::Server("s1".into()))
+        .await
+        .unwrap();
+
+    let loaded = db.load_sources().await.unwrap();
+    assert_eq!(loaded.device_id.as_deref(), Some("dev-1"));
+    assert_eq!(loaded.active, config::Source::Server("s1".into()));
 }
 
 #[tokio::test]
 async fn signing_out_drops_the_credentials_and_keeps_the_server() {
     let db = db::init(&unique_db()).await.unwrap();
-    db.save_config(&server(Some("token"))).await.unwrap();
+    save_sources(&db, &server(Some("token"))).await;
     db.set_server_credentials("s1", None, None).await.unwrap();
 
     let loaded = db.load_server("s1").await.unwrap().unwrap();
@@ -245,8 +292,7 @@ async fn a_kv_value_round_trips() {
 #[tokio::test]
 async fn removing_a_server_takes_its_rows_with_it() {
     let db = db::init(&unique_db()).await.unwrap();
-    let mut cfg = server(Some("token"));
-    db.save_config(&cfg).await.unwrap();
+    save_sources(&db, &server(Some("token"))).await;
     let source = Source::Server("s1".into());
     db.upsert_tracks(&source, &[track("t1", Vec::new())])
         .await
@@ -257,11 +303,12 @@ async fn removing_a_server_takes_its_rows_with_it() {
     db.set_favorite("s1", "t1", true).await.unwrap();
     db.bump_listen_count(&source, "t1").await.unwrap();
 
-    cfg.servers.clear();
-    cfg.server = None;
-    cfg.active_source = config::Source::default();
-    db.save_config(&cfg).await.unwrap();
+    db.set_active_source(&config::Source::default())
+        .await
+        .unwrap();
+    db.delete_server("s1").await.unwrap();
 
+    assert!(db.load_server("s1").await.unwrap().is_none());
     assert!(
         db.tracks_by_keys(&source, &["t1".into()])
             .await
@@ -270,14 +317,7 @@ async fn removing_a_server_takes_its_rows_with_it() {
     );
     assert!(db.playlist_entries(&source, "P").await.unwrap().is_empty());
     assert!(db.favorites("s1").await.unwrap().is_empty());
-    assert!(
-        db.load_config()
-            .await
-            .unwrap()
-            .unwrap()
-            .listen_counts
-            .is_empty()
-    );
+    assert!(db.listen_counts().await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -550,6 +590,85 @@ async fn once_the_source_names_an_artist_a_credit_no_longer_renames_it() {
 }
 
 #[tokio::test]
+async fn a_name_the_source_reports_replaces_a_stale_one() {
+    let db = db::init(&unique_db()).await.unwrap();
+    let source = Source::Server("yt".into());
+    let unlinked = |text: &str| track("t2", vec![ArtistCredit::unlinked(text)]);
+    db.upsert_tracks(
+        &source,
+        &[
+            track("t1", vec![ArtistCredit::linked("Aimer", "UC-aimer")]),
+            unlinked("Aimer"),
+        ],
+    )
+    .await
+    .unwrap();
+    assert!(db.name_artist(&source, "UC-aimer", "Aimer").await.unwrap());
+
+    assert!(
+        db.name_artist(&source, "UC-aimer", "Aimerrhythm")
+            .await
+            .unwrap(),
+        "a header naming a source-named row anew renames it"
+    );
+    let named = db.artist(&source, "UC-aimer").await.unwrap().unwrap();
+    assert_eq!(named.name, "Aimerrhythm");
+
+    let listed = |name: &str| vec![("UC-aimer".to_string(), name.to_string())];
+    assert_eq!(db.name_artists(&source, &listed("Aimer")).await.unwrap(), 1);
+    assert_eq!(
+        db.name_artists(&source, &listed("Aimer")).await.unwrap(),
+        0,
+        "already so"
+    );
+    let names: Vec<(Option<String>, String)> = db
+        .artists(&source)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| (row.source_id, row.name))
+        .collect();
+    assert!(names.contains(&(Some("UC-aimer".into()), "Aimer".into())));
+    assert!(
+        names.contains(&(None, "Aimer".into())),
+        "the unlinked row its name keys is left alone"
+    );
+}
+
+#[tokio::test]
+async fn a_credit_spelling_never_overwrites_a_listing_name() {
+    let db = db::init(&unique_db()).await.unwrap();
+    let source = Source::Server("srv".into());
+    let billed = |text: &str| track("t1", vec![ArtistCredit::linked(text, "ar-ada")]);
+    db.upsert_tracks(&source, &[billed("Ada feat. Boris")])
+        .await
+        .unwrap();
+    assert_eq!(
+        db.artist(&source, "ar-ada").await.unwrap().unwrap().name,
+        "Ada feat. Boris",
+        "a credit names a row nothing else has"
+    );
+
+    let listing = vec![
+        ("ar-ada".to_string(), "Ada".to_string()),
+        ("ar-nobody".to_string(), "Nobody".to_string()),
+    ];
+    assert_eq!(db.name_artists(&source, &listing).await.unwrap(), 1);
+    db.upsert_tracks(&source, &[billed("ADA (feat. Cleo)")])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        db.artist(&source, "ar-ada").await.unwrap().unwrap().name,
+        "Ada"
+    );
+    assert!(
+        db.artist(&source, "ar-nobody").await.unwrap().is_none(),
+        "a listing renames rows, it files none"
+    );
+}
+
+#[tokio::test]
 async fn a_queue_round_trips_through_its_rows() {
     let db = db::init(&unique_db()).await.unwrap();
     let mut listed = track("t1", Vec::new());
@@ -570,6 +689,7 @@ async fn a_queue_round_trips_through_its_rows() {
         shuffle_order: vec![1, 0, 9],
         shuffle_enabled: true,
         radio_cursor: None,
+        origin: Some(r#"{"kind":"album","id":"a"}"#.into()),
     };
 
     db.save_queue(&Source::default(), &saved).await.unwrap();
@@ -589,6 +709,7 @@ async fn a_queue_round_trips_through_its_rows() {
         ),
         (1, 40, true)
     );
+    assert_eq!(restored.origin, saved.origin);
 }
 
 #[tokio::test]
@@ -620,12 +741,46 @@ async fn a_position_save_leaves_the_rows_alone() {
     );
 }
 
+#[tokio::test]
+async fn each_sources_queue_keeps_its_own_origin() {
+    let db = db::init(&unique_db()).await.unwrap();
+    let local = Source::default();
+    let server = Source::Server("srv-1".into());
+    let queued = |origin: Option<&str>| db::QueueSnapshot {
+        version: 1,
+        queue: vec![track("t1", Vec::new())],
+        origin: origin.map(str::to_owned),
+        ..Default::default()
+    };
+    db.save_queue(&local, &queued(Some("from-local")))
+        .await
+        .unwrap();
+    db.save_queue(&server, &queued(None)).await.unwrap();
+    assert_eq!(
+        db.load_queue(&local).await.unwrap().origin.as_deref(),
+        Some("from-local")
+    );
+    assert_eq!(db.load_queue(&server).await.unwrap().origin, None);
+
+    // A position-only save carries the origin too, so a save that only moved the playhead cannot lose it.
+    db.save_queue_position(&local, &queued(Some("renamed")))
+        .await
+        .unwrap();
+    assert_eq!(
+        db.load_queue(&local).await.unwrap().origin.as_deref(),
+        Some("renamed")
+    );
+
+    db.clear_queue(&local).await.unwrap();
+    assert_eq!(db.load_queue(&local).await.unwrap().origin, None);
+}
+
 /// Downloads and pins are written a row at a time, so a whole-config save must neither store nor erase them.
 #[tokio::test]
 async fn offline_copies_and_pins_live_in_their_own_tables() {
     let path = unique_db();
     let db = db::init(&path).await.unwrap();
-    db.save_config(&AppConfig::default()).await.unwrap();
+    db.ensure_app_state().await.unwrap();
     db.set_offline_track("t1", Some("/cache/t1.flac"))
         .await
         .unwrap();
@@ -639,30 +794,56 @@ async fn offline_copies_and_pins_live_in_their_own_tables() {
         .await
         .unwrap();
 
-    let mut stale = db.load_config().await.unwrap().unwrap();
-    stale.offline_tracks.clear();
-    stale.pinned_stations.clear();
-    db.save_config(&stale).await.unwrap();
+    let settings_path = config::store::settings_path_for(path.parent().unwrap());
+    let every_key: Vec<config::SettingKey> = config::SettingKey::iter().collect();
+    let mut saved = config::Settings::default();
+    saved.ui.theme = "nord".into();
+    config::store::save_settings(&settings_path, &saved, &every_key).unwrap();
 
-    let loaded = db.load_config().await.unwrap().unwrap();
     assert_eq!(
-        loaded.offline_tracks.get("t1").map(String::as_str),
+        db.offline_tracks()
+            .await
+            .unwrap()
+            .get("t1")
+            .map(String::as_str),
         Some("/cache/t1.flac")
     );
     assert_eq!(
-        loaded.pinned_stations,
+        db.pinned_stations().await.unwrap(),
         [r#"{"id":"moe","name":"LISTEN.moe"}"#, r#"{"id":"jazz"}"#],
         "a re-pin keeps its place"
     );
-    let settings =
-        std::fs::read_to_string(config::store::settings_path_for(path.parent().unwrap())).unwrap();
+    let settings = std::fs::read_to_string(&settings_path).unwrap();
     assert!(!settings.contains("offline_tracks") && !settings.contains("pinned_stations"));
 
     db.set_offline_track("t1", None).await.unwrap();
     db.set_pinned_station("moe", None).await.unwrap();
-    let loaded = db.load_config().await.unwrap().unwrap();
-    assert!(loaded.offline_tracks.is_empty());
-    assert_eq!(loaded.pinned_stations, [r#"{"id":"jazz"}"#]);
+    assert!(db.offline_tracks().await.unwrap().is_empty());
+    assert_eq!(db.pinned_stations().await.unwrap(), [r#"{"id":"jazz"}"#]);
+}
+
+#[tokio::test]
+async fn downloader_history_keeps_the_newest_first_up_to_its_limit() {
+    let db = db::init(&unique_db()).await.unwrap();
+    db.ensure_app_state().await.unwrap();
+    let entry = |n: usize| config::DownloaderHistoryEntry {
+        url: format!("https://example.invalid/{n}"),
+        title: format!("Track {n}"),
+        format: "mp3".into(),
+        status: "completed".into(),
+        error: None,
+    };
+    for n in 0..4 {
+        db.push_downloader_history(&entry(n), 3).await.unwrap();
+    }
+    db.ensure_app_state().await.unwrap();
+
+    assert_eq!(
+        db.downloader_history().await.unwrap(),
+        [entry(3), entry(2), entry(1)]
+    );
+    db.clear_downloader_history().await.unwrap();
+    assert!(db.downloader_history().await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -753,14 +934,15 @@ async fn the_single_and_bulk_artist_covers_agree_for_every_artist() {
             .unwrap();
     }
 
-    let bulk = db.artist_album_covers(&source).await.unwrap();
+    let bulk = db.artist_fallback_covers(&source).await.unwrap();
     let artists = db.artists(&source).await.unwrap();
     assert_eq!(artists.len(), 3);
     for artist in &artists {
-        let single = db.artist_album_cover(&source, &artist.key).await.unwrap();
+        let single = db
+            .artist_fallback_cover(&source, &artist.key)
+            .await
+            .unwrap();
         assert_eq!(single, bulk.get(&artist.key).cloned(), "{}", artist.name);
     }
-    assert_eq!(bulk.get("UC-ada").map(String::as_str), Some("/a1.jpg"));
-    assert_eq!(bulk.get("UC-boris").map(String::as_str), Some("/a2.jpg"));
-    assert_eq!(bulk.len(), 2);
+    assert_eq!(bulk.len(), 3, "each has a track to fall back on");
 }

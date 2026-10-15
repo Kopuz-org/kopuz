@@ -26,10 +26,11 @@
 
 use async_trait::async_trait;
 
-use config::{AppConfig, MusicService, Source};
+use config::{MusicService, Source};
 use db::Db;
 
 use crate::server_ops::ServerConn;
+use crate::sources::Sources;
 
 mod apple_music;
 pub mod capabilities;
@@ -273,27 +274,9 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("album"))
     }
 
-    /// Resolve an opened album reference — a raw browse id, a `ytmusic:album:MPRE…`
-    /// (search rows with an album link), or a synthesized `ytmusic:album:<hash>`
-    /// (search rows without one) — to its full remote album. `None` when it can't
-    /// be resolved or has no tracks. The id→browse-id→album dance lives here so the
-    /// UI never reaches into the per-service catalog. Default unsupported; only
-    /// catalog remotes (YT) override.
+    /// The full remote album an opened album id names, or `None` when it names none with tracks.
     async fn fetch_album_by_ref(&self, _id: &str) -> Result<Option<RemoteAlbum>, SourceError> {
         Err(SourceError::unsupported("album by ref"))
-    }
-
-    /// Resolve a saved album's title + artist to its full remote album (header +
-    /// every track) for the YT-Music-style album page — the local library stores
-    /// YT albums by hash with no browse id, so the page needs the remote listing.
-    /// `None` when it can't be resolved or has no tracks. Default unsupported; only
-    /// catalog remotes (YT) override.
-    async fn fetch_album_by_meta(
-        &self,
-        _title: &str,
-        _artist: &str,
-    ) -> Result<Option<RemoteAlbum>, SourceError> {
-        Err(SourceError::unsupported("album by meta"))
     }
 
     /// One page of a remote playlist: `cursor = None` for the first page, then
@@ -307,18 +290,6 @@ pub trait MediaSource: Send + Sync {
         _cursor: Option<String>,
     ) -> Result<(Vec<reader::Track>, Option<String>), SourceError> {
         Err(SourceError::unsupported("playlist paging"))
-    }
-
-    /// Resolve a saved album's title + artist to a remote album browse id, so
-    /// the album page can fetch the album's full track list (the local library
-    /// stores YT albums by hash, with no browse id). Default unsupported; only
-    /// catalog remotes (YT) override.
-    async fn resolve_album_browse_id(
-        &self,
-        _album: &str,
-        _artist: &str,
-    ) -> Result<Option<String>, SourceError> {
-        Err(SourceError::unsupported("album browse id"))
     }
 
     /// A remote artist profile (banner, top songs, albums, related) by channel
@@ -388,11 +359,11 @@ pub trait MediaSource: Send + Sync {
         Ok(Vec::new())
     }
 
-    /// Fetch artist → image-URL pairs from the remote (for the "artist photo"
-    /// view). Default empty (local reads them from the DB; YT has none).
-    async fn fetch_artist_images(
+    /// The remote's own artist listing: each artist as it names itself, with its photo URL when it has one.
+    /// Default empty (local reads them from the DB; YT has none).
+    async fn fetch_artists(
         &self,
-    ) -> Result<Vec<(reader::ArtistCredit, String)>, SourceError> {
+    ) -> Result<Vec<(reader::ArtistCredit, Option<String>)>, SourceError> {
         Ok(Vec::new())
     }
 
@@ -649,6 +620,24 @@ pub trait MediaSource: Send + Sync {
             .map_err(SourceError::from)
     }
 
+    /// Name every artist of this source's own listing that carries an id; answers how many rows changed. DB op.
+    async fn name_listed_artists(
+        &self,
+        listed: &[(reader::ArtistCredit, Option<String>)],
+    ) -> Result<usize, SourceError> {
+        let named: Vec<(String, String)> = listed
+            .iter()
+            .filter_map(|(artist, _)| Some((artist.id.clone()?, artist.name.clone())))
+            .collect();
+        if named.is_empty() {
+            return Ok(0);
+        }
+        self.db()
+            .name_artists(self.source(), &named)
+            .await
+            .map_err(SourceError::from)
+    }
+
     /// Record (or clear) the cached image for one of this source's artists, by its key. DB-cache op.
     async fn set_artist_image(
         &self,
@@ -852,16 +841,6 @@ pub(super) async fn mirror_created(
 
 // ============================ Resolvers ================================
 
-/// The server id of the active source — its own id, falling back to the
-/// configured server's id (matches the legacy single-server config).
-fn active_server_id(config: &AppConfig) -> Option<String> {
-    config
-        .active_source
-        .server_id()
-        .map(String::from)
-        .or_else(|| config.server.as_ref().and_then(|s| s.id.clone()))
-}
-
 /// Build the per-remote source for `conn` — the ONE place service dispatch happens.
 fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSource> {
     match conn.service {
@@ -901,9 +880,9 @@ pub type ActiveSource = std::sync::Arc<dyn MediaSource>;
 /// The configured server's [`MediaSource`], or `None` when no usable creds
 /// exist. Unlike [`active`] this ignores the active source — the reconciler
 /// syncs the configured server even while a local page is open.
-pub fn configured_server(db: Db, config: &AppConfig) -> Option<Box<dyn MediaSource>> {
-    let conn = ServerConn::resolve(config)?;
-    let source = Source::Server(active_server_id(config).unwrap_or_default());
+pub fn configured_server(db: Db, sources: &Sources) -> Option<Box<dyn MediaSource>> {
+    let conn = ServerConn::resolve(sources)?;
+    let source = Source::Server(sources.active_server_id().unwrap_or_default());
     Some(remote_source(db, source, &conn))
 }
 
@@ -912,15 +891,11 @@ pub fn local(db: Db, source: Source) -> Box<dyn MediaSource> {
     Box::new(LocalSource { db, source })
 }
 
-/// The [`MediaSource`] backing a given [`Source`] key — the single factory.
-/// Local needs no creds; a server resolves its creds from `config` (falling back
-/// to the offline stand-in when none are usable, so favorites still queue).
-/// Building a server source stands up an HTTP client, so resolve once and hold
-/// the result (the cached [`ActiveSource`]) rather than calling per render.
-pub fn resolve(db: Db, config: &AppConfig, source: &Source) -> Box<dyn MediaSource> {
+/// The single factory: a server without usable creds in `sources` gets the offline stand-in, and building one stands up an HTTP client, so hold the result.
+pub fn resolve(db: Db, sources: &Sources, source: &Source) -> Box<dyn MediaSource> {
     match source {
         Source::LocalLibrary(_) => local(db, source.clone()),
-        Source::Server(id) => match ServerConn::resolve(config) {
+        Source::Server(id) => match ServerConn::resolve(sources) {
             Some(conn) => remote_source(db, Source::Server(id.clone()), &conn),
             None => Box::new(OfflineServerSource {
                 db,
@@ -931,6 +906,6 @@ pub fn resolve(db: Db, config: &AppConfig, source: &Source) -> Box<dyn MediaSour
 }
 
 /// The [`MediaSource`] for the app's active source.
-pub fn active(db: Db, config: &AppConfig) -> Box<dyn MediaSource> {
-    resolve(db, config, &config.active_source)
+pub fn active(db: Db, sources: &Sources) -> Box<dyn MediaSource> {
+    resolve(db, sources, &sources.active)
 }

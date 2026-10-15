@@ -5,7 +5,7 @@ use crate::queue_drag::{
     set_dragged_queue_tracks,
 };
 use api::TrackInfo as Track;
-use config::{AppConfig, UiStyle};
+use config::{Settings, UiStyle};
 use dioxus::prelude::*;
 use hooks::consume_api;
 use hooks::toast::toast;
@@ -47,10 +47,10 @@ pub fn TrackRow(
     #[props(default = Vec::new())] selected_queue_tracks: Vec<Track>,
     #[props(default = None)] row_num: Option<usize>,
 ) -> Element {
-    let config = use_context::<Signal<AppConfig>>();
+    let settings = use_context::<Signal<Settings>>();
     let nav_ctrl = use_context::<NavigationController>();
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
-    let show_row_images = config.read().show_row_images;
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
+    let show_row_images = settings.read().ui.show_row_images;
     let show_selection_highlight = is_selection_mode && is_selected;
     let selection_shadow = if show_selection_highlight {
         "inset 0 0 0 9999px rgba(255,255,255,0.07)"
@@ -96,8 +96,7 @@ pub fn TrackRow(
         }
     };
 
-    let fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
-    let duration_str = fmt_dur(track.duration_secs().unwrap_or_default());
+    let duration_str = duration_label(&track);
 
     // The container a file is in, which the daemon works out: a row
     // that came from a service names no file, so it has none.
@@ -173,8 +172,10 @@ pub fn TrackRow(
                     }
                     span { class: "text-[11px] text-white/45 truncate leading-tight",
                         span { dir: "auto", "{track.artist}" }
-                        " • "
-                        span { dir: "ltr", "{duration_str}" }
+                        if !duration_str.is_empty() {
+                            " • "
+                            span { dir: "ltr", "{duration_str}" }
+                        }
                     }
                 }
 
@@ -631,6 +632,11 @@ pub fn TrackRow(
                     ondoubleclick: move |evt| evt.stop_propagation(),
                     "{track.title}"
                 }
+                if is_downloaded && (is_album || !show_row_images) {
+                    div { class: "shrink-0 ml-2 w-3 h-3 bg-indigo-500 rounded flex items-center justify-center",
+                        i { class: "fa-solid fa-check text-white", style: "font-size: 6px;" }
+                    }
+                }
                 if let Some(ref ft) = file_type {
                     span {
                         class: "shrink-0 ml-2 text-[9px] font-semibold uppercase px-1 py-0.5 rounded leading-none tracking-wide",
@@ -728,9 +734,30 @@ pub fn share_track(track: Track) {
         match api.track_web_url(track.key.clone()).await {
             Ok(Some(url)) => {
                 copy_to_clipboard(&url);
-                toast("Copied link");
+                toast(&i18n::t("share_copied"));
             }
-            _ => toast("Couldn't find a page for this track"),
+            _ => toast(&i18n::t("share_no_page")),
         }
     });
+}
+
+/// A row's duration as m:ss, blank when the source gave none (YouTube Music's artist Top songs).
+fn duration_label(track: &Track) -> String {
+    track
+        .duration_secs()
+        .map(|secs| format!("{}:{:02}", secs / 60, secs % 60))
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unknown_duration_is_left_blank_not_zero() {
+        let mut track = Track::default();
+        assert_eq!(duration_label(&track), "");
+        track.duration_ms = Some(225_000);
+        assert_eq!(duration_label(&track), "3:45");
+    }
 }

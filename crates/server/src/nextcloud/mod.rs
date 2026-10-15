@@ -92,10 +92,23 @@ pub async fn browse_folders(
     user_id: &str,
     password: &str,
     remote_path: &str,
-) -> Result<Vec<String>, String> {
-    NextcloudClient::new(server_url, user_id, password)?
+) -> Result<Vec<String>, crate::source::SourceError> {
+    NextcloudClient::new(server_url, user_id, password)
+        .map_err(crate::source::SourceError::InvalidInput)?
         .list_dirs(remote_path)
         .await
+}
+
+/// A refused credential and a server that did not answer, told apart from whatever else went wrong.
+pub(crate) fn source_error(error: nextcloud::Error) -> crate::source::SourceError {
+    use crate::source::SourceError;
+    if error.is_auth_error() {
+        return SourceError::Auth;
+    }
+    match error {
+        nextcloud::Error::Http(error) => SourceError::from_request(error),
+        other => SourceError::Backend(utils::redact::redact_url(&other.to_string())),
+    }
 }
 
 pub(crate) struct NextcloudClient {
@@ -160,7 +173,8 @@ impl NextcloudClient {
     pub(crate) async fn scan(
         &self,
         roots: &[String],
-    ) -> Result<(Vec<NextcloudAlbum>, Vec<NextcloudTrack>), String> {
+    ) -> Result<(Vec<NextcloudAlbum>, Vec<NextcloudTrack>), crate::source::SourceError> {
+        use crate::source::SourceError;
         let roots = if roots.is_empty() {
             vec![self.guess_music_root().await?]
         } else {
@@ -180,8 +194,9 @@ impl NextcloudClient {
                 Ok(entries) => entries,
                 // A renamed or unshared root must not void the rest.
                 Err(e) => {
-                    tracing::warn!(root, error = %e, "nextcloud folder unreadable");
-                    failures.push(format!("{root}: {e}"));
+                    let error = source_error(e);
+                    tracing::warn!(root, %error, "nextcloud folder unreadable");
+                    failures.push((root, error));
                     continue;
                 }
             };
@@ -191,7 +206,21 @@ impl NextcloudClient {
         }
 
         if albums.is_empty() && tracks.is_empty() && !failures.is_empty() {
-            return Err(format!("could not list {}", failures.join("; ")));
+            let kind = |wanted: &SourceError| failures.iter().all(|(_, error)| error == wanted);
+            if kind(&SourceError::Auth) {
+                return Err(SourceError::Auth);
+            }
+            if kind(&SourceError::Connectivity) {
+                return Err(SourceError::Connectivity);
+            }
+            let listed: Vec<String> = failures
+                .iter()
+                .map(|(root, error)| format!("{root}: {error}"))
+                .collect();
+            return Err(SourceError::Backend(format!(
+                "could not list {}",
+                listed.join("; ")
+            )));
         }
 
         // Nested roots (a folder and its parent) would list a track twice.
@@ -204,14 +233,17 @@ impl NextcloudClient {
 
     /// Sub-directories of `path`, sorted by name, for the settings folder
     /// browser. Errors when the listing request fails.
-    pub(crate) async fn list_dirs(&self, path: &str) -> Result<Vec<String>, String> {
+    pub(crate) async fn list_dirs(
+        &self,
+        path: &str,
+    ) -> Result<Vec<String>, crate::source::SourceError> {
         let path = dav_path::normalise(path);
         let entries = self
             .nc
             .files()
             .propfind(&path, Depth::One, nextcloud::files::DEFAULT_PROPS)
             .await
-            .map_err(|e| format!("could not list {path}: {e}"))?;
+            .map_err(source_error)?;
 
         let mut dirs: Vec<String> = entries
             .into_iter()
@@ -226,13 +258,11 @@ impl NextcloudClient {
     /// Paths of every audio file starred in Nextcloud itself, restricted to the
     /// configured roots so a starred file outside the library isn't favourited
     /// against a track the library doesn't hold.
-    pub(crate) async fn favorites(&self, roots: &[String]) -> Result<Vec<String>, String> {
-        let entries = self
-            .nc
-            .files()
-            .favorites("/")
-            .await
-            .map_err(|e| format!("could not read favourites: {e}"))?;
+    pub(crate) async fn favorites(
+        &self,
+        roots: &[String],
+    ) -> Result<Vec<String>, crate::source::SourceError> {
+        let entries = self.nc.files().favorites("/").await.map_err(source_error)?;
 
         Ok(entries
             .into_iter()
@@ -242,12 +272,16 @@ impl NextcloudClient {
             .collect())
     }
 
-    pub(crate) async fn set_favorite(&self, remote_path: &str, on: bool) -> Result<(), String> {
+    pub(crate) async fn set_favorite(
+        &self,
+        remote_path: &str,
+        on: bool,
+    ) -> Result<(), crate::source::SourceError> {
         self.nc
             .files()
             .set_favorite(remote_path, on)
             .await
-            .map_err(|e| format!("could not update favourite: {e}"))
+            .map_err(source_error)
     }
 
     /// Track length in whole seconds, read from the file's header because
@@ -426,16 +460,27 @@ impl NextcloudClient {
         EmbeddedArt::Found(cover.bytes, ext)
     }
 
-    async fn guess_music_root(&self) -> Result<String, String> {
+    async fn guess_music_root(&self) -> Result<String, crate::source::SourceError> {
+        use crate::source::SourceError;
         for candidate in ROOT_CANDIDATES {
-            if self.nc.files().exists(candidate).await.unwrap_or(false) {
-                return Ok((*candidate).to_string());
+            match self
+                .nc
+                .files()
+                .exists(candidate)
+                .await
+                .map_err(source_error)
+            {
+                Ok(true) => return Ok((*candidate).to_string()),
+                Ok(false) => {}
+                // No other candidate would get past a refused login or a server that does not answer.
+                Err(error @ (SourceError::Auth | SourceError::Connectivity)) => return Err(error),
+                Err(error) => tracing::debug!(candidate, %error, "nextcloud root probe failed"),
             }
         }
-        Err(format!(
+        Err(SourceError::Backend(format!(
             "no music folder found (looked for {}); pick one in Settings",
             ROOT_CANDIDATES.join(", ")
-        ))
+        )))
     }
 }
 
@@ -506,6 +551,38 @@ fn extension_for_mime(content_type: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The DAV path a request failed on names the user, and its error reaches the app.
+    #[tokio::test]
+    async fn a_failed_favorites_request_keeps_the_user_out_of_its_error() {
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let address = closed.local_addr().expect("address");
+        drop(closed);
+        let client = NextcloudClient::new(&format!("http://{address}"), "someone", "app-pw")
+            .expect("client");
+        let error = client.favorites(&[]).await.expect_err("nothing listens");
+        assert_eq!(error, crate::source::SourceError::Connectivity);
+        let error = client
+            .set_favorite("/Music/a.mp3", true)
+            .await
+            .expect_err("nothing listens");
+        assert!(!error.to_string().contains("someone"), "{error}");
+    }
+
+    #[test]
+    fn a_refused_credential_is_an_auth_failure() {
+        let dav = |status| nextcloud::Error::Dav {
+            method: "PROPFIND".into(),
+            path: "/".into(),
+            status,
+            body: String::new(),
+        };
+        assert_eq!(source_error(dav(401)), crate::source::SourceError::Auth);
+        assert!(matches!(
+            source_error(dav(500)),
+            crate::source::SourceError::Backend(_)
+        ));
+    }
 
     #[test]
     fn path_helpers_clamp_at_the_root() {

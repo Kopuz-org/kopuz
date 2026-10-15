@@ -28,13 +28,14 @@ const OUTPUT_DIR: &str = "output_dir";
 /// The settings keys behind the published rows.
 const OUTPUT_DIR_KEY: &str = "ytdlp_output_dir";
 const OPTIONS_KEY: &str = "ytdlp_options";
-const HISTORY_KEY: &str = "ytdlp_history";
 
 /// How many finished downloads the history keeps.
 const HISTORY_LIMIT: usize = 50;
 
 pub struct UrlDownloadService {
+    db: db::Db,
     config: Arc<ConfigService>,
+    sources: Arc<crate::sources::SourceService>,
     rescan: std::sync::OnceLock<(Arc<crate::library::LibraryService>, Arc<JobRunner>)>,
 }
 
@@ -379,9 +380,15 @@ async fn write_tags(
 }
 
 impl UrlDownloadService {
-    pub fn new(config: Arc<ConfigService>) -> Arc<Self> {
+    pub fn new(
+        db: db::Db,
+        config: Arc<ConfigService>,
+        sources: Arc<crate::sources::SourceService>,
+    ) -> Arc<Self> {
         Arc::new(Self {
+            db,
             config,
+            sources,
             rescan: std::sync::OnceLock::new(),
         })
     }
@@ -431,14 +438,14 @@ impl UrlDownloadService {
             return Err(ApiError::unsupported("ffmpeg is not installed"));
         }
         let config = self.config.snapshot().await;
-        let output_dir = output_root(&config.downloader_output_dir);
+        let output_dir = output_root(&config.downloads.downloader_output_dir);
         prepare_output(&output_dir)?;
         let request = Request {
             link,
             output_dir,
             format,
-            options: config.downloader_options.clone(),
-            downloader: YoutubeDownloader::new(youtube_cookies(&config)),
+            options: config.downloads.downloader_options.clone(),
+            downloader: YoutubeDownloader::new(youtube_cookies(&*self.sources.snapshot().await)),
             ffmpeg,
         };
         let service = self.clone();
@@ -454,13 +461,14 @@ impl UrlDownloadService {
         if query.is_empty() {
             return Ok(Vec::new());
         }
-        let config = self.config.snapshot().await;
-        let downloader = YoutubeDownloader::new(youtube_cookies(&config));
+        let downloader = YoutubeDownloader::new(youtube_cookies(&*self.sources.snapshot().await));
         let tracks = match youtube_download::parse_link(query) {
-            Some(link) => downloader.tracks(&link).await,
-            None => downloader.search(query).await,
-        }
-        .map_err(ApiError::internal)?;
+            Some(link) => downloader.tracks(&link).await.map_err(ApiError::internal)?,
+            None => downloader
+                .search(query)
+                .await
+                .map_err(crate::sources::source_error)?,
+        };
         Ok(tracks
             .iter()
             .map(|track| DownloadCandidate {
@@ -477,13 +485,13 @@ impl UrlDownloadService {
     /// The downloader's options, with what they currently hold.
     pub async fn settings(&self) -> Vec<FieldSpec> {
         let config = self.config.snapshot().await;
-        let options = &config.downloader_options;
+        let options = &config.downloads.downloader_options;
         vec![
             FieldSpec {
                 key: OUTPUT_DIR.to_string(),
                 label: Text::key("downloader_output_dir_placeholder"),
                 kind: FieldKind::Directory,
-                value: Some(config.downloader_output_dir.clone()),
+                value: Some(config.downloads.downloader_output_dir.clone()),
                 config_key: Some(OUTPUT_DIR_KEY.to_string()),
                 ..Default::default()
             },
@@ -526,50 +534,51 @@ impl UrlDownloadService {
 
     /// Answer the published options. An absent key is left alone.
     pub async fn set_settings(&self, values: Vec<FieldValue>) -> Result<Vec<FieldSpec>, ApiError> {
+        use config::{DownloadsKey, SettingKey};
         let mut keys = Vec::new();
         if value_of(&values, OUTPUT_DIR).is_some() {
-            keys.push(OUTPUT_DIR_KEY);
+            keys.push(SettingKey::Downloads(DownloadsKey::DownloaderOutputDir));
         }
         if values.iter().any(|value| value.key != OUTPUT_DIR) {
-            keys.push(OPTIONS_KEY);
+            keys.push(SettingKey::Downloads(DownloadsKey::DownloaderOptions));
         }
-        self.config.ensure_unlocked(&keys)?;
+        self.config.ensure_unlocked(&keys).await?;
         self.config
             .mutate_state(&keys, move |config| {
                 if let Some(dir) = value_of(&values, OUTPUT_DIR) {
-                    config.downloader_output_dir = dir.trim().to_string();
+                    config.downloads.downloader_output_dir = dir.trim().to_string();
                 }
-                apply_options(&values, &mut config.downloader_options);
+                apply_options(&values, &mut config.downloads.downloader_options);
             })
             .await?;
         Ok(self.settings().await)
     }
 
-    pub async fn history(&self) -> Vec<DownloadHistoryEntry> {
-        self.config
-            .snapshot()
-            .await
-            .downloader_history
-            .iter()
+    pub async fn history(&self) -> Result<Vec<DownloadHistoryEntry>, ApiError> {
+        let entries =
+            self.db.downloader_history().await.map_err(|error| {
+                ApiError::internal(format!("download history unreadable: {error}"))
+            })?;
+        Ok(entries
+            .into_iter()
             .map(|entry| DownloadHistoryEntry {
-                url: entry.url.clone(),
-                title: entry.title.clone(),
                 format: Format::from_stored(&entry.format).id().to_string(),
                 state: match entry.status.as_str() {
                     "completed" => DownloadState::Finished,
                     _ => DownloadState::Failed,
                 },
-                error: entry.error.clone(),
+                url: entry.url,
+                title: entry.title,
+                error: entry.error,
             })
-            .collect()
+            .collect())
     }
 
     pub async fn clear_history(&self) -> Result<(), ApiError> {
-        self.config.ensure_unlocked(&[HISTORY_KEY])?;
-        self.config
-            .mutate_state(&[HISTORY_KEY], |config| config.downloader_history.clear())
-            .await?;
-        Ok(())
+        self.db
+            .clear_downloader_history()
+            .await
+            .map_err(|error| ApiError::internal(format!("download history not cleared: {error}")))
     }
 
     /// Every track the link stands for, one after another. One failing does
@@ -610,7 +619,7 @@ impl UrlDownloadService {
 
         if failures.len() < tracks.len()
             && let Some((library, jobs)) = self.rescan.get()
-            && let Err(error) = library.spawn_scan(jobs)
+            && let Err(error) = library.spawn_scan(jobs, crate::jobs::Trigger::User)
         {
             tracing::debug!(%error, "no rescan after the download");
         }
@@ -714,8 +723,7 @@ impl UrlDownloadService {
         Ok(())
     }
 
-    /// Downloads are remembered so the page can show what happened after a
-    /// restart, which is why this is config rather than a job list.
+    /// Kept in a table rather than a job list, so the page still shows what happened after a restart.
     async fn record_history(&self, track: &reader::Track, format: Format, error: Option<String>) {
         let entry = config::DownloaderHistoryEntry {
             url: Link::video_url(&track.id.key()),
@@ -728,14 +736,7 @@ impl UrlDownloadService {
             },
             error,
         };
-        if let Err(error) = self
-            .config
-            .mutate_state(&[HISTORY_KEY], move |config| {
-                config.downloader_history.insert(0, entry);
-                config.downloader_history.truncate(HISTORY_LIMIT);
-            })
-            .await
-        {
+        if let Err(error) = self.db.push_downloader_history(&entry, HISTORY_LIMIT).await {
             tracing::warn!(%error, "the download history could not be saved");
         }
     }
@@ -762,8 +763,8 @@ impl Step<'_> {
 
 /// The signed-in YouTube Music session's cookies, when that is the configured
 /// server, so Premium streams download at Premium quality.
-fn youtube_cookies(config: &config::AppConfig) -> Option<String> {
-    config
+fn youtube_cookies(sources: &server::sources::Sources) -> Option<String> {
+    sources
         .server
         .as_ref()
         .and_then(|server| server.ytmusic_cookies())
@@ -813,16 +814,16 @@ mod tests {
         );
         server.access_token = Some("SAPISID=leftover".into());
         server.yt_anonymous = true;
-        let mut config = config::AppConfig {
+        let mut sources = server::sources::Sources {
             server: Some(server),
             ..Default::default()
         };
-        assert_eq!(youtube_cookies(&config), None);
-        if let Some(server) = config.server.as_mut() {
+        assert_eq!(youtube_cookies(&sources), None);
+        if let Some(server) = sources.server.as_mut() {
             server.yt_anonymous = false;
         }
         assert_eq!(
-            youtube_cookies(&config).as_deref(),
+            youtube_cookies(&sources).as_deref(),
             Some("SAPISID=leftover")
         );
     }

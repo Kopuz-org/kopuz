@@ -1,0 +1,62 @@
+# A hand-written settings file: unsorted keys, comments, partial tables.
+theme = "nord"
+language = "tr"
+crossfade_seconds = 6
+volume_scroll_step = 0.1
+lyrics_offset_ms = 2500
+lyrics_depth_blur_strength = 80
+ui_style = "Modern"
+titlebar_mode = "System"
+spotify_browser = "brave"
+discord_presence = false
+auto_fetch_covers = true
+cover_fetch_strategy = "LastFmFirst"
+offline_quality = "Kbps256"
+sync_interval_minutes = 90
+ytdlp_output_dir = "/home/me/Downloads/kopuz"
+custom_background_path = "/home/me/Pictures/wall.png"
+cover_art_darkening = 45
+hero_height = 640
+
+[ytdlp_options]
+organize_by_album = false
+write_thumbnail = true
+
+[equalizer]
+enabled = true
+preset = "Custom"
+bands = [-6.0, -3.5, 0.0, 1.5, 3.0, 4.5, 6.0, -1.0, -2.0, 12.0]
+preamp_db = -2.5
+
+[replay_gain]
+mode = "Track"
+preamp_db = 1.5
+
+[custom_themes.ocean]
+name = "Ocean"
+
+[custom_themes.ocean.vars]
+"--color-bg" = "#0b1d2a"
+"--color-fg" = "#d8e6f0"
+
+[custom_themes.ember]
+name = "Ember"
+vars = { "--color-bg" = "#1a0f0a" }
+
+[[local_sources]]
+id = "local"
+name = "Local Library"
+directories = ["/home/me/Music"]
+
+[[local_sources]]
+id = "local:archive"
+name = "Archive"
+directories = ["/mnt/archive/flac", "/mnt/archive/mp3"]
+
+[[radio_registries]]
+url = "https://raw.githubusercontent.com/Kopuz-org/kopuz/refs/heads/master/radio-registry/index.json"
+is_default = true
+
+[[radio_registries]]
+url = "https://example.org/stations/index.json"
+enabled = false

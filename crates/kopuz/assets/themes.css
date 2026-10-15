@@ -1289,7 +1289,8 @@ select:disabled {
     padding: 0.35rem;
     border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 16%, transparent);
     border-radius: 0.65rem;
-    background: color-mix(in srgb, var(--color-black, #000000) 72%, transparent);
+    /* Opaque like the sheet: WebKitGTK without accelerated compositing drops the blur, leaving the rows below legible through it. */
+    background: color-mix(in srgb, var(--color-black, #000000) 72%, var(--color-neutral-900, #171717));
     -webkit-backdrop-filter: blur(18px) saturate(125%);
     backdrop-filter: blur(18px) saturate(125%);
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);

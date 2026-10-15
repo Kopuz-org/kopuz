@@ -29,7 +29,9 @@ impl Session {
             if !allow_crossfade || restore_seek.is_some_and(|position| !position.is_zero()) {
                 Transition::Immediate
             } else if self.should_crossfade() {
-                Transition::Crossfade(Duration::from_secs(self.config.crossfade_seconds as u64))
+                Transition::Crossfade(Duration::from_secs(
+                    self.settings.playback.crossfade_seconds as u64,
+                ))
             } else if self.should_play_gapless() {
                 Transition::Gapless
             } else {
@@ -48,28 +50,16 @@ impl Session {
             .and_then(|provider| provider(&track));
 
         let offline_path = if factory_override.is_none() && is_server {
-            let raw = self
-                .config
-                .offline_tracks
-                .get(&item_id)
+            // Imported paths are untrusted: one with a placeholder extension streams instead.
+            self.offline
+                .present(&item_id)
                 .map(PathBuf::from)
-                .filter(|path| path.exists());
-            if let Some(path) = raw.as_ref() {
-                let bad_ext = matches!(
-                    path.extension().and_then(|extension| extension.to_str()),
-                    Some("audio") | Some("bin")
-                );
-                if bad_ext {
-                    // Imported config paths are untrusted. Remove only the
-                    // stale mapping; deleting the path could remove user data.
-                    self.config.offline_tracks.remove(&item_id);
-                    None
-                } else {
-                    raw
-                }
-            } else {
-                raw
-            }
+                .filter(|path| {
+                    !matches!(
+                        path.extension().and_then(|extension| extension.to_str()),
+                        Some("audio") | Some("bin")
+                    )
+                })
         } else {
             None
         };
@@ -91,8 +81,9 @@ impl Session {
             station
                 .and_then(|station| station.streams.iter().find(|stream| stream.id == stream_id))
                 .map(|stream| (stream.url.clone(), cover))
-        } else if is_server && self.config.server.is_some() && self.active_source.is_some() {
-            let cover = now_playing_artwork(&self.config, &track).unwrap_or_default();
+        } else if is_server && self.sources.server.is_some() && self.active_source.is_some() {
+            let cover =
+                now_playing_artwork(self.sources.server.as_ref(), &track).unwrap_or_default();
             Some((ResolvedStreamRef::pending_marker(&item_id), cover))
         } else {
             None
@@ -144,6 +135,7 @@ impl Session {
             self.error = Some(api::ErrorBody {
                 code: api::ErrorCode::SourceUnreachable,
                 message: message.to_string(),
+                reason: None,
             });
             return false;
         }
@@ -199,7 +191,7 @@ impl Session {
         }
 
         let cover_url = if offline_path.is_some() {
-            now_playing_artwork(&self.config, &track).unwrap_or_default()
+            now_playing_artwork(self.sources.server.as_ref(), &track).unwrap_or_default()
         } else {
             remote_ref
                 .as_ref()
@@ -261,7 +253,7 @@ impl Session {
         let mut prepared = match result {
             Ok(prepared) => prepared,
             Err(failure) => {
-                if self.fail_load(failure.token, failure.message) {
+                if self.fail_load(failure.token, failure.code, failure.message) {
                     self.publish(state_tx, false);
                 }
                 return;
@@ -274,7 +266,7 @@ impl Session {
             .model
             .track_at(prepared.idx)
             .filter(|track| track.id == prepared.track.id)
-            .and_then(|track| now_playing_artwork(&self.config, track))
+            .and_then(|track| now_playing_artwork(self.sources.server.as_ref(), track))
         {
             prepared.artwork = Some(artwork);
         }
@@ -297,6 +289,7 @@ impl Session {
             .map(|url| {
                 (
                     url.to_string(),
+                    temp_cover_key(&prepared.track, url),
                     NowPlayingMeta {
                         title: prepared.track.title.clone(),
                         artist: prepared.track.artist.clone(),
@@ -326,10 +319,10 @@ impl Session {
         });
         let token = prepared.token;
         #[cfg(target_os = "macos")]
-        if let Some((url, mut meta)) = artwork_fetch {
+        if let Some((url, key, mut meta)) = artwork_fetch {
             let artwork_tx = self.cmd_tx.clone();
             tokio::spawn(async move {
-                let Some(path) = fetch_cover_to_temp(&url).await else {
+                let Some(path) = fetch_cover_to_temp(&url, &key).await else {
                     return;
                 };
                 meta.artwork = Some(path);
@@ -386,12 +379,14 @@ impl Session {
                     .pending_transition
                     .as_ref()
                     .is_some_and(|pending| pending.to_token == finished.token);
+                let mut fading_from = None;
                 if matching_transition {
                     if outcome.crossfaded || outcome.gapless {
                         if let Some(pending) = self.pending_transition.as_mut() {
                             // Keep the visible queue/track outgoing until the
                             // authoritative TrackSwitched event.
                             pending.stage = if outcome.crossfaded {
+                                fading_from = Some(pending.from_token);
                                 TransitionStage::Fading
                             } else {
                                 TransitionStage::Queued
@@ -405,6 +400,10 @@ impl Session {
                 }
                 self.maybe_record_recent();
                 self.publish(state_tx, false);
+                // The outgoing track stays on screen through the fade, so clients get a live anchor for it to keep counting.
+                if let Some(from_token) = fading_from {
+                    self.publish_position_anchor(state_tx, Some(from_token), None, true);
+                }
                 if self.pending_transition.is_none()
                     && self.phase != ApiPhase::Idle
                     && self.position_token != Some(finished.token)
@@ -422,7 +421,7 @@ impl Session {
             }
             Some(Err(error)) => {
                 tracing::error!(error = %error, "playback failed");
-                if self.fail_load(finished.token, error) {
+                if self.fail_load(finished.token, engine_failure_code(error.kind), error) {
                     self.publish(state_tx, false);
                 }
             }
@@ -454,8 +453,8 @@ impl Session {
         if self.external.is_none() {
             self.attach_external_now(sink.clone());
         }
-        let artwork =
-            server::cover::track(&self.config, &track, 800).map(|cover| cover.as_ref().to_string());
+        let artwork = server::cover::track(self.sources.server.as_ref(), &track, 800)
+            .map(|cover| cover.as_ref().to_string());
         tokio::spawn(async move {
             if let Err(error) = sink.load(&track, artwork).await {
                 tracing::warn!(%error, "external playback could not start");
@@ -470,7 +469,7 @@ impl Session {
         covers: std::collections::HashMap<String, String>,
         state_tx: &watch::Sender<PlayerState>,
     ) {
-        if source != self.config.active_source {
+        if source != self.sources.active {
             return;
         }
         let loaded_position = self
@@ -497,7 +496,7 @@ impl Session {
             let artwork = self
                 .model
                 .track_at(loaded_position)
-                .and_then(|track| now_playing_artwork(&self.config, track));
+                .and_then(|track| now_playing_artwork(self.sources.server.as_ref(), track));
             if self.player.set_artwork(self.intent.token(), artwork)
                 && self.pending_transition.is_none()
             {
@@ -510,20 +509,32 @@ impl Session {
     }
 }
 
-pub(super) fn now_playing_artwork(config: &config::AppConfig, track: &Track) -> Option<String> {
-    match server::cover::locate(config, reader::CoverRef::for_track(track), 800)? {
+pub(super) fn now_playing_artwork(
+    server: Option<&config::MusicServer>,
+    track: &Track,
+) -> Option<String> {
+    match server::cover::locate(server, reader::CoverRef::for_track(track), 800)? {
         server::cover::Located::File(path) => Some(path.to_string_lossy().into_owned()),
         server::cover::Located::Url(url) => Some(url),
     }
 }
 
-/// Download a cover to a temp file named by its URL hash, so repeated plays
+/// What a temp cover file is named by: a Subsonic cover's id, whose URL is signed afresh on every play, else its URL.
+#[cfg(target_os = "macos")]
+pub(super) fn temp_cover_key(track: &Track, url: &str) -> String {
+    match reader::CoverRef::for_track(track) {
+        reader::CoverRef::SubsonicItem { item_id } => format!("subsonic|{item_id}"),
+        _ => url.to_string(),
+    }
+}
+
+/// Download a cover to a temp file named by a hash of `key`, so repeated plays
 /// of the same album reuse the file instead of growing the temp dir. MPRIS
 /// `mpris:artUrl` wants a file too, not just macOS Now Playing.
-pub(super) async fn fetch_cover_to_temp(url: &str) -> Option<String> {
+pub(super) async fn fetch_cover_to_temp(url: &str, key: &str) -> Option<String> {
     use sha2::{Digest as _, Sha256};
     let mut hasher = Sha256::new();
-    hasher.update(url.as_bytes());
+    hasher.update(key.as_bytes());
     let digest = hasher.finalize();
     let mut name = String::from("kopuz_cover_");
     for byte in &digest[..12] {
@@ -594,6 +605,7 @@ impl ClassifiedLoad {
         } else {
             let (stream_ref, _) = self.remote_ref.take().ok_or_else(|| LoadFailure {
                 token: self.token,
+                code: api::ErrorCode::Internal,
                 message: "classified load has no source".to_string(),
             })?;
             ClassifiedSource::Remote {
@@ -649,10 +661,7 @@ impl ClassifiedLoad {
                     source
                         .open_stream(item_id, buffer_progress.clone())
                         .await
-                        .map_err(|error| LoadFailure {
-                            token: self.token,
-                            message: error.to_string(),
-                        })?
+                        .map_err(|error| LoadFailure::from_source(self.token, &error))?
                 } else {
                     None
                 }
@@ -668,9 +677,7 @@ impl ClassifiedLoad {
         let mut loudness_db = None;
         let factory: SourceFactory = match source {
             ClassifiedSource::Factory(factory) => factory,
-            ClassifiedSource::Local(path) => Box::new(move || {
-                player::decoder::open_file(&path).map_err(|error| error.to_string())
-            }),
+            ClassifiedSource::Local(path) => Box::new(move || player::decoder::open_file(&path)),
             ClassifiedSource::Cached {
                 path,
                 source,
@@ -683,18 +690,18 @@ impl ClassifiedLoad {
                     Ok(parts) => Ok(parts),
                     Err(error) => {
                         tracing::warn!(error = %error, "cached file failed to open; falling back to the server stream");
-                        let source = source
-                            .as_ref()
-                            .ok_or_else(|| "no active source for cache fallback".to_string())?;
+                        let source = source.as_ref().ok_or_else(|| {
+                            std::io::Error::other("no active source for cache fallback")
+                        })?;
                         if let Some(stream) = rt_handle
                             .block_on(source.open_stream(&item_id, buffer_progress.clone()))
-                            .map_err(|error| error.to_string())?
+                            .map_err(source_io_error)?
                         {
                             return Ok(player::decoder::from_stream(stream));
                         }
                         let info = rt_handle
                             .block_on(source.resolve_stream(&item_id))
-                            .map_err(|error| error.to_string())?;
+                            .map_err(source_io_error)?;
                         network_factory(
                             info.url,
                             info.format,
@@ -712,14 +719,12 @@ impl ClassifiedLoad {
                     ResolvedStreamRef::Pending(item_id) => {
                         let source = source.ok_or_else(|| LoadFailure {
                             token: self.token,
+                            code: api::ErrorCode::Internal,
                             message: "no active source for remote track".to_string(),
                         })?;
                         let info = source.resolve_stream(item_id).await.map_err(|error| {
                             tracing::error!(error = %error, "stream URL resolve failed");
-                            LoadFailure {
-                                token: self.token,
-                                message: error.to_string(),
-                            }
+                            LoadFailure::from_source(self.token, &error)
                         })?;
                         duration_secs = info.duration_secs;
                         bitrate = info.bitrate;
@@ -784,11 +789,47 @@ pub(super) struct PreparedLoad {
 
 pub(super) struct LoadFailure {
     token: u64,
+    code: api::ErrorCode,
     message: String,
+}
+
+impl LoadFailure {
+    fn from_source(token: u64, error: &server::source::SourceError) -> Self {
+        use server::source::SourceError;
+        let code = match error {
+            SourceError::Connectivity => api::ErrorCode::SourceUnreachable,
+            SourceError::Auth => api::ErrorCode::SourceAuthExpired,
+            _ => api::ErrorCode::Internal,
+        };
+        Self {
+            token,
+            code,
+            message: error.to_string(),
+        }
+    }
+}
+
+/// A source's failure inside a stream factory, as the I/O error the engine tells an unreachable host by.
+fn source_io_error(error: server::source::SourceError) -> std::io::Error {
+    match error {
+        server::source::SourceError::Connectivity => {
+            std::io::Error::new(std::io::ErrorKind::NotConnected, error.to_string())
+        }
+        other => std::io::Error::other(other.to_string()),
+    }
+}
+
+/// The error code a failure from the engine is shown under.
+pub(super) fn engine_failure_code(kind: player::engine::FailureKind) -> api::ErrorCode {
+    match kind {
+        player::engine::FailureKind::Unreachable => api::ErrorCode::SourceUnreachable,
+        player::engine::FailureKind::NotFound => api::ErrorCode::NotFound,
+        player::engine::FailureKind::Other => api::ErrorCode::Internal,
+    }
 }
 
 pub(super) struct LoadFinished {
     token: u64,
-    result: Option<Result<player::engine::LoadOutcome, String>>,
+    result: Option<Result<player::engine::LoadOutcome, player::engine::Failure>>,
     clear_pending_resume: bool,
 }

@@ -38,20 +38,29 @@ pub fn event_to_proto(value: &api::ApiEvent) -> Event {
             current: progress.current,
             total: progress.total,
             message: progress.message.clone(),
+            automatic: progress.automatic,
         }),
         api::ApiEvent::JobFinished {
             id,
             kind,
             ok,
             error,
+            automatic,
         } => event::Kind::JobFinished(JobFinished {
             id: id.clone(),
             kind: job_kind_to_proto(*kind) as i32,
             ok: *ok,
             error: error.as_ref().map(error_body_to_proto),
+            automatic: *automatic,
         }),
-        api::ApiEvent::ConfigChanged { keys } => {
-            event::Kind::ConfigChanged(ConfigChanged { keys: keys.clone() })
+        api::ApiEvent::ConfigChanged { revision } => event::Kind::ConfigChanged(ConfigChanged {
+            revision: *revision,
+        }),
+        api::ApiEvent::FrontendPrefsChanged { frontend, keys } => {
+            event::Kind::FrontendPrefsChanged(FrontendPrefsChanged {
+                frontend: frontend.clone(),
+                keys: keys.clone(),
+            })
         }
         api::ApiEvent::SourceStatus { source, state } => {
             event::Kind::SourceStatus(SourceStatusEvent {
@@ -103,14 +112,20 @@ pub fn event_from_proto(value: &Event) -> Option<api::ApiEvent> {
             current: progress.current,
             total: progress.total,
             message: progress.message.clone(),
+            automatic: progress.automatic,
         }),
         event::Kind::JobFinished(finished) => api::ApiEvent::JobFinished {
             id: finished.id.clone(),
             kind: job_kind_from_proto(finished.kind),
             ok: finished.ok,
             error: finished.error.as_ref().map(error_body_from_proto),
+            automatic: finished.automatic,
         },
         event::Kind::ConfigChanged(changed) => api::ApiEvent::ConfigChanged {
+            revision: changed.revision,
+        },
+        event::Kind::FrontendPrefsChanged(changed) => api::ApiEvent::FrontendPrefsChanged {
+            frontend: changed.frontend.clone(),
             keys: changed.keys.clone(),
         },
         event::Kind::SourceStatus(status) => api::ApiEvent::SourceStatus {
@@ -164,6 +179,7 @@ mod tests {
                 current: Some(1),
                 total: Some(2),
                 message: Some("f".into()),
+                automatic: true,
             }),
             api::ApiEvent::JobFinished {
                 id: "j".into(),
@@ -172,10 +188,21 @@ mod tests {
                 error: Some(api::ErrorBody {
                     code: api::ErrorCode::Conflict,
                     message: "busy".into(),
+                    reason: Some(api::ErrorReason::SignInTimedOut),
                 }),
+                automatic: false,
             },
-            api::ApiEvent::ConfigChanged {
-                keys: vec!["volume".into()],
+            api::ApiEvent::JobFinished {
+                id: "k".into(),
+                kind: api::JobKind::LibrarySync,
+                ok: true,
+                error: None,
+                automatic: true,
+            },
+            api::ApiEvent::ConfigChanged { revision: 9 },
+            api::ApiEvent::FrontendPrefsChanged {
+                frontend: "gpui".into(),
+                keys: vec!["skin".into(), "columns".into()],
             },
             api::ApiEvent::SourceStatus {
                 source: "jellyfin".into(),

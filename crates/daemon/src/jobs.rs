@@ -13,6 +13,13 @@ use crate::session::SessionHandle;
 const RETAINED_JOBS: usize = 50;
 const PROGRESS_THROTTLE_MS: u128 = 200;
 
+/// Who asked for a job: a person (through the API) or the daemon's own schedule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trigger {
+    User,
+    Schedule,
+}
+
 struct JobEntry {
     status: JobStatus,
     cancelled: Arc<AtomicBool>,
@@ -30,6 +37,7 @@ pub struct JobRunner {
 pub struct JobCtx {
     id: String,
     kind: JobKind,
+    automatic: bool,
     cancelled: Arc<AtomicBool>,
     session: SessionHandle,
     entries: Arc<Mutex<Vec<JobEntry>>>,
@@ -39,6 +47,10 @@ pub struct JobCtx {
 impl JobCtx {
     pub fn cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Relaxed)
+    }
+
+    pub fn kind(&self) -> JobKind {
+        self.kind
     }
 
     pub fn progress(
@@ -57,6 +69,7 @@ impl JobCtx {
                 current,
                 total,
                 message,
+                automatic: self.automatic,
             }));
     }
 
@@ -117,6 +130,20 @@ impl JobRunner {
         F: FnOnce(JobCtx) -> Fut,
         Fut: std::future::Future<Output = Result<(), ApiError>> + Send + 'static,
     {
+        self.start_as(kind, Trigger::User, job)
+    }
+
+    pub fn start_as<F, Fut>(
+        &self,
+        kind: JobKind,
+        trigger: Trigger,
+        job: F,
+    ) -> Result<JobRef, ApiError>
+    where
+        F: FnOnce(JobCtx) -> Fut,
+        Fut: std::future::Future<Output = Result<(), ApiError>> + Send + 'static,
+    {
+        let automatic = trigger == Trigger::Schedule;
         let id = format!("job-{}", self.next_id.fetch_add(1, Ordering::Relaxed) + 1);
         let cancelled = Arc::new(AtomicBool::new(false));
         {
@@ -150,6 +177,7 @@ impl JobRunner {
                     total: None,
                     message: None,
                     error: None,
+                    automatic,
                 },
                 cancelled: cancelled.clone(),
             });
@@ -165,11 +193,13 @@ impl JobRunner {
                 current: None,
                 total: None,
                 message: None,
+                automatic,
             }));
 
         let ctx = JobCtx {
             id: id.clone(),
             kind,
+            automatic,
             cancelled: cancelled.clone(),
             session: self.session.clone(),
             entries: self.entries.clone(),
@@ -201,9 +231,21 @@ impl JobRunner {
                 kind,
                 ok: state == JobState::Finished,
                 error,
+                automatic,
             });
         });
         Ok(JobRef { job_id: id })
+    }
+
+    /// The job of `kind` running now, if any.
+    pub fn running(&self, kind: JobKind) -> Option<JobRef> {
+        let entries = self.entries.lock().ok()?;
+        entries
+            .iter()
+            .find(|entry| entry.status.kind == kind && entry.status.state == JobState::Running)
+            .map(|entry| JobRef {
+                job_id: entry.status.id.clone(),
+            })
     }
 
     pub fn list(&self) -> Vec<JobStatus> {

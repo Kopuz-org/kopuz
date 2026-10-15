@@ -17,6 +17,23 @@ impl SourceError {
     pub fn unsupported(op: &'static str) -> Self {
         SourceError::Unsupported(op)
     }
+
+    /// A request that got no answer, not one the server refused.
+    pub fn from_request(error: reqwest::Error) -> Self {
+        if error.is_connect() || error.is_timeout() {
+            SourceError::Connectivity
+        } else {
+            SourceError::Backend(error.without_url().to_string())
+        }
+    }
+
+    /// A non-success HTTP status, where 401 and 403 mean the credentials were refused.
+    pub fn from_status(status: reqwest::StatusCode, what: &str) -> Self {
+        match status.as_u16() {
+            401 | 403 => SourceError::Auth,
+            _ => SourceError::Backend(format!("{what} failed: {status}")),
+        }
+    }
 }
 
 impl fmt::Display for SourceError {
@@ -145,7 +162,8 @@ pub struct ArtistLookup {
 pub struct LibrarySnapshot {
     pub albums: Vec<reader::Album>,
     pub tracks: Vec<reader::Track>,
-    pub artist_images: Vec<(reader::ArtistCredit, String)>,
+    /// The source's own artist listing, with each photo URL it has.
+    pub artists: Vec<(reader::ArtistCredit, Option<String>)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,6 +219,14 @@ pub struct PlaylistMeta {
     pub image_tag: Option<String>,
 }
 
+/// What kind of release a source files an album as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseKind {
+    Album,
+    Single,
+    Ep,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RemoteAlbum {
     pub browse_id: String,
@@ -208,6 +234,8 @@ pub struct RemoteAlbum {
     pub artist: Option<String>,
     pub artist_id: Option<String>,
     pub year: Option<String>,
+    /// The kind the source reports; `None` when it reports none it names.
+    pub kind: Option<ReleaseKind>,
     pub thumbnail: Option<String>,
     pub audio_playlist_id: Option<String>,
     pub tracks: Vec<reader::Track>,
@@ -221,6 +249,7 @@ impl From<crate::ytmusic::discover::YtAlbum> for RemoteAlbum {
             artist: a.artist,
             artist_id: a.artist_id,
             year: a.year,
+            kind: a.kind,
             thumbnail: a.thumbnail,
             audio_playlist_id: a.audio_playlist_id,
             tracks: a.tracks,

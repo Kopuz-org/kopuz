@@ -1,6 +1,6 @@
 //! Interactive equalizer settings and graph rendering.
 
-use config::{AppConfig, EqPreset, EqualizerSettings as EqualizerConfig};
+use config::{EqPreset, EqualizerSettings as EqualizerConfig, Settings};
 use dioxus::prelude::*;
 
 use super::AppSelect;
@@ -100,13 +100,13 @@ pub fn EqualizerPanel(
         "16 kHz",
     ];
 
-    let config = use_context::<Signal<AppConfig>>();
+    let settings = use_context::<Signal<Settings>>();
     let mut draft = use_signal(|| current.clone());
     let mut dragging_band = use_signal(|| None::<usize>);
     let mut hovered_band = use_signal(|| None::<usize>);
     let mut displayed_bands = use_signal(|| current.resolved_bands());
     let mut animation_token = use_signal(|| 0_u64);
-    let reduce_animations = config.read().reduce_animations;
+    let reduce_animations = settings.read().ui.reduce_animations;
     let enabled = draft.read().enabled;
     let resolved_bands = *displayed_bands.read();
     let slider_style = if enabled {

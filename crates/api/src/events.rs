@@ -18,6 +18,8 @@ pub enum Table {
     Recents,
     /// The radio station list, including which stations are pinned.
     Stations,
+    /// Artist rows on their own: their photos and the names their source gives them.
+    Artists,
     Unknown,
 }
 
@@ -40,6 +42,8 @@ pub struct JobProgress {
     pub current: Option<u64>,
     pub total: Option<u64>,
     pub message: Option<String>,
+    /// Started by the daemon's own schedule rather than by a user.
+    pub automatic: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,8 +96,16 @@ pub enum ApiEvent {
         kind: JobKind,
         ok: bool,
         error: Option<ErrorBody>,
+        /// Started by the daemon's own schedule rather than by a user.
+        automatic: bool,
     },
+    /// The settings moved; re-read the view, whose revision this is.
     ConfigChanged {
+        revision: u64,
+    },
+    /// A frontend's stored preferences changed (set or deleted) in these keys; re-read what you hold.
+    FrontendPrefsChanged {
+        frontend: String,
         keys: Vec<String>,
     },
     SourceStatus {

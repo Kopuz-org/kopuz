@@ -1,4 +1,4 @@
-use config::{AppConfig, UiStyle};
+use config::{Settings, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
@@ -67,8 +67,8 @@ pub fn CompactPlayer() -> Element {
     }
 
     let mut ctrl = use_context::<PlayerController>();
-    let config = use_context::<Signal<AppConfig>>();
-    let skin = skin_for(config.read().ui_style);
+    let settings = use_context::<Signal<Settings>>();
+    let skin = skin_for(settings.read().ui.ui_style);
 
     let mut is_dragging = use_signal(|| false);
     let mut drag_progress = use_signal(|| 0u64);
@@ -84,7 +84,13 @@ pub fn CompactPlayer() -> Element {
     } else {
         0.0
     };
-    let is_radio = duration == u64::MAX;
+    // No length is a radio stream or a track whose source gave none; only the stream is live.
+    let seekable = duration != u64::MAX;
+    let is_radio = ctrl
+        .current_track_snapshot
+        .read()
+        .as_ref()
+        .is_some_and(api::TrackInfo::is_radio);
 
     let cover = ctrl
         .current_cover_url(hooks::artwork::Size::Thumb)
@@ -169,7 +175,7 @@ pub fn CompactPlayer() -> Element {
             }
 
             div {
-                class: format!("relative z-10 h-[3px] w-full bg-white/10 shrink-0 overflow-hidden {}", if is_radio || is_loading { "" } else { "group cursor-pointer" }),
+                class: format!("relative z-10 h-[3px] w-full bg-white/10 shrink-0 overflow-hidden {}", if !seekable || is_loading { "" } else { "group cursor-pointer" }),
                 dir: "ltr",
                 onmousedown: move |evt| evt.stop_propagation(),
                 PlaybackBufferIndicator {
@@ -186,8 +192,8 @@ pub fn CompactPlayer() -> Element {
                     min: "0",
                     max: "{duration}",
                     value: "{display_progress}",
-                    class: format!("slider-hit absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if is_radio || is_loading { "pointer-events-none" } else { "cursor-pointer" }),
-                    disabled: is_radio || is_loading,
+                    class: format!("slider-hit absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if !seekable || is_loading { "pointer-events-none" } else { "cursor-pointer" }),
+                    disabled: !seekable || is_loading,
                     onchange: move |evt| {
                         if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
                             ctrl.seek(std::time::Duration::from_secs(val));

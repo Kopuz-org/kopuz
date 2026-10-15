@@ -186,31 +186,7 @@ impl MediaSource for YtSource {
     }
 
     async fn fetch_album_by_ref(&self, id: &str) -> Result<Option<RemoteAlbum>, SourceError> {
-        // Resolve the id (raw browse id, `ytmusic:album:MPRE…`, or a synthesized
-        // `ytmusic:album:<hash>`) to a real browse id before fetching.
-        let browse_id = if let Some(bid) = crate::ytmusic::search::album_browse_id(id) {
-            Some(bid)
-        } else if let Some((album, artist)) = crate::ytmusic::search::synth_album_parts(id) {
-            self.resolve_album_browse_id(&album, &artist).await?
-        } else {
-            None
-        };
-        let Some(browse_id) = browse_id else {
-            return Ok(None);
-        };
-        Ok(self
-            .fetch_album(&browse_id)
-            .await
-            .ok()
-            .filter(|a| !a.tracks.is_empty()))
-    }
-
-    async fn fetch_album_by_meta(
-        &self,
-        title: &str,
-        artist: &str,
-    ) -> Result<Option<RemoteAlbum>, SourceError> {
-        let Some(browse_id) = self.resolve_album_browse_id(title, artist).await? else {
+        let Some(browse_id) = crate::ytmusic::search::album_browse_id(id) else {
             return Ok(None);
         };
         Ok(self
@@ -231,17 +207,6 @@ impl MediaSource for YtSource {
             .map_err(SourceError::from)
     }
 
-    async fn resolve_album_browse_id(
-        &self,
-        album: &str,
-        artist: &str,
-    ) -> Result<Option<String>, SourceError> {
-        self.client
-            .resolve_album_browse_id(album, artist)
-            .await
-            .map_err(SourceError::from)
-    }
-
     async fn fetch_artist(
         &self,
         channel_id: &str,
@@ -256,54 +221,19 @@ impl MediaSource for YtSource {
         &self,
         artist: &reader::ArtistCredit,
     ) -> Result<ArtistLookup, SourceError> {
-        if let Some(channel) = artist.id.as_deref() {
-            let header = self
-                .client
-                .artist_header(channel)
-                .await
-                .map_err(SourceError::from)?;
-            return Ok(ArtistLookup {
-                image: header.avatar,
-                name: header.name,
-            });
-        }
-        let name = artist.name.as_str();
-        if let Some(url) = self
-            .client
-            .resolve_artist_image(name)
-            .await
-            .map_err(SourceError::from)?
-        {
-            return Ok(ArtistLookup {
-                image: Some(url),
-                name: None,
-            });
-        }
-        // No artists-search entry (user channels for uploaded content) —
-        // reconcile the channel from a library song and use its avatar.
-        let Some(key) = artist.key.as_deref() else {
+        // A credit's text names no one for sure, so only the channel it links has a photo.
+        let Some(channel) = artist.id.as_deref() else {
             return Ok(ArtistLookup::default());
         };
-        let tracks = self
-            .db
-            .artist_tracks(&self.source, key, Some(3))
+        let header = self
+            .client
+            .artist_header(channel)
             .await
-            .unwrap_or_default();
-        for track in tracks.iter() {
-            if let Ok(Some(cid)) = self
-                .client
-                .artist_channel_for_video(&track.id.key(), name)
-                .await
-                && let Ok(header) = self.client.artist_header(&cid).await
-                && header.avatar.is_some()
-            {
-                return Ok(ArtistLookup {
-                    image: header.avatar,
-                    name: None,
-                });
-            }
-        }
-        Ok(ArtistLookup::default())
+            .map_err(SourceError::from)?;
+        Ok(ArtistLookup {
+            image: header.avatar,
+            name: header.name,
+        })
     }
 
     async fn add_to_playlist(

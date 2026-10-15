@@ -14,7 +14,7 @@
 
 use std::fmt::Write as _;
 use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -30,6 +30,8 @@ use utils::artwork_image::{
 };
 const MAX_REMOTE_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
 const REMOTE_ARTWORK_TIMEOUT: Duration = Duration::from_secs(15);
+/// A cover cached by item id rather than URL never sees its URL change, so it is fetched again after this.
+const REMOTE_ARTWORK_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// The version an [`ArtworkRef`] carries: a hash of the resolved cover
 /// reference, so it changes when and only when the picture would -- a photo
@@ -51,18 +53,12 @@ fn ref_for(target: ArtworkTarget, cover: CoverRef) -> Option<ArtworkRef> {
     }
 }
 
-/// An artist's picture: a custom override, then the source's own photo, then
-/// -- for a library source only -- one of their album covers.
-///
-/// That last resort is what keeps a local grid from being a wall of
-/// placeholders. A remote catalog never uses it: a liked track's album cover
-/// is not a picture of the artist.
+/// An artist's picture: a custom override, then the source's own photo, then the cover of its first album or else its first track.
 pub fn artist_cover(
     source: &str,
     key: &str,
     images: &db::ArtistImages,
-    album_cover: Option<&Path>,
-    library_view: bool,
+    fallback: Option<&CoverRef>,
 ) -> CoverRef {
     let (overrides, photos) = images;
     let identity = (source.to_string(), key.to_string());
@@ -72,20 +68,21 @@ pub fn artist_cover(
     if let Some(photo) = photos.get(&identity) {
         return match photo {
             reader::ArtistImageRef::Local(path) => CoverRef::Local(path.clone()),
-            reader::ArtistImageRef::Remote(url) => CoverRef::EmbeddedUrl(url.clone()),
+            // A Subsonic photo is kept as its cover id and signed when fetched; anything else is a plain URL.
+            reader::ArtistImageRef::Remote(url) => match CoverRef::parse(url) {
+                CoverRef::None | CoverRef::Local(_) => CoverRef::EmbeddedUrl(url.clone()),
+                typed => typed,
+            },
         };
     }
-    match album_cover.filter(|_| library_view) {
-        Some(path) => CoverRef::parse(&path.to_string_lossy()),
-        None => CoverRef::None,
-    }
+    fallback.cloned().unwrap_or(CoverRef::None)
 }
 
 /// A playlist's cover: an explicit one, then the server's image tag, then the
 /// first track's art. Only the daemon can sign the middle one.
 pub fn playlist_cover(
     playlist: &reader::models::Playlist,
-    config: &config::AppConfig,
+    server: Option<&config::MusicServer>,
     first_track: Option<&reader::Track>,
 ) -> CoverRef {
     if let Some(path) = playlist.cover_path.as_ref() {
@@ -94,7 +91,7 @@ pub fn playlist_cover(
             return explicit;
         }
     }
-    if let (Some(tag), Some(server)) = (playlist.image_tag.as_ref(), config.server.as_ref()) {
+    if let (Some(tag), Some(server)) = (playlist.image_tag.as_ref(), server) {
         let tagged = CoverRef::remote_item(server.service, &playlist.id, Some(tag));
         if tagged != CoverRef::None {
             return tagged;
@@ -131,29 +128,22 @@ pub fn artist_ref(
     artist: &db::ArtistRow,
     source: &config::Source,
     images: &db::ArtistImages,
-    album_cover: Option<&Path>,
-    library_view: bool,
+    fallback: Option<&CoverRef>,
 ) -> Option<ArtworkRef> {
     ref_for(
         ArtworkTarget::Artist(artist.key.clone()),
-        artist_cover(
-            source.as_str(),
-            &artist.key,
-            images,
-            album_cover,
-            library_view,
-        ),
+        artist_cover(source.as_str(), &artist.key, images, fallback),
     )
 }
 
 pub fn playlist_ref(
     playlist: &reader::models::Playlist,
-    config: &config::AppConfig,
+    server: Option<&config::MusicServer>,
     first_track: Option<&reader::Track>,
 ) -> Option<ArtworkRef> {
     ref_for(
         ArtworkTarget::Playlist(playlist.id.clone()),
-        playlist_cover(playlist, config, first_track),
+        playlist_cover(playlist, server, first_track),
     )
 }
 
@@ -192,6 +182,17 @@ fn hash_name(input: &str) -> String {
         let _ = write!(name, "{byte:02x}");
     }
     name
+}
+
+/// What a proxied cover is cached under: its URL, unless signing salts that afresh on every request.
+fn remote_cache_name(server: Option<&config::MusicServer>, cover: &CoverRef, url: &str) -> String {
+    match cover {
+        CoverRef::SubsonicItem { item_id } => {
+            let server = server.map_or("", |server| server.url.as_str());
+            hash_name(&format!("subsonic|{server}|{item_id}"))
+        }
+        _ => hash_name(url),
+    }
 }
 
 /// Applies the shared resize policy to a fetched remote cover, the way
@@ -250,13 +251,18 @@ impl ArtworkService {
         target: &ArtworkTarget,
         hq: bool,
     ) -> Result<ArtworkPayload, ApiError> {
-        let config = self.session.config_watch().borrow().clone();
+        let sources = self.session.sources();
         let width = if hq { HQ_MAX } else { THUMB_MAX };
-        let cover = self.cover_for(target, &config).await?;
+        let cover = self.cover_for(target, &sources).await?;
         let missing = || ApiError::not_found("no artwork for this entity");
-        match server::cover::locate(&config, cover, width).ok_or_else(missing)? {
+        match server::cover::locate(sources.server.as_ref(), cover.clone(), width)
+            .ok_or_else(missing)?
+        {
             Located::File(path) => self.local_payload(&path.to_string_lossy(), hq).await,
-            Located::Url(url) => self.proxied_payload(&url, hq).await,
+            Located::Url(url) => {
+                let cache_name = remote_cache_name(sources.server.as_ref(), &cover, &url);
+                self.proxied_payload(&url, &cache_name, hq).await
+            }
         }
     }
 
@@ -265,61 +271,53 @@ impl ArtworkService {
     async fn cover_for(
         &self,
         target: &ArtworkTarget,
-        config: &config::AppConfig,
+        sources: &server::sources::Sources,
     ) -> Result<CoverRef, ApiError> {
         let db_error = |error: db::DbError| ApiError::internal(format!("database error: {error}"));
+        let active = &sources.active;
         match target {
-            ArtworkTarget::Track(key) => Ok(CoverRef::for_track(&self.track(key, config).await?)),
+            ArtworkTarget::Track(key) => Ok(CoverRef::for_track(&self.track(key, active).await?)),
             ArtworkTarget::Album(id) => {
                 let album = self
                     .db
-                    .album(&config.active_source, id)
+                    .album(active, id)
                     .await
                     .map_err(db_error)?
                     .ok_or_else(|| ApiError::not_found("unknown album id"))?;
                 Ok(album_cover(&album))
             }
             ArtworkTarget::Artist(key) => {
-                let artist =
-                    crate::artist_row::require(&self.db, &config.active_source, key).await?;
+                let artist = crate::artist_row::require(&self.db, active, key).await?;
                 let images = self.db.artist_images().await.map_err(db_error)?;
-                let source = server::source::active(self.db.clone(), config);
-                let library_view =
-                    source.capabilities().artist_view == server::source::ArtistView::Library;
                 // The cover the listing advertised, so the bytes served are the picture its ref was versioned on.
-                let album = match library_view {
-                    true => self
-                        .db
-                        .artist_album_cover(&config.active_source, &artist.key)
-                        .await
-                        .map_err(db_error)?
-                        .map(PathBuf::from),
-                    false => None,
-                };
+                let fallback = self
+                    .db
+                    .artist_fallback_cover(active, &artist.key)
+                    .await
+                    .map_err(db_error)?;
                 Ok(artist_cover(
-                    config.active_source.as_str(),
+                    active.as_str(),
                     &artist.key,
                     &images,
-                    album.as_deref(),
-                    library_view,
+                    fallback.as_ref(),
                 ))
             }
             ArtworkTarget::Playlist(id) => {
-                let store = self
-                    .db
-                    .load_playlists(&config.active_source)
-                    .await
-                    .map_err(db_error)?;
+                let store = self.db.load_playlists(active).await.map_err(db_error)?;
                 let playlist = store
                     .playlists
                     .iter()
                     .find(|playlist| &playlist.id == id)
                     .ok_or_else(|| ApiError::not_found("unknown playlist id"))?;
                 let first = match playlist.tracks.first() {
-                    Some(key) => self.track(key, config).await.ok(),
+                    Some(key) => self.track(key, active).await.ok(),
                     None => None,
                 };
-                Ok(playlist_cover(playlist, config, first.as_ref()))
+                Ok(playlist_cover(
+                    playlist,
+                    sources.server.as_ref(),
+                    first.as_ref(),
+                ))
             }
             // Public images the daemon holds a URL for. Proxied rather than
             // handed over, so every frontend gets pictures the same way and
@@ -346,14 +344,10 @@ impl ArtworkService {
 
     /// A track the library holds, or one the session is playing that came
     /// from a live listing the database has never seen.
-    async fn track(
-        &self,
-        key: &str,
-        config: &config::AppConfig,
-    ) -> Result<reader::Track, ApiError> {
+    async fn track(&self, key: &str, active: &config::Source) -> Result<reader::Track, ApiError> {
         let found = self
             .db
-            .tracks_by_keys(&config.active_source, &[key.to_string()])
+            .tracks_by_keys(active, &[key.to_string()])
             .await
             .map_err(|error| ApiError::internal(format!("database error: {error}")))?
             .into_iter()
@@ -421,16 +415,47 @@ impl ArtworkService {
     ///
     /// The width handed to `locate` is only a hint a service may ignore, so the
     /// shared resize policy is applied here too rather than trusting the origin.
-    async fn proxied_payload(&self, url: &str, hq: bool) -> Result<ArtworkPayload, ApiError> {
+    async fn proxied_payload(
+        &self,
+        url: &str,
+        cache_name: &str,
+        hq: bool,
+    ) -> Result<ArtworkPayload, ApiError> {
         let cache_path = self.cache_dir.join(format!(
-            "remote_{}_{}",
+            "remote_{}_{cache_name}",
             if hq { "hq" } else { "thumb" },
-            hash_name(url)
         ));
-        if let Ok(bytes) = tokio::fs::read(&cache_path).await {
-            let content_type = sniff_content_type(&bytes);
-            return Ok(self.payload(bytes, content_type));
+        let cached = tokio::fs::read(&cache_path).await.ok();
+        let fresh = tokio::fs::metadata(&cache_path)
+            .await
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|written| written.elapsed().ok())
+            .is_some_and(|age| age < REMOTE_ARTWORK_TTL);
+        if let Some(bytes) = cached.as_ref().filter(|_| fresh) {
+            let content_type = sniff_content_type(bytes);
+            return Ok(self.payload(bytes.clone(), content_type));
         }
+        match self.download(url, hq).await {
+            Ok((bytes, content_type)) => {
+                if let Some(parent) = cache_path.parent() {
+                    let _ = tokio::fs::create_dir_all(parent).await;
+                }
+                let _ = tokio::fs::write(&cache_path, &bytes).await;
+                Ok(self.payload(bytes, content_type))
+            }
+            // A stale cover beats none while the server is away.
+            Err(error) => match cached {
+                Some(bytes) => {
+                    let content_type = sniff_content_type(&bytes);
+                    Ok(self.payload(bytes, content_type))
+                }
+                None => Err(error),
+            },
+        }
+    }
+
+    async fn download(&self, url: &str, hq: bool) -> Result<(Vec<u8>, &'static str), ApiError> {
         let mut response = self
             .http
             .get(url)
@@ -459,12 +484,7 @@ impl ArtworkService {
             }
             bytes.extend_from_slice(&chunk);
         }
-        let (bytes, content_type) = resize_remote(bytes, hq).await;
-        if let Some(parent) = cache_path.parent() {
-            let _ = tokio::fs::create_dir_all(parent).await;
-        }
-        let _ = tokio::fs::write(&cache_path, &bytes).await;
-        Ok(self.payload(bytes, content_type))
+        Ok(resize_remote(bytes, hq).await)
     }
 
     fn payload(&self, bytes: Vec<u8>, content_type: &'static str) -> ArtworkPayload {
@@ -541,6 +561,36 @@ mod tests {
     }
 
     #[test]
+    fn a_signed_cover_is_cached_under_its_id_not_its_salted_url() {
+        let server = config::MusicServer {
+            url: "https://sub.example".into(),
+            service: config::MusicService::Subsonic,
+            ..Default::default()
+        };
+        let server = Some(&server);
+        let cover = CoverRef::SubsonicItem {
+            item_id: "al-1".into(),
+        };
+        assert_eq!(
+            remote_cache_name(
+                server,
+                &cover,
+                "https://sub.example/rest/getCoverArt.view?s=a"
+            ),
+            remote_cache_name(
+                server,
+                &cover,
+                "https://sub.example/rest/getCoverArt.view?s=b"
+            ),
+        );
+        let url = "https://img.example/x.jpg";
+        assert_eq!(
+            remote_cache_name(server, &CoverRef::EmbeddedUrl(url.into()), url),
+            hash_name(url)
+        );
+    }
+
+    #[test]
     fn content_type_sniffing_recognizes_magic_bytes() {
         assert_eq!(sniff_content_type(b"\x89PNG\r\n\x1a\n"), "image/png");
         assert_eq!(
@@ -582,13 +632,11 @@ mod tests {
         assert_eq!(first.target, other.target, "the target is the identity");
     }
 
-    /// The artist chain the grid depends on: an override wins, then the
-    /// source's photo, then an album cover -- but only for a library source.
+    /// The artist chain the grid depends on: an override wins, then the source's photo, then the album or track cover.
     #[test]
     fn artist_art_falls_back_through_override_photo_then_album() {
-        let album = std::path::Path::new("/music/band/cover.jpg");
-        let artist_cover =
-            |images, album, library| artist_cover("srv", "k-band", images, album, library);
+        let album = &CoverRef::Local(PathBuf::from("/music/band/cover.jpg"));
+        let artist_cover = |images, album| artist_cover("srv", "k-band", images, album);
         let identity = ("srv".to_string(), "k-band".to_string());
         let mut overrides = std::collections::HashMap::new();
         let mut photos = std::collections::HashMap::new();
@@ -598,28 +646,20 @@ mod tests {
         );
         let images: db::ArtistImages = (overrides.clone(), photos.clone());
         assert_eq!(
-            artist_cover(&images, Some(album), true),
+            artist_cover(&images, Some(album)),
             CoverRef::EmbeddedUrl("https://p/band.jpg".into())
         );
 
         overrides.insert(identity, PathBuf::from("/pics/band.png"));
         let images: db::ArtistImages = (overrides, photos);
         assert_eq!(
-            artist_cover(&images, Some(album), true),
+            artist_cover(&images, Some(album)),
             CoverRef::Local(PathBuf::from("/pics/band.png"))
         );
 
         let empty: db::ArtistImages = Default::default();
-        assert_eq!(
-            artist_cover(&empty, Some(album), true),
-            CoverRef::Local(album.to_path_buf()),
-            "a library artist may borrow an album cover"
-        );
-        assert_eq!(
-            artist_cover(&empty, Some(album), false),
-            CoverRef::None,
-            "a remote catalog never renders an album as the artist"
-        );
+        assert_eq!(artist_cover(&empty, Some(album)), album.clone());
+        assert_eq!(artist_cover(&empty, None), CoverRef::None);
     }
 
     #[test]
@@ -633,11 +673,11 @@ mod tests {
         let images: db::ArtistImages = (Default::default(), photos);
 
         assert_eq!(
-            artist_cover("a", "k1", &images, None, true),
+            artist_cover("a", "k1", &images, None),
             CoverRef::EmbeddedUrl("https://p/a.jpg".into())
         );
-        assert_eq!(artist_cover("a", "k2", &images, None, true), CoverRef::None);
-        assert_eq!(artist_cover("b", "k1", &images, None, true), CoverRef::None);
+        assert_eq!(artist_cover("a", "k2", &images, None), CoverRef::None);
+        assert_eq!(artist_cover("b", "k1", &images, None), CoverRef::None);
     }
 }
 
@@ -646,7 +686,7 @@ mod tests {
 /// without knowing which services exist.
 pub mod settings {
     use api::schema::{ChoiceOption, FieldKind, FieldSpec, FieldValue, Text, value_of};
-    use config::{AppConfig, FetchStrategy};
+    use config::{FetchStrategy, LibraryKey, SettingKey, Settings};
 
     pub const AUTO_FETCH: &str = "auto_fetch_covers";
     pub const STRATEGY: &str = "cover_fetch_strategy";
@@ -676,13 +716,13 @@ pub mod settings {
         FetchStrategy::LastFmOnly,
     ];
 
-    pub fn fields(config: &AppConfig) -> Vec<FieldSpec> {
+    pub fn fields(config: &Settings) -> Vec<FieldSpec> {
         vec![
             FieldSpec {
                 key: AUTO_FETCH.to_string(),
                 label: Text::key(AUTO_FETCH),
                 kind: FieldKind::Toggle,
-                value: Some(config.auto_fetch_covers.to_string()),
+                value: Some(config.library.auto_fetch_covers.to_string()),
                 config_key: Some(AUTO_FETCH.to_string()),
                 ..Default::default()
             },
@@ -700,7 +740,7 @@ pub mod settings {
                         .collect(),
                     custom: false,
                 },
-                value: Some(strategy_id(config.cover_fetch_strategy).to_string()),
+                value: Some(strategy_id(config.library.cover_fetch_strategy).to_string()),
                 config_key: Some(STRATEGY.to_string()),
                 ..Default::default()
             },
@@ -708,24 +748,24 @@ pub mod settings {
     }
 
     /// The settings keys an answer list would write.
-    pub fn written_keys(values: &[FieldValue]) -> Vec<&'static str> {
+    pub fn written_keys(values: &[FieldValue]) -> Vec<SettingKey> {
         let mut keys = Vec::new();
         if value_of(values, AUTO_FETCH).is_some() {
-            keys.push(AUTO_FETCH);
+            keys.push(SettingKey::Library(LibraryKey::AutoFetchCovers));
         }
         if value_of(values, STRATEGY).is_some() {
-            keys.push(STRATEGY);
+            keys.push(SettingKey::Library(LibraryKey::CoverFetchStrategy));
         }
         keys
     }
 
     /// Fold answers in. An absent key is left alone.
-    pub fn apply(values: &[FieldValue], config: &mut AppConfig) {
+    pub fn apply(values: &[FieldValue], config: &mut Settings) {
         if let Some(on) = value_of(values, AUTO_FETCH) {
-            config.auto_fetch_covers = on == "true";
+            config.library.auto_fetch_covers = on == "true";
         }
         if let Some(strategy) = value_of(values, STRATEGY) {
-            config.cover_fetch_strategy = strategy_from_id(strategy);
+            config.library.cover_fetch_strategy = strategy_from_id(strategy);
         }
     }
 }

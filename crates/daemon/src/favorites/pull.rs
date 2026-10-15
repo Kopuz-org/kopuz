@@ -64,25 +64,17 @@ impl super::FavoritesService {
         }
     }
 
-    /// The gated import the reconcile loop runs: no job, no progress, and a
-    /// no-op unless something is actually missing.
-    pub(super) async fn pull_unattended(&self) -> Result<(), ApiError> {
-        self.pull(None, false).await
-    }
-
-    /// Import the remote favorites. `force` runs even when a previous import
-    /// would have made this one redundant; without a `ctx` the walk is
-    /// unattended, reporting no progress and answering to no cancel.
-    pub(super) async fn pull(&self, ctx: Option<&JobCtx>, force: bool) -> Result<(), ApiError> {
-        let config = self.session.config_watch().borrow().clone();
+    /// Import the remote favorites and answer whether it did; `force` skips the staleness gate, and without a `ctx` nothing reports progress or cancels it.
+    pub(super) async fn pull(&self, ctx: Option<&JobCtx>, force: bool) -> Result<bool, ApiError> {
+        let sources = self.session.sources();
         let source: ActiveSource =
-            std::sync::Arc::from(server::source::active(self.db.clone(), &config));
+            std::sync::Arc::from(server::source::active(self.db.clone(), &sources));
         if !source.capabilities().sync {
-            return Ok(());
+            return Ok(false);
         }
         let server_id = source.source().as_str().to_string();
         if !force && !self.pull_is_stale(&source, &server_id).await {
-            return Ok(());
+            return Ok(false);
         }
 
         match source.capabilities().favorites_sync {
@@ -107,7 +99,7 @@ impl super::FavoritesService {
             }
             FavoritesSync::Paginated => self.pull_paginated(ctx, &source).await?,
         }
-        Ok(())
+        Ok(true)
     }
 
     async fn pull_paginated(
@@ -171,8 +163,10 @@ impl super::FavoritesService {
             let _ = source
                 .upsert_favorites_page(&page_refs, start_rank, epoch)
                 .await;
+            // Inside another job (a playlist sync) the count would read as that job's.
             if let Some(ctx) = ctx {
-                ctx.progress("importing favorites", Some(ids.len() as u64), None, None);
+                let done = (ctx.kind() == JobKind::FavoritesSync).then_some(ids.len() as u64);
+                ctx.progress("importing favorites", done, None, None);
             }
             self.bump(Table::Tracks);
             self.bump(Table::Favorites);

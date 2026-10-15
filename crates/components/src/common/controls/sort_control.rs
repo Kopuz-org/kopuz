@@ -19,6 +19,8 @@ impl LibrarySortField for AlbumSortField {
             Self::Artist => "sort_field_artist",
             Self::Year => "sort_field_year",
             Self::Genre => "sort_field_genre",
+            Self::RecentlyAdded => "sort_field_date_added",
+            Self::TrackCount => "sort_field_tracks",
         }
     }
 }

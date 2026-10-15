@@ -148,7 +148,7 @@ async fn musixmatch_get(
         .map_err(|error| {
             tracing::warn!(
                 target: "kopuz::lyrics",
-                "musixmatch request action={action} failed={error}"
+                "musixmatch request action={action} failed={}", error.without_url()
             );
             reach.unreachable();
         })
@@ -158,7 +158,7 @@ async fn musixmatch_get(
         .map_err(|error| {
             tracing::warn!(
                 target: "kopuz::lyrics",
-                "musixmatch request action={action} json_failed={error}"
+                "musixmatch request action={action} json_failed={}", error.without_url()
             );
         })
         .ok()

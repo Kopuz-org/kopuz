@@ -14,7 +14,7 @@ use reader::Track;
 use server::source::RadioPage;
 use tokio::sync::watch;
 
-use crate::jobs::{JobCtx, JobRunner};
+use crate::jobs::{JobCtx, JobRunner, Trigger};
 use crate::session::{QueueMaterializer, SessionHandle};
 
 pub struct LibraryService {
@@ -24,12 +24,17 @@ pub struct LibraryService {
     /// registry toggle takes effect without a restart.
     station_registry: std::sync::RwLock<Arc<radio::registry::StationRegistry>>,
     cover_cache: PathBuf,
-    config_rx: OnceLock<watch::Receiver<config::AppConfig>>,
+    /// The cover fetcher's Last.fm key.
+    credentials: crate::CredentialStore,
+    config_rx: OnceLock<watch::Receiver<config::Settings>>,
+    sources_rx: OnceLock<watch::Receiver<Arc<server::sources::Sources>>>,
     session: OnceLock<SessionHandle>,
     catalog: OnceLock<Arc<crate::catalog::CatalogService>>,
     transient: std::sync::Mutex<TransientTracks>,
     /// Artists a photo lookup is out for, so a grid re-asking mid-batch does not send the same lookups again.
     artwork_in_flight: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    /// When each source's photos were last swept for, by source.
+    photo_sweeps: std::sync::Mutex<HashMap<String, std::time::Instant>>,
 }
 
 /// Tracks that exist but the database has never seen: a browse shelf, a
@@ -74,6 +79,36 @@ fn map_sort(sort: api::TrackSort) -> db::TrackSort {
     }
 }
 
+fn db_page(page: Page) -> db::Page {
+    db::Page {
+        offset: page.offset,
+        limit: page.limit,
+    }
+}
+
+fn album_query(source: config::Source, query: api::AlbumQuery) -> db::AlbumQuery {
+    db::AlbumQuery {
+        source,
+        search: query.search.unwrap_or_default(),
+        genre: query.genre,
+        year_from: query.year_from,
+        year_to: query.year_to,
+        artist_key: query.artist_key,
+        downloaded: query.downloaded,
+        ids: query.ids,
+        sort: query.sort,
+    }
+}
+
+fn artist_query(source: config::Source, query: api::ArtistQuery) -> db::ArtistQuery {
+    db::ArtistQuery {
+        source,
+        search: query.search.unwrap_or_default(),
+        downloaded: query.downloaded,
+        sort: query.sort,
+    }
+}
+
 fn lyrics_view(lyrics: server::lyrics::Lyrics) -> api::LyricsView {
     let to_ms = |seconds: f64| (seconds.max(0.0) * 1000.0) as u64;
     match lyrics {
@@ -106,30 +141,27 @@ fn lyrics_view(lyrics: server::lyrics::Lyrics) -> api::LyricsView {
     }
 }
 
-fn matches_search(track: &Track, needle: &str) -> bool {
-    let needle = needle.to_lowercase();
-    [&track.title, &track.artist, &track.album]
-        .into_iter()
-        .any(|field| field.to_lowercase().contains(&needle))
-}
-
 impl LibraryService {
     pub fn new(
         db: db::Db,
         source: config::Source,
         station_registry: Arc<radio::registry::StationRegistry>,
         cover_cache: PathBuf,
+        credentials: crate::CredentialStore,
     ) -> Self {
         Self {
             db,
             source,
             station_registry: std::sync::RwLock::new(station_registry),
             cover_cache,
+            credentials,
             config_rx: OnceLock::new(),
+            sources_rx: OnceLock::new(),
             session: OnceLock::new(),
             catalog: OnceLock::new(),
             transient: std::sync::Mutex::new(TransientTracks::default()),
             artwork_in_flight: Arc::default(),
+            photo_sweeps: std::sync::Mutex::default(),
         }
     }
 
@@ -183,14 +215,33 @@ impl LibraryService {
     /// Late-bound session wiring (the session needs the materializer first):
     /// gives the service live config and the event stream for invalidations.
     pub fn attach_session(&self, session: SessionHandle) {
-        let _ = self.config_rx.set(session.config_watch());
+        let _ = self.config_rx.set(session.settings_watch());
+        let _ = self.sources_rx.set(session.sources_watch());
         let _ = self.session.set(session);
     }
 
-    fn current_config(&self) -> config::AppConfig {
+    fn current_config(&self) -> config::Settings {
         self.config_rx
             .get()
             .map(|rx| rx.borrow().clone())
+            .unwrap_or_default()
+    }
+
+    /// The live sources once the session is attached, the construction-time source before that.
+    fn current_sources(&self) -> Arc<server::sources::Sources> {
+        match self.sources_rx.get() {
+            Some(rx) => rx.borrow().clone(),
+            None => Arc::new(server::sources::Sources {
+                active: self.source.clone(),
+                ..Default::default()
+            }),
+        }
+    }
+
+    fn offline(&self) -> crate::offline::OfflineIndex {
+        self.session
+            .get()
+            .map(|session| session.offline().clone())
             .unwrap_or_default()
     }
 
@@ -203,14 +254,15 @@ impl LibraryService {
     /// The source library reads run against: the live active source once the
     /// session is attached, the construction-time source before that.
     fn query_source(&self) -> config::Source {
-        self.config_rx
+        self.sources_rx
             .get()
-            .map(|rx| rx.borrow().active_source.clone())
+            .map(|rx| rx.borrow().active.clone())
             .unwrap_or_else(|| self.source.clone())
     }
 
-    fn scan_roots(config: &config::AppConfig) -> Vec<(config::Source, Vec<PathBuf>)> {
+    fn scan_roots(config: &config::Settings) -> Vec<(config::Source, Vec<PathBuf>)> {
         config
+            .library
             .local_sources
             .iter()
             .map(|source| {
@@ -223,14 +275,14 @@ impl LibraryService {
     }
 
     pub async fn tracks(&self, filter: TrackFilter, page: Page) -> Result<TrackPage, ApiError> {
-        let config = self.current_config();
+        let offline = self.offline();
         let (total, rows) = self.tracks_raw(filter, page).await?;
         Ok(TrackPage {
             total,
             offset: page.offset,
             items: rows
                 .iter()
-                .map(|track| crate::wire::track_info(track, &config))
+                .map(|track| crate::wire::track_info(track, &offline))
                 .collect(),
         })
     }
@@ -240,63 +292,25 @@ impl LibraryService {
         filter: TrackFilter,
         page: Page,
     ) -> Result<(u32, Vec<Track>), ApiError> {
-        let narrowed = if let Some(album) = filter.album.as_deref() {
-            Some(
-                self.db
-                    .album_tracks(&self.query_source(), album)
-                    .await
-                    .map_err(db_error)?,
-            )
-        } else if let Some(genre) = filter.genre.as_deref() {
-            Some(
-                self.db
-                    .genre_tracks(&self.query_source(), genre)
-                    .await
-                    .map_err(db_error)?,
-            )
-        } else {
-            None
+        let sort = match filter.sort {
+            api::TrackSort::Default if filter.album.is_some() => db::TrackSort::TrackNumber,
+            sort => map_sort(sort),
         };
-
-        if let Some(mut rows) = narrowed {
-            if let Some(search) = filter.search.as_deref().filter(|s| !s.is_empty()) {
-                rows.retain(|track| matches_search(track, search));
-            }
-            if let Some(favorite) = filter.favorite {
-                let source = self.query_source();
-                let favorites: std::collections::HashSet<String> = self
-                    .db
-                    .favorites(source.as_str())
-                    .await
-                    .map_err(db_error)?
-                    .into_iter()
-                    .collect();
-                rows.retain(|track| favorites.contains(track.id.key().as_ref()) == favorite);
-            }
-            let total = rows.len() as u32;
-            let items = rows
-                .into_iter()
-                .skip(page.offset as usize)
-                .take(page.limit as usize)
-                .collect();
-            return Ok((total, items));
-        }
-
         let db_filter = db::TrackFilter {
             source: self.query_source(),
-            sort: map_sort(filter.sort),
+            sort,
             search: filter.search.unwrap_or_default(),
+            album: filter.album,
+            genre: filter.genre,
             favorite: filter.favorite,
+            downloaded: filter.downloaded,
+            year_from: filter.year_from,
+            year_to: filter.year_to,
+            reverse: filter.reverse,
         };
         let items = self
             .db
-            .tracks_page(
-                &db_filter,
-                db::Page {
-                    offset: page.offset,
-                    limit: page.limit,
-                },
-            )
+            .tracks_page(&db_filter, db_page(page))
             .await
             .map_err(db_error)?;
         let total = self.db.tracks_count(&db_filter).await.map_err(db_error)?;
@@ -308,7 +322,7 @@ impl LibraryService {
         prefix: &str,
         page: Page,
     ) -> Result<api::TrackPage, ApiError> {
-        let config = self.current_config();
+        let offline = self.offline();
         let rows = self
             .db
             .folder_tracks(&self.query_source(), prefix)
@@ -319,7 +333,7 @@ impl LibraryService {
             .iter()
             .skip(page.offset as usize)
             .take(page.limit as usize)
-            .map(|track| crate::wire::track_info(track, &config))
+            .map(|track| crate::wire::track_info(track, &offline))
             .collect();
         Ok(api::TrackPage {
             total,
@@ -328,21 +342,23 @@ impl LibraryService {
         })
     }
 
-    pub fn stats(&self) -> api::StatsView {
-        let config = self.current_config();
-        let own = config.active_source.listen_count_key("");
-        let listen_counts = config
-            .listen_counts
-            .iter()
+    pub async fn stats(&self) -> Result<api::StatsView, ApiError> {
+        let own = self.query_source().listen_count_key("");
+        let listen_counts = self
+            .db
+            .listen_counts()
+            .await
+            .map_err(db_error)?
+            .into_iter()
             .filter_map(|(key, count)| {
                 if own.is_empty() {
-                    (!key.starts_with("local:")).then(|| (key.clone(), *count))
+                    (!key.starts_with("local:")).then_some((key, count))
                 } else {
-                    key.strip_prefix(&own).map(|uid| (uid.to_owned(), *count))
+                    key.strip_prefix(&own).map(|uid| (uid.to_owned(), count))
                 }
             })
             .collect();
-        api::StatsView { listen_counts }
+        Ok(api::StatsView { listen_counts })
     }
 
     /// Lyrics for one library track, through the app's full provider chain
@@ -350,9 +366,10 @@ impl LibraryService {
     /// process cache. Radio has no lyrics by construction.
     pub async fn lyrics(&self, key: &str) -> Result<api::LyricsView, ApiError> {
         let config = self.current_config();
+        let sources = self.current_sources();
         let track = match self
             .db
-            .tracks_by_keys(&config.active_source, &[key.to_string()])
+            .tracks_by_keys(&sources.active, &[key.to_string()])
             .await
             .map_err(db_error)?
             .into_iter()
@@ -376,9 +393,9 @@ impl LibraryService {
             track.duration,
             track.id.uid(),
         )
-        .prefer_local(config.prefer_local_lyrics)
-        .enable_musixmatch(config.enable_musixmatch_lyrics);
-        if let Some(server) = &config.server {
+        .prefer_local(config.lyrics.prefer_local_lyrics)
+        .enable_musixmatch(config.lyrics.enable_musixmatch_lyrics);
+        if let Some(server) = &sources.server {
             request = request.with_server(
                 Some(&server.url),
                 server.access_token.as_deref(),
@@ -462,12 +479,18 @@ impl LibraryService {
             })
             .filter(|artist| !artist.trim().is_empty())
             .unwrap_or_else(|| "Live Radio".to_string());
+        let cover = station.and_then(|station| match &station.metadata {
+            Some(radio::manifest::MetadataSourceDef::Static(meta)) => {
+                meta.resolve(stream_id).2.map(str::to_string)
+            }
+            _ => None,
+        });
 
         Track {
             id: reader::TrackId::Local(std::path::PathBuf::from(format!(
                 "radio:{station_id}:{stream_id}"
             ))),
-            cover: None,
+            cover,
             album_id: String::new(),
             title,
             artist,
@@ -668,11 +691,15 @@ mod tests {
             .await
             .expect("seed tracks");
         let cover_cache = dir.path().join("covers");
+        let credentials = crate::CredentialStore::load(&database)
+            .await
+            .expect("credentials");
         let service = LibraryService::new(
             database,
             source,
             Arc::new(radio::registry::StationRegistry::default()),
             cover_cache,
+            credentials,
         );
         (dir, service)
     }
@@ -708,7 +735,7 @@ mod tests {
         assert_eq!(page.items[0].title, "song 4");
 
         let ada = library
-            .artists(Page::default())
+            .artists(api::ArtistQuery::default(), Page::default())
             .await
             .expect("artist grid")
             .artists

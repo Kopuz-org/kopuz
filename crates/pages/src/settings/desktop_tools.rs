@@ -1,24 +1,24 @@
 #[cfg(not(target_os = "android"))]
 use components::settings_items::{SettingItem, SettingsSection, ToggleSetting};
-use config::AppConfig;
+use config::Settings;
 use dioxus::prelude::*;
 
 #[cfg(not(target_os = "android"))]
 use crate::theme_editor::ThemeEditorPage;
 
 #[cfg(not(target_os = "android"))]
-pub(super) fn theme_editor_section(config: Signal<AppConfig>) -> Element {
+pub(super) fn theme_editor_section(settings: Signal<Settings>) -> Element {
     rsx! {
         SettingsSection { title: i18n::t("theme_editor").to_string(),
             div { class: "py-2",
-                ThemeEditorPage { config, embedded: true }
+                ThemeEditorPage { settings, embedded: true }
             }
         }
     }
 }
 
 #[cfg(target_os = "android")]
-pub(super) fn theme_editor_section(_config: Signal<AppConfig>) -> Element {
+pub(super) fn theme_editor_section(_config: Signal<Settings>) -> Element {
     rsx! {}
 }
 
@@ -28,7 +28,7 @@ fn trigger_test_crash() {
 }
 
 #[cfg(not(target_os = "android"))]
-pub(super) fn logs_section(mut config: Signal<AppConfig>) -> Element {
+pub(super) fn logs_section(settings: Signal<Settings>) -> Element {
     rsx! {
         SettingsSection { title: i18n::t("logs").to_string(),
             div {
@@ -37,9 +37,11 @@ pub(super) fn logs_section(mut config: Signal<AppConfig>) -> Element {
                     config_key: "tracing_enabled",
                     control: rsx! {
                         ToggleSetting {
-                            enabled: config.read().tracing_enabled,
+                            enabled: settings.read().system.tracing_enabled,
                             on_change: move |v| {
-                                config.write().tracing_enabled = v;
+                                hooks::settings::edit(config::SettingsEdit::System(
+                                    config::SystemEdit::TracingEnabled(v),
+                                ));
                             },
                         }
                     },
@@ -96,6 +98,6 @@ pub(super) fn logs_section(mut config: Signal<AppConfig>) -> Element {
 /// import / vacuum / info, all against the disposable debug DB with a live
 /// pool swap (no restart). English-only by design (dev tool).
 #[cfg(target_os = "android")]
-pub(super) fn logs_section(_config: Signal<AppConfig>) -> Element {
+pub(super) fn logs_section(_config: Signal<Settings>) -> Element {
     rsx! {}
 }

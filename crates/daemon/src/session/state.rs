@@ -72,6 +72,7 @@ impl Session {
     ) {
         let token = token.unwrap_or_else(|| self.visible_token());
         let position = position.unwrap_or_else(|| self.displayed_position());
+        let playing = playing && self.stalled != Some(token);
         let anchor = PositionAnchor {
             ms: position.as_millis() as u64,
             at_ms: self.now_ms(),
@@ -112,13 +113,13 @@ impl Session {
     }
 
     pub(super) fn should_crossfade(&self) -> bool {
-        self.config.crossfade_seconds > 0
+        self.settings.playback.crossfade_seconds > 0
             && self.phase == ApiPhase::Playing
             && self.player.can_resume()
     }
 
     pub(super) fn should_play_gapless(&self) -> bool {
-        self.config.crossfade_seconds == 0
+        self.settings.playback.crossfade_seconds == 0
             && self.phase == ApiPhase::Playing
             && self.player.can_resume()
     }
@@ -134,16 +135,11 @@ impl Session {
             Some(external) => external.track.as_ref(),
             None => self.model.current_track(),
         };
-        let track = shown.map(|track| crate::wire::track_info(track, &self.config));
+        let track = shown.map(|track| crate::wire::track_info(track, &self.offline));
         let fading = self.pending_transition.as_ref().and_then(|pending| {
             (pending.stage == TransitionStage::Fading).then(|| FadingState {
                 from_token: pending.from_token,
                 track: track.clone().unwrap_or_default(),
-                position_ms: self
-                    .player
-                    .fading_position()
-                    .unwrap_or_default()
-                    .as_millis() as u64,
             })
         });
         PlayerState {
@@ -159,6 +155,7 @@ impl Session {
                 index: (!self.model.is_empty()).then(|| self.model.current_position() as u32),
                 shuffle: self.model.shuffle(),
                 loop_mode: self.model.loop_mode(),
+                context: self.origin.clone(),
             },
             volume: self.volume,
             muted: self.muted,

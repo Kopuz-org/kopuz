@@ -1,4 +1,3 @@
-use config::AppConfig;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
@@ -12,13 +11,13 @@ use std::collections::HashSet;
 #[component]
 pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-    let config = use_context::<Signal<AppConfig>>();
     let _nav_ctrl = use_context::<NavigationController>();
+    let all_downloaded = !props.tracks.is_empty() && props.tracks.iter().all(|t| t.offline);
 
-    let total_seconds: u64 = props.tracks.iter().filter_map(|t| t.duration_secs()).sum();
-    let duration_min = total_seconds / 60;
+    let duration = api::total_duration_secs(&props.tracks)
+        .map(|secs| format!(" · {} {}", secs / 60, i18n::t("min")))
+        .unwrap_or_default();
 
-    let offline_tracks = config.read().offline_tracks.clone();
     // Per-track cover resolver (source dispatch + album lookup live in the
     // source layer; no partition decision here).
     let _fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
@@ -54,6 +53,8 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
     let current_song_album = ctrl.current_song_album.read().clone();
     let current_song_duration = *ctrl.current_song_duration.read();
     let tracks_for_play_all = sorted_tracks.clone();
+    let play_all_album = props.album_id.clone();
+    let shuffle_album = props.album_id.clone();
     let selected_queue_tracks: Vec<_> = sorted_tracks
         .iter()
         .filter(|track| props.selected_tracks.contains(&track.key))
@@ -151,15 +152,12 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                         style: "color: var(--color-white); opacity: 0.45;",
                         {
                             let count = props.tracks.len();
-                            let song_text = i18n::t_with(
-                                "showcase_song_count",
-                                &[("count", count.to_string())],
-                            );
+                            let song_text = i18n::t_with("showcase_song_count", &[("count", count.into())]);
                             let release_year = props
                                 .release_year
                                 .map(|year| format!(" · {year}"))
                                 .unwrap_or_default();
-                            rsx! { "{song_text} · {duration_min} {i18n::t(\"min\")}{release_year}" }
+                            rsx! { "{song_text}{duration}{release_year}" }
                         }
                     }
 
@@ -170,7 +168,9 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                 style: "background: var(--color-indigo-500);",
                                 onclick: move |_| {
                                     let is_shuffle = *ctrl.shuffle.peek();
-                                    if is_shuffle {
+                                    if let Some(id) = play_all_album.clone().filter(|_| sort_state.peek().is_none()) {
+                                        ctrl.play_album(id, tracks_for_play_all.len(), is_shuffle);
+                                    } else if is_shuffle {
                                         ctrl.play_queue_shuffled(tracks_for_play_all.clone());
                                     } else {
                                         ctrl.play_queue_linear(tracks_for_play_all.clone());
@@ -184,7 +184,11 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                 style: if *ctrl.shuffle.read() { "background: var(--color-indigo-500); border: 1px solid transparent;" } else { "background: color-mix(in oklab, var(--color-indigo-500) 25%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 40%, transparent);" },
                                 onclick: move |_| {
                                     ctrl.toggle_shuffle();
-                                    ctrl.play_queue_shuffled(tracks_for_shuffle.clone());
+                                    if let Some(id) = shuffle_album.clone().filter(|_| sort_state.peek().is_none()) {
+                                        ctrl.play_album(id, tracks_for_shuffle.len(), true);
+                                    } else {
+                                        ctrl.play_queue_shuffled(tracks_for_shuffle.clone());
+                                    }
                                 },
                                 i { class: "fa-solid fa-shuffle text-xs" }
                                 "{i18n::t(\"shuffle\")}"
@@ -202,18 +206,18 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                 button {
                                     class: "inline-flex items-center justify-center h-9 w-9 rounded-full text-sm font-medium transition-colors border border-white/12 hover:bg-white/10 active:scale-95",
                                     style: "color: var(--color-white); opacity: 0.6;",
+                                    title: if all_downloaded { i18n::t("remove_download") } else { i18n::t("download_offline") },
                                     disabled: props.is_downloading_all,
                                     onclick: move |_| {
-                                        if props.on_delete_all.is_some() {
-                                            if let Some(ref h) = props.on_delete_all {
-                                                h.call(());
-                                            }
-                                        } else if let Some(ref h) = props.on_download_all {
+                                        let handler = if all_downloaded { &props.on_delete_all } else { &props.on_download_all };
+                                        if let Some(h) = handler {
                                             h.call(());
                                         }
                                     },
                                     if props.is_downloading_all {
                                         i { class: "fa-solid fa-spinner fa-spin text-xs" }
+                                    } else if all_downloaded {
+                                        i { class: "fa-solid fa-trash text-xs" }
                                     } else {
                                         i { class: "fa-solid fa-download text-xs" }
                                     }
@@ -280,18 +284,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                     || matches_current_metadata;
                                 let is_selected = props.is_selection_mode
                                     && props.selected_tracks.contains(&track.key);
-                                let path_str = track.uid.clone();
-                                let item_id_str: String = path_str
-                                    .split(':')
-                                    .nth(1)
-                                    .unwrap_or(&path_str)
-                                    .to_string();
-                                let is_downloaded = if let Some(path_str) = offline_tracks.get(&item_id_str) {
-                                    std::path::Path::new(path_str).exists()
-                                }
-                                else {
-                                    false
-                                };
+                                let is_downloaded = track.offline;
                                 let is_downloading = false;
                                 let play_queue = std::sync::Arc::clone(&sorted_tracks_arc);
                                 let cover_url: Option<utils::CoverUrl> =
@@ -314,7 +307,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                                     class: "grid items-center p-2 rounded-lg hover:bg-white/5 group transition-colors relative select-none",
                                                     style: format!("grid-template-columns: {columns};"),
                                                     i { class: "fa-solid fa-compact-disc" }
-                                                    p { "Disc {track.disc_number.unwrap_or(1)}" }
+                                                    p { {i18n::t_with("disc_heading", &[("number", track.disc_number.unwrap_or(1).into())])} }
                                                 }
                                             }
                                         }

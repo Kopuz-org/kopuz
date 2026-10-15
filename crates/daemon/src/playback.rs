@@ -29,6 +29,10 @@ pub(crate) fn network_factory(
                     icy_tx,
                     rt_handle,
                 );
+                stream.wait_for_response_headers();
+                if let Some(error) = stream.response_error() {
+                    return Err(error);
+                }
                 Ok(decoder::from_stream_with_hint(stream, "ogg"))
             } else if let Some((fmt, range_safe)) = yt_format {
                 // YT: HTTP Range-backed source. Symphonia can seek freely
@@ -77,6 +81,9 @@ pub(crate) fn network_factory(
                             buffer_progress,
                         );
                     stream.wait_for_response_headers();
+                    if let Some(error) = stream.response_error() {
+                        return Err(error);
+                    }
                     let len = stream.known_total_size();
                     let (source, mut hint) = decoder::from_stream_with_len(stream, len);
                     hint.with_extension(fmt.extension());
@@ -175,12 +182,15 @@ pub(crate) fn network_factory(
                                 buffer_progress,
                             );
                         stream.wait_for_response_headers();
+                        if let Some(error) = stream.response_error() {
+                            return Err(error);
+                        }
                         let len = stream.known_total_size();
                         Ok(decoder::from_stream_with_len(stream, len))
                     }
                 }
             }
         };
-        build().map_err(|e| e.to_string())
+        build()
     })
 }

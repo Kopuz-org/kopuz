@@ -19,6 +19,7 @@ use crate::session::SessionHandle;
 
 pub struct RadioService {
     registry: RwLock<StationRegistry>,
+    db: db::Db,
     config: Arc<ConfigService>,
     library: Arc<LibraryService>,
     session: SessionHandle,
@@ -58,12 +59,14 @@ fn station_info(manifest: &StationManifest, pinned: bool) -> RadioStationInfo {
 
 impl RadioService {
     pub fn new(
+        db: db::Db,
         config: Arc<ConfigService>,
         library: Arc<LibraryService>,
         session: SessionHandle,
     ) -> Arc<Self> {
         Arc::new(Self {
             registry: RwLock::new(StationRegistry::new()),
+            db,
             config,
             library,
             session,
@@ -74,14 +77,18 @@ impl RadioService {
     /// whenever the registry list or the pins change, so a settings toggle
     /// takes effect without a restart.
     pub async fn reload(&self) -> Result<(), ApiError> {
-        let config = self.config.view().await?.config;
+        let registries = self.config.snapshot().await.integrations.radio_registries;
+        let pins =
+            self.db.pinned_stations().await.map_err(|error| {
+                ApiError::internal(format!("pinned stations unreadable: {error}"))
+            })?;
         let mut registry = StationRegistry::new();
-        for entry in config.radio_registries.iter().filter(|entry| entry.enabled) {
+        for entry in registries.iter().filter(|entry| entry.enabled) {
             if let Err(error) = registry.import_registry(&entry.url).await {
                 tracing::warn!(url = %entry.url, %error, "radio registry import failed");
             }
         }
-        for json in &config.pinned_stations {
+        for json in &pins {
             match serde_json::from_str(json) {
                 Ok(manifest) => registry.pin_manifest(manifest),
                 Err(error) => tracing::warn!(%error, "pinned radio station is invalid"),
@@ -95,7 +102,7 @@ impl RadioService {
     /// takes effect without a restart. Pins reload themselves through `pin`,
     /// which is why the key ignores them: re-importing every registry for a
     /// pin would cost a round of network for nothing.
-    pub fn watch_config(self: &Arc<Self>, mut config: watch::Receiver<config::AppConfig>) {
+    pub fn watch_config(self: &Arc<Self>, mut config: watch::Receiver<config::Settings>) {
         let service = self.clone();
         tokio::spawn(async move {
             let mut current = registry_key(&config.borrow());
@@ -198,9 +205,10 @@ impl RadioService {
         let json = serde_json::to_string(&manifest)
             .map_err(|error| ApiError::internal(error.to_string()))?;
 
-        self.config
-            .set_pinned_station(&manifest.id, pinned.then_some(json))
-            .await?;
+        self.db
+            .set_pinned_station(&manifest.id, pinned.then_some(json.as_str()))
+            .await
+            .map_err(|error| ApiError::internal(format!("station pin failed: {error}")))?;
         self.reload().await?;
         if !pinned {
             // Unpinning demotes rather than forgets: the station drops out of
@@ -217,8 +225,9 @@ impl RadioService {
 }
 
 /// What the registry is built from: the enabled registry URLs, in order.
-fn registry_key(config: &config::AppConfig) -> String {
+fn registry_key(config: &config::Settings) -> String {
     config
+        .integrations
         .radio_registries
         .iter()
         .filter(|entry| entry.enabled)

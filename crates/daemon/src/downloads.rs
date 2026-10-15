@@ -13,7 +13,6 @@ use server::playback_ref::PlaybackItemRef;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
-use crate::config_service::ConfigService;
 use crate::jobs::{JobCtx, JobRunner};
 use crate::session::SessionHandle;
 
@@ -37,7 +36,6 @@ struct Batch {
 pub struct DownloadsService {
     db: db::Db,
     session: SessionHandle,
-    config: Arc<ConfigService>,
     cache_dir: PathBuf,
     /// What the running batch is working through, for a progress list.
     batch: std::sync::Mutex<Batch>,
@@ -71,16 +69,10 @@ fn content_type_to_ext(content_type: &str) -> Option<&'static str> {
 }
 
 impl DownloadsService {
-    pub fn new(
-        db: db::Db,
-        session: SessionHandle,
-        config: Arc<ConfigService>,
-        cache_dir: PathBuf,
-    ) -> Arc<Self> {
+    pub fn new(db: db::Db, session: SessionHandle, cache_dir: PathBuf) -> Arc<Self> {
         Arc::new(Self {
             db,
             session,
-            config,
             cache_dir,
             batch: std::sync::Mutex::new(Batch::default()),
         })
@@ -113,8 +105,7 @@ impl DownloadsService {
 
     /// Item ids with a registered offline copy.
     pub async fn list(&self) -> Vec<String> {
-        let config = self.session.config_watch().borrow().clone();
-        let mut ids: Vec<String> = config.offline_tracks.keys().cloned().collect();
+        let mut ids = self.session.offline().ids();
         ids.sort();
         ids
     }
@@ -151,7 +142,7 @@ impl DownloadsService {
     }
 
     async fn register(&self, item_id: &str, path: Option<String>) -> Result<(), ApiError> {
-        self.config.set_offline_track(item_id, path).await?;
+        self.session.offline().set(&self.db, item_id, path).await?;
         self.session.invalidate(Table::Tracks);
         Ok(())
     }
@@ -171,9 +162,9 @@ impl DownloadsService {
     }
 
     async fn run_downloads(&self, ctx: &JobCtx, keys: Vec<String>) -> Result<(), ApiError> {
-        let config = self.session.config_watch().borrow().clone();
+        let sources = self.session.sources();
         let source: server::source::ActiveSource =
-            Arc::from(server::source::active(self.db.clone(), &config));
+            Arc::from(server::source::active(self.db.clone(), &sources));
         let total = keys.len() as u64;
         if let Ok(mut batch) = self.batch.lock() {
             *batch = Batch {
@@ -196,7 +187,7 @@ impl DownloadsService {
                 batch.queued.retain(|queued| queued != key);
                 batch.active = Some(key.clone());
             }
-            if let Err(error) = self.download_one(ctx, &source, &config, key).await {
+            if let Err(error) = self.download_one(ctx, &source, &sources.active, key).await {
                 if ctx.cancelled() {
                     return Ok(());
                 }
@@ -228,12 +219,12 @@ impl DownloadsService {
         &self,
         ctx: &JobCtx,
         source: &server::source::ActiveSource,
-        config: &config::AppConfig,
+        active: &config::Source,
         key: &str,
     ) -> Result<(), ApiError> {
         let uid = self
             .db
-            .tracks_by_keys(&config.active_source, &[key.to_string()])
+            .tracks_by_keys(active, &[key.to_string()])
             .await
             .map_err(|error| ApiError::internal(format!("database error: {error}")))?
             .into_iter()
@@ -251,9 +242,7 @@ impl DownloadsService {
             .ok_or_else(|| ApiError::invalid_input("track key has no item id"))?
             .to_string();
 
-        if let Some(existing) = config.offline_tracks.get(&item_id)
-            && Path::new(existing).is_file()
-        {
+        if self.session.offline().present(&item_id).is_some() {
             return Ok(());
         }
 
@@ -370,8 +359,7 @@ impl DownloadsService {
     pub async fn remove(&self, key: &str) -> Result<(), ApiError> {
         let item_ref = PlaybackItemRef::parse(key);
         let item_id = item_ref.primary_id().unwrap_or(key).to_string();
-        let config = self.session.config_watch().borrow().clone();
-        let Some(path) = config.offline_tracks.get(&item_id).cloned() else {
+        let Some(path) = self.session.offline().path(&item_id) else {
             return Err(ApiError::not_found("no offline copy for this track"));
         };
         match self.remove_cache_file(Path::new(&path)) {

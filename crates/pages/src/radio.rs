@@ -17,7 +17,7 @@ use std::time::Duration;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct RadioProps {
-    pub config: Signal<config::AppConfig>,
+    pub settings: Signal<config::Settings>,
 }
 
 /// Pin or unpin, moving the check mark first and putting it back on failure; the daemon announces the new list.
@@ -32,7 +32,7 @@ fn toggle_pin(id: String, mut pinned_ids: Signal<HashSet<String>>) {
     spawn(async move {
         if let Err(error) = api.pin_radio_station(id.clone(), !pinned).await {
             tracing::warn!(%error, "pinning a station failed");
-            hooks::toast::toast_error(&error.to_string());
+            hooks::toast::toast_api_error(&error);
             if pinned {
                 pinned_ids.write().insert(id);
             } else {
@@ -75,8 +75,8 @@ fn matches_query(station: &RadioStationInfo, query: &str) -> bool {
 #[component]
 pub fn Radio(props: RadioProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-    let config = props.config;
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let settings = props.settings;
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
     // A phone has no room for the description column, so a row is the
     // station and its play controls.
     let phone = cfg!(target_os = "android");
@@ -111,7 +111,7 @@ pub fn Radio(props: RadioProps) -> Element {
         async move {
             api.search_radio(query.trim().to_string(), 60)
                 .await
-                .map_err(|error| error.to_string())
+                .map_err(|error| components::forms::error_text(&error))
         }
     });
 
@@ -274,6 +274,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                 // Outer wrapper — not a grid, expanded row renders below without overlap
                                 div {
                                     class: "rounded-lg mx-1 group cursor-pointer transition-colors hover:bg-white/[0.04]",
+                                    oncontextmenu: move |evt| evt.prevent_default(),
                                     onclick: {
                                         let station_id = station.id.clone();
                                         let stream_id = station.streams.first().map(|s| s.id.clone()).unwrap_or_default();
@@ -287,12 +288,21 @@ pub fn Radio(props: RadioProps) -> Element {
                                         style: "grid-template-columns: {station_cols};",
 
                                         div { class: "flex items-center justify-center",
-                                            div {
-                                                class: "w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
-                                                style: "background: color-mix(in oklab, var(--color-indigo-500) 15%, transparent);",
-                                                i {
-                                                    class: "{station.icon} text-base",
-                                                    style: "color: var(--color-indigo-500);",
+                                            if let Some(art) = station_art(station) {
+                                                img {
+                                                    src: "{art}",
+                                                    class: "w-9 h-9 rounded-lg object-cover shrink-0",
+                                                    style: "background: rgba(255,255,255,0.05);",
+                                                    decoding: "async", loading: "lazy",
+                                                }
+                                            } else {
+                                                div {
+                                                    class: "w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
+                                                    style: "background: color-mix(in oklab, var(--color-indigo-500) 15%, transparent);",
+                                                    i {
+                                                        class: "{station.icon} text-base",
+                                                        style: "color: var(--color-indigo-500);",
+                                                    }
                                                 }
                                             }
                                         }
@@ -438,6 +448,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                     key: "{station.id}",
                                     class: "group flex items-start gap-4 p-4 rounded-xl border transition-colors cursor-pointer hover:bg-white/10",
                                     style: "border-color: rgba(255,255,255,0.08);",
+                                    oncontextmenu: move |evt| evt.prevent_default(),
                                     onclick: {
                                         let station_id = station.id.clone();
                                         let stream_id = station.streams.first().map(|s| s.id.clone()).unwrap_or_default();
@@ -446,12 +457,21 @@ pub fn Radio(props: RadioProps) -> Element {
                                         }
                                     },
 
-                                    div {
-                                        class: "w-11 h-11 rounded-md flex items-center justify-center shrink-0",
-                                        style: "background: rgba(255,255,255,0.05);",
-                                        i {
-                                            class: "{station.icon} text-lg",
-                                            style: "color: var(--color-slate-300);",
+                                    if let Some(art) = station_art(station) {
+                                        img {
+                                            src: "{art}",
+                                            class: "w-11 h-11 rounded-md object-cover shrink-0",
+                                            style: "background: rgba(255,255,255,0.05);",
+                                            decoding: "async", loading: "lazy",
+                                        }
+                                    } else {
+                                        div {
+                                            class: "w-11 h-11 rounded-md flex items-center justify-center shrink-0",
+                                            style: "background: rgba(255,255,255,0.05);",
+                                            i {
+                                                class: "{station.icon} text-lg",
+                                                style: "color: var(--color-slate-300);",
+                                            }
                                         }
                                     }
 
@@ -572,6 +592,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                             key: "{st.id}",
                                             class: "grid items-center px-4 py-2.5 rounded-lg mx-1 group cursor-pointer transition-colors hover:bg-white/[0.04]",
                                             style: "grid-template-columns: {station_cols};",
+                                            oncontextmenu: move |evt| evt.prevent_default(),
                                             onclick: {
                                                 let st = st.clone();
                                                 move |_| {
@@ -668,6 +689,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                             key: "{st.id}",
                                             class: "group flex items-start gap-4 p-4 rounded-xl border transition-colors cursor-pointer hover:bg-white/10",
                                             style: "border-color: rgba(255,255,255,0.08);",
+                                            oncontextmenu: move |evt| evt.prevent_default(),
                                             onclick: {
                                                 let st = st.clone();
                                                 move |_| {

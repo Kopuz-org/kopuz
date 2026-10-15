@@ -1,7 +1,6 @@
 use crate::player::TrackKind;
 
-/// Library ordering. `Default` is the daemon's own choice, so a caller that
-/// does not care says nothing.
+/// Library ordering. `Default` is the listing's natural order: disc and track for an album, artist then album otherwise.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum TrackSort {
     #[default]
@@ -98,6 +97,43 @@ pub struct TrackFilter {
     pub genre: Option<String>,
     pub favorite: Option<bool>,
     pub sort: TrackSort,
+    /// Only tracks with a downloaded copy (`Some(true)`), or only those without.
+    pub downloaded: Option<bool>,
+    /// Inclusive bounds on the year of the track's album; an album with no year is in neither.
+    pub year_from: Option<u16>,
+    pub year_to: Option<u16>,
+    /// Run `sort` backwards: every term flips, so `DateAdded` becomes oldest first.
+    pub reverse: bool,
+}
+
+/// Which albums to list and in what order; `AlbumPage::total` counts the filtered set.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AlbumQuery {
+    /// Matches the title or the billed artist's text, ignoring ASCII case.
+    pub search: Option<String>,
+    pub genre: Option<String>,
+    /// Inclusive bounds; an album with no year is in neither.
+    pub year_from: Option<u16>,
+    pub year_to: Option<u16>,
+    /// Only albums billed to this artist.
+    pub artist_key: Option<String>,
+    /// Only these albums, by id; an empty list matches none.
+    pub ids: Option<Vec<String>>,
+    /// Only those with a downloaded track (`Some(true)`), or only those with none.
+    pub downloaded: Option<bool>,
+    /// The first criterion decides and the rest break ties; artist then title settle what is left.
+    pub sort: Vec<config::SortCriterion<config::AlbumSortField>>,
+}
+
+/// Which artists to list and in what order; `ArtistPage::total` counts the filtered set.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArtistQuery {
+    /// Matches the artist's name, ignoring ASCII case.
+    pub search: Option<String>,
+    /// Only those with a downloaded track (`Some(true)`), or only those with none.
+    pub downloaded: Option<bool>,
+    /// The first criterion decides and the rest break ties; name then key settle what is left.
+    pub sort: Vec<config::SortCriterion<config::ArtistSortField>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -167,14 +203,15 @@ pub struct ArtistInfo {
     pub key: String,
     pub name: String,
     pub track_count: u32,
+    /// The albums billed to the artist.
+    pub album_count: u32,
     pub artwork: Option<crate::ArtworkRef>,
 }
 
-/// An artist page's header and albums; its tracks page through `artist_tracks`.
+/// An artist page's header; its albums list through `albums` by artist key, its tracks page through `artist_tracks`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtistDetail {
     pub info: ArtistInfo,
-    pub albums: Vec<AlbumInfo>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -192,12 +229,11 @@ pub struct SearchResults {
 }
 
 impl TrackInfo {
-    /// Whole seconds, which is how a duration is shown. A radio stream has
-    /// none: it plays until it is stopped.
+    /// Whole seconds, which is how a duration is shown; `None` for a radio stream and for a track whose source gave none.
     pub fn duration_secs(&self) -> Option<u64> {
         match self.kind {
             TrackKind::Radio => None,
-            TrackKind::Normal => Some(self.duration_ms.unwrap_or_default() / 1000),
+            TrackKind::Normal => self.duration_ms.map(|ms| ms / 1000),
         }
     }
 
@@ -206,9 +242,31 @@ impl TrackInfo {
     }
 }
 
+/// The summed seconds of the tracks whose duration is known; `None` when none is.
+pub fn total_duration_secs<'a>(tracks: impl IntoIterator<Item = &'a TrackInfo>) -> Option<u64> {
+    tracks
+        .into_iter()
+        .filter_map(TrackInfo::duration_secs)
+        .reduce(u64::saturating_add)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ArtistCredit, TrackInfo};
+    use super::{ArtistCredit, TrackInfo, total_duration_secs};
+
+    #[test]
+    fn a_total_skips_unknown_durations_and_is_none_without_any() {
+        let known = |ms| TrackInfo {
+            duration_ms: Some(ms),
+            ..Default::default()
+        };
+        let unknown = TrackInfo::default();
+        assert_eq!(
+            total_duration_secs(&[known(60_000), unknown.clone(), known(30_000)]),
+            Some(90)
+        );
+        assert_eq!(total_duration_secs(&[unknown.clone(), unknown]), None);
+    }
 
     fn track(artist: &str, credits: &[(&str, &str)]) -> TrackInfo {
         TrackInfo {

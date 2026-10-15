@@ -2,14 +2,14 @@ use super::metadata::TrackMetadata;
 use super::tabs::Tabs;
 use crate::player_controls::{ControlsVariant, SeekSlider, TransportButtons, VolumeSlider};
 use crate::titlebar::Titlebar;
-use config::AppConfig;
+use config::Settings;
 use dioxus::prelude::*;
 
 #[component]
 pub(crate) fn FullscreenDesktop(
     is_playing: Signal<bool>,
     mut is_fullscreen: Signal<bool>,
-    mut config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     current_song_duration: Signal<u64>,
     current_song_progress: Signal<u64>,
     current_song_title: Signal<String>,
@@ -20,12 +20,12 @@ pub(crate) fn FullscreenDesktop(
     items: Vec<api::TrackInfo>,
     lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
     volume: Signal<f32>,
-    persisted_volume: Signal<f32>,
     background_style: Memo<String>,
     cover_background: Memo<Option<String>>,
 ) -> Element {
-    let use_player_bar = config.read().fullscreen_use_player_bar;
-    let tabs_collapsed = config.read().fullscreen_tabs_collapsed;
+    let use_player_bar = settings.read().ui.fullscreen_use_player_bar;
+    let mut prefs = hooks::ui_prefs::use_ui_prefs();
+    let tabs_collapsed = prefs.read().fullscreen_tabs_collapsed;
     let active_tab = use_signal(|| 0usize);
 
     rsx! {
@@ -43,7 +43,7 @@ pub(crate) fn FullscreenDesktop(
 
             div {
                 class: if use_player_bar {
-                    match config.read().player_bar_position {
+                    match settings.read().ui.player_bar_position {
                         config::PlayerBarPosition::Top => "flex flex-1 overflow-hidden pt-24",
                         config::PlayerBarPosition::Bottom => "flex flex-1 overflow-hidden pb-24",
                     }
@@ -78,13 +78,13 @@ pub(crate) fn FullscreenDesktop(
 
                         TransportButtons { is_playing, variant: ControlsVariant::Fullscreen }
 
-                        VolumeSlider { config, volume, persisted_volume, variant: ControlsVariant::Fullscreen }
+                        VolumeSlider { settings, volume, variant: ControlsVariant::Fullscreen }
                     }
                 }
 
                 if !tabs_collapsed {
                     Tabs {
-                        config,
+                        settings,
                         items,
                         current_queue_index,
                         lyrics,
@@ -99,7 +99,7 @@ pub(crate) fn FullscreenDesktop(
                     class: "absolute right-4 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 backdrop-blur text-white/70 hover:text-white flex items-center justify-center shadow-lg ring-1 ring-white/10 transition-colors",
                     "aria-label": i18n::t("show_side_panel").to_string(),
                     title: i18n::t("show_side_panel").to_string(),
-                    onclick: move |_| config.write().fullscreen_tabs_collapsed = false,
+                    onclick: move |_| prefs.write().fullscreen_tabs_collapsed = false,
                     i { class: "fa-solid fa-chevron-left text-sm" }
                 }
             }

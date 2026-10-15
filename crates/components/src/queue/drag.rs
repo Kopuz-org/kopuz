@@ -110,7 +110,7 @@ pub fn clear_dragged_queue_track() {
 
 fn show_queue_drag_count_preview(count: usize, client_x: f64, client_y: f64) {
     let payload = json!({
-        "count": count,
+        "label": i18n::t_with("track_count", &[("count", count.into())]),
         "clientX": client_x,
         "clientY": client_y,
     });
@@ -182,12 +182,6 @@ pub fn install_native_artwork_drag_prevention() {
 }
 
 pub fn install_rightbar_drag_handlers() {
-    let track_count_singular = serde_json::to_string(&i18n::t("track_count_singular").to_string())
-        .unwrap_or_else(|_| "\"1 track\"".to_string());
-    let track_count_plural = serde_json::to_string(
-        &i18n::t_with("track_count", &[("count", "__COUNT__".to_string())]).to_string(),
-    )
-    .unwrap_or_else(|_| "\"__COUNT__ tracks\"".to_string());
     install_native_artwork_drag_prevention();
     let script = r#"
         if (!document.__kopuzTrackDragInstalled) {{
@@ -264,19 +258,14 @@ pub fn install_rightbar_drag_handlers() {
             };
 
             window.__kopuzMoveQueueDragPreview = moveQueueDragPreview;
-            window.__kopuzShowQueueDragCountPreview = ({ count, clientX, clientY }) => {
+            window.__kopuzShowQueueDragCountPreview = ({ label, clientX, clientY }) => {
                 const preview = ensureQueueDragPreview();
                 syncQueueDragPreviewTheme(preview);
                 const cover = preview.querySelector('[data-cover]');
                 const titleEl = preview.querySelector('[data-title]');
                 const artistEl = preview.querySelector('[data-artist]');
 
-                if (titleEl) {{
-                    titleEl.textContent =
-                        count === 1
-                            ? __TRACK_COUNT_SINGULAR__
-                            : __TRACK_COUNT_PLURAL__.replace("__COUNT__", count);
-                }}
+                if (titleEl) titleEl.textContent = label || '';
 
                 if (artistEl) artistEl.textContent = '';
                 if (cover) {
@@ -414,9 +403,7 @@ pub fn install_rightbar_drag_handlers() {
         }
         "#
     .replace("{{", "{")
-    .replace("}}", "}")
-    .replace("__TRACK_COUNT_SINGULAR__", &track_count_singular)
-    .replace("__TRACK_COUNT_PLURAL__", &track_count_plural);
+    .replace("}}", "}");
     let _ = eval(&script);
 }
 

@@ -104,6 +104,24 @@ pub fn is_artist_image_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Disc number from a "Disc 2", "CD2 - Live", "Disc 1 of 2" or "[CD1]" directory name; past 99 it is a year, not a disc.
+pub fn disc_of(dir_name: &str) -> Option<u32> {
+    let lower = dir_name
+        .trim()
+        .trim_start_matches(['[', '('])
+        .to_ascii_lowercase();
+    let rest = lower
+        .strip_prefix("disc")
+        .or_else(|| lower.strip_prefix("disk"))
+        .or_else(|| lower.strip_prefix("cd"))?;
+    let digits: String = rest
+        .trim_start_matches([' ', '-', '_', '.'])
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    digits.parse::<u32>().ok().filter(|n| (1..=99).contains(n))
+}
+
 pub fn save_cover(
     album_id: &str,
     data: &[u8],
@@ -123,6 +141,20 @@ pub fn save_cover(
 mod tests {
     use super::*;
     use std::fs::File;
+
+    #[test]
+    fn disc_of_parses_disc_folder_names() {
+        assert_eq!(disc_of("Disc 2"), Some(2));
+        assert_eq!(disc_of("disk3"), Some(3));
+        assert_eq!(disc_of("CD-1"), Some(1));
+        assert_eq!(disc_of("Live in Tokyo"), None);
+        assert_eq!(disc_of("Disc"), None);
+        assert_eq!(disc_of("CD1 - Live"), Some(1));
+        assert_eq!(disc_of("Disc 1 of 2"), Some(1));
+        assert_eq!(disc_of("[CD2]"), Some(2));
+        assert_eq!(disc_of("Disco Inferno"), None);
+        assert_eq!(disc_of("CD 2000"), None);
+    }
 
     #[test]
     fn test_find_folder_cover() {

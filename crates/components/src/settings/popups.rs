@@ -153,8 +153,10 @@ pub fn LoginPopup(
     let login_text = i18n::t("login").to_string();
     let username_placeholder = i18n::t("username").to_string();
     let password_placeholder = i18n::t("password").to_string();
-    let login_to_service_text =
-        i18n::t_with("login_to_service", &[("service", service_name.clone())]);
+    let login_to_service_text = i18n::t_with(
+        "login_to_service",
+        &[("service", service_name.clone().into())],
+    );
 
     rsx! {
         div {
@@ -232,9 +234,10 @@ pub fn AddRegistryPopup(
                     p { class: "error", "{err}" }
                 }
 
+                // Uncontrolled: echoing `value` back over the bridge overwrote keys typed meanwhile.
                 input {
                     placeholder: "{url_placeholder}",
-                    value: "{registry_url()}",
+                    initial_value: "{registry_url()}",
                     oninput: move |e| registry_url.set(e.value()),
                     onkeydown: move |e| e.stop_propagation(),
                     disabled: loading()

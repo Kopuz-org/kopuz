@@ -25,6 +25,7 @@ pub fn job_status_to_proto(value: &api::JobStatus) -> JobStatus {
         total: value.total,
         message: value.message.clone(),
         error: value.error.as_ref().map(error_body_to_proto),
+        automatic: value.automatic,
     }
 }
 
@@ -38,23 +39,59 @@ pub fn job_status_from_proto(value: &JobStatus) -> api::JobStatus {
         total: value.total,
         message: value.message.clone(),
         error: value.error.as_ref().map(error_body_from_proto),
+        automatic: value.automatic,
     }
 }
 
 pub fn config_view_to_proto(value: &api::ConfigView) -> ConfigView {
     ConfigView {
-        config: Some(config_to_proto(&value.config)),
-        locked_keys: value.locked_keys.clone(),
+        config: Some(config_to_proto(&value.settings)),
+        locks: value.locks.iter().map(setting_lock_to_proto).collect(),
         revision: value.revision,
     }
 }
 
+/// A locked key this build does not know is dropped: it cannot render a row for it anyway.
 pub fn config_view_from_proto(value: &ConfigView) -> api::ConfigView {
     api::ConfigView {
-        config: config_from_proto(value.config.as_ref().unwrap_or(&Config::default())),
-        locked_keys: value.locked_keys.clone(),
+        settings: config_from_proto(value.config.as_ref().unwrap_or(&Config::default())),
+        locks: value
+            .locks
+            .iter()
+            .filter_map(setting_lock_from_proto)
+            .collect(),
         revision: value.revision,
     }
+}
+
+fn setting_lock_to_proto(value: &api::SettingLock) -> SettingLock {
+    let by = match &value.by {
+        api::LockSource::Managed(path) => {
+            setting_lock::By::ManagedFile(path.to_string_lossy().into_owned())
+        }
+        api::LockSource::DropIn(path) => {
+            setting_lock::By::DropIn(path.to_string_lossy().into_owned())
+        }
+        api::LockSource::Env(var) => setting_lock::By::EnvVar(var.clone()),
+    };
+    SettingLock {
+        key: setting_key_to_proto(value.key) as i32,
+        by: Some(by),
+    }
+}
+
+/// A lock that names no layer still locks; it cites the main file, with no path to show.
+fn setting_lock_from_proto(value: &SettingLock) -> Option<api::SettingLock> {
+    let by = match &value.by {
+        Some(setting_lock::By::ManagedFile(path)) => api::LockSource::Managed(path.into()),
+        Some(setting_lock::By::DropIn(path)) => api::LockSource::DropIn(path.into()),
+        Some(setting_lock::By::EnvVar(var)) => api::LockSource::Env(var.clone()),
+        None => api::LockSource::Managed(std::path::PathBuf::new()),
+    };
+    Some(api::SettingLock {
+        key: setting_key_from_proto(value.key)?,
+        by,
+    })
 }
 
 pub fn daemon_status_to_proto(value: &api::DaemonStatus) -> DaemonStatus {
@@ -87,6 +124,79 @@ mod tests {
         assert_eq!(
             daemon_status_from_proto(&daemon_status_to_proto(&status)),
             status
+        );
+    }
+
+    #[test]
+    fn a_config_view_keeps_its_locks_their_layers_and_revision() {
+        let layers = [
+            api::LockSource::Managed("/home/me/.config/kopuz/settings.toml".into()),
+            api::LockSource::DropIn("/home/me/.config/kopuz/settings.d/10-theme.toml".into()),
+            api::LockSource::Env("KOPUZ_CONFIG_THEME".into()),
+        ];
+        let view = api::ConfigView {
+            settings: ::config::Settings::default(),
+            locks: ::config::SettingKey::iter()
+                .zip(layers.iter().cycle())
+                .map(|(key, by)| api::SettingLock {
+                    key,
+                    by: by.clone(),
+                })
+                .collect(),
+            revision: 7,
+        };
+        assert_eq!(config_view_from_proto(&config_view_to_proto(&view)), view);
+    }
+
+    #[test]
+    fn a_job_status_keeps_whether_it_was_automatic() {
+        for automatic in [false, true] {
+            let status = api::JobStatus {
+                id: "job-1".into(),
+                kind: api::JobKind::LibrarySync,
+                state: api::JobState::Running,
+                phase: "persisting".into(),
+                current: Some(3),
+                total: Some(9),
+                message: None,
+                error: None,
+                automatic,
+            };
+            assert_eq!(job_status_from_proto(&job_status_to_proto(&status)), status);
+        }
+    }
+
+    /// A daemon too old to know the field sends nothing, which must read as a user's job.
+    #[test]
+    fn a_job_from_an_older_daemon_is_not_automatic() {
+        let old = JobStatus {
+            id: "job-1".into(),
+            ..Default::default()
+        };
+        assert!(!job_status_from_proto(&old).automatic);
+    }
+
+    #[test]
+    fn the_sync_interval_survives_the_wire() {
+        for minutes in [0, 15, ::config::DEFAULT_SYNC_INTERVAL_MINUTES, u32::MAX] {
+            let mut settings = ::config::Settings::default();
+            settings.library.sync_interval_minutes = minutes;
+            assert_eq!(
+                config_from_proto(&config_to_proto(&settings))
+                    .library
+                    .sync_interval_minutes,
+                minutes
+            );
+        }
+    }
+
+    /// A peer too old to know the field sends nothing, which must not read as "never sync".
+    #[test]
+    fn an_absent_sync_interval_is_the_default() {
+        let old = Config::default();
+        assert_eq!(
+            config_from_proto(&old).library.sync_interval_minutes,
+            ::config::DEFAULT_SYNC_INTERVAL_MINUTES
         );
     }
 

@@ -1,6 +1,6 @@
 use crate::lyrics_view::LyricsView;
 use crate::queue_list_view::QueueListView;
-use config::AppConfig;
+use config::Settings;
 use dioxus::document::eval;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
@@ -20,7 +20,7 @@ pub fn Rightbar(
 ) -> Element {
     let mut active_tab = use_signal(|| 0usize);
     let ctrl = use_context::<PlayerController>();
-    let config = use_context::<Signal<AppConfig>>();
+    let settings = use_context::<Signal<Settings>>();
     // The words come from the daemon: several providers are tried, and some
     // want the account's own token, which never leaves it.
     let track_key = use_memo(move || {
@@ -74,22 +74,7 @@ pub fn Rightbar(
     let up_next_text = i18n::t("up_next").to_string();
     let lyrics_text = i18n::t("lyrics").to_string();
 
-    let items = {
-        let q = queue.read();
-        let is_shuffle = *ctrl.shuffle.read();
-
-        if is_shuffle {
-            ctrl.shuffle_order
-                .read()
-                .iter()
-                .filter_map(|&qi| q.get(qi).cloned())
-                .collect::<Vec<_>>()
-        } else {
-            (0..q.len())
-                .filter_map(|qi| q.get(qi).cloned())
-                .collect::<Vec<_>>()
-        }
-    };
+    let items = queue.read().clone();
 
     if !*is_rightbar_open.read() {
         return rsx! { div {} };
@@ -143,7 +128,7 @@ pub fn Rightbar(
             if *active_tab.read() == 0 {
                 QueueListView {
                     items,
-                    config,
+                    settings,
                     current_queue_index,
                     layout: crate::queue_list_view::LayoutMode::Rightbar,
                 }
@@ -151,7 +136,7 @@ pub fn Rightbar(
                 LyricsView {
                     lyrics,
                     current_song_progress,
-                    config,
+                    settings,
                     layout: crate::lyrics_view::LayoutMode::Rightbar,
                 }
             }

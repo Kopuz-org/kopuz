@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use config::AppConfig;
+use config::Settings;
 use dioxus::prelude::*;
 use material_colors::{
     color::Argb,
@@ -124,8 +124,8 @@ fn argb(color: &Color) -> Argb {
 }
 
 #[component]
-pub fn SystemColors(config: Signal<AppConfig>, artwork: Signal<Option<Vec<Color>>>) -> Element {
-    let enabled = use_memo(move || config.read().theme == "system");
+pub fn SystemColors(settings: Signal<Settings>, artwork: Signal<Option<Vec<Color>>>) -> Element {
+    let enabled = use_memo(move || settings.read().ui.theme == "system");
     let mut system_css = use_signal(|| None::<String>);
     use_resource(move || {
         let enabled = enabled();
@@ -145,7 +145,7 @@ pub fn SystemColors(config: Signal<AppConfig>, artwork: Signal<Option<Vec<Color>
                 let next = android::read().await;
                 #[cfg(not(target_os = "android"))]
                 let next = {
-                    let live_path = config.peek().live_theme_path.clone();
+                    let live_path = settings.peek().ui.live_theme_path.clone();
                     let (cache, seed) = tokio::task::spawn_blocking(move || {
                         let seed = wallpaper.seed(&live_path);
                         (wallpaper, seed)

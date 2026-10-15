@@ -11,6 +11,8 @@ language = Bahasa
 library = Pustaka
 playlists = Daftar Putar
 album = Album
+release_single = Singel
+release_ep = EP
 artist = Artis
 home = Beranda
 search = Cari
@@ -165,6 +167,7 @@ radio_empty = Tidak ada lagu serupa ditemukan
 radio_failed = Tidak dapat memulai radio
 remove_from_queue = Hapus dari Antrian
 downloading = Mengunduh…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = Tindakan lainnya untuk { $name }
 share_musicbrainz = Bagikan (MusicBrainz)
 share_link_copied = Tautan MusicBrainz disalin
@@ -180,6 +183,7 @@ add_all_to_queue = Tambahkan Semua ke Antrian
 add_all_to_playlist = Tambahkan Semua ke Daftar Putar
 select_all = Pilih semua
 select_all_tracks = Pilih semua trek
+deselect_all_tracks = Deselect all tracks
 remove_from_cache = Hapus dari Tembolok
 create = Buat
 save = Simpan
@@ -214,6 +218,9 @@ lyrics_not_found = Lirik tidak ditemukan
 instrumental_break = Instrumental
 no_previous_songs = Tidak ada lagu sebelumnya
 playlist_track_count = { $count } trek
+playlist_folder_count = { $count } daftar putar
+playlists_synced_count = { $count } daftar putar tersinkron
+playlists_loading_tracks = Memuat trek — daftar putar { $done } / { $count } ({ $remaining } tersisa)
 music_playlist_count = Musik • { $count } trek
 showcase_song_count = { $count } lagu
 
@@ -273,7 +280,6 @@ time = Waktu
 genre = Genre
 plays = Pemutaran
 track_count = { $count } trek
-track_count_singular = 1 trek
 songs = lagu
 min = min
 
@@ -550,8 +556,13 @@ external_play_on = Putar di
 external_this_app = kopuz (aplikasi ini)
 prefer_active_device = Playback device
 prefer_active_device_help = When another device is already playing, take it over instead of starting playback here.
-settings_managed_notice = Beberapa pengaturan dikelola oleh konfigurasi sistem (Nix/hjem) dan tidak dapat diubah di sini.
+settings_managed_notice = Beberapa pengaturan berasal dari berkas pengaturan yang tidak dapat ditulis oleh aplikasi (hanya-baca atau dikelola oleh Nix/hjem) dan tidak dapat diubah di sini.
 setting_managed_by_system = Dikelola oleh konfigurasi sistem
+settings_dropin_notice = Beberapa pengaturan ditetapkan oleh berkas tambahan dan tidak dapat diubah di sini.
+settings_env_notice = Beberapa pengaturan ditetapkan oleh variabel lingkungan KOPUZ_CONFIG_* dan tidak dapat diubah di sini.
+setting_locked_by_file = Diatur oleh { $path }
+setting_locked_by_dropin = Diatur oleh berkas tambahan { $path }
+setting_locked_by_env = Diatur oleh { $var }
 
 settings_interface = Interface
 interface_general = General
@@ -636,7 +647,11 @@ waiting_for_browser = Waiting for your browser…
 signed_in = Signed in
 metadata_number_invalid = Enter a number, or leave it empty to clear the tag.
 metadata_batch_keep = Leave unchanged
-metadata_batch_count = Editing { $count } tracks
+metadata_batch_count =
+    { $count ->
+        [one] Editing { $count } track
+       *[other] Editing { $count } tracks
+    }
 interface_font = Interface font
 interface_font_description = The font family to draw the interface with.
 interface_font_placeholder = Theme default
@@ -716,6 +731,13 @@ view = View
 undo = Undo
 quit = Quit
 scanning_library = Scanning library…
+network_offline_banner = No internet connection — switched to offline mode
+network_online_banner = Back online — switched to server mode
+keep_server_mode = Keep server mode
+tray_show_hide = Show / Hide Kopuz
+tray_quit = Quit Kopuz
+tray_unavailable_title = Tray icon unavailable
+tray_unavailable_message = System tray unavailable: appindicator library not found. Install libayatana-appindicator (Debian/Ubuntu/Arch) or libappindicator-gtk3 (Fedora). Closing the window will quit the app instead of minimizing to tray.
 reconnecting_attempt = Reconnecting… (attempt { $attempt })
 downloads_summary = { $done } downloaded, { $failed } failed
 job_scan = Library scan
@@ -782,11 +804,19 @@ discover_clear_search = Clear search
 discover_results_for = Results for "{ $query }"
 discover_no_results_hint = Try fewer words, or switch source and look again.
 discover_show_less = Show less
-discover_genre_count = { $count } genres
+discover_genre_count =
+    { $count ->
+        [one] { $count } genre
+       *[other] { $count } genres
+    }
 discover_read_failed = Couldn't load your library: { $error }
 palette_all_results = All results for "{ $query }" in Discover
 
-library_count = { $count } items
+library_count =
+    { $count ->
+        [one] { $count } item
+       *[other] { $count } items
+    }
 library_filter_placeholder = Filter the library…
 library_chip_downloaded = Downloaded
 library_chip_years = Years
@@ -809,7 +839,11 @@ library_tile_medium = Medium
 library_tile_large = Large
 library_default_view = Grids open as
 library_default_view_description = Whether albums, artists and playlists start as tiles or as rows.
-library_artist_tracks = { $count } tracks
+library_artist_tracks =
+    { $count ->
+        [one] { $count } track
+       *[other] { $count } tracks
+    }
 library_selected = { $count } selected
 library_whole_selection = Everything that matches
 library_read_failed = Could not read the library
@@ -848,7 +882,11 @@ downloader_history = URL downloads
 interface_skin = Skin
 interface_skin_description = The shape of the interface: how round things are, how tall a row sits.
 
-home_plays = { $count } plays
+home_plays =
+    { $count ->
+        [one] { $count } play
+       *[other] { $count } plays
+    }
 
 interface_ambient = Ambient light
 interface_ambient_description = Let the current cover cast its colour across the window.
@@ -875,10 +913,41 @@ clippsly_help = Create an App Password at clippsly.app, then sign in with your C
 cloud_storage_usage = Cloud storage: { $used } of { $total } used
 upload_music = Upload music
 uploading_music = Uploading { $name }…
-music_uploaded = Uploaded { $count } file(s).
+music_uploaded =
+    { $count ->
+        [one] Uploaded { $count } file.
+       *[other] Uploaded { $count } files.
+    }
 music_upload_too_large = Audio files must be no larger than 500 MiB.
 cloud_storage_loading = Loading storage usage…
 
 smb_url_placeholder = smb://nas/Music
 smb_help = Connect to an SMB 2/3 share or subfolder, then sign in with your NAS account. Domain accounts can use DOMAIN\username. Files are read without mounting the share.
 invalid_smb_url = Enter smb://host/share or smb://host/share/folder, without credentials in the URL.
+sync_interval = Sync and rescan every
+sync_interval_never = Never
+sync_interval_minutes = { $count } min
+sync_interval_hours = { $count } h
+sync_interval_days = { $count } d
+
+error_setting_locked = A managed settings file pins this setting, so it cannot be changed here.
+error_connect_not_offered = This integration does not connect that way.
+error_api_key_missing = Set the API key and secret first.
+error_sign_in_not_started = The service did not start the sign-in. Check the API key and your connection.
+error_browser_not_opened = Could not open a browser for the sign-in.
+error_sign_in_timed_out = The sign-in was not approved in time.
+error_browser_profile_gone = That browser profile is no longer there.
+error_browser_cookies_unreadable = Could not read the cookies of that browser profile.
+error_browser_profile_signed_out = That browser profile is not signed in to the service. Sign in there, or paste your token instead.
+error_browser_profile_no_token = The service did not show a token for that profile. Paste it instead.
+error_integration_unreachable = Could not reach the service. Check your connection.
+error_credential_rejected = The service does not accept that token. Paste your token instead.
+error_default_source_undeletable = The default folder source cannot be deleted.
+error_empty_source_folder = A source folder cannot be empty.
+error_code_invalid_input = Not accepted: { $detail }
+error_code_not_found = That is no longer there.
+error_code_conflict = Already in use or in progress: { $detail }
+error_code_source_auth_expired = The source did not accept the sign-in. Sign in again in Settings.
+error_code_source_unreachable = The source could not be reached. Check your connection.
+error_code_unsupported = Not supported here: { $detail }
+error_code_internal = Something went wrong: { $detail }

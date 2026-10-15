@@ -184,7 +184,7 @@ impl SpotifyHost {
 /// A browser that can host the player page, offered in the settings picker.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PlayerBrowser {
-    /// Stable id persisted in `AppConfig::spotify_browser`.
+    /// Stable id persisted in `Settings::spotify_browser`.
     pub id: &'static str,
     /// Display name for the picker.
     pub label: &'static str,

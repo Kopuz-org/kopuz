@@ -1,20 +1,20 @@
 use super::navigation::SettingsCategory;
 use components::settings_items::SettingsGroup;
-use config::AppConfig;
+use config::Settings;
 use dioxus::prelude::*;
 
 #[component]
 pub(super) fn SettingsIndex(
-    config: Signal<AppConfig>,
+    settings: Signal<Settings>,
     active_source: Option<api::SourceInfo>,
     on_select: EventHandler<SettingsCategory>,
 ) -> Element {
-    let language = config.read().language.clone();
+    let language = settings.read().ui.language.clone();
     let language_name = i18n::available_languages()
         .iter()
         .find(|(code, _)| *code == language)
         .map(|(_, name)| (*name).to_string());
-    let crossfade_seconds = config.read().crossfade_seconds;
+    let crossfade_seconds = settings.read().playback.crossfade_seconds;
     let crossfade = format!(
         "{} {}",
         i18n::t("crossfade"),
@@ -24,12 +24,12 @@ pub(super) fn SettingsIndex(
             format!("{crossfade_seconds}s")
         }
     );
-    let equalizer = if config.read().equalizer.enabled {
+    let equalizer = if settings.read().playback.equalizer.enabled {
         i18n::t("enabled")
     } else {
         i18n::t("disabled")
     };
-    let quality = config.read().offline_quality.label().to_string();
+    let quality = settings.read().library.offline_quality.label().to_string();
 
     rsx! {
         div { id: "settings-index", class: "settings-index",

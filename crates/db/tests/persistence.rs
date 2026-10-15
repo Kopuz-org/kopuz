@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use config::{AppConfig, MusicServer, MusicService, SavedServer};
+use config::{MusicServer, MusicService, SavedServer};
 use db::{QueueSnapshot, Source, TrackFilter};
 use reader::models::{Track, TrackId};
 
@@ -50,33 +50,36 @@ fn server_track(id: &str, title: &str) -> Track {
 }
 
 async fn seed_active_server(db: &db::Db, id: &str) {
-    let cfg = AppConfig {
-        servers: vec![SavedServer {
-            id: id.into(),
-            name: "yt".into(),
-            url: "https://music.youtube.com".into(),
-            service: MusicService::YtMusic,
-            yt_browser: None,
-            yt_anonymous: false,
-            apple_music_storefront: "us".into(),
-            apple_music_language: "en".into(),
-        }],
-        server: Some(MusicServer {
-            name: "yt".into(),
-            url: "https://music.youtube.com".into(),
-            service: MusicService::YtMusic,
-            access_token: Some("cookie".into()),
-            user_id: None,
-            id: Some(id.into()),
-            yt_browser: None,
-            yt_anonymous: false,
-            apple_music_storefront: "us".into(),
-            apple_music_language: "en".into(),
-        }),
-        active_source: config::Source::Server(id.into()),
-        ..Default::default()
-    };
-    db.save_config(&cfg).await.unwrap();
+    db.ensure_app_state().await.unwrap();
+    db.save_server(&SavedServer {
+        id: id.into(),
+        name: "yt".into(),
+        url: "https://music.youtube.com".into(),
+        service: MusicService::YtMusic,
+        yt_browser: None,
+        yt_anonymous: false,
+        apple_music_storefront: "us".into(),
+        apple_music_language: "en".into(),
+    })
+    .await
+    .unwrap();
+    db.save_active_server(&MusicServer {
+        name: "yt".into(),
+        url: "https://music.youtube.com".into(),
+        service: MusicService::YtMusic,
+        access_token: Some("cookie".into()),
+        user_id: None,
+        id: Some(id.into()),
+        yt_browser: None,
+        yt_anonymous: false,
+        apple_music_storefront: "us".into(),
+        apple_music_language: "en".into(),
+    })
+    .await
+    .unwrap();
+    db.set_active_source(&config::Source::Server(id.into()))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -553,6 +556,7 @@ async fn queue_round_trips() {
         shuffle_order: vec![0],
         shuffle_enabled: true,
         radio_cursor: None,
+        origin: None,
     };
     db.save_queue(&Source::default(), &snap).await.unwrap();
     let q = db.load_queue(&Source::default()).await.unwrap();

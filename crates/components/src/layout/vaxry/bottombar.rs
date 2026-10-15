@@ -10,7 +10,7 @@ use hooks::favorites::toggle_favorite;
 
 #[component]
 pub fn BottombarVaxry(
-    mut config: Signal<config::AppConfig>,
+    mut settings: Signal<config::Settings>,
     mut is_playing: Signal<bool>,
     mut is_fullscreen: Signal<bool>,
     mut current_song_duration: Signal<u64>,
@@ -20,7 +20,6 @@ pub fn BottombarVaxry(
     mut current_song_title: Signal<String>,
     mut current_song_artist: Signal<String>,
     mut volume: Signal<f32>,
-    mut persisted_volume: Signal<f32>,
     mut is_rightbar_open: Signal<bool>,
     is_devices_open: Signal<bool>,
 ) -> Element {
@@ -134,7 +133,7 @@ pub fn BottombarVaxry(
         "fa-regular fa-heart"
     };
 
-    let position = config.read().player_bar_position;
+    let position = settings.read().ui.player_bar_position;
     let border_class = match position {
         PlayerBarPosition::Bottom => "border-t border-white/5",
         PlayerBarPosition::Top => "border-b border-white/5",
@@ -146,7 +145,7 @@ pub fn BottombarVaxry(
         PlayerBarPosition::Bottom => "top",
         PlayerBarPosition::Top => "bottom",
     };
-    let bar_as_fullscreen = *is_fullscreen.read() && config.read().fullscreen_use_player_bar;
+    let bar_as_fullscreen = *is_fullscreen.read() && settings.read().ui.fullscreen_use_player_bar;
     // `backdrop-blur-xl` makes the bar a stacking context, so its menus can
     // only rise as high as the bar itself does over the page.
     let lift_class = if bar_as_fullscreen {
@@ -154,12 +153,13 @@ pub fn BottombarVaxry(
     } else {
         "relative z-30"
     };
-    let bg_class =
-        if config.read().cover_art_background || !config.read().custom_background_path.is_empty() {
-            "bg-black/40"
-        } else {
-            "bg-black/70 backdrop-blur-xl"
-        };
+    let bg_class = if settings.read().background.cover_art_background
+        || !settings.read().background.custom_background_path.is_empty()
+    {
+        "bg-black/40"
+    } else {
+        "bg-black/70 backdrop-blur-xl"
+    };
 
     rsx! {
         div {
@@ -234,7 +234,7 @@ pub fn BottombarVaxry(
                 crate::dont_recommend::DontRecommendButton {
                     class: "text-slate-500 hover:text-slate-300 transition-colors text-xs w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/10 active:scale-95",
                 }
-                VolumeSlider { config, volume, persisted_volume, variant: ControlsVariant::Bar }
+                VolumeSlider { settings, volume, variant: ControlsVariant::Bar }
                 button {
                     class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                     onclick: move |_| { let c = *is_rightbar_open.read(); is_rightbar_open.set(!c); },

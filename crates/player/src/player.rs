@@ -390,7 +390,7 @@ mod tests {
         let mut player = Player::try_with_sink(Box::new(crate::engine::NullSink::new())).unwrap();
         let load = |token| LoadArgs {
             token,
-            factory: Box::new(|| Err("no audio needed".into())),
+            factory: Box::new(|| Err(std::io::Error::other("no audio needed"))),
             meta: NowPlayingMeta {
                 title: format!("Track {token}"),
                 artist: String::new(),

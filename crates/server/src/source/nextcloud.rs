@@ -153,10 +153,7 @@ impl MediaSource for NextcloudSource {
         use std::path::PathBuf;
 
         let client = self.client()?;
-        let (albums, tracks) = client
-            .scan(&self.folders)
-            .await
-            .map_err(SourceError::Backend)?;
+        let (albums, tracks) = client.scan(&self.folders).await?;
 
         // Nothing persists until the snapshot is whole, so a serial pass here stalls the sync.
         let mut jobs = Vec::with_capacity(albums.len());
@@ -237,7 +234,7 @@ impl MediaSource for NextcloudSource {
         Ok(LibrarySnapshot {
             albums: out_albums,
             tracks: out_tracks,
-            artist_images: Vec::new(),
+            artists: Vec::new(),
         })
     }
 
@@ -266,17 +263,11 @@ impl MediaSource for NextcloudSource {
     }
 
     async fn fetch_favorites(&self) -> Result<Vec<String>, SourceError> {
-        self.client()?
-            .favorites(&self.folders)
-            .await
-            .map_err(SourceError::Backend)
+        self.client()?.favorites(&self.folders).await
     }
 
     async fn push_favorite(&self, item_id: &str, on: bool) -> Result<(), SourceError> {
-        self.client()?
-            .set_favorite(item_id, on)
-            .await
-            .map_err(SourceError::Backend)
+        self.client()?.set_favorite(item_id, on).await
     }
 
     async fn add_to_playlist(

@@ -1,42 +1,6 @@
-//! `config::AppConfig` <-> the wire `Config` message.
-//!
-//! The settings surface is a real message, not JSON in a string field: the
-//! config is a closed Rust struct on both ends of one binary, so the schema
-//! can say so. Credential keys and machine-local path state are absent from
-//! the wire entirely -- `config_from_proto` leaves them at their defaults
-//! and the daemon restores what it holds.
+//! `config::Settings` <-> the flat wire `Config` message, every setting included.
 
 use crate::*;
-
-pub fn album_view_mode_to_proto(value: config::AlbumViewMode) -> AlbumViewMode {
-    match value {
-        config::AlbumViewMode::Grid => AlbumViewMode::Grid,
-        config::AlbumViewMode::List => AlbumViewMode::List,
-    }
-}
-
-pub fn album_view_mode_from_proto(value: i32) -> config::AlbumViewMode {
-    match AlbumViewMode::try_from(value).unwrap_or(AlbumViewMode::Unspecified) {
-        AlbumViewMode::Grid => config::AlbumViewMode::Grid,
-        AlbumViewMode::List => config::AlbumViewMode::List,
-        AlbumViewMode::Unspecified => config::AlbumViewMode::default(),
-    }
-}
-
-pub fn artist_view_order_to_proto(value: &config::ArtistViewOrder) -> ArtistViewOrder {
-    match value {
-        config::ArtistViewOrder::Tracks => ArtistViewOrder::Tracks,
-        config::ArtistViewOrder::Albums => ArtistViewOrder::Albums,
-    }
-}
-
-pub fn artist_view_order_from_proto(value: i32) -> config::ArtistViewOrder {
-    match ArtistViewOrder::try_from(value).unwrap_or(ArtistViewOrder::Unspecified) {
-        ArtistViewOrder::Tracks => config::ArtistViewOrder::Tracks,
-        ArtistViewOrder::Albums => config::ArtistViewOrder::Albums,
-        ArtistViewOrder::Unspecified => config::ArtistViewOrder::Tracks,
-    }
-}
 
 pub fn back_behavior_to_proto(value: config::BackBehavior) -> BackBehavior {
     match value {
@@ -110,21 +74,6 @@ pub fn fetch_strategy_from_proto(value: i32) -> config::FetchStrategy {
     }
 }
 
-pub fn listen_now_style_to_proto(value: config::ListenNowStyle) -> ListenNowStyle {
-    match value {
-        config::ListenNowStyle::List => ListenNowStyle::List,
-        config::ListenNowStyle::Cards => ListenNowStyle::Cards,
-    }
-}
-
-pub fn listen_now_style_from_proto(value: i32) -> config::ListenNowStyle {
-    match ListenNowStyle::try_from(value).unwrap_or(ListenNowStyle::Unspecified) {
-        ListenNowStyle::List => config::ListenNowStyle::List,
-        ListenNowStyle::Cards => config::ListenNowStyle::Cards,
-        ListenNowStyle::Unspecified => config::ListenNowStyle::default(),
-    }
-}
-
 pub fn offline_quality_to_proto(value: config::OfflineQuality) -> OfflineQuality {
     match value {
         config::OfflineQuality::Kbps128 => OfflineQuality::Kbps128,
@@ -193,23 +142,6 @@ pub fn settings_layout_from_proto(value: i32) -> config::SettingsLayout {
     }
 }
 
-pub fn sort_order_to_proto(value: &config::SortOrder) -> SortOrder {
-    match value {
-        config::SortOrder::Title => SortOrder::Title,
-        config::SortOrder::Artist => SortOrder::Artist,
-        config::SortOrder::Album => SortOrder::Album,
-    }
-}
-
-pub fn sort_order_from_proto(value: i32) -> config::SortOrder {
-    match SortOrder::try_from(value).unwrap_or(SortOrder::Unspecified) {
-        SortOrder::Title => config::SortOrder::Title,
-        SortOrder::Artist => config::SortOrder::Artist,
-        SortOrder::Album => config::SortOrder::Album,
-        SortOrder::Unspecified => config::SortOrder::Title,
-    }
-}
-
 pub fn titlebar_mode_to_proto(value: config::TitlebarMode) -> TitlebarMode {
     match value {
         config::TitlebarMode::Custom => TitlebarMode::Custom,
@@ -267,40 +199,6 @@ pub fn eq_preset_from_proto(value: i32) -> config::EqPreset {
     }
 }
 
-pub fn sort_direction_to_proto(value: config::SortDirection) -> SortDirection {
-    match value {
-        config::SortDirection::Asc => SortDirection::Asc,
-        config::SortDirection::Desc => SortDirection::Desc,
-    }
-}
-
-pub fn sort_direction_from_proto(value: i32) -> config::SortDirection {
-    match SortDirection::try_from(value).unwrap_or(SortDirection::Unspecified) {
-        SortDirection::Asc => config::SortDirection::Asc,
-        SortDirection::Desc => config::SortDirection::Desc,
-        SortDirection::Unspecified => config::SortDirection::default(),
-    }
-}
-
-pub fn album_sort_field_to_proto(value: config::AlbumSortField) -> AlbumSortField {
-    match value {
-        config::AlbumSortField::Title => AlbumSortField::Title,
-        config::AlbumSortField::Artist => AlbumSortField::Artist,
-        config::AlbumSortField::Year => AlbumSortField::Year,
-        config::AlbumSortField::Genre => AlbumSortField::Genre,
-    }
-}
-
-pub fn album_sort_field_from_proto(value: i32) -> config::AlbumSortField {
-    match AlbumSortField::try_from(value).unwrap_or(AlbumSortField::Unspecified) {
-        AlbumSortField::Title => config::AlbumSortField::Title,
-        AlbumSortField::Artist => config::AlbumSortField::Artist,
-        AlbumSortField::Year => config::AlbumSortField::Year,
-        AlbumSortField::Genre => config::AlbumSortField::Genre,
-        AlbumSortField::Unspecified => config::AlbumSortField::Title,
-    }
-}
-
 pub fn track_sort_field_to_proto(value: config::TrackSortField) -> TrackSortField {
     match value {
         config::TrackSortField::Title => TrackSortField::Title,
@@ -319,23 +217,6 @@ pub fn track_sort_field_from_proto(value: i32) -> config::TrackSortField {
         TrackSortField::Duration => config::TrackSortField::Duration,
         TrackSortField::DateAdded => config::TrackSortField::DateAdded,
         TrackSortField::Unspecified => config::TrackSortField::Title,
-    }
-}
-
-pub fn artist_sort_field_to_proto(value: config::ArtistSortField) -> ArtistSortField {
-    match value {
-        config::ArtistSortField::Name => ArtistSortField::Name,
-        config::ArtistSortField::Tracks => ArtistSortField::Tracks,
-        config::ArtistSortField::Albums => ArtistSortField::Albums,
-    }
-}
-
-pub fn artist_sort_field_from_proto(value: i32) -> config::ArtistSortField {
-    match ArtistSortField::try_from(value).unwrap_or(ArtistSortField::Unspecified) {
-        ArtistSortField::Name => config::ArtistSortField::Name,
-        ArtistSortField::Tracks => config::ArtistSortField::Tracks,
-        ArtistSortField::Albums => config::ArtistSortField::Albums,
-        ArtistSortField::Unspecified => config::ArtistSortField::Name,
     }
 }
 
@@ -376,20 +257,6 @@ pub fn saved_folder_source_from_proto(value: &SavedFolderSource) -> config::Save
             .iter()
             .map(std::path::PathBuf::from)
             .collect(),
-    }
-}
-
-pub fn home_section_to_proto(value: &config::HomeSection) -> HomeSection {
-    HomeSection {
-        key: value.key.clone(),
-        enabled: value.enabled,
-    }
-}
-
-pub fn home_section_from_proto(value: &HomeSection) -> config::HomeSection {
-    config::HomeSection {
-        key: value.key.clone(),
-        enabled: value.enabled,
     }
 }
 
@@ -489,266 +356,187 @@ pub fn replay_gain_from_proto(value: Option<&ReplayGainSettings>) -> config::Rep
     }
 }
 
-pub fn album_sort_criterion_to_proto(
-    value: &config::SortCriterion<config::AlbumSortField>,
-) -> AlbumSortCriterion {
-    AlbumSortCriterion {
-        field: album_sort_field_to_proto(value.field) as i32,
-        direction: sort_direction_to_proto(value.direction) as i32,
+pub fn downloader_options_to_proto(value: &config::DownloaderOptions) -> DownloaderOptions {
+    DownloaderOptions {
+        embed_metadata: value.embed_metadata,
+        embed_thumbnail: value.embed_thumbnail,
+        write_thumbnail: value.write_thumbnail,
+        organize_by_album: value.organize_by_album,
+        overwrite_existing: value.overwrite_existing,
     }
 }
 
-pub fn album_sort_criterion_from_proto(
-    value: &AlbumSortCriterion,
-) -> config::SortCriterion<config::AlbumSortField> {
-    config::SortCriterion {
-        field: album_sort_field_from_proto(value.field),
-        direction: sort_direction_from_proto(value.direction),
+pub fn downloader_options_from_proto(
+    value: Option<&DownloaderOptions>,
+) -> config::DownloaderOptions {
+    let Some(value) = value else {
+        return config::DownloaderOptions::default();
+    };
+    config::DownloaderOptions {
+        embed_metadata: value.embed_metadata,
+        embed_thumbnail: value.embed_thumbnail,
+        write_thumbnail: value.write_thumbnail,
+        organize_by_album: value.organize_by_album,
+        overwrite_existing: value.overwrite_existing,
     }
 }
 
-pub fn track_sort_criterion_to_proto(
-    value: &config::SortCriterion<config::TrackSortField>,
-) -> TrackSortCriterion {
-    TrackSortCriterion {
-        field: track_sort_field_to_proto(value.field) as i32,
-        direction: sort_direction_to_proto(value.direction) as i32,
-    }
-}
-
-pub fn track_sort_criterion_from_proto(
-    value: &TrackSortCriterion,
-) -> config::SortCriterion<config::TrackSortField> {
-    config::SortCriterion {
-        field: track_sort_field_from_proto(value.field),
-        direction: sort_direction_from_proto(value.direction),
-    }
-}
-
-pub fn artist_sort_criterion_to_proto(
-    value: &config::SortCriterion<config::ArtistSortField>,
-) -> ArtistSortCriterion {
-    ArtistSortCriterion {
-        field: artist_sort_field_to_proto(value.field) as i32,
-        direction: sort_direction_to_proto(value.direction) as i32,
-    }
-}
-
-pub fn artist_sort_criterion_from_proto(
-    value: &ArtistSortCriterion,
-) -> config::SortCriterion<config::ArtistSortField> {
-    config::SortCriterion {
-        field: artist_sort_field_from_proto(value.field),
-        direction: sort_direction_from_proto(value.direction),
-    }
-}
-
-pub fn config_to_proto(value: &config::AppConfig) -> Config {
+pub fn config_to_proto(value: &config::Settings) -> Config {
+    let config::Settings {
+        playback,
+        ui,
+        background,
+        lyrics,
+        library,
+        integrations,
+        downloads,
+        spotify,
+        system,
+    } = value;
     Config {
-        folder_sources: value
+        folder_sources: library
             .local_sources
             .iter()
             .map(saved_folder_source_to_proto)
             .collect(),
-        active_source: Some(source_ref_to_proto(&value.active_source)),
-        source_explicitly_set: value.source_explicitly_set,
-        server_folders: value
-            .server_folders
-            .iter()
-            .map(|(k, v)| (k.clone(), StringList { values: v.clone() }))
-            .collect(),
-        theme: value.theme.clone(),
-        live_theme_path: value.live_theme_path.clone(),
-        device_id: value.device_id.clone(),
-        sort_order: sort_order_to_proto(&value.sort_order) as i32,
-        album_sort: value
-            .album_sort
-            .iter()
-            .map(album_sort_criterion_to_proto)
-            .collect(),
-        library_sort: value
-            .library_sort
-            .iter()
-            .map(track_sort_criterion_to_proto)
-            .collect(),
-        artist_album_sort: value
-            .artist_album_sort
-            .iter()
-            .map(album_sort_criterion_to_proto)
-            .collect(),
-        artist_sort: value
-            .artist_sort
-            .iter()
-            .map(artist_sort_criterion_to_proto)
-            .collect(),
-        album_view_mode: album_view_mode_to_proto(value.album_view_mode) as i32,
-        artist_album_view_mode: album_view_mode_to_proto(value.artist_album_view_mode) as i32,
-        artists_view_mode: album_view_mode_to_proto(value.artists_view_mode) as i32,
-        artist_view_order: artist_view_order_to_proto(&value.artist_view_order) as i32,
-        listen_counts: value.listen_counts.clone().into_iter().collect(),
-        language: value.language.clone(),
-        reduce_animations: value.reduce_animations,
-        fullscreen_use_player_bar: value.fullscreen_use_player_bar,
-        fullscreen_tabs_collapsed: value.fullscreen_tabs_collapsed,
-        cover_art_background: value.cover_art_background,
-        cover_art_darkening: u32::from(value.cover_art_darkening),
-        cover_art_blur: u32::from(value.cover_art_blur),
-        custom_background_path: value.custom_background_path.clone(),
-        custom_font_path: value.custom_font_path.clone(),
-        tracing_enabled: value.tracing_enabled,
-        auto_check_updates: value.auto_check_updates,
-        minimize_to_tray: value.minimize_to_tray,
-        show_source_toggle: value.show_source_toggle,
-        show_row_images: value.show_row_images,
-        sidebar_order: value.sidebar_order.clone(),
-        volume: value.volume,
-        muted: value.muted,
-        volume_scroll_step: value.volume_scroll_step,
-        crossfade_seconds: u32::from(value.crossfade_seconds),
-        custom_themes: value
+        theme: ui.theme.clone(),
+        live_theme_path: ui.live_theme_path.clone(),
+        language: ui.language.clone(),
+        reduce_animations: ui.reduce_animations,
+        fullscreen_use_player_bar: ui.fullscreen_use_player_bar,
+        cover_art_background: background.cover_art_background,
+        cover_art_darkening: u32::from(background.cover_art_darkening),
+        cover_art_blur: u32::from(background.cover_art_blur),
+        custom_background_path: background.custom_background_path.clone(),
+        custom_font_path: ui.custom_font_path.clone(),
+        tracing_enabled: system.tracing_enabled,
+        auto_check_updates: system.auto_check_updates,
+        minimize_to_tray: system.minimize_to_tray,
+        show_source_toggle: ui.show_source_toggle,
+        show_row_images: ui.show_row_images,
+        volume_scroll_step: playback.volume_scroll_step,
+        crossfade_seconds: u32::from(playback.crossfade_seconds),
+        custom_themes: ui
             .custom_themes
             .iter()
             .map(|(k, v)| (k.clone(), custom_theme_to_proto(v)))
             .collect(),
-        back_behavior: back_behavior_to_proto(value.back_behavior) as i32,
-        channel_mode: channel_mode_to_proto(value.channel_mode) as i32,
-        equalizer: Some(equalizer_to_proto(&value.equalizer)),
-        replay_gain: Some(replay_gain_to_proto(value.replay_gain)),
-        device_change_behavior: device_change_behavior_to_proto(value.device_change_behavior)
+        back_behavior: back_behavior_to_proto(playback.back_behavior) as i32,
+        channel_mode: channel_mode_to_proto(playback.channel_mode) as i32,
+        equalizer: Some(equalizer_to_proto(&playback.equalizer)),
+        replay_gain: Some(replay_gain_to_proto(playback.replay_gain)),
+        device_change_behavior: device_change_behavior_to_proto(playback.device_change_behavior)
             as i32,
-        sample_rate_mode: sample_rate_mode_to_proto(value.sample_rate_mode) as i32,
-        titlebar_mode: titlebar_mode_to_proto(value.titlebar_mode) as i32,
-        offline_quality: offline_quality_to_proto(value.offline_quality) as i32,
-        player_bar_position: player_bar_position_to_proto(value.player_bar_position) as i32,
-        ui_style: ui_style_to_proto(value.ui_style) as i32,
-        settings_layout: settings_layout_to_proto(value.settings_layout) as i32,
-        hero_height: value.hero_height,
-        home_sections: value
-            .home_sections
-            .iter()
-            .map(home_section_to_proto)
-            .collect(),
-        listen_now_style: listen_now_style_to_proto(value.listen_now_style) as i32,
-        auto_fetch_covers: value.auto_fetch_covers,
-        cover_fetch_strategy: fetch_strategy_to_proto(value.cover_fetch_strategy) as i32,
-        radio_registries: value
+        sample_rate_mode: sample_rate_mode_to_proto(playback.sample_rate_mode) as i32,
+        titlebar_mode: titlebar_mode_to_proto(ui.titlebar_mode) as i32,
+        offline_quality: offline_quality_to_proto(library.offline_quality) as i32,
+        player_bar_position: player_bar_position_to_proto(ui.player_bar_position) as i32,
+        ui_style: ui_style_to_proto(ui.ui_style) as i32,
+        settings_layout: settings_layout_to_proto(ui.settings_layout) as i32,
+        auto_fetch_covers: library.auto_fetch_covers,
+        cover_fetch_strategy: fetch_strategy_to_proto(library.cover_fetch_strategy) as i32,
+        radio_registries: integrations
             .radio_registries
             .iter()
             .map(registry_entry_to_proto)
             .collect(),
-        pinned_stations: value.pinned_stations.clone(),
-        prefer_local_lyrics: value.prefer_local_lyrics,
-        enable_musixmatch_lyrics: value.enable_musixmatch_lyrics,
-        lyrics_offset_ms: value.lyrics_offset_ms,
-        lyrics_offset_auto: value.lyrics_offset_auto,
-        lyrics_depth_blur: value.lyrics_depth_blur,
-        lyrics_depth_blur_strength: u32::from(value.lyrics_depth_blur_strength),
+        prefer_local_lyrics: lyrics.prefer_local_lyrics,
+        enable_musixmatch_lyrics: lyrics.enable_musixmatch_lyrics,
+        lyrics_offset_ms: lyrics.lyrics_offset_ms,
+        lyrics_offset_auto: lyrics.lyrics_offset_auto,
+        lyrics_depth_blur: lyrics.lyrics_depth_blur,
+        lyrics_depth_blur_strength: u32::from(lyrics.lyrics_depth_blur_strength),
+        sync_interval_minutes: Some(library.sync_interval_minutes),
+        discord_presence: integrations.discord_presence,
+        discord_presence_source: integrations.discord_presence_source,
+        spotify_browser: spotify.spotify_browser.clone(),
+        spotify_prefer_active_device: spotify.spotify_prefer_active_device,
+        downloader_output_dir: downloads.downloader_output_dir.clone(),
+        downloader_options: Some(downloader_options_to_proto(&downloads.downloader_options)),
     }
 }
 
-/// Credential fields and machine-local path state are not on the wire, so
-/// they come back as their defaults here; the daemon overwrites them with
-/// what it already holds before anything is persisted.
-pub fn config_from_proto(value: &Config) -> config::AppConfig {
-    config::AppConfig {
-        local_sources: value
-            .folder_sources
-            .iter()
-            .map(saved_folder_source_from_proto)
-            .collect(),
-        active_source: source_ref_from_proto(value.active_source.as_ref()),
-        source_explicitly_set: value.source_explicitly_set,
-        server_folders: value
-            .server_folders
-            .iter()
-            .map(|(k, v)| (k.clone(), v.values.clone()))
-            .collect(),
-        theme: value.theme.clone(),
-        live_theme_path: value.live_theme_path.clone(),
-        device_id: value.device_id.clone(),
-        sort_order: sort_order_from_proto(value.sort_order),
-        album_sort: value
-            .album_sort
-            .iter()
-            .map(album_sort_criterion_from_proto)
-            .collect(),
-        library_sort: value
-            .library_sort
-            .iter()
-            .map(track_sort_criterion_from_proto)
-            .collect(),
-        artist_album_sort: value
-            .artist_album_sort
-            .iter()
-            .map(album_sort_criterion_from_proto)
-            .collect(),
-        artist_sort: value
-            .artist_sort
-            .iter()
-            .map(artist_sort_criterion_from_proto)
-            .collect(),
-        album_view_mode: album_view_mode_from_proto(value.album_view_mode),
-        artist_album_view_mode: album_view_mode_from_proto(value.artist_album_view_mode),
-        artists_view_mode: album_view_mode_from_proto(value.artists_view_mode),
-        artist_view_order: artist_view_order_from_proto(value.artist_view_order),
-        listen_counts: value.listen_counts.clone().into_iter().collect(),
-        language: value.language.clone(),
-        reduce_animations: value.reduce_animations,
-        fullscreen_use_player_bar: value.fullscreen_use_player_bar,
-        fullscreen_tabs_collapsed: value.fullscreen_tabs_collapsed,
-        cover_art_background: value.cover_art_background,
-        cover_art_darkening: value.cover_art_darkening.min(u32::from(u8::MAX)) as u8,
-        cover_art_blur: value.cover_art_blur.min(u32::from(u8::MAX)) as u8,
-        custom_background_path: value.custom_background_path.clone(),
-        custom_font_path: value.custom_font_path.clone(),
-        tracing_enabled: value.tracing_enabled,
-        auto_check_updates: value.auto_check_updates,
-        minimize_to_tray: value.minimize_to_tray,
-        show_source_toggle: value.show_source_toggle,
-        show_row_images: value.show_row_images,
-        sidebar_order: value.sidebar_order.clone(),
-        volume: value.volume,
-        muted: value.muted,
-        volume_scroll_step: value.volume_scroll_step,
-        crossfade_seconds: value.crossfade_seconds.min(u32::from(u8::MAX)) as u8,
-        custom_themes: value
-            .custom_themes
-            .iter()
-            .map(|(k, v)| (k.clone(), custom_theme_from_proto(v)))
-            .collect(),
-        back_behavior: back_behavior_from_proto(value.back_behavior),
-        channel_mode: channel_mode_from_proto(value.channel_mode),
-        equalizer: equalizer_from_proto(value.equalizer.as_ref()),
-        replay_gain: replay_gain_from_proto(value.replay_gain.as_ref()),
-        device_change_behavior: device_change_behavior_from_proto(value.device_change_behavior),
-        sample_rate_mode: sample_rate_mode_from_proto(value.sample_rate_mode),
-        titlebar_mode: titlebar_mode_from_proto(value.titlebar_mode),
-        offline_quality: offline_quality_from_proto(value.offline_quality),
-        player_bar_position: player_bar_position_from_proto(value.player_bar_position),
-        ui_style: ui_style_from_proto(value.ui_style),
-        settings_layout: settings_layout_from_proto(value.settings_layout),
-        hero_height: value.hero_height,
-        home_sections: value
-            .home_sections
-            .iter()
-            .map(home_section_from_proto)
-            .collect(),
-        listen_now_style: listen_now_style_from_proto(value.listen_now_style),
-        auto_fetch_covers: value.auto_fetch_covers,
-        cover_fetch_strategy: fetch_strategy_from_proto(value.cover_fetch_strategy),
-        radio_registries: value
-            .radio_registries
-            .iter()
-            .map(registry_entry_from_proto)
-            .collect(),
-        pinned_stations: value.pinned_stations.clone(),
-        prefer_local_lyrics: value.prefer_local_lyrics,
-        enable_musixmatch_lyrics: value.enable_musixmatch_lyrics,
-        lyrics_offset_ms: value.lyrics_offset_ms,
-        lyrics_offset_auto: value.lyrics_offset_auto,
-        lyrics_depth_blur: value.lyrics_depth_blur,
-        lyrics_depth_blur_strength: value.lyrics_depth_blur_strength.min(u32::from(u8::MAX)) as u8,
-        ..Default::default()
+pub fn config_from_proto(value: &Config) -> config::Settings {
+    config::Settings {
+        playback: config::Playback {
+            volume_scroll_step: value.volume_scroll_step,
+            crossfade_seconds: value.crossfade_seconds.min(u32::from(u8::MAX)) as u8,
+            back_behavior: back_behavior_from_proto(value.back_behavior),
+            channel_mode: channel_mode_from_proto(value.channel_mode),
+            equalizer: equalizer_from_proto(value.equalizer.as_ref()),
+            replay_gain: replay_gain_from_proto(value.replay_gain.as_ref()),
+            device_change_behavior: device_change_behavior_from_proto(value.device_change_behavior),
+            sample_rate_mode: sample_rate_mode_from_proto(value.sample_rate_mode),
+        },
+        ui: config::Ui {
+            theme: value.theme.clone(),
+            live_theme_path: value.live_theme_path.clone(),
+            custom_themes: value
+                .custom_themes
+                .iter()
+                .map(|(k, v)| (k.clone(), custom_theme_from_proto(v)))
+                .collect(),
+            language: value.language.clone(),
+            reduce_animations: value.reduce_animations,
+            fullscreen_use_player_bar: value.fullscreen_use_player_bar,
+            show_source_toggle: value.show_source_toggle,
+            show_row_images: value.show_row_images,
+            titlebar_mode: titlebar_mode_from_proto(value.titlebar_mode),
+            player_bar_position: player_bar_position_from_proto(value.player_bar_position),
+            ui_style: ui_style_from_proto(value.ui_style),
+            settings_layout: settings_layout_from_proto(value.settings_layout),
+            custom_font_path: value.custom_font_path.clone(),
+        },
+        background: config::Background {
+            cover_art_background: value.cover_art_background,
+            cover_art_darkening: value.cover_art_darkening.min(u32::from(u8::MAX)) as u8,
+            cover_art_blur: value.cover_art_blur.min(u32::from(u8::MAX)) as u8,
+            custom_background_path: value.custom_background_path.clone(),
+        },
+        lyrics: config::Lyrics {
+            prefer_local_lyrics: value.prefer_local_lyrics,
+            enable_musixmatch_lyrics: value.enable_musixmatch_lyrics,
+            lyrics_offset_ms: value.lyrics_offset_ms,
+            lyrics_offset_auto: value.lyrics_offset_auto,
+            lyrics_depth_blur: value.lyrics_depth_blur,
+            lyrics_depth_blur_strength: value.lyrics_depth_blur_strength.min(u32::from(u8::MAX))
+                as u8,
+        },
+        library: config::Library {
+            local_sources: value
+                .folder_sources
+                .iter()
+                .map(saved_folder_source_from_proto)
+                .collect(),
+            auto_fetch_covers: value.auto_fetch_covers,
+            cover_fetch_strategy: fetch_strategy_from_proto(value.cover_fetch_strategy),
+            offline_quality: offline_quality_from_proto(value.offline_quality),
+            sync_interval_minutes: value
+                .sync_interval_minutes
+                .unwrap_or(config::DEFAULT_SYNC_INTERVAL_MINUTES),
+        },
+        integrations: config::Integrations {
+            discord_presence: value.discord_presence,
+            discord_presence_source: value.discord_presence_source,
+            radio_registries: value
+                .radio_registries
+                .iter()
+                .map(registry_entry_from_proto)
+                .collect(),
+        },
+        downloads: config::Downloads {
+            downloader_output_dir: value.downloader_output_dir.clone(),
+            downloader_options: downloader_options_from_proto(value.downloader_options.as_ref()),
+        },
+        spotify: config::Spotify {
+            spotify_browser: value.spotify_browser.clone(),
+            spotify_prefer_active_device: value.spotify_prefer_active_device,
+        },
+        system: config::System {
+            tracing_enabled: value.tracing_enabled,
+            auto_check_updates: value.auto_check_updates,
+            minimize_to_tray: value.minimize_to_tray,
+        },
     }
 }
 
@@ -764,17 +552,27 @@ mod tests {
             config::UiStyle::Vaxry,
             config::UiStyle::Material3,
         ] {
-            let original = config::AppConfig {
-                ui_style,
-                theme: "system".into(),
-                ..Default::default()
-            };
+            let mut original = config::Settings::default();
+            original.ui.ui_style = ui_style;
+            original.ui.theme = "system".into();
             let bytes = config_to_proto(&original).encode_to_vec();
             let restored = config_from_proto(&Config::decode(bytes.as_slice()).unwrap());
-            assert_eq!(restored.ui_style, ui_style);
-            assert_eq!(restored.theme, original.theme);
+            assert_eq!(restored.ui.ui_style, ui_style);
+            assert_eq!(restored.ui.theme, original.ui.theme);
         }
         assert_eq!(ui_style_from_proto(1), config::UiStyle::Normal);
         assert_eq!(ui_style_from_proto(2), config::UiStyle::Vaxry);
+    }
+
+    /// Every setting is on the wire now, the daemon-owned ones included, so every sample edit survives the round trip.
+    #[test]
+    fn every_wire_setting_survives_the_round_trip() {
+        let mut original = config::Settings::default();
+        original.integrations.radio_registries.clear();
+        for edit in config::edit_samples() {
+            original.apply(edit);
+        }
+        let restored = config_from_proto(&config_to_proto(&original));
+        assert_eq!(restored, original);
     }
 }

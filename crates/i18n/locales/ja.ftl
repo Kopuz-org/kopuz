@@ -11,6 +11,8 @@ language = 言語
 library = ライブラリ
 playlists = プレイリスト
 album = アルバム
+release_single = シングル
+release_ep = EP
 artist = アーティスト
 home = ホーム
 search = 検索
@@ -112,6 +114,7 @@ radio_empty = 類似する曲が見つかりません
 radio_failed = ラジオを開始できませんでした
 remove_from_queue = キューから削除
 downloading = ダウンロード中…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = { $name } のその他の操作
 share_musicbrainz = 共有 (MusicBrainz)
 share_link_copied = MusicBrainzのリンクをコピーしました
@@ -127,6 +130,7 @@ add_all_to_queue = すべてをキューに追加
 add_all_to_playlist = すべてをプレイリストに追加
 select_all = すべて選択
 select_all_tracks = すべてのトラックを選択
+deselect_all_tracks = すべてのトラックの選択を解除
 remove_from_cache = キャッシュから削除
 create = 作成
 save = 保存
@@ -156,6 +160,9 @@ lyrics_not_found = 歌詞が見つかりません
 instrumental_break = 間奏
 no_previous_songs = 以前の曲はありません
 playlist_track_count = { $count } トラック
+playlist_folder_count = { $count } 件のプレイリスト
+playlists_synced_count = { $count } 件のプレイリストを同期済み
+playlists_loading_tracks = トラックを読み込み中 — プレイリスト { $done } / { $count }（残り { $remaining }）
 music_playlist_count = 音楽 • { $count } トラック
 showcase_song_count = { $count } 曲
 
@@ -215,7 +222,6 @@ time = 時間
 genre = ジャンル
 plays = 再生回数
 track_count = { $count } トラック
-track_count_singular = 1トラック
 songs = 曲
 min = 分
 
@@ -562,8 +568,13 @@ external_play_on = 再生デバイス
 external_this_app = kopuz（このアプリ）
 prefer_active_device = Playback device
 prefer_active_device_help = When another device is already playing, take it over instead of starting playback here.
-settings_managed_notice = 一部の設定はシステム構成（Nix/hjem）で管理されており、ここでは変更できません。
+settings_managed_notice = 一部の設定は、アプリが書き込めない設定ファイル（読み取り専用、または Nix/hjem で管理）で指定されているため、ここでは変更できません。
 setting_managed_by_system = システム構成で管理されています
+settings_dropin_notice = 一部の設定は追加設定ファイルで指定されており、ここでは変更できません。
+settings_env_notice = 一部の設定は環境変数 KOPUZ_CONFIG_* で指定されており、ここでは変更できません。
+setting_locked_by_file = { $path } で設定されています
+setting_locked_by_dropin = 追加設定ファイル { $path } で設定されています
+setting_locked_by_env = { $var } で設定されています
 
 settings_interface = Interface
 interface_general = General
@@ -648,7 +659,11 @@ waiting_for_browser = Waiting for your browser…
 signed_in = Signed in
 metadata_number_invalid = Enter a number, or leave it empty to clear the tag.
 metadata_batch_keep = Leave unchanged
-metadata_batch_count = Editing { $count } tracks
+metadata_batch_count =
+    { $count ->
+        [one] Editing { $count } track
+       *[other] Editing { $count } tracks
+    }
 interface_font = Interface font
 interface_font_description = The font family to draw the interface with.
 interface_font_placeholder = Theme default
@@ -728,6 +743,13 @@ view = View
 undo = Undo
 quit = Quit
 scanning_library = Scanning library…
+network_offline_banner = インターネットに接続されていません — オフラインモードに切り替えました
+network_online_banner = オンラインに戻りました — サーバーモードに切り替えました
+keep_server_mode = サーバーモードを維持
+tray_show_hide = Kopuz を表示 / 非表示
+tray_quit = Kopuz を終了
+tray_unavailable_title = トレイアイコンを利用できません
+tray_unavailable_message = System tray unavailable: appindicator library not found. Install libayatana-appindicator (Debian/Ubuntu/Arch) or libappindicator-gtk3 (Fedora). Closing the window will quit the app instead of minimizing to tray.
 reconnecting_attempt = Reconnecting… (attempt { $attempt })
 downloads_summary = { $done } downloaded, { $failed } failed
 job_scan = Library scan
@@ -794,11 +816,19 @@ discover_clear_search = Clear search
 discover_results_for = Results for "{ $query }"
 discover_no_results_hint = Try fewer words, or switch source and look again.
 discover_show_less = Show less
-discover_genre_count = { $count } genres
+discover_genre_count =
+    { $count ->
+        [one] { $count } genre
+       *[other] { $count } genres
+    }
 discover_read_failed = Couldn't load your library: { $error }
 palette_all_results = All results for "{ $query }" in Discover
 
-library_count = { $count } items
+library_count =
+    { $count ->
+        [one] { $count } item
+       *[other] { $count } items
+    }
 library_filter_placeholder = Filter the library…
 library_chip_downloaded = Downloaded
 library_chip_years = Years
@@ -821,7 +851,11 @@ library_tile_medium = Medium
 library_tile_large = Large
 library_default_view = Grids open as
 library_default_view_description = Whether albums, artists and playlists start as tiles or as rows.
-library_artist_tracks = { $count } tracks
+library_artist_tracks =
+    { $count ->
+        [one] { $count } track
+       *[other] { $count } tracks
+    }
 library_selected = { $count } selected
 library_whole_selection = Everything that matches
 library_read_failed = Could not read the library
@@ -860,7 +894,11 @@ downloader_history = URL downloads
 interface_skin = Skin
 interface_skin_description = The shape of the interface: how round things are, how tall a row sits.
 
-home_plays = { $count } plays
+home_plays =
+    { $count ->
+        [one] { $count } play
+       *[other] { $count } plays
+    }
 
 interface_ambient = Ambient light
 interface_ambient_description = Let the current cover cast its colour across the window.
@@ -887,10 +925,41 @@ clippsly_help = Create an App Password at clippsly.app, then sign in with your C
 cloud_storage_usage = Cloud storage: { $used } of { $total } used
 upload_music = Upload music
 uploading_music = Uploading { $name }…
-music_uploaded = Uploaded { $count } file(s).
+music_uploaded =
+    { $count ->
+        [one] Uploaded { $count } file.
+       *[other] Uploaded { $count } files.
+    }
 music_upload_too_large = Audio files must be no larger than 500 MiB.
 cloud_storage_loading = Loading storage usage…
 
 smb_url_placeholder = smb://nas/Music
 smb_help = Connect to an SMB 2/3 share or subfolder, then sign in with your NAS account. Domain accounts can use DOMAIN\username. Files are read without mounting the share.
 invalid_smb_url = Enter smb://host/share or smb://host/share/folder, without credentials in the URL.
+sync_interval = Sync and rescan every
+sync_interval_never = Never
+sync_interval_minutes = { $count } min
+sync_interval_hours = { $count } h
+sync_interval_days = { $count } d
+
+error_setting_locked = A managed settings file pins this setting, so it cannot be changed here.
+error_connect_not_offered = This integration does not connect that way.
+error_api_key_missing = Set the API key and secret first.
+error_sign_in_not_started = The service did not start the sign-in. Check the API key and your connection.
+error_browser_not_opened = Could not open a browser for the sign-in.
+error_sign_in_timed_out = The sign-in was not approved in time.
+error_browser_profile_gone = That browser profile is no longer there.
+error_browser_cookies_unreadable = Could not read the cookies of that browser profile.
+error_browser_profile_signed_out = That browser profile is not signed in to the service. Sign in there, or paste your token instead.
+error_browser_profile_no_token = The service did not show a token for that profile. Paste it instead.
+error_integration_unreachable = Could not reach the service. Check your connection.
+error_credential_rejected = The service does not accept that token. Paste your token instead.
+error_default_source_undeletable = The default folder source cannot be deleted.
+error_empty_source_folder = A source folder cannot be empty.
+error_code_invalid_input = Not accepted: { $detail }
+error_code_not_found = That is no longer there.
+error_code_conflict = Already in use or in progress: { $detail }
+error_code_source_auth_expired = The source did not accept the sign-in. Sign in again in Settings.
+error_code_source_unreachable = The source could not be reached. Check your connection.
+error_code_unsupported = Not supported here: { $detail }
+error_code_internal = Something went wrong: { $detail }

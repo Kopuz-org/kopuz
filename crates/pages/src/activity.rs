@@ -1,5 +1,5 @@
 use api::TrackInfo as Track;
-use config::{AppConfig, UiStyle};
+use config::{Settings, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{use_active_source, use_albums, use_listen_counts, use_tracks_window};
 use hooks::use_player_controller::PlayerController;
@@ -19,11 +19,12 @@ fn format_duration(seconds: u64) -> String {
 /// only per-source bits are the cover (file vs remote URL), the track
 /// origin icon, and the subtitle.
 #[component]
-pub fn Activity(config: Signal<AppConfig>) -> Element {
+pub fn Activity(settings: Signal<Settings>) -> Element {
     let mut ctrl = use_context::<PlayerController>();
 
     let source = use_active_source();
-    let albums_res = use_albums(source);
+    let albums_query = use_memo(|| Some(hooks::AlbumQuery::default()));
+    let albums_res = use_albums(source, albums_query);
     let counts_res = use_listen_counts(source);
     let filter = use_memo(move || {
         // The source is the daemon's; naming it here only keeps the memo
@@ -40,13 +41,14 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
         albums_res
             .read()
             .clone()
+            .and_then(Result::ok)
             .unwrap_or_default()
             .iter()
             .map(|a| (a.id.clone(), a.genre.clone()))
             .collect::<HashMap<String, String>>()
     });
 
-    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
     let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
     let saved_scroll = scroll_positions
         .peek()

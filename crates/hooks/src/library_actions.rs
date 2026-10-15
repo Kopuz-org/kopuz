@@ -12,7 +12,7 @@
 use dioxus::prelude::*;
 
 use crate::api::consume_api;
-use crate::toast::toast_error;
+use crate::toast::toast_api_error;
 
 /// Rewrite one track's tags, and its embedded cover with them.
 pub fn edit_track(patch: api::TrackMetadataPatch) {
@@ -20,7 +20,7 @@ pub fn edit_track(patch: api::TrackMetadataPatch) {
     spawn(async move {
         if let Err(error) = api.update_track_metadata(patch).await {
             tracing::warn!(%error, "saving track tags failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -35,7 +35,7 @@ pub fn delete_tracks(keys: Vec<String>, from_disk: bool) {
     spawn(async move {
         if let Err(error) = api.delete_tracks(keys, from_disk).await {
             tracing::warn!(%error, "deleting tracks failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -45,7 +45,7 @@ pub fn delete_album(id: String, from_disk: bool) {
     spawn(async move {
         if let Err(error) = api.delete_album(id, from_disk).await {
             tracing::warn!(%error, "deleting an album failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -62,7 +62,7 @@ pub fn upload_artwork(target: api::ArtworkTarget, content_type: String, bytes: V
         };
         if let Err(error) = api.upload_artwork(upload).await {
             tracing::warn!(%error, "setting artwork failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -72,7 +72,7 @@ pub fn remove_artwork(target: api::ArtworkTarget) {
     spawn(async move {
         if let Err(error) = api.remove_artwork(target).await {
             tracing::warn!(%error, "removing artwork failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -95,9 +95,7 @@ pub fn content_type_for(path: &std::path::Path) -> String {
     .to_string()
 }
 
-/// Every track key of an album, in album order, then whatever the caller
-/// wanted with them. The album's own tracks are a daemon read, so an action
-/// menu does not need the list on screen to act on it.
+/// An album's track keys in the daemon's album order (disc, track, title), handed to `then`; an action menu needs no list on screen.
 pub fn with_album_keys(album_id: String, then: impl FnOnce(Vec<String>) + 'static) {
     let api = consume_api();
     spawn(async move {
@@ -114,16 +112,10 @@ pub fn with_album_keys(album_id: String, then: impl FnOnce(Vec<String>) + 'stati
             Ok(page) => page,
             Err(error) => {
                 tracing::warn!(%error, "reading an album's tracks failed");
-                toast_error(&error.to_string());
+                toast_api_error(&error);
                 return;
             }
         };
-        let mut tracks = page.items;
-        tracks.sort_by(|left, right| {
-            left.track_number
-                .cmp(&right.track_number)
-                .then_with(|| left.title.cmp(&right.title))
-        });
-        then(tracks.into_iter().map(|track| track.key).collect());
+        then(page.items.into_iter().map(|track| track.key).collect());
     });
 }
