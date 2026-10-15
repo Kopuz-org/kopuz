@@ -120,6 +120,7 @@ pub struct VolumeMute {
     pub toggle_mute: Callback<()>,
     pub on_wheel: Callback<WheelEvent>,
     pub on_input: Callback<FormEvent>,
+    pub on_change: Callback<FormEvent>,
 }
 
 pub fn use_volume_mute(settings: Signal<Settings>, volume: Signal<f32>) -> VolumeMute {
@@ -164,12 +165,27 @@ pub fn use_volume_mute(settings: Signal<Settings>, volume: Signal<f32>) -> Volum
         }
     });
 
+    // The level a drag started from, so a drag down to zero restores that and not the last step before zero.
+    let mut drag_from = use_signal(|| None::<f32>);
     let on_input = use_callback(move |evt: FormEvent| {
         if let Ok(val) = evt.value().parse::<f32>() {
-            ctrl.set_volume(val);
-            if val > f32::EPSILON {
-                last_audible.set(val);
+            if drag_from.read().is_none() {
+                let before = if *muted.read() { 0.0 } else { *volume.read() };
+                drag_from.set(Some(before));
             }
+            ctrl.set_volume(val);
+        }
+    });
+
+    let on_change = use_callback(move |evt: FormEvent| {
+        let from = drag_from.write().take();
+        let Ok(val) = evt.value().parse::<f32>() else {
+            return;
+        };
+        if val > f32::EPSILON {
+            last_audible.set(val);
+        } else if let Some(from) = from.filter(|from| *from > f32::EPSILON) {
+            last_audible.set(from);
         }
     });
 
@@ -182,6 +198,7 @@ pub fn use_volume_mute(settings: Signal<Settings>, volume: Signal<f32>) -> Volum
         toggle_mute,
         on_wheel,
         on_input,
+        on_change,
     }
 }
 
@@ -416,6 +433,7 @@ pub fn VolumeSlider(
     let toggle_mute = vol.toggle_mute;
     let on_wheel = vol.on_wheel;
     let on_input = vol.on_input;
+    let on_change = vol.on_change;
 
     match variant {
         ControlsVariant::Fullscreen => rsx! {
@@ -449,6 +467,7 @@ pub fn VolumeSlider(
                         value: "{level}",
                         class: "slider-hit absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer",
                         oninput: move |evt| on_input.call(evt),
+                        onchange: move |evt| on_change.call(evt),
                     }
                 }
             }
@@ -478,6 +497,7 @@ pub fn VolumeSlider(
                         value: "{level}",
                         class: "slider-hit absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-10",
                         oninput: move |evt| on_input.call(evt),
+                        onchange: move |evt| on_change.call(evt),
                     }
                 }
             }
