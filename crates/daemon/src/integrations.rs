@@ -957,9 +957,9 @@ impl IntegrationService {
     /// poll loop, which is why it is not a frontend's job.
     pub async fn authenticate(&self, id: &str) -> Result<IntegrationInfo, ApiError> {
         let info = self.info(id).await?;
-        if matches!(info.connect, ConnectKind::None) {
+        if info.connect != ConnectKind::WebSignIn {
             return Err(ApiError::unsupported(
-                "this integration takes a token rather than a web sign-in",
+                "this integration does not connect with a web sign-in",
             ));
         }
         let librefm = id == LIBREFM;
@@ -1203,5 +1203,32 @@ mod tests {
             Some(true),
             "the presence setting is left alone"
         );
+    }
+
+    #[tokio::test]
+    async fn only_a_web_sign_in_integration_starts_a_web_sign_in() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let database = db::init(&dir.path().join("sign-in.db")).await.expect("db");
+        let config = Arc::new(crate::config_service::ConfigService::new(
+            database.clone(),
+            dir.path().join("settings.toml"),
+            config::Settings::default(),
+        ));
+        let credentials = CredentialStore::load(&database).await.expect("credentials");
+        let pause = PresencePause::load(&database).await.expect("pause");
+        let service = IntegrationService::new(config, credentials, pause);
+
+        for id in [LISTENBRAINZ, DISCORD] {
+            let refused = service
+                .authenticate(id)
+                .await
+                .expect_err("no web sign-in to run");
+            assert_eq!(refused.code, api::ErrorCode::Unsupported, "{id}");
+        }
+        let unknown = service
+            .authenticate("nope")
+            .await
+            .expect_err("unknown integration");
+        assert_eq!(unknown.code, api::ErrorCode::NotFound);
     }
 }
