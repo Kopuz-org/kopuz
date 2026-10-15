@@ -368,7 +368,7 @@ pub async fn folder_tracks(
     with_credits(pool, rows).await
 }
 
-/// One track per billed artist, the credit the byline names else the first, as a tile bills it; the name match folds ASCII case only.
+/// One track per billed artist, which is each track's first credit, as a tile bills it.
 pub async fn artist_sample_tracks(
     pool: &SqlitePool,
     source: &Source,
@@ -378,12 +378,8 @@ pub async fn artist_sample_tracks(
         r#"SELECT {TRACK_COLUMNS}
              FROM tracks t
              JOIN (SELECT MIN(s.rowid_pk) AS track_pk,
-                          COALESCE(
-                            (SELECT c.artist_pk FROM track_credits c
-                              WHERE c.track_pk = s.rowid_pk AND TRIM(c.name) = TRIM(s.artist) COLLATE NOCASE
-                              ORDER BY c.position LIMIT 1),
-                            (SELECT c.artist_pk FROM track_credits c
-                              WHERE c.track_pk = s.rowid_pk AND c.position = 0)) AS billed
+                          (SELECT c.artist_pk FROM track_credits c
+                            WHERE c.track_pk = s.rowid_pk ORDER BY c.position LIMIT 1) AS billed
                      FROM tracks s
                     WHERE s.source = ?1
                     GROUP BY billed) first ON first.track_pk = t.rowid_pk
