@@ -1060,12 +1060,12 @@ async fn post(url: &str, body: &Value, cookies: &str) -> Result<Value, String> {
     req.json(&body)
         .send()
         .await
-        .map_err(|e| format!("discover HTTP: {e}"))?
+        .map_err(|e| format!("discover HTTP: {}", e.without_url()))?
         .error_for_status()
-        .map_err(|e| format!("discover HTTP: {e}"))?
+        .map_err(|e| format!("discover HTTP: {}", e.without_url()))?
         .json::<Value>()
         .await
-        .map_err(|e| format!("discover JSON: {e}"))
+        .map_err(|e| format!("discover JSON: {}", e.without_url()))
 }
 
 pub(super) fn parse_initial(resp: &Value) -> DiscoverHome {

@@ -258,13 +258,11 @@ impl NextcloudClient {
     /// Paths of every audio file starred in Nextcloud itself, restricted to the
     /// configured roots so a starred file outside the library isn't favourited
     /// against a track the library doesn't hold.
-    pub(crate) async fn favorites(&self, roots: &[String]) -> Result<Vec<String>, String> {
-        let entries = self
-            .nc
-            .files()
-            .favorites("/")
-            .await
-            .map_err(|e| format!("could not read favourites: {e}"))?;
+    pub(crate) async fn favorites(
+        &self,
+        roots: &[String],
+    ) -> Result<Vec<String>, crate::source::SourceError> {
+        let entries = self.nc.files().favorites("/").await.map_err(source_error)?;
 
         Ok(entries
             .into_iter()
@@ -274,12 +272,16 @@ impl NextcloudClient {
             .collect())
     }
 
-    pub(crate) async fn set_favorite(&self, remote_path: &str, on: bool) -> Result<(), String> {
+    pub(crate) async fn set_favorite(
+        &self,
+        remote_path: &str,
+        on: bool,
+    ) -> Result<(), crate::source::SourceError> {
         self.nc
             .files()
             .set_favorite(remote_path, on)
             .await
-            .map_err(|e| format!("could not update favourite: {e}"))
+            .map_err(source_error)
     }
 
     /// Track length in whole seconds, read from the file's header because
@@ -549,6 +551,23 @@ fn extension_for_mime(content_type: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The DAV path a request failed on names the user, and its error reaches the app.
+    #[tokio::test]
+    async fn a_failed_favorites_request_keeps_the_user_out_of_its_error() {
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let address = closed.local_addr().expect("address");
+        drop(closed);
+        let client = NextcloudClient::new(&format!("http://{address}"), "someone", "app-pw")
+            .expect("client");
+        let error = client.favorites(&[]).await.expect_err("nothing listens");
+        assert_eq!(error, crate::source::SourceError::Connectivity);
+        let error = client
+            .set_favorite("/Music/a.mp3", true)
+            .await
+            .expect_err("nothing listens");
+        assert!(!error.to_string().contains("someone"), "{error}");
+    }
 
     #[test]
     fn a_refused_credential_is_an_auth_failure() {

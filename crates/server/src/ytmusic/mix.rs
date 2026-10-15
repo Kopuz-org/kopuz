@@ -141,12 +141,12 @@ async fn post_next(body: &Value, cookies: &str) -> Result<Value, String> {
     req.json(&body)
         .send()
         .await
-        .map_err(|e| format!("next HTTP: {e}"))?
+        .map_err(|e| format!("next HTTP: {}", e.without_url()))?
         .error_for_status()
-        .map_err(|e| format!("next HTTP: {e}"))?
+        .map_err(|e| format!("next HTTP: {}", e.without_url()))?
         .json()
         .await
-        .map_err(|e| format!("next JSON: {e}"))
+        .map_err(|e| format!("next JSON: {}", e.without_url()))
 }
 
 #[tracing::instrument(name = "yt.watch_track", skip(cookies))]

@@ -73,12 +73,12 @@ async fn scrape_client_id(http: &reqwest::Client) -> Result<String, String> {
         .get(WEB_HOST)
         .send()
         .await
-        .map_err(|e| format!("SoundCloud homepage HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud homepage HTTP: {}", e.without_url()))?
         .error_for_status()
-        .map_err(|e| format!("SoundCloud homepage HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud homepage HTTP: {}", e.without_url()))?
         .text()
         .await
-        .map_err(|e| format!("SoundCloud homepage body: {e}"))?;
+        .map_err(|e| format!("SoundCloud homepage body: {}", e.without_url()))?;
 
     let mut scripts = Vec::new();
     for chunk in html.split("<script") {
@@ -175,12 +175,12 @@ async fn api_search(http: &reqwest::Client, query: &str, cid: &str) -> Result<Va
         .query(&[("q", query), ("client_id", cid), ("limit", "50")])
         .send()
         .await
-        .map_err(|e| format!("SoundCloud search HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud search HTTP: {}", e.without_url()))?
         .error_for_status()
-        .map_err(|e| format!("SoundCloud search HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud search HTTP: {}", e.without_url()))?
         .json::<Value>()
         .await
-        .map_err(|e| format!("SoundCloud search JSON: {e}"))
+        .map_err(|e| format!("SoundCloud search JSON: {}", e.without_url()))
 }
 
 /// A resolved, playable SoundCloud stream. Progressive is the keyless 128 kbps
@@ -262,12 +262,12 @@ async fn resolve_media_url(
     let resolved = req
         .send()
         .await
-        .map_err(|e| format!("SoundCloud stream resolve HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud stream resolve HTTP: {}", e.without_url()))?
         .error_for_status()
-        .map_err(|e| format!("SoundCloud stream resolve HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud stream resolve HTTP: {}", e.without_url()))?
         .json::<Value>()
         .await
-        .map_err(|e| format!("SoundCloud stream resolve JSON: {e}"))?;
+        .map_err(|e| format!("SoundCloud stream resolve JSON: {}", e.without_url()))?;
 
     resolved
         .get("url")
@@ -290,12 +290,12 @@ async fn lookup_track(
     )
     .send()
     .await
-    .map_err(|e| format!("SoundCloud lookup HTTP: {e}"))?
+    .map_err(|e| format!("SoundCloud lookup HTTP: {}", e.without_url()))?
     .error_for_status()
-    .map_err(|e| format!("SoundCloud lookup HTTP: {e}"))?
+    .map_err(|e| format!("SoundCloud lookup HTTP: {}", e.without_url()))?
     .json::<Value>()
     .await
-    .map_err(|e| format!("SoundCloud lookup JSON: {e}"))
+    .map_err(|e| format!("SoundCloud lookup JSON: {}", e.without_url()))
 }
 
 /// Attach the web-app `Authorization: OAuth <token>` header for a signed-in
@@ -437,12 +437,12 @@ async fn auth_get_json(
     apply_auth(http.get(url), token)
         .send()
         .await
-        .map_err(|e| format!("SoundCloud API HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud API HTTP: {}", e.without_url()))?
         .error_for_status()
-        .map_err(|e| format!("SoundCloud API HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud API HTTP: {}", e.without_url()))?
         .json::<Value>()
         .await
-        .map_err(|e| format!("SoundCloud API JSON: {e}"))
+        .map_err(|e| format!("SoundCloud API JSON: {}", e.without_url()))
 }
 
 /// Fetch the signed-in user's profile (`/me`).
@@ -640,9 +640,9 @@ pub(crate) async fn set_track_like(track_id: &str, like: bool, token: &str) -> R
     apply_auth(req, Some(token))
         .send()
         .await
-        .map_err(|e| format!("SoundCloud like HTTP: {e}"))?
+        .map_err(|e| format!("SoundCloud like HTTP: {}", e.without_url()))?
         .error_for_status()
-        .map_err(|e| format!("SoundCloud like HTTP: {e}"))?;
+        .map_err(|e| format!("SoundCloud like HTTP: {}", e.without_url()))?;
     Ok(())
 }
 

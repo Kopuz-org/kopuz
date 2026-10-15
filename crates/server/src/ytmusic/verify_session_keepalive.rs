@@ -32,7 +32,7 @@ pub async fn tick(cookies: &str) -> Result<Option<String>, String> {
         .header("Authorization", auth)
         .send()
         .await
-        .map_err(|e| format!("verify_session HTTP: {e}"))?;
+        .map_err(|e| format!("verify_session HTTP: {}", e.without_url()))?;
 
     if !resp.status().is_success() {
         return Err(format!("verify_session HTTP {}", resp.status()));
