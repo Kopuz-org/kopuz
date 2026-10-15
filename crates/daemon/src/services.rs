@@ -105,7 +105,7 @@ pub fn folders() -> ServiceInfo {
         icon: Icon::Class("fa-solid fa-folder-tree".into()),
         accent: "#6366f1".to_string(),
         experimental: false,
-        fields: vec![directories_field(&[])],
+        fields: vec![folder_source_field(&[])],
     }
 }
 
@@ -125,6 +125,18 @@ pub fn directories_field(paths: &[String]) -> FieldSpec {
         required: true,
         value: Some(api::schema::encode_directories(paths)),
         ..text_field(DIRECTORIES, "remote_music_folders", FieldKind::Directories)
+    }
+}
+
+/// The folders of a folder source, which live in the settings file, so a layer that pins them renders the field locked.
+pub fn folder_source_field(paths: &[String]) -> FieldSpec {
+    FieldSpec {
+        config_key: Some(
+            config::SettingKey::Library(config::LibraryKey::LocalSources)
+                .name()
+                .to_string(),
+        ),
+        ..directories_field(paths)
     }
 }
 
