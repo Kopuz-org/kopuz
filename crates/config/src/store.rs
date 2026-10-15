@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value as JsonValue;
 use toml::{Table, Value as TomlValue};
+use toml_edit::{ArrayOfTables, Document, Item, Table as EditTable, TableLike, Value as EditValue};
 
 use crate::{LibraryKey, SettingKey, Settings};
 
@@ -417,42 +418,57 @@ impl FileLayers {
             true => local_path_for(&self.path),
             false => self.path.clone(),
         };
-        let mut table = match std::fs::read_to_string(&written_path) {
-            Ok(text) => match text.parse::<Table>() {
-                Ok(table) => table,
-                // A save of every key replaces the file as saves always did; a sparse one would lose what it cannot read.
-                Err(_) if SettingKey::iter().all(|key| keys.contains(&key)) => Table::new(),
-                Err(error) => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("refusing to rewrite an unparsable settings file: {error}"),
-                    ));
-                }
-            },
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Table::new(),
+        let before = match std::fs::read_to_string(&written_path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(error) => return Err(error),
         };
-        let before = table.clone();
+        let (mut document, mut current) =
+            match (before.parse::<Document>(), before.parse::<Table>()) {
+                (Ok(document), Ok(table)) => (document, table),
+                // A save of every key replaces the file as saves always did; a sparse one would lose what it cannot read.
+                _ if SettingKey::iter().all(|key| keys.contains(&key)) => {
+                    (Document::new(), Table::new())
+                }
+                (Err(error), _) => return Err(unparsable(error)),
+                (_, Err(error)) => return Err(unparsable(error)),
+            };
         let values = Table::try_from(settings).map_err(std::io::Error::other)?;
+        // What the file resolves a key it leaves out to: the defaults, under the local file when the main one is written.
+        let mut baseline = Table::try_from(Settings::default()).map_err(std::io::Error::other)?;
+        if written_path == self.path
+            && let Some(local) = &self.local
+        {
+            merge_into(&mut baseline, local.clone());
+        }
+        let baseline = written_table(baseline);
+        let root = document.as_table_mut();
         for key in keys {
             let name = key.name();
             // A pinned key's value in `settings` is the layer's; skipping it keeps the file's own value for when the pin goes.
             if self.is_locked(name) {
                 continue;
             }
-            match values.get(name).cloned().and_then(written_value) {
-                Some(value) => table.insert(name.to_owned(), value),
-                None => table.remove(name),
-            };
+            let value = values.get(name).cloned().and_then(written_value);
+            patch_key(
+                root,
+                &current,
+                name,
+                value.as_ref(),
+                baseline.get(name),
+                false,
+            )?;
             // Left beside the new sources, the retired key would overwrite them again on load.
             if *key == SettingKey::Library(LibraryKey::LocalSources) {
-                table.remove("music_directory");
+                root.remove("music_directory");
+                current.remove("music_directory");
             }
         }
-        if table == before {
+        let text = document.to_string();
+        if text == before {
             return Ok(false);
         }
-        write_table(&written_path, &table)?;
+        write_text(&written_path, &text)?;
         Ok(true)
     }
 }
@@ -470,8 +486,108 @@ pub fn save_settings(
     FileLayers::read(settings_path).save(settings, keys)
 }
 
-fn write_table(written_path: &Path, table: &Table) -> std::io::Result<()> {
-    let text = toml::to_string_pretty(table).map_err(std::io::Error::other)?;
+fn unparsable(error: impl std::fmt::Display) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        format!("refusing to rewrite an unparsable settings file: {error}"),
+    )
+}
+
+/// Bring `key` of a table in the file to `new`, editing in place only what differs so comments, order and untouched sub-keys stay as written; a key the file leaves out stays out while `new` is what it already resolves to.
+fn patch_key(
+    table: &mut dyn TableLike,
+    current: &Table,
+    key: &str,
+    new: Option<&TomlValue>,
+    baseline: Option<&TomlValue>,
+    inline: bool,
+) -> std::io::Result<()> {
+    let Some(new) = new else {
+        table.remove(key);
+        return Ok(());
+    };
+    match (table.get_mut(key), current.get(key)) {
+        (Some(item), Some(current)) => patch_item(item, current, new, baseline, inline),
+        _ if baseline == Some(new) => Ok(()),
+        _ => {
+            table.insert(key, fresh_item(new, inline)?);
+            Ok(())
+        }
+    }
+}
+
+fn patch_item(
+    item: &mut Item,
+    current: &TomlValue,
+    new: &TomlValue,
+    baseline: Option<&TomlValue>,
+    inline: bool,
+) -> std::io::Result<()> {
+    if current == new {
+        return Ok(());
+    }
+    let item_inline = item.is_inline_table();
+    if let (Some(current), Some(new), Some(table)) =
+        (current.as_table(), new.as_table(), item.as_table_like_mut())
+    {
+        let baseline = baseline.and_then(TomlValue::as_table);
+        for gone in current.keys().filter(|key| !new.contains_key(*key)) {
+            table.remove(gone);
+        }
+        for (key, value) in new {
+            let below = baseline.and_then(|table| table.get(key));
+            patch_key(table, current, key, Some(value), below, item_inline)?;
+        }
+        return Ok(());
+    }
+    let mut fresh = fresh_item(new, inline)?;
+    if let (Some(old), Some(value)) = (item.as_value(), fresh.as_value_mut()) {
+        *value.decor_mut() = old.decor().clone();
+    }
+    *item = fresh;
+    Ok(())
+}
+
+/// A value as the file would spell it: inline inside an inline table, else tables as `[headers]` the way the file was first written.
+fn fresh_item(value: &TomlValue, inline: bool) -> std::io::Result<Item> {
+    let value = serde::Serialize::serialize(value, toml_edit::ser::ValueSerializer::new())
+        .map_err(std::io::Error::other)?;
+    Ok(match inline {
+        true => Item::Value(value),
+        false => expanded(value),
+    })
+}
+
+fn expanded(value: EditValue) -> Item {
+    match value {
+        EditValue::InlineTable(inline) => Item::Table(expanded_table(inline.into_table())),
+        EditValue::Array(array)
+            if !array.is_empty() && array.iter().all(EditValue::is_inline_table) =>
+        {
+            let mut tables = ArrayOfTables::new();
+            for value in array {
+                if let EditValue::InlineTable(inline) = value {
+                    tables.push(expanded_table(inline.into_table()));
+                }
+            }
+            Item::ArrayOfTables(tables)
+        }
+        other => Item::Value(other),
+    }
+}
+
+fn expanded_table(mut table: EditTable) -> EditTable {
+    for (_, item) in table.iter_mut() {
+        if let Item::Value(value) = std::mem::take(item) {
+            *item = expanded(value);
+        }
+    }
+    let only_tables = table.iter().all(|(_, item)| !item.is_value());
+    table.set_implicit(only_tables && !table.is_empty());
+    table
+}
+
+fn write_text(written_path: &Path, text: &str) -> std::io::Result<()> {
     // Follow a hand-made writable symlink to its target rather than replace it; an hjem link points into the store and never gets here.
     let target = std::fs::canonicalize(written_path).unwrap_or_else(|_| written_path.to_path_buf());
     if let Some(parent) = target.parent()
@@ -1132,9 +1248,40 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
 
-        assert!(save_all(&path, &Settings::default()));
+        assert!(
+            !save_all(&path, &Settings::default()),
+            "the defaults are what a missing file already reads as"
+        );
+        let mut settings = Settings::default();
+        settings.ui.theme = "nord".into();
+        assert!(save_all(&path, &settings));
+        settings.ui.theme = Settings::default().ui.theme;
+        assert!(save_all(&path, &settings));
 
         assert_eq!(reloaded(&path), Settings::default());
+    }
+
+    #[test]
+    fn a_save_edits_the_file_in_place_and_only_the_changed_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        let hand_written = "# mine, keep me\nytdlp_output_dir = \"/dl\" # trailing\ntheme = \"nord\"\n\n[replay_gain]\nmode = \"Off\"\n";
+        std::fs::write(&path, hand_written).unwrap();
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
+        let mut settings = layers.merge_and_parse(Table::new()).unwrap();
+        settings.ui.theme = "dracula".into();
+        settings.playback.replay_gain.mode = crate::ReplayGainMode::Track;
+        let keys = [
+            SettingKey::Ui(crate::UiKey::Theme),
+            SettingKey::Playback(crate::PlaybackKey::ReplayGain),
+        ];
+
+        assert!(layers.save(&settings, &keys).unwrap());
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "# mine, keep me\nytdlp_output_dir = \"/dl\" # trailing\ntheme = \"dracula\"\n\n[replay_gain]\nmode = \"Track\"\n"
+        );
     }
 
     /// Every collection/enum/nested shape at once: the default settings are mostly empty vectors and unit enums, so they would not catch a field TOML can't express.
@@ -1281,13 +1428,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
         let mut settings = Settings::default();
-        settings.playback.volume_scroll_step = 0.05;
+        settings.playback.volume_scroll_step = 0.07;
 
         save_all(&path, &settings);
 
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
-            text.contains("volume_scroll_step = 0.05\n"),
+            text.contains("volume_scroll_step = 0.07\n"),
             "f32 widening leaked into the file:\n{text}"
         );
         assert_eq!(
@@ -1458,10 +1605,10 @@ mod tests {
     fn a_save_that_changes_no_setting_leaves_the_file_as_written() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
-        let settings = Settings::default();
-        save_all(&path, &settings);
-        let hand_written = format!("# mine\n{}", std::fs::read_to_string(&path).unwrap());
-        std::fs::write(&path, &hand_written).unwrap();
+        let mut settings = Settings::default();
+        settings.ui.theme = "nord".into();
+        let hand_written = "# mine\ntheme   =   \"nord\"\n";
+        std::fs::write(&path, hand_written).unwrap();
 
         assert!(!save_all(&path, &settings), "no setting changed");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), hand_written);

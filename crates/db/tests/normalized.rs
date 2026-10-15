@@ -805,7 +805,9 @@ async fn offline_copies_and_pins_live_in_their_own_tables() {
 
     let settings_path = config::store::settings_path_for(path.parent().unwrap());
     let every_key: Vec<config::SettingKey> = config::SettingKey::iter().collect();
-    config::store::save_settings(&settings_path, &config::Settings::default(), &every_key).unwrap();
+    let mut saved = config::Settings::default();
+    saved.ui.theme = "nord".into();
+    config::store::save_settings(&settings_path, &saved, &every_key).unwrap();
 
     assert_eq!(
         db.offline_tracks()
