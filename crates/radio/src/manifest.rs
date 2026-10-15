@@ -60,7 +60,6 @@ pub enum MetadataSourceDef {
     Static(StaticSourceDef),
 }
 
-// Keep in minds that this wrote entirely for listen.moe, haven't tested with other providers that use websocket.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSocketSourceDef {
     /// URL template, e.g. "wss://listen.moe/{stream_key}/gateway_v2"
@@ -206,7 +205,7 @@ impl StationManifest {
                 self.schema_version.clone(),
             ));
         }
-        // ID check
+
         if self.id.trim().is_empty()
             || !self
                 .id
@@ -526,7 +525,7 @@ mod tests {
                 assert!(rest.stream_url_map.is_empty());
                 assert!(rest.entry_selector.is_none());
                 assert!(rest.stream_name_map.is_empty());
-                assert_eq!(rest.poll_interval_secs, 5); // default
+                assert_eq!(rest.poll_interval_secs, 5);
             }
             _ => panic!("expected Rest"),
         }
@@ -563,7 +562,6 @@ mod tests {
                 );
                 assert!(s.stream_overrides.is_empty());
 
-                // resolve falls back to top-level for unknown stream
                 let (title, artist, cover) = s.resolve("main");
                 assert_eq!(title, "Lo-Fi Beats 24/7");
                 assert_eq!(artist, "Various Artists");
@@ -617,7 +615,6 @@ mod tests {
                 assert_eq!(artist, "Jazz Ensemble");
                 assert_eq!(cover, None);
 
-                // unknown stream falls back to top-level
                 let (title, artist, _) = s.resolve("unknown");
                 assert_eq!(title, "Lo-Fi Radio");
                 assert_eq!(artist, "Various Artists");

@@ -1,6 +1,5 @@
 use dioxus::prelude::*;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Where the next menu should open, when a right-click asked for it.
 ///
@@ -28,8 +27,6 @@ pub async fn close_open_sheet() -> bool {
     .await
     .unwrap_or(false)
 }
-
-static NEXT_MENU_ID: AtomicU64 = AtomicU64::new(0);
 
 fn take_context_point() -> Option<(f64, f64)> {
     CONTEXT_POINT.lock().ok().and_then(|mut slot| slot.take())
@@ -82,7 +79,7 @@ pub struct DotsMenuProps {
     pub icon: String,
     /// Accessible name for the icon-only trigger.
     pub aria_label: String,
-    /// What the menu acts on, heading the sheet it opens as on Android.
+    /// Heading for the Android action sheet.
     #[props(default)]
     pub title: String,
     #[props(default)]
@@ -99,8 +96,6 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
     let mut trigger_element = use_signal(|| None::<MountedEvent>);
     let mut panel_geometry = use_signal(|| None::<(f64, f64, f64, f64)>);
     let is_rtl = i18n::is_rtl();
-    let root_id =
-        use_hook(|| format!("dots-menu-{}", NEXT_MENU_ID.fetch_add(1, Ordering::Relaxed)));
 
     let base_button_class = format!(
         "w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors {}",
@@ -117,25 +112,17 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
 
     rsx! {
         div {
-            id: "{root_id}",
-            // `cursor-default` because rows that own a menu are often drag
-            // handles carrying `cursor-grab`, and `cursor` inherits.
             class: if props.is_open {
                 "relative dots-menu-root cursor-default"
             } else {
                 "relative cursor-default"
             },
-            // On the root, not the panel: focus stays on the trigger when the
-            // menu opens by click, so a keydown on the panel would never fire.
             onkeydown: move |evt| {
                 if props.is_open && evt.key() == Key::Escape {
                     evt.stop_propagation();
                     props.on_close.call(());
                 }
             },
-            // A press inside the menu must never reach the row behind it: the
-            // draggable rows arm a drag on mousedown and a long-press on
-            // touchstart, and either one swallows the click on a menu entry.
             onmousedown: move |evt| evt.stop_propagation(),
             ontouchstart: move |evt| evt.stop_propagation(),
 
@@ -148,7 +135,6 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                 onmounted: move |evt| trigger_element.set(Some(evt)),
                 onclick: move |evt| {
                     evt.stop_propagation();
-                    // Anchor to the button, never to a stale right-click point.
                     clear_context_point();
                     panel_geometry.set(None);
                     if props.is_open {
@@ -161,8 +147,6 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
             }
 
             if props.is_open {
-                OutsidePress { root_id: root_id.clone(), on_close: props.on_close }
-
                 div {
                     class: if sheet { "fixed inset-0 dots-menu-backdrop bg-black/60" } else { "fixed inset-0 dots-menu-backdrop" },
                     aria_hidden: "true",
@@ -180,8 +164,6 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                     },
                     style: "{panel_style}",
                     role: "menu",
-                    // Focusable only so a pointer-opened menu can be given
-                    // focus below; it stays out of the tab order.
                     tabindex: "-1",
                     onmounted: {
                         let anchor = props.anchor.clone();
@@ -191,8 +173,6 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                             let trigger_evt = trigger_element.peek().clone();
                             let anchor = anchor.clone();
                             let placement = placement.clone();
-                            // Consumed on mount so the next open falls back to
-                            // the trigger unless another right-click sets it.
                             let pointer = take_context_point();
                             async move {
                                 if sheet {
@@ -205,10 +185,6 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                                     return;
                                 };
                                 let (left, top) = if let Some((x, y)) = position.or(pointer) {
-                                    // Opened at a point rather than from the
-                                    // trigger: the point is the corner the panel
-                                    // grows away from, mirrored in RTL so it
-                                    // still opens inwards.
                                     let left = if is_rtl { x - panel_rect.width() } else { x };
                                     (left, y)
                                 } else {
@@ -237,11 +213,6 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                                     panel_rect.height(),
                                 )));
                                 if pointer.is_some() {
-                                    // A right-click leaves focus wherever it
-                                    // was, so Escape would never reach the root
-                                    // handler. A click-opened menu keeps focus
-                                    // on the trigger, which is already inside
-                                    // the root, so it is left alone.
                                     let _ = panel_evt.set_focus(true).await;
                                 }
                             }
@@ -292,43 +263,4 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
             }
         }
     }
-}
-
-/// Closes the menu on a press outside its root. The backdrop alone cannot be
-/// relied on: an ancestor with `backdrop-filter` (the player bars) becomes the
-/// containing block for `position: fixed` in WebKitGTK, so the backdrop only
-/// covers that ancestor and presses elsewhere never reach it.
-#[component]
-fn OutsidePress(root_id: String, on_close: EventHandler<()>) -> Element {
-    use_hook(|| {
-        let script = format!(
-            r#"
-            const id = {root_id:?};
-            const stops = window.__dotsMenuOutside ??= new Map();
-            stops.get(id)?.();
-            const onDown = (evt) => {{
-                const root = document.getElementById(id);
-                if (root && root.contains(evt.target)) return;
-                stop();
-                dioxus.send(true);
-            }};
-            const stop = () => {{
-                document.removeEventListener("pointerdown", onDown, true);
-                stops.delete(id);
-            }};
-            document.addEventListener("pointerdown", onDown, true);
-            stops.set(id, stop);
-            "#
-        );
-        spawn(async move {
-            let mut listener = document::eval(&script);
-            if listener.recv::<bool>().await.is_ok() {
-                on_close.call(());
-            }
-        });
-    });
-    use_drop(move || {
-        document::eval(&format!("window.__dotsMenuOutside?.get({root_id:?})?.();"));
-    });
-    rsx! {}
 }

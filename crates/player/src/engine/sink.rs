@@ -148,10 +148,6 @@ impl CpalSink {
         let mut stream_config = supported_config.config();
         stream_config.buffer_size = match supported_config.buffer_size() {
             cpal::SupportedBufferSize::Range { min, max } => {
-                // Android: larger buffer for stability under thermal throttling and when the
-                // UI thread is busy (scroll, layout, image decode). ~46ms at 44.1kHz is the
-                // sweet spot — low enough latency for media controls, big enough that the OS
-                // scheduler doesn't drop frames.
                 #[cfg(target_os = "android")]
                 let target = 2048u32.clamp(*min, *max);
                 #[cfg(not(target_os = "android"))]
@@ -235,8 +231,6 @@ impl AudioSink for CpalSink {
         desired_sample_rate: Option<u32>,
         make_cb: DataCallbackFactory,
     ) -> Result<SinkConfig, String> {
-        // Re-acquire the default device: after a disconnect the cached handle is
-        // dead, and opens are rare enough that a fresh lookup is free insurance.
         if let Some(device) = cpal::default_host().default_output_device() {
             self.device = device;
         }
@@ -251,7 +245,7 @@ impl AudioSink for CpalSink {
         let mut data_cb = make_cb(config);
         let on_event = self.on_event.clone();
         let latency_micros = self.latency_micros.clone();
-        // A stale device's latency must not carry into a new stream.
+
         self.latency_micros
             .store(0, std::sync::atomic::Ordering::Relaxed);
         let stream = self
@@ -261,7 +255,6 @@ impl AudioSink for CpalSink {
                 move |data: &mut [f32], info: &cpal::OutputCallbackInfo| {
                     let stamps = info.timestamp();
                     if let Some(ahead) = stamps.playback.checked_duration_since(stamps.callback) {
-                        // Smoothed: the per-callback reading jitters by a few ms.
                         let sample = ahead.as_micros() as u64;
                         let prior = latency_micros.load(std::sync::atomic::Ordering::Relaxed);
                         let next = if prior == 0 {
@@ -275,25 +268,18 @@ impl AudioSink for CpalSink {
                 },
                 move |err: cpal::Error| {
                     let event = match err.kind() {
-                        // Recovery will land on whatever device is default now;
-                        // the user's device-change behavior applies.
                         cpal::ErrorKind::DeviceNotAvailable => SinkEvent::DeviceLost,
-                        // An xrun is a scheduling hiccup the backend recovers
-                        // in place (ALSA re-prepares and continues); a rebuild
-                        // would only add a bigger glitch plus a reseek. If the
-                        // in-place recovery fails, cpal reports that failure as
-                        // a separate error, which the arms below handle.
+
                         cpal::ErrorKind::Xrun => {
                             tracing::warn!("audio buffer underrun (recovered in place)");
                             return;
                         }
-                        // The backend rerouted the stream itself; it stays
-                        // active and needs no rebuild.
+
                         cpal::ErrorKind::DeviceChanged => {
                             tracing::info!("audio stream rerouted by the backend");
                             return;
                         }
-                        // Same device, but the stream must be rebuilt.
+
                         _ => SinkEvent::StreamStalled,
                     };
                     tracing::error!(error = %err, "cpal stream error");

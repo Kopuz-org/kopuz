@@ -98,7 +98,7 @@ impl TrackId {
         match self {
             TrackId::Local(p) => p.to_string_lossy().into_owned(),
             TrackId::Server { service, item_id } => {
-                format!("{}:{}", service_prefix(*service), item_id)
+                format!("{}:{}", service.id(), item_id)
             }
         }
     }
@@ -107,47 +107,20 @@ impl TrackId {
     /// path). Used ONLY by the migration importer; the 3rd cover segment is
     /// dropped here (the importer sets `Track.cover` separately).
     pub fn from_legacy_path(s: &str) -> Self {
-        for (prefix, svc) in [
-            ("ytmusic", config::MusicService::YtMusic),
-            ("jellyfin", config::MusicService::Jellyfin),
-            ("subsonic", config::MusicService::Subsonic),
-            ("custom", config::MusicService::Custom),
-            ("soundcloud", config::MusicService::SoundCloud),
-            ("applemusic", config::MusicService::AppleMusic),
-            ("spotify", config::MusicService::Spotify),
-            ("nextcloud", config::MusicService::Nextcloud),
-            ("clippsly", config::MusicService::Clippsly),
-            ("smb", config::MusicService::Smb),
-        ] {
-            if let Some(rest) = s.strip_prefix(prefix).and_then(|r| r.strip_prefix(':')) {
-                let item_id = if svc == config::MusicService::Smb {
-                    rest
-                } else {
-                    rest.split(':').next().unwrap_or("")
-                }
-                .to_string();
-                return TrackId::Server {
-                    service: svc,
-                    item_id,
-                };
-            }
+        if let Some((prefix, rest)) = s.split_once(':')
+            && let Some(service) = MusicService::from_id(prefix)
+        {
+            let item_id = if service == MusicService::Smb {
+                rest
+            } else {
+                rest.split(':').next().unwrap_or_default()
+            };
+            return Self::Server {
+                service,
+                item_id: item_id.to_string(),
+            };
         }
         TrackId::Local(PathBuf::from(s))
-    }
-}
-
-fn service_prefix(s: config::MusicService) -> &'static str {
-    match s {
-        config::MusicService::YtMusic => "ytmusic",
-        config::MusicService::Jellyfin => "jellyfin",
-        config::MusicService::Subsonic => "subsonic",
-        config::MusicService::Custom => "custom",
-        config::MusicService::SoundCloud => "soundcloud",
-        config::MusicService::AppleMusic => "applemusic",
-        config::MusicService::Spotify => "spotify",
-        config::MusicService::Nextcloud => "nextcloud",
-        config::MusicService::Clippsly => "clippsly",
-        config::MusicService::Smb => "smb",
     }
 }
 
@@ -255,11 +228,6 @@ impl CoverRef {
             "custom" if !item_id.is_empty() => {
                 Self::remote_item(MusicService::Custom, item_id, value)
             }
-            // YT Music, SoundCloud and Apple Music refs only carry
-            // self-contained artwork — a URL, or an Apple artwork template.
-            // Their item identity is irrelevant to cover resolution.
-            // Nextcloud too: an img tag won't send the Basic auth its previews
-            // need, so the sync caches art to disk and the ref carries a path.
             "ytmusic" | "soundcloud" | "applemusic" | "nextcloud" | "clippsly" | "smb" => {
                 value.map_or(Self::None, Self::parse)
             }
@@ -273,12 +241,7 @@ impl CoverRef {
             if value == Self::NO_COVER {
                 return Self::None;
             }
-            // The value may already describe a cover on its own: an embedded
-            // URL, or — when an album's whole ref is projected onto a track — a
-            // ref in its own right. Either wins over reading it as *this*
-            // item's key, which is the misread this type exists to prevent. A
-            // real image tag carries no service prefix and no URL scheme, so it
-            // parses to `None` and falls through to the arms below.
+
             match Self::parse(value) {
                 Self::None | Self::Local(_) => {}
                 typed => return typed,
@@ -313,7 +276,7 @@ impl CoverRef {
     /// the item id can hold one itself (a remote path): the third segment would
     /// otherwise start mid-id and resolve to nothing.
     pub fn stored_item_ref(service: MusicService, item_id: &str, cover: Option<&str>) -> String {
-        let prefix = service_prefix(service);
+        let prefix = service.id();
         match cover {
             Some(value) => format!("{prefix}:{item_id}:{value}"),
             None => format!("{prefix}:{item_id}"),
@@ -340,8 +303,6 @@ impl CoverRef {
             MusicService::Subsonic | MusicService::Custom
                 if track.cover.as_deref() == Some(Self::NO_COVER) =>
             {
-                // The sync found no cover key for this song. Its own art is
-                // still worth asking for — but only over a signed request.
                 Self::SubsonicItem {
                     item_id: item_id.into_owned(),
                     signed: true,
@@ -374,10 +335,7 @@ impl CoverRef {
         if let Some(url) = stored.strip_prefix("directurl:") {
             return (!url.is_empty()).then(|| url.to_string());
         }
-        // `artwork://` is the app's own scheme for a cover the daemon
-        // resolves. It is as self-contained as an http URL, and saying so
-        // here is what keeps a daemon-sourced row from being misread as a
-        // service-specific image tag.
+
         if stored.starts_with("http://")
             || stored.starts_with("https://")
             || stored.starts_with("artwork://")
@@ -651,8 +609,6 @@ mod tests {
             }
         );
 
-        // A bare album ref (the sync's form when the album has no Primary tag)
-        // still names the album, not the song with no art of its own.
         let bare = track(MusicService::Jellyfin, "track-1", None, "jellyfin:album-1");
         assert_eq!(
             CoverRef::for_track(&bare),
@@ -662,7 +618,6 @@ mod tests {
             }
         );
 
-        // No album ref at all → the song's own item.
         let orphan = track(MusicService::Jellyfin, "track-1", None, "");
         assert_eq!(
             CoverRef::for_track(&orphan),
@@ -689,8 +644,6 @@ mod tests {
             }
         );
 
-        // A real Jellyfin image tag carries no service prefix, so it stays the
-        // track's own tag.
         assert_eq!(
             CoverRef::remote_item(MusicService::Jellyfin, "track-1", Some("d41d8cd98f00b204")),
             CoverRef::JellyfinItem {
@@ -715,7 +668,6 @@ mod tests {
             }
         );
 
-        // Absent (rather than sentinel) → the plain token-authenticated lookup.
         assert_eq!(
             CoverRef::for_track(&track(MusicService::Custom, "song-1", None, "")),
             CoverRef::SubsonicItem {
@@ -798,8 +750,6 @@ mod tests {
             );
         }
 
-        // An id with no artwork has nothing to resolve to, but must not be
-        // mistaken for a cover value.
         assert_eq!(CoverRef::parse("applemusic:1234567890"), CoverRef::None);
     }
 }
@@ -869,13 +819,3 @@ pub struct PlaylistStore {
     pub playlists: Vec<Playlist>,
     pub folders: Vec<PlaylistFolder>,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct FavoritesStore {
-    #[serde(default)]
-    pub local_favorites: Vec<PathBuf>,
-    #[serde(default)]
-    pub jellyfin_favorites: Vec<String>,
-}
-
-impl FavoritesStore {}

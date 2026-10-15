@@ -1,14 +1,14 @@
-//! The shape of a track key: which source it came from, what it names
-//! there, and what a stream ref resolves to once a source hands one back.
-//! Daemon-side -- a frontend passes a key around as an opaque string.
+//! Playback classification from domain identities and resolved stream markers.
+
+use std::path::Path;
+
+use reader::TrackId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaybackItemRef<'a> {
-    Local(&'a str),
+    Local(&'a Path),
     Server {
-        service: &'a str,
         item_id: &'a str,
-        extra: Option<&'a str>,
     },
     Radio {
         station_id: &'a str,
@@ -17,26 +17,20 @@ pub enum PlaybackItemRef<'a> {
 }
 
 impl<'a> PlaybackItemRef<'a> {
-    pub fn parse(value: &'a str) -> Self {
-        let mut parts = value.split(':');
-        let scheme = parts.next().unwrap_or_default();
-        match scheme {
-            "smb" => Self::Server {
-                service: scheme,
-                item_id: value.strip_prefix("smb:").unwrap_or_default(),
-                extra: None,
+    pub fn from_id(id: &'a TrackId) -> Self {
+        match id {
+            TrackId::Server { item_id, .. } => Self::Server { item_id },
+            TrackId::Local(path) => match path
+                .to_str()
+                .and_then(|value| value.strip_prefix("radio:"))
+                .and_then(|value| value.split_once(':'))
+            {
+                Some((station_id, stream_id)) => Self::Radio {
+                    station_id,
+                    stream_id,
+                },
+                None => Self::Local(path),
             },
-            "radio" => Self::Radio {
-                station_id: parts.next().unwrap_or_default(),
-                stream_id: parts.next().unwrap_or_default(),
-            },
-            "jellyfin" | "subsonic" | "custom" | "ytmusic" | "soundcloud" | "applemusic"
-            | "spotify" | "nextcloud" | "clippsly" => Self::Server {
-                service: scheme,
-                item_id: parts.next().unwrap_or_default(),
-                extra: parts.next(),
-            },
-            _ => Self::Local(value),
         }
     }
 
@@ -59,8 +53,7 @@ impl<'a> PlaybackItemRef<'a> {
     pub fn stream_id(self) -> Option<&'a str> {
         match self {
             Self::Radio { stream_id, .. } => Some(stream_id),
-            Self::Server { extra, .. } => extra,
-            Self::Local(_) => None,
+            Self::Server { .. } | Self::Local(_) => None,
         }
     }
 }
@@ -122,7 +115,7 @@ mod tests {
     #[test]
     fn parses_radio_item_refs() {
         assert_eq!(
-            PlaybackItemRef::parse("radio:station:stream"),
+            PlaybackItemRef::from_id(&reader::TrackId::Local("radio:station:stream".into())),
             PlaybackItemRef::Radio {
                 station_id: "station",
                 stream_id: "stream",
@@ -131,14 +124,28 @@ mod tests {
     }
 
     #[test]
-    fn parses_server_item_refs() {
+    fn server_item_ids_are_opaque_for_every_service() {
+        use config::MusicService;
+        for &service in MusicService::ALL {
+            let id = reader::TrackId::Server {
+                service,
+                item_id: "folder:item:42".into(),
+            };
+            assert_eq!(
+                PlaybackItemRef::from_id(&id),
+                PlaybackItemRef::Server {
+                    item_id: "folder:item:42"
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn local_paths_are_not_reclassified_as_services() {
+        let id = reader::TrackId::Local("nextcloud:track.flac".into());
         assert_eq!(
-            PlaybackItemRef::parse("ytmusic:video_id:extra"),
-            PlaybackItemRef::Server {
-                service: "ytmusic",
-                item_id: "video_id",
-                extra: Some("extra"),
-            }
+            PlaybackItemRef::from_id(&id),
+            PlaybackItemRef::Local(std::path::Path::new("nextcloud:track.flac"))
         );
     }
 
@@ -147,11 +154,9 @@ mod tests {
         for service in config::MusicService::ALL {
             let key = format!("{}:track_id", service.id());
             assert_eq!(
-                PlaybackItemRef::parse(&key),
+                PlaybackItemRef::from_id(&reader::TrackId::from_legacy_path(&key)),
                 PlaybackItemRef::Server {
-                    service: service.id(),
                     item_id: "track_id",
-                    extra: None,
                 }
             );
         }
@@ -160,11 +165,11 @@ mod tests {
     #[test]
     fn smb_item_refs_preserve_the_complete_path() {
         assert_eq!(
-            PlaybackItemRef::parse("smb:Artist/Vol 1: Deluxe/01.flac"),
+            PlaybackItemRef::from_id(&reader::TrackId::from_legacy_path(
+                "smb:Artist/Vol 1: Deluxe/01.flac"
+            )),
             PlaybackItemRef::Server {
-                service: "smb",
                 item_id: "Artist/Vol 1: Deluxe/01.flac",
-                extra: None,
             }
         );
     }

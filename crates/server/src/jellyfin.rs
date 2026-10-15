@@ -65,17 +65,13 @@ struct LoginResponse {
     #[serde(rename = "AccessToken")]
     access_token: String,
     #[serde(rename = "User")]
-    #[allow(dead_code)]
     user: UserObj,
 }
 
 #[derive(Deserialize)]
-#[allow(dead_code)]
 struct UserObj {
     #[serde(rename = "Id")]
     id: String,
-    #[serde(rename = "Name")]
-    name: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -165,20 +161,6 @@ pub struct AlbumItem {
 #[serde(rename_all = "PascalCase")]
 pub struct AlbumsResponse {
     pub items: Vec<AlbumItem>,
-    pub total_record_count: u32,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-#[serde(rename_all = "PascalCase")]
-pub struct Genre {
-    pub name: String,
-    pub id: String,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "PascalCase")]
-pub struct GenresResponse {
-    pub items: Vec<Genre>,
     pub total_record_count: u32,
 }
 
@@ -858,7 +840,7 @@ impl JellyfinClient {
 
 #[cfg(test)]
 mod tests {
-    use super::Item;
+    use super::{Item, LoginResponse};
 
     #[test]
     fn reads_the_normalization_gains() {
@@ -876,7 +858,6 @@ mod tests {
         let info = item.replay_gain_info();
         assert_eq!(info.track_gain_db, Some(-7.5));
         assert_eq!(info.album_gain_db, Some(-5.25));
-        // Jellyfin publishes no peaks, so clip prevention stays inert here.
         assert_eq!(info.track_peak, None);
         assert_eq!(info.album_peak, None);
     }
@@ -885,6 +866,26 @@ mod tests {
     fn an_item_from_an_older_server_reports_nothing() {
         let item: Item =
             serde_json::from_str(r#"{"Name": "T", "Id": "1", "Type": "Audio"}"#).unwrap();
-        assert!(item.replay_gain_info().is_empty());
+        assert_eq!(item.replay_gain_info(), config::ReplayGainInfo::default());
+    }
+
+    #[test]
+    fn login_response_requires_credentials_but_not_display_name() {
+        let response: LoginResponse = serde_json::from_str(
+            r#"{"AccessToken":"token","User":{"Id":"user-id","Name":"Listener"}}"#,
+        )
+        .unwrap();
+        assert_eq!(response.access_token, "token");
+        assert_eq!(response.user.id, "user-id");
+        assert!(
+            serde_json::from_str::<LoginResponse>(
+                r#"{"AccessToken":"token","User":{"Id":"user-id"}}"#
+            )
+            .is_ok()
+        );
+        assert!(
+            serde_json::from_str::<LoginResponse>(r#"{"AccessToken":"token","User":{}}"#).is_err()
+        );
+        assert!(serde_json::from_str::<LoginResponse>(r#"{"User":{"Id":"user-id"}}"#).is_err());
     }
 }

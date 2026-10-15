@@ -35,7 +35,7 @@ fn NoEntryIcon() -> Element {
 pub fn DontRecommendButton(class: String) -> Element {
     let ctrl = use_context::<PlayerController>();
     let caps = hooks::sources::use_capabilities();
-    // Hooks run before the gate; one after it would change the hook count mid-life.
+
     let track = use_memo(move || ctrl.current_track_snapshot.read().clone());
     let is_favorite = hooks::use_db_queries::use_track_is_favorite(track)();
     if !caps.read().dont_recommend {
@@ -46,7 +46,7 @@ pub fn DontRecommendButton(class: String) -> Element {
     rsx! {
         button {
             class: "{class} disabled:opacity-40 disabled:cursor-not-allowed",
-            // Like and dislike are one setting on the remote, so both at once would undo the heart.
+
             disabled: is_favorite,
             title: "{label}",
             "aria-label": "{label}",

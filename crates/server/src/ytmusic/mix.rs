@@ -23,10 +23,6 @@ impl MixSeed<'_> {
     fn mix_playlist_id(&self) -> String {
         match self {
             Self::Video(id) => format!("RDAMVM{id}"),
-            // Playlist ids are stored bare, but the `VL`-prefixed browse form
-            // leaks in from some InnerTube responses (see `playlists.rs`) and
-            // `RDAMPL` wants the bare one. Normalizing here rather than at
-            // construction means no caller can skip it.
             Self::Playlist(id) => format!("RDAMPL{}", id.strip_prefix("VL").unwrap_or(id)),
         }
     }
@@ -121,10 +117,6 @@ async fn post_next(body: &Value, cookies: &str) -> Result<Value, String> {
     let mut req = super::innertube::http_client()
         .clone()
         .post(format!("{ORIGIN}/youtubei/v1/next?prettyPrint=false"))
-        // The same header set every other InnerTube call sends. This one was
-        // missing the User-Agent and the API format version, which is what
-        // YouTube started answering with a bare 403 -- browse and player, which
-        // send them, kept working from the same session and cookies.
         .header("User-Agent", client.user_agent)
         .header("Content-Type", "application/json")
         .header("X-Goog-Api-Format-Version", "1")
@@ -149,11 +141,6 @@ async fn post_next(body: &Value, cookies: &str) -> Result<Value, String> {
 }
 
 fn walk_queue(resp: &Value) -> MixPage {
-    // Iterate the watchNext tabs by tabRenderer presence rather than
-    // assuming the queue lives at tabs[0]. YT A/B-tests the tab order
-    // (Up next vs Lyrics vs Related) and the positional dive
-    // silently returned an empty queue whenever the queue tab wasn't
-    // first — kills 'next song' and the radio button.
     let tabs = resp
         .pointer(
             "/contents/singleColumnMusicWatchNextResultsRenderer/tabbedRenderer/watchNextTabbedResultsRenderer/tabs",
@@ -199,8 +186,6 @@ fn walk_panel(panel: &Value) -> MixPage {
                 .collect()
         })
         .unwrap_or_default();
-    // `nextRadioContinuationData` for a mix, `nextContinuationData` for a
-    // long playlist queue; the key is the only difference.
     let continuation = panel
         .get("continuations")
         .and_then(|v| v.as_array())
@@ -263,8 +248,6 @@ fn parse_queue_row(row: &Value) -> Option<Track> {
         })
         .unwrap_or_default();
 
-    // For songs (has_album): byline = [artist, album, year-or-views, likes]
-    // For videos:            byline = [artist, views, likes]
     let primary_artist = byline.first().cloned().unwrap_or_default();
     let artists = if primary_artist.is_empty() {
         Vec::new()
@@ -320,9 +303,6 @@ fn parse_queue_row(row: &Value) -> Option<Track> {
 }
 
 fn normalize_yt_thumbnail(url: &str) -> String {
-    // See discover.rs for the rationale: only rewrite when the URL
-    // already carries a `=wNNN` size suffix; otherwise the suffix
-    // glues onto mixart / query-style URLs and 404s.
     if let Some(idx) = url.rfind("=w")
         && url[idx + 2..]
             .chars()
@@ -368,8 +348,6 @@ pub async fn artist_channel_for_video(
     });
     let resp = post_next(&body, cookies).await?;
 
-    // (text, channel) pairs from the requested video's own byline — scoped by
-    // videoId so other queue entries' artists can't be picked up.
     let mut channels: Vec<(String, String)> = Vec::new();
     collect_video_byline_channels(&resp, video_id, &mut channels);
     let want = super::search::fold_artist_name(artist_name);
@@ -378,10 +356,6 @@ pub async fn artist_channel_for_video(
         .find(|(text, _)| super::search::fold_artist_name(text) == want)
         .map(|(_, id)| id.clone())
         .or_else(|| {
-            // A joined credit ("beat_shobon & CircusP") equals no single run;
-            // the run it STARTS with is the credit's primary artist. Longest
-            // prefix, so "A & B" prefers a run "A & B'" over plain "A"… never
-            // a mid-string accident.
             channels
                 .iter()
                 .filter(|(text, _)| {
@@ -398,9 +372,6 @@ pub async fn artist_channel_for_video(
             ids.all(|id| id == first).then(|| first.to_string())
         })
         .or_else(|| {
-            // Unlinked byline text (album songs credited to a joined name):
-            // the row menu's "Go to artist" entry is YT's own canonical
-            // artist for the song.
             let mut menu_artists = Vec::new();
             collect_video_menu_artists(&resp, video_id, &mut menu_artists);
             menu_artists.into_iter().next()

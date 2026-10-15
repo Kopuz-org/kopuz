@@ -4458,7 +4458,6 @@ dependencies = [
  "ctrlc",
  "dioxus",
  "directories",
- "discord-rich-presence",
  "futures-util",
  "hex",
  "http",
@@ -4486,7 +4485,6 @@ dependencies = [
  "objc2-foundation",
  "objc2-media-player",
  "percent-encoding",
- "rand 0.10.2",
  "reqwest 0.13.4",
  "rustls-platform-verifier",
  "serde",
@@ -4498,7 +4496,6 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "urlencoding",
  "uuid 1.23.5",
  "wallpaper",
  "webbrowser",
@@ -4524,13 +4521,11 @@ name = "kopuz-client"
 version = "0.21.0"
 dependencies = [
  "async-trait",
- "directories",
  "futures-util",
  "hyper-util",
  "kopuz-api",
  "kopuz-config",
  "kopuz-proto",
- "serde_json",
  "tokio",
  "tonic",
  "tower 0.5.3",
@@ -4543,7 +4538,6 @@ version = "0.21.0"
 dependencies = [
  "base64 0.22.1",
  "dioxus",
- "directories",
  "kopuz-api",
  "kopuz-config",
  "kopuz-hooks",
@@ -4551,12 +4545,10 @@ dependencies = [
  "kopuz-player",
  "kopuz-route",
  "kopuz-utils",
- "rand 0.10.2",
  "rfd",
  "serde_json",
  "tokio",
  "tracing",
- "uuid 1.23.5",
 ]
 
 [[package]]
@@ -4606,10 +4598,8 @@ dependencies = [
  "kopuz-server",
  "kopuz-utils",
  "libc",
- "percent-encoding",
  "rand 0.10.2",
  "reqwest 0.13.4",
- "serde",
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
@@ -4651,8 +4641,6 @@ dependencies = [
  "kopuz-reader",
  "reqwest 0.13.4",
  "serde",
- "serde_json",
- "tokio",
  "tracing",
 ]
 
@@ -4698,7 +4686,6 @@ dependencies = [
  "kopuz-radio",
  "kopuz-reader",
  "kopuz-utils",
- "libc",
  "rand 0.10.2",
  "tempfile",
  "tokio",
@@ -4727,7 +4714,6 @@ dependencies = [
  "kopuz-utils",
  "rand 0.10.2",
  "rfd",
- "serde",
  "serde_json",
  "tempfile",
  "tokio",
@@ -4765,12 +4751,12 @@ dependencies = [
 name = "kopuz-proto"
 version = "0.21.0"
 dependencies = [
+ "directories",
  "futures-util",
  "kopuz-api",
  "kopuz-config",
  "prost",
  "protox",
- "serde_json",
  "tokio",
  "tonic",
  "tonic-build",

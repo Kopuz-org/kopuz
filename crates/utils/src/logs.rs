@@ -76,8 +76,6 @@ pub fn rotate_session_log(dir: &Path) {
 pub fn rotate_session_log_named(dir: &Path, latest: &str, prefix: &str) {
     let latest = dir.join(latest);
     if latest.exists() {
-        // Name by the previous file's last-modified time (when that session
-        // ran) when available, falling back to now. Both sort chronologically.
         let ts = std::fs::metadata(&latest)
             .and_then(|m| m.modified())
             .map(format_time)
@@ -104,7 +102,7 @@ fn prune_old_sessions(dir: &Path, prefix: &str, keep: usize) {
     if sessions.len() <= keep {
         return;
     }
-    sessions.sort(); // timestamped names sort oldest-first
+    sessions.sort();
     for old in &sessions[..sessions.len() - keep] {
         let _ = std::fs::remove_file(old);
     }
@@ -119,17 +117,14 @@ fn read_tail(path: &Path) -> Option<String> {
     let len = f.metadata().ok()?.len();
     let start = len.saturating_sub(TAIL_BYTES);
     f.seek(SeekFrom::Start(start)).ok()?;
-    // Read bytes and lossily decode: seeking to a fixed offset can land
-    // mid-UTF-8, which would make read_to_string fail and drop the tail
-    // entirely despite the "lossy" intent.
+
     let mut bytes = Vec::new();
     f.read_to_end(&mut bytes).ok()?;
     let mut buf = String::from_utf8_lossy(&bytes).into_owned();
-    if start > 0 {
-        // Drop the (likely partial) first line.
-        if let Some(nl) = buf.find('\n') {
-            buf.drain(..=nl);
-        }
+    if start > 0
+        && let Some(nl) = buf.find('\n')
+    {
+        buf.drain(..=nl);
     }
     Some(buf)
 }
@@ -200,9 +195,6 @@ pub fn export_logs(dest: &Path) -> io::Result<()> {
     let dir =
         log_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "log dir not set"))?;
 
-    // Read sources BEFORE creating (truncating) dest — the user could pick an
-    // existing log file (even latest.log itself) as the destination, which
-    // File::create would erase before we read it.
     let latest = std::fs::read_to_string(dir.join(LATEST));
     let crash = newest_crash(&dir).map(|p| {
         let name = p
@@ -258,8 +250,7 @@ mod tests {
     #[test]
     fn read_tail_caps_at_64k_and_trims_partial_first_line() {
         let p = tmp("large");
-        // One giant line (> 64 KiB, no newline) then a complete trailing line.
-        // The 64 KiB window starts mid-giant-line, which must be dropped.
+
         let mut content = "x".repeat(70_000);
         content.push('\n');
         content.push_str("TAIL LINE");
@@ -277,9 +268,7 @@ mod tests {
     #[test]
     fn read_tail_lossy_when_offset_splits_utf8() {
         let p = tmp("utf8");
-        // 75_000 bytes of 3-byte chars: 64 KiB from the end lands mid-codepoint
-        // (75000-65536 = 9464, 9464 % 3 = 2). read_to_string would error here
-        // and drop the tail; the lossy read must still return it.
+
         std::fs::write(&p, "€".repeat(25_000).as_bytes()).unwrap();
         assert!(
             read_tail(&p).is_some(),

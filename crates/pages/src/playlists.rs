@@ -34,8 +34,7 @@ pub fn PlaylistsPage(
             return;
         }
         let name = playlist_name();
-        // A source that can't mutate playlists (a creds-less/offline server, or a
-        // read-only source) gets the friendly message instead of a raw error.
+
         if caps().playlists == api::PlaylistCapability::None {
             error.set(Some(i18n::t("error_server_not_configured").to_string()));
             return;
@@ -48,8 +47,6 @@ pub fn PlaylistsPage(
             saving.set(false);
             match result {
                 Ok(_) => {
-                    // A server create mirrors into the DB but a re-sync still
-                    // reconciles remote-side details, so the sync path re-fetches.
                     if caps().sync {
                         playlist_refresh_trigger.with_mut(|v| *v += 1);
                     }
@@ -100,8 +97,7 @@ pub fn PlaylistsPage(
                             on_close: move |_| nav_ctrl.close_playlist(),
                             is_downloading_all,
                             on_download_all: move |_| {
-                                // The playlist already holds its track refs, and
-                                // refs are what a download takes.
+
                                 let keys: Vec<String> = playlists_res
                                     .read()
                                     .clone()
@@ -149,7 +145,6 @@ pub fn PlaylistsPage(
                 }
             } else {
                 div { class: if cfg!(target_os = "android") { "flex items-center justify-end mb-2" } else if is_vaxry { "flex items-center justify-between mb-6" } else { "flex items-center justify-between mb-8" },
-                    // The app header already names the page on Android.
                     if !cfg!(target_os = "android") {
                         if is_vaxry {
                             div {
@@ -266,9 +261,7 @@ fn PlaylistsGrid(
     let downloads = hooks::downloads::use_downloads();
 
     let playlists_res = use_playlists();
-    // First track of each playlist — the cover-of-last-resort for a playlist with
-    // no explicit cover / image tag (resolved through the source cover seam).
-    // Folder-management state (mutated inside `folders_layout`'s handlers).
+
     let active_menu = use_signal(|| Option::<String>::None);
     let open_folder_id = use_signal(|| Option::<String>::None);
     let move_target_id = use_signal(|| Option::<String>::None);
@@ -277,27 +270,26 @@ fn PlaylistsGrid(
     let rename_folder_id = use_signal(|| Option::<String>::None);
     let rename_folder_name = use_signal(String::new);
 
-    // The pull runs in the daemon, single-flight, so this only has to ask.
-    // The stamp that stops an automatic re-sync lives there too, which is why
-    // no dedup key or request id is kept here any more.
     let sync_job = hooks::jobs::use_job_progress(hooks::JobKind::PlaylistSync);
     let is_syncing = use_memo(move || sync_job.read().running);
     let synced_so_far = use_memo(move || sync_job.read().current.unwrap_or(0) as usize);
+    let anonymous = hooks::sources::use_active_source_info();
 
     use_effect(move || {
         if caps().sync {
-            // Naming the trigger keeps the effect subscribed to it.
             let _ = *refresh_trigger.read();
             hooks::jobs::start(hooks::JobKind::PlaylistSync);
         }
     });
 
+    if let Some(error) = playlists_res.error() {
+        return rsx! { components::common::query_error::QueryError {
+            message: error.to_string(),
+            onretry: move |_| { let mut query = playlists_res; query.restart(); },
+        } };
+    }
     let store = playlists_res.read().clone().unwrap_or_default();
 
-    // A playlist's cover is the daemon's to resolve: it walks the explicit
-    // cover, then the server's image tag, then the first track's art. The
-    // middle one is signed with credentials that never leave the daemon, so
-    // the chain cannot live here.
     let cover_for = |playlist: &api::PlaylistInfo| -> Option<utils::CoverUrl> {
         hooks::artwork::url(playlist.artwork.as_ref(), hooks::artwork::Size::Thumb)
     };
@@ -317,7 +309,6 @@ fn PlaylistsGrid(
         });
     }
 
-    // ---- Server (flat remote list) layout ----------------------------------
     let offline = caps().downloads && *is_offline.read();
     let conf = config.read();
     let playlists: Vec<api::PlaylistInfo> = if offline {
@@ -326,12 +317,9 @@ fn PlaylistsGrid(
             .iter()
             .filter(|p| {
                 !p.track_keys.is_empty()
-                    && p.track_keys.iter().all(|tid| {
-                        conf.offline_tracks
-                            .get(tid)
-                            .map(|path| std::path::Path::new(path).exists())
-                            .unwrap_or(false)
-                    })
+                    && p.track_keys
+                        .iter()
+                        .all(|tid| downloads.read().is_stored(tid))
             })
             .cloned()
             .collect()
@@ -340,8 +328,7 @@ fn PlaylistsGrid(
     };
     drop(conf);
     let remote_catalog = caps().albums == api::AlbumPresentation::Remote;
-    // The flat remote card has no overflow menu of its own, so radio is its one
-    // entry — no kind-tagged action list needed here (unlike the folder card).
+
     let can_radio = caps().playlist_radio;
     let radio_text = components::radio_actions::radio_label();
     let radio_actions = vec![MenuAction::new(
@@ -349,9 +336,7 @@ fn PlaylistsGrid(
         components::radio_actions::RADIO_ICON,
     )];
     let mut active_menu = active_menu;
-    // A source usable without an account has nothing to show until someone
-    // signs in, which is the daemon's answer, not a service name.
-    let anonymous = hooks::sources::use_active_source_info();
+
     let anonymous = anonymous
         .read()
         .as_ref()
@@ -600,8 +585,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
         let count = playlist.track_keys.len();
         let is_menu_open = active_menu.read().as_deref() == Some(playlist.id.as_str());
         let (actions, action_kinds) = build_playlist_actions(in_folder);
-        // Resolved during render, like the track rows' radio: the handler reads
-        // context, which an event closure can't do.
+
         let start_radio = components::radio_actions::playlist_radio_handler(playlist.id.clone());
         let pid_ctx = playlist.id.clone();
         rsx! {
@@ -671,12 +655,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                             handler.call(());
                                         }
                                     }
-                                    // Deleting from inside a folder also drops the
-                                    // membership row, so the folder doesn't keep a
-                                    // dangling id.
-                                    // The daemon drops the folder membership with
-                                    // the playlist, so there is nothing to undo
-                                    // here for a playlist that sat in one.
+
                                     PlaylistCardAction::Delete => {
                                         hooks::playlist_actions::delete(pid_action.clone());
                                     }

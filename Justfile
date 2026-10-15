@@ -5,7 +5,7 @@ tailwind:
     npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css
 
 serve: tailwind
-    dx serve
+    dx serve --package kopuz
 
 build: tailwind
     dx build --package kopuz --release

@@ -110,6 +110,27 @@ fn is_google_block_page(status: reqwest::StatusCode, body: &str) -> bool {
         && body.contains("<title>Sorry...</title>")
 }
 
+fn player_request(
+    client: YouTubeClient,
+    cookies: Option<&str>,
+) -> Result<reqwest::RequestBuilder, String> {
+    let origin = if client.client_name == "WEB_REMIX" {
+        ORIGIN_YOUTUBE_MUSIC
+    } else {
+        "https://www.youtube.com"
+    };
+    let mut req = http_client()
+        .post(format!("{origin}/youtubei/v1/player?prettyPrint=false"))
+        .headers(request_headers(client, origin));
+    if client.login_supported
+        && let Some(c) = cookies
+    {
+        let auth = sapisid_hash(c, origin).ok_or_else(|| "SAPISID missing".to_string())?;
+        req = req.header("Cookie", c).header("Authorization", auth);
+    }
+    Ok(req)
+}
+
 /// Hits `/youtubei/v1/player`. For WEB_REMIX we go via music.youtube.com,
 /// everything else uses www.youtube.com.
 #[tracing::instrument(name = "yt.player_http", skip(cookies, extras), fields(client = client.client_name, video_id = %video_id))]
@@ -149,42 +170,14 @@ pub async fn player(
         });
     }
 
-    let host = if client.client_name == "WEB_REMIX" {
-        ORIGIN_YOUTUBE_MUSIC
-    } else {
-        "https://www.youtube.com"
-    };
-    let url = format!("{host}/youtubei/v1/player?prettyPrint=false");
-
-    let mut req = http_client()
-        .post(&url)
-        .header("User-Agent", client.user_agent)
-        .header("Content-Type", "application/json")
-        .header("X-Goog-Api-Format-Version", "1")
-        .header("X-YouTube-Client-Name", client.client_id)
-        .header("X-YouTube-Client-Version", client.client_version);
-    if client.client_name.starts_with("WEB") {
-        req = req
-            .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
-            .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
-    }
-    // A browser sends the visitor id as a header as well as in the context.
+    let mut req = player_request(client, cookies)?;
     if let Some(visitor) = extras.visitor_data {
         req = req.header("X-Goog-Visitor-Id", visitor);
-    }
-    if client.login_supported
-        && let Some(c) = cookies
-    {
-        let auth =
-            sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
-        req = req.header("Cookie", c).header("Authorization", auth);
     }
 
     let resp = match req.json(&body).send().await {
         Ok(resp) => resp,
         Err(error) => {
-            // On the span, so a failed call is not just a slow one with no
-            // outcome recorded next to it.
             tracing::warn!(client = client.client_name, %error, "player request failed");
             return Err(format!("player HTTP: {error}"));
         }
@@ -235,16 +228,7 @@ pub async fn post(
         .post(format!(
             "{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/{endpoint}?prettyPrint=false"
         ))
-        .header("User-Agent", client.user_agent)
-        .header("Content-Type", "application/json")
-        .header("X-Goog-Api-Format-Version", "1")
-        .header("X-YouTube-Client-Name", client.client_id)
-        .header("X-YouTube-Client-Version", client.client_version);
-    if client.client_name.starts_with("WEB") {
-        req = req
-            .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
-            .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
-    }
+        .headers(request_headers(client, ORIGIN_YOUTUBE_MUSIC));
     if client.login_supported
         && let Some(c) = cookies.filter(|c| !c.is_empty())
     {
@@ -288,13 +272,7 @@ pub async fn browse_maybe_auth(browse_id: &str, cookies: Option<&str>) -> Result
         .post(format!(
             "{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/browse?prettyPrint=false"
         ))
-        .header("User-Agent", client.user_agent)
-        .header("Content-Type", "application/json")
-        .header("X-Goog-Api-Format-Version", "1")
-        .header("X-YouTube-Client-Name", client.client_id)
-        .header("X-YouTube-Client-Version", client.client_version)
-        .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
-        .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
+        .headers(request_headers(client, ORIGIN_YOUTUBE_MUSIC));
     if let Some(c) = cookies {
         let auth =
             sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
@@ -343,13 +321,7 @@ pub async fn browse_continuation_maybe_auth(
         .post(format!(
             "{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/browse?ctoken={continuation}&continuation={continuation}&prettyPrint=false"
         ))
-        .header("User-Agent", client.user_agent)
-        .header("Content-Type", "application/json")
-        .header("X-Goog-Api-Format-Version", "1")
-        .header("X-YouTube-Client-Name", client.client_id)
-        .header("X-YouTube-Client-Version", client.client_version)
-        .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
-        .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
+        .headers(request_headers(client, ORIGIN_YOUTUBE_MUSIC));
     if let Some(c) = cookies {
         let auth =
             sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
@@ -378,12 +350,7 @@ pub async fn visitor_id(cookies: Option<&str>) -> Result<String, String> {
         .post(format!(
             "{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/visitor_id?prettyPrint=false"
         ))
-        .header("User-Agent", client.user_agent)
-        .header("Content-Type", "application/json")
-        .header("X-YouTube-Client-Name", client.client_id)
-        .header("X-YouTube-Client-Version", client.client_version)
-        .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
-        .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
+        .headers(request_headers(client, ORIGIN_YOUTUBE_MUSIC));
     if let Some(c) = cookies {
         let auth =
             sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
@@ -404,10 +371,93 @@ pub async fn visitor_id(cookies: Option<&str>) -> Result<String, String> {
     extract_visitor_data(&json).ok_or_else(|| "no visitorData in response".to_string())
 }
 
+/// Required InnerTube headers for the endpoint's origin, including anonymous requests.
+pub(super) fn request_headers(
+    client: YouTubeClient,
+    origin: &'static str,
+) -> reqwest::header::HeaderMap {
+    use reqwest::header::{HeaderMap, HeaderValue};
+    let mut headers = HeaderMap::new();
+    for (name, value) in [
+        ("user-agent", client.user_agent),
+        ("content-type", "application/json"),
+        ("x-goog-api-format-version", "1"),
+        ("x-youtube-client-name", client.client_id),
+        ("x-youtube-client-version", client.client_version),
+        ("x-origin", origin),
+        ("referer", origin),
+    ] {
+        headers.insert(name, HeaderValue::from_static(value));
+    }
+    headers
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::clients::{ANDROID_MUSIC, VISIONOS, WEB_REMIX};
     use super::*;
 
+    #[test]
+    fn player_headers_match_the_request_destination() {
+        for (client, host) in [
+            (WEB_REMIX, "music.youtube.com"),
+            (VISIONOS, "www.youtube.com"),
+            (ANDROID_MUSIC, "www.youtube.com"),
+        ] {
+            let request = player_request(client, None).unwrap().build().unwrap();
+            assert_eq!(request.method(), reqwest::Method::POST);
+            assert_eq!(request.url().host_str(), Some(host));
+            assert_eq!(request.url().path(), "/youtubei/v1/player");
+            let origin = request.url().origin().ascii_serialization();
+            assert_eq!(request.headers()["x-origin"], origin, "{client:?}");
+            let referer =
+                reqwest::Url::parse(request.headers()["referer"].to_str().unwrap()).unwrap();
+            assert_eq!(referer.origin(), request.url().origin(), "{client:?}");
+            assert_eq!(referer.path(), "/");
+            assert!(!request.headers().contains_key("cookie"));
+            assert!(!request.headers().contains_key("authorization"));
+        }
+    }
+
+    #[test]
+    fn player_credentials_are_only_sent_by_login_clients() {
+        for client in [WEB_REMIX, ANDROID_MUSIC, VISIONOS] {
+            let request = player_request(client, Some("SAPISID=test-cookie"))
+                .unwrap()
+                .build()
+                .unwrap();
+            if client.login_supported {
+                assert_eq!(request.headers()["cookie"], "SAPISID=test-cookie");
+                assert!(
+                    request.headers()["authorization"]
+                        .to_str()
+                        .unwrap()
+                        .starts_with("SAPISIDHASH ")
+                );
+            } else {
+                assert!(!request.headers().contains_key("cookie"));
+                assert!(!request.headers().contains_key("authorization"));
+            }
+        }
+    }
+
+    #[test]
+    fn every_client_sends_the_complete_endpoint_headers() {
+        for client in [
+            super::super::clients::WEB_REMIX,
+            super::super::clients::ANDROID_MUSIC,
+            super::super::clients::VISIONOS,
+        ] {
+            let headers = super::request_headers(client, ORIGIN_YOUTUBE_MUSIC);
+            assert_eq!(headers["user-agent"], client.user_agent);
+            assert_eq!(headers["x-youtube-client-name"], client.client_id);
+            assert_eq!(headers["x-youtube-client-version"], client.client_version);
+            assert_eq!(headers["x-goog-api-format-version"], "1");
+            assert_eq!(headers["x-origin"], super::ORIGIN_YOUTUBE_MUSIC);
+            assert_eq!(headers["referer"], super::ORIGIN_YOUTUBE_MUSIC);
+            assert!(!headers.contains_key("cookie"));
+        }
+    }
     const SORRY_PAGE: &str = "<html><head><meta http-equiv=\"content-type\" \
         content=\"text/html; charset=utf-8\"/><title>Sorry...</title><style> body \
         { font-family: verdana, arial, sans-serif; }</style></head><body>...";
@@ -421,12 +471,11 @@ mod tests {
             &format!("\n  {SORRY_PAGE}")
         ));
 
-        // A 403 with an API body is a real answer about the request.
         assert!(!is_google_block_page(
             forbidden,
             r#"{"error":{"code":403,"message":"The caller does not have permission"}}"#
         ));
-        // The page on any other status is not the block either.
+
         assert!(!is_google_block_page(reqwest::StatusCode::OK, SORRY_PAGE));
         assert!(!is_google_block_page(
             reqwest::StatusCode::TOO_MANY_REQUESTS,

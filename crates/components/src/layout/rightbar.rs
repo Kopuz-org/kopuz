@@ -21,8 +21,7 @@ pub fn Rightbar(
     let mut active_tab = use_signal(|| 0usize);
     let ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
-    // The words come from the daemon: several providers are tried, and some
-    // want the account's own token, which never leaves it.
+
     let track_key = use_memo(move || {
         ctrl.current_track_snapshot
             .read()

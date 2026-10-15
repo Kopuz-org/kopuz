@@ -8,8 +8,6 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Executor};
 
 fn unique_db() -> PathBuf {
-    // pid + counter, not just clock: macOS's µs clock let parallel tests
-    // collide on a nanos-only name and delete each other's live DB.
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
@@ -29,8 +27,7 @@ async fn seed(db_path: &std::path::Path) {
         .await
         .unwrap();
     let mut batch = String::new();
-    // Two local albums (rock inserted before jazz so jazz is "newer"), one
-    // server track, listen counts keyed by uid (path / "ytmusic:id").
+
     for (i, (key, album_id, title, artist, album, disc, track)) in [
         (
             "/music/rock/a1.flac",
@@ -99,6 +96,50 @@ async fn seed(db_path: &std::path::Path) {
 }
 
 #[tokio::test]
+async fn album_and_genre_filters_share_sorting_and_counts() {
+    let path = unique_db();
+    let database = db::init(&path).await.unwrap();
+    seed(&path).await;
+    let filter = TrackFilter {
+        source: Source::default(),
+        album: Some("al-rock".into()),
+        genre: Some("Rock".into()),
+        sort: TrackSort::Title,
+        ..Default::default()
+    };
+    let rows = database
+        .tracks_page(
+            &filter,
+            Page {
+                offset: 1,
+                limit: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(database.tracks_count(&filter).await.unwrap(), 2);
+    assert_eq!(rows[0].title, "Ballad");
+    let mismatched = TrackFilter {
+        genre: Some("Jazz".into()),
+        ..filter
+    };
+    assert_eq!(database.tracks_count(&mismatched).await.unwrap(), 0);
+    assert!(
+        database
+            .tracks_page(
+                &mismatched,
+                Page {
+                    offset: 0,
+                    limit: 10
+                }
+            )
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn typed_queries_smoke() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
@@ -132,7 +173,6 @@ async fn typed_queries_smoke() {
     assert_eq!(jazz.len(), 2);
     assert!(jazz.iter().all(|t| t.album == "Jazz One"));
 
-    // Prefix with an underscore in a filename must not act as a wildcard.
     let folder = db
         .folder_tracks(&Source::default(), "/music/jazz/")
         .await
@@ -183,6 +223,7 @@ async fn typed_queries_smoke() {
                 sort: TrackSort::PlayCount,
                 search: String::new(),
                 favorite: None,
+                ..Default::default()
             },
             Page {
                 offset: 0,
@@ -248,10 +289,7 @@ async fn track_cover_projects_from_album_for_local_keeps_own_for_server() {
         Some("own-ref"),
         "server track keeps its own cover ref; COALESCE doesn't pull the album's"
     );
-    // The regression guard: a server track with NO own cover must stay NULL, NOT
-    // inherit the album's `cover_path`. The album ref is service-encoded, and the
-    // cover resolver would misread it as the track's own image tag (#cover). Server
-    // rows fall back to the album via `album_id` at resolve time instead.
+
     let no_cover = srv.iter().find(|t| t.title == "SrvSongNoCover").unwrap();
     assert_eq!(
         no_cover.cover.as_deref(),
@@ -284,6 +322,7 @@ async fn track_filter_selects_favorites_in_sql() {
         sort: TrackSort::Title,
         search: String::new(),
         favorite,
+        ..Default::default()
     };
     let page = Page {
         offset: 0,
@@ -298,7 +337,6 @@ async fn track_filter_selects_favorites_in_sql() {
     keys.sort();
     assert_eq!(keys, vec!["/music/jazz/b_1.flac", "/music/rock/a1.flac"]);
 
-    // The count must agree with the page, or the scroll spacer lies.
     assert_eq!(db.tracks_count(&filter(Some(true))).await.unwrap(), 2);
 
     let others = db.tracks_page(&filter(Some(false)), page).await.unwrap();

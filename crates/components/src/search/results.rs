@@ -24,9 +24,9 @@ pub fn SearchResults(
     mut selected_track_for_playlist: Signal<Option<String>>,
     on_select_album: EventHandler<String>,
 ) -> Element {
+    let downloads = hooks::downloads::use_downloads();
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
-    let offline_tracks = config.read().offline_tracks.clone();
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
     let sort_state = use_signal(|| None);
     let sorted_tracks = showcase::sorted_tracks(&tracks, *sort_state.read());
@@ -127,9 +127,7 @@ pub fn SearchResults(
                                     && track.duration_secs() == Some(current_song_duration);
                                 let is_currently_playing: bool = matches_current_path || matches_current_metadata;
                                 let is_menu_open = active_menu_track.read().as_ref() == Some(&track.uid);
-                                let is_downloaded = offline_tracks
-                                    .get(&track.key)
-                                    .is_some_and(|path| std::path::Path::new(path).exists());
+                                let is_downloaded = downloads.read().is_stored(&track.key);
 
                                 rsx! {
                                     TrackRow {

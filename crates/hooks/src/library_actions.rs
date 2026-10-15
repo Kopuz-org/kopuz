@@ -1,13 +1,4 @@
-//! Library mutations, from anywhere in the UI.
-//!
-//! Editing a tag, deleting a track and setting a cover each used to be spelled
-//! out at the call site: take the active source, open the audio file, unlink
-//! the path, tell the source, then bump a generation counter by hand. The
-//! daemon does all of that and announces the change, so what is left here is
-//! which track and what to change.
-//!
-//! A failure toasts rather than being swallowed: the inline versions only
-//! bumped `if …is_ok()`, so a refused write looked like nothing happening.
+//! Library mutations through the daemon API, with errors shown as toasts.
 
 use dioxus::prelude::*;
 

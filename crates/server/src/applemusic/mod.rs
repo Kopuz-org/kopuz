@@ -68,7 +68,6 @@ pub fn track_from_song_data(song: &types::TrackData) -> Track {
         song.attributes.artist_name.clone()
     };
 
-    // Some endpoints answer with no relationships at all, hence the fallback.
     let credits: Vec<reader::ArtistCredit> = if song.relationships.artists.data.is_empty() {
         vec![reader::ArtistCredit::unlinked(
             song.attributes.artist_name.clone(),
@@ -155,7 +154,6 @@ pub fn track_from_library_song(song: &types::LibrarySongResource) -> Track {
         .filter(|a| !a.url.is_empty())
         .map(|a| artwork_url(&a.url, 600));
 
-    // Use catalogId (Adam ID) for playback — web playback API requires it.
     let playback_id = song
         .attributes
         .playParams
@@ -174,9 +172,6 @@ pub fn track_from_library_song(song: &types::LibrarySongResource) -> Track {
         playback_id
     );
 
-    // Genre lives on the album row, and the only thing joining a track to it is
-    // this id — so an empty one costs the track its genre everywhere, not just
-    // on the album page.
     let album_id = song
         .relationships
         .albums
@@ -201,7 +196,7 @@ pub fn track_from_library_song(song: &types::LibrarySongResource) -> Track {
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
-        // A library song relates to its catalog entry and album, never an artist.
+
         credits: vec![reader::ArtistCredit::unlinked(
             song.attributes.artistName.clone(),
         )],

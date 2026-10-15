@@ -1,4 +1,3 @@
-use config::AppConfig;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
@@ -11,16 +10,13 @@ use std::collections::HashSet;
 
 #[component]
 pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
+    let downloads = hooks::downloads::use_downloads();
     let mut ctrl = use_context::<PlayerController>();
-    let config = use_context::<Signal<AppConfig>>();
     let _nav_ctrl = use_context::<NavigationController>();
 
     let total_seconds: u64 = props.tracks.iter().filter_map(|t| t.duration_secs()).sum();
     let duration_min = total_seconds / 60;
 
-    let offline_tracks = config.read().offline_tracks.clone();
-    // Per-track cover resolver (source dispatch + album lookup live in the
-    // source layer; no partition decision here).
     let _fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
     let sort_state = use_signal(|| None);
     let indexed_tracks: Vec<_> = props
@@ -93,7 +89,6 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
         }
     }
 
-    // A phone has no room for the title beside the cover, so it stacks under it.
     let phone = cfg!(target_os = "android");
     let cover_size = if phone { "w-32 h-32" } else { "w-44 h-44" };
     let cover_cursor = if props.on_cover_click.is_some() {
@@ -280,18 +275,8 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                     || matches_current_metadata;
                                 let is_selected = props.is_selection_mode
                                     && props.selected_tracks.contains(&track.key);
-                                let path_str = track.uid.clone();
-                                let item_id_str: String = path_str
-                                    .split(':')
-                                    .nth(1)
-                                    .unwrap_or(&path_str)
-                                    .to_string();
-                                let is_downloaded = if let Some(path_str) = offline_tracks.get(&item_id_str) {
-                                    std::path::Path::new(path_str).exists()
-                                }
-                                else {
-                                    false
-                                };
+                                let item_id_str = track.key.clone();
+                                let is_downloaded = downloads.read().is_stored(&item_id_str);
                                 let is_downloading = false;
                                 let play_queue = std::sync::Arc::clone(&sorted_tracks_arc);
                                 let cover_url: Option<utils::CoverUrl> =

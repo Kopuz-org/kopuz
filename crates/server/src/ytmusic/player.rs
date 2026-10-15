@@ -21,31 +21,7 @@ use super::clients::{VISIONOS, WEB_REMIX, YouTubeClient};
 use super::decipher;
 use super::innertube::{self, PlayerExtras};
 use super::tracking::PlaybackTracking;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AudioFormat {
-    Webm,
-    M4a,
-}
-
-impl AudioFormat {
-    pub fn extension(self) -> &'static str {
-        match self {
-            AudioFormat::Webm => "webm",
-            AudioFormat::M4a => "m4a",
-        }
-    }
-
-    fn from_mime(mime: &str) -> Option<AudioFormat> {
-        if mime.contains("webm") {
-            Some(AudioFormat::Webm)
-        } else if mime.contains("mp4") {
-            Some(AudioFormat::M4a)
-        } else {
-            None
-        }
-    }
-}
+use crate::stream::AudioFormat;
 
 #[derive(Clone, Debug)]
 pub struct YtStreamInfo {

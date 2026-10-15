@@ -11,8 +11,6 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::JsEngine;
 
-// Per-run capture of the solver's `print` output (thread-local: the isolate is
-// single-threaded).
 thread_local! {
     static OUT: RefCell<String> = const { RefCell::new(String::new()) };
 }
@@ -74,8 +72,6 @@ impl Default for DenoCoreEngine {
 impl DenoCoreEngine {
     /// Spawn the isolate thread; it lives for the process and is reused across solves.
     pub fn new() -> Self {
-        // Before spawning, so it can't race the BotGuard isolate (see
-        // `ytmusic::ensure_v8_platform`).
         crate::ytmusic::ensure_v8_platform();
         let (tx, rx) = mpsc::unbounded_channel::<SolveJob>();
         std::thread::Builder::new()
@@ -126,7 +122,7 @@ fn run(mut rx: mpsc::UnboundedReceiver<SolveJob>) {
         let boot = format!("{PRELUDE}\n{}", super::solver_bootstrap());
         if let Err(e) = js.execute_script("decipher:prelude", boot) {
             tracing::error!(error = %e, "decipher: prelude failed");
-            // Drain with errors so callers don't hang.
+
             while let Ok(job) = rx.try_recv() {
                 let _ = job.reply.send(Err(format!("decipher prelude failed: {e}")));
             }
@@ -135,11 +131,7 @@ fn run(mut rx: mpsc::UnboundedReceiver<SolveJob>) {
         while let Some(job) = rx.recv().await {
             let result = solve_one(&mut js, job.program).await;
             let _ = job.reply.send(result);
-            // Each solve churns MBs of JS heap (the installed player closure is
-            // compiled from ~2.5 MB of source). V8's default old-space limit is
-            // gigabytes, so without a hint it grows for the whole session
-            // instead of collecting — a full GC here keeps the isolate flat and
-            // hands the pages back to the OS.
+
             js.v8_isolate().low_memory_notification();
         }
     });
@@ -147,7 +139,7 @@ fn run(mut rx: mpsc::UnboundedReceiver<SolveJob>) {
 
 async fn solve_one(js: &mut JsRuntime, program: String) -> Result<String, String> {
     OUT.with(|o| o.borrow_mut().clear());
-    // Solver is synchronous, but drive the event loop so stray microtasks settle.
+
     let value = js
         .execute_script("decipher:solve", program)
         .map_err(|e| e.to_string())?;

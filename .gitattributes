@@ -1,3 +1,4 @@
 # Pin to LF so sqlx's byte-checksum of each migration matches across platforms.
 crates/db/migrations/*.sql text eol=lf
+crates/db/legacy-migrations/*.sql text eol=lf
 crates/i18n/locales/**/*.ftl linguist-generated=true

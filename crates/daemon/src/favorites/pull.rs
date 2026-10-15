@@ -38,8 +38,7 @@ impl super::FavoritesService {
                 )
                 .await
                 .is_some();
-                // Dirty rows do not count as "already imported": a like made
-                // locally and never pushed must not suppress the first import.
+
                 let held = self.db.favorites(server_id).await.unwrap_or_default().len();
                 let dirty = self
                     .db
@@ -94,15 +93,15 @@ impl super::FavoritesService {
                     .fetch_favorites()
                     .await
                     .map_err(super::source_error)?;
-                // A diff in place rather than a clear and re-add, so the list
-                // never blinks empty; local dirty rows survive it.
+
                 source
                     .replace_favorites_clean(&ids)
                     .await
                     .map_err(super::source_error)?;
-                let _ = source
+                source
                     .set_meta("fav_pull", &server_id, &unix_now().to_string())
-                    .await;
+                    .await
+                    .map_err(super::source_error)?;
                 self.bump(Table::Favorites);
             }
             FavoritesSync::Paginated => self.pull_paginated(ctx, &source).await?,
@@ -115,9 +114,6 @@ impl super::FavoritesService {
         ctx: Option<&JobCtx>,
         source: &ActiveSource,
     ) -> Result<(), ApiError> {
-        // One epoch for the whole walk: every page stamps its rows with it and
-        // the closing sweep drops whatever was not re-stamped, which is how a
-        // remote unlike is noticed.
         let epoch = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|elapsed| elapsed.as_millis() as i64)
@@ -126,23 +122,18 @@ impl super::FavoritesService {
         let mut ids: Vec<String> = Vec::new();
         let mut keep_albums: Vec<String> = Vec::new();
         let mut cursor: Option<String> = None;
-        let mut completed = true;
+        let mut cursors = HashSet::new();
 
         loop {
             if ctx.is_some_and(|ctx| ctx.cancelled()) {
-                completed = false;
-                break;
+                return Ok(());
             }
-            let page = match source.fetch_favorites_page(cursor.clone()).await {
-                Ok(page) => page,
-                Err(error) => {
-                    tracing::warn!(%error, "favorites page fetch failed");
-                    completed = false;
-                    break;
-                }
-            };
+            let page = source
+                .fetch_favorites_page(cursor.clone())
+                .await
+                .map_err(super::source_error)?;
             let next = page.next.clone();
-            // YT repeats tracks across page boundaries, so the dedup is ours.
+
             let fresh: Vec<Track> = page
                 .tracks
                 .into_iter()
@@ -151,11 +142,6 @@ impl super::FavoritesService {
                     !key.is_empty() && seen.insert(key)
                 })
                 .collect();
-            // Nothing new after the dedup means the walk is exhausted; going
-            // round again would hammer the same continuation forever.
-            if fresh.is_empty() {
-                break;
-            }
             let page_refs: Vec<String> = fresh
                 .iter()
                 .map(|track| track.id.key().to_string())
@@ -166,11 +152,15 @@ impl super::FavoritesService {
             keep_albums.extend(fresh.iter().map(|track| track.album_id.clone()));
 
             for chunk in fresh.chunks(100) {
-                let _ = source.upsert_tracks(chunk).await;
+                source
+                    .upsert_tracks(chunk)
+                    .await
+                    .map_err(super::source_error)?;
             }
-            let _ = source
+            source
                 .upsert_favorites_page(&page_refs, start_rank, epoch)
-                .await;
+                .await
+                .map_err(super::source_error)?;
             if let Some(ctx) = ctx {
                 ctx.progress("importing favorites", Some(ids.len() as u64), None, None);
             }
@@ -178,20 +168,30 @@ impl super::FavoritesService {
             self.bump(Table::Favorites);
 
             match next {
-                Some(next) => cursor = Some(next),
+                Some(next) => {
+                    if !cursors.insert(next.clone()) {
+                        return Err(ApiError::internal("favorites pagination repeated a cursor"));
+                    }
+                    cursor = Some(next);
+                }
                 None => break,
             }
         }
 
-        if !completed {
+        if ctx.is_some_and(|ctx| ctx.cancelled()) {
             return Ok(());
         }
         keep_albums.sort();
         keep_albums.dedup();
-        let _ = source.prune(&ids, &keep_albums).await;
-        if source.sweep_favorites(epoch).await.is_ok() {
-            self.bump(Table::Favorites);
-        }
+        source
+            .prune(&ids, &keep_albums)
+            .await
+            .map_err(super::source_error)?;
+        source
+            .sweep_favorites(epoch)
+            .await
+            .map_err(super::source_error)?;
+        self.bump(Table::Favorites);
         self.bump(Table::Tracks);
         self.bump(Table::Albums);
         Ok(())

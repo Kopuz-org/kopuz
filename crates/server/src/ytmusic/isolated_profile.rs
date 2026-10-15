@@ -20,9 +20,6 @@ pub fn delete_profile(server_id: &str) -> std::io::Result<()> {
     cookies::delete_profile(PROFILE_PREFIX, server_id)
 }
 
-// Windows browser sign-in is now supported: cookies are decrypted natively
-// (v10 DPAPI + planted v20 app-bound key — see `crate::cookies::windows_native`),
-// so the extract callback below resolves the same as Linux/macOS.
 #[tracing::instrument(name = "yt.signin", skip(server_id, signin_timeout), fields(browser = %browser))]
 pub async fn launch_signin_and_extract(
     browser: Browser,

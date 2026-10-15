@@ -1,9 +1,4 @@
-//! What the daemon is fetching for offline playback.
-//!
-//! The overlay used to read a queue the UI process owned, down to bytes
-//! transferred per item. The download is a daemon job now, and a job reports
-//! which track it is on out of how many -- so this shows that, plus the
-//! titles, and no longer a byte-level speed the daemon does not measure.
+//! Offline download progress by track, as reported by daemon jobs.
 
 use dioxus::prelude::*;
 
@@ -21,8 +16,6 @@ pub fn DownloadOverlay() -> Element {
     let downloads = hooks::downloads::use_downloads();
     let mut collapsed = use_signal(|| false);
 
-    // The batch reports keys; the titles come from the library, so a row says
-    // what is downloading rather than an opaque id.
     let statuses = use_resource(move || {
         let api = api.clone();
         let running = downloads.read().running;

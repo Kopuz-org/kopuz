@@ -83,8 +83,7 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
         &mut ctrl.playback_error,
         state.error.as_ref().map(|error| error.message.clone()),
     );
-    // Which device an integration is playing on, so a picker can mark it and
-    // the bottombar can say playback is somewhere else.
+
     set_if_changed(
         &mut ctrl.external_device,
         state
@@ -99,8 +98,6 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
         set_if_changed(&mut ctrl.current_queue_index, index as usize);
     }
 
-    // During a crossfade the outgoing track stays on screen and drives the
-    // seek bar; otherwise the committed track does.
     let (shown, fading_secs) = match &state.fading {
         Some(fading) => (
             Some(&fading.track),
@@ -121,8 +118,7 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
                 &mut ctrl.current_song_duration,
                 now.duration_ms.map(|ms| ms / 1000).unwrap_or(u64::MAX),
             );
-            // The picture comes with the row rather than being derived from
-            // it, so a cover only the daemon can fetch still resolves.
+
             set_if_changed(&mut ctrl.current_artwork, now.artwork.clone());
             set_if_changed(&mut ctrl.current_track_snapshot, Some(now.clone()));
         }
@@ -225,8 +221,8 @@ pub(crate) fn use_session_projector(ctrl: PlayerController) {
                             _ => {}
                         }
                     }
-                    // The daemon went away: nothing more will arrive, and the
-                    // app reports that elsewhere.
+
+
                     None => break,
                 },
                 _ = tokio::time::sleep(Duration::from_millis(1000)), if ticking => {

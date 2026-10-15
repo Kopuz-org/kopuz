@@ -124,7 +124,7 @@ fn IndexRow(
         button {
             r#type: "button",
             class: "settings-index-row",
-            onclick: move |evt| on_click.call(evt),
+            onclick: on_click,
             i { class: "fa-solid {icon} settings-index-icon", aria_hidden: "true" }
             span { class: "settings-index-text",
                 span { class: "settings-index-title", "{title}" }

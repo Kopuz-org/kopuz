@@ -54,13 +54,10 @@ impl DatabaseLease {
     }
 }
 
-// std's file locking is unsupported on Android. Use the same kernel operation
-// on Linux so the ownership tests exercise the Android implementation too.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn try_lock_exclusive(file: &File) -> Result<(), std::fs::TryLockError> {
     use std::os::fd::AsRawFd;
 
-    // SAFETY: the borrowed file keeps its descriptor valid for this call.
     if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
         return Ok(());
     }

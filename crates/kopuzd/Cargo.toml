@@ -36,7 +36,6 @@ tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 directories = { workspace = true }
 futures-util = { workspace = true }
-libc = { workspace = true }
 rand = { workspace = true }
 player = { workspace = true }
 

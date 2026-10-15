@@ -1,6 +1,4 @@
-//! Config persistence round-trip (issue #347, step 4): the in-memory `AppConfig`
-//! survives save→load, creds live in the `servers` table (never the blob), and
-//! play counts live in `listen_counts`.
+//! Configuration, credentials, and listen-count persistence.
 
 use std::path::PathBuf;
 
@@ -9,8 +7,6 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, SqliteConnection};
 
 fn unique_db() -> PathBuf {
-    // pid + counter, not just clock: macOS's µs clock let parallel tests
-    // collide on a nanos-only name and delete each other's live DB.
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
@@ -96,9 +92,7 @@ async fn webview_upgrade_removes_registered_sessions_and_keeps_cookie_sessions()
 async fn webview_upgrade_after_server_split_keeps_current_credentials() {
     for browser_table_applied in [false, true] {
         let path = unique_db();
-        // A current master database has the split schema without the branch's
-        // migrations. Also cover a launch that already created browser_auth
-        // before failing at the old cleanup migration.
+
         let db = db::init(&path).await.unwrap();
         drop(db);
         let pool = sqlx::SqlitePool::connect_with(SqliteConnectOptions::new().filename(&path))
@@ -188,8 +182,6 @@ async fn config_round_trips_with_creds_in_servers_table() {
 
     db.save_config(&cfg).await.unwrap();
 
-    // Play counts are written ONLY through bump_listen_count (a per-play
-    // 1-row upsert), never by save_config — but load_config hydrates them.
     for _ in 0..7 {
         db.bump_listen_count(&Source::Server("srv-b".into()), "VID1")
             .await
@@ -212,7 +204,6 @@ async fn config_round_trips_with_creds_in_servers_table() {
     assert_eq!(loaded.listen_counts.get("ytmusic:VID1"), Some(&7));
     assert_eq!(loaded.listen_counts.get("/music/a.flac"), Some(&3));
 
-    // The settings file carries settings only: no creds, servers, counts or state.
     let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
     let written = std::fs::read_to_string(&settings_path).expect("settings file written");
     assert!(
@@ -230,7 +221,6 @@ async fn config_round_trips_with_creds_in_servers_table() {
         .unwrap();
     assert_eq!(active, "srv-b");
 
-    // Removing a server from the list drops its row (the active one is kept).
     let mut cfg2 = loaded;
     cfg2.servers.retain(|s| s.id == "srv-b");
     cfg2.server = None;
@@ -298,7 +288,6 @@ async fn a_save_writes_the_settings_file_and_a_hand_edit_wins_on_load() {
     let mut written: toml::Table = text.parse().unwrap();
     assert_eq!(written["theme"].as_str(), Some("midnight"));
 
-    // The file is where settings live, so a hand edit is what loads.
     written.insert("theme".into(), "nord".into());
     std::fs::write(&settings_path, written.to_string()).unwrap();
     let loaded = db.load_config().await.unwrap().expect("config present");
@@ -307,8 +296,6 @@ async fn a_save_writes_the_settings_file_and_a_hand_edit_wins_on_load() {
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
 
-// The allow is for cleanup only: re-enabling write on our own temp file so the
-// temp dir can be removed.
 #[allow(clippy::permissions_set_readonly_false)]
 #[tokio::test]
 async fn managed_settings_file_is_never_written_but_still_applies() {
@@ -321,7 +308,6 @@ async fn managed_settings_file_is_never_written_but_still_applies() {
 
     let db = db::init(&db_path).await.unwrap();
 
-    // Nothing saved yet: the file alone configures the app, and a state key in it is ignored.
     let loaded = db
         .load_config()
         .await
@@ -330,7 +316,6 @@ async fn managed_settings_file_is_never_written_but_still_applies() {
     assert_eq!(loaded.theme, "nord");
     assert_eq!(loaded.volume, AppConfig::default().volume);
 
-    // The immutable file is left alone; what it leaves unset goes beside it, and state to the DB.
     let mut cfg = loaded;
     cfg.theme = "dracula".into();
     cfg.crossfade_seconds = 4;
@@ -383,7 +368,6 @@ async fn layered_overrides_are_not_persisted_as_base_config() {
     let loaded = db.load_config().await.unwrap().expect("config present");
     assert_eq!(loaded.theme, "nord", "the drop-in applies");
 
-    // Change something unrelated while the override is in force.
     let mut cfg = loaded;
     cfg.volume = 0.42;
     db.save_config(&cfg).await.unwrap();
@@ -449,7 +433,6 @@ async fn hand_written_layers_apply_in_order_and_survive_bad_keys() {
     );
     assert_eq!(loaded.ui_style, config::UiStyle::default());
 
-    // Saving on top of that doesn't corrupt the hand-written file: the pinned drop-in key keeps the file's own value.
     let mut cfg = loaded;
     cfg.language = "de".into();
     db.save_config(&cfg).await.unwrap();

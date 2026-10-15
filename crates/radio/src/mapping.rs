@@ -9,7 +9,6 @@ pub fn extract_value<'a>(json: &'a Value, path: &str) -> Option<&'a Value> {
         return Some(json);
     }
 
-    // Convert dot-notation to JSON pointer notation (e.g., "foo.0.bar" -> "/foo/0/bar")
     let pointer_path = format!("/{}", path.replace('.', "/"));
     json.pointer(&pointer_path)
 }
@@ -185,7 +184,6 @@ mod tests {
 
     #[test]
     fn test_extract_artist_array_of_objects() {
-        // LISTEN.moe style
         let json = serde_json::json!({
             "song": {
                 "artists": [
@@ -199,7 +197,7 @@ mod tests {
             artist: "song.artists".into(),
             artwork_url: None,
             artwork_url_template: None,
-            artist_separator: None, // defaults to ", "
+            artist_separator: None,
             artist_array_field: Some("name".into()),
         };
         assert_eq!(extract_artist(&json, &mapping), "Artist1, Artist2");
@@ -224,8 +222,6 @@ mod tests {
         );
     }
 
-    // select_entry tests
-
     /// J1-style: API returns array for multiple channels, select by display name
     #[test]
     fn test_select_entry_stream_name() {
@@ -244,12 +240,10 @@ mod tests {
         name_map.insert("J1HITS".to_string(), "J1 HITS".to_string());
         name_map.insert("J1GOLD".to_string(), "J1 GOLD".to_string());
 
-        // Selecting HITS
         let entry = select_entry(&json, &selector, "J1HITS", &name_map).unwrap();
         assert_eq!(entry["title"].as_str().unwrap(), "Song A");
         assert_eq!(entry["artist"].as_str().unwrap(), "Artist A");
 
-        // Selecting GOLD
         let entry = select_entry(&json, &selector, "J1GOLD", &name_map).unwrap();
         assert_eq!(entry["title"].as_str().unwrap(), "Song B");
         assert_eq!(entry["artist"].as_str().unwrap(), "Artist B");
@@ -290,7 +284,6 @@ mod tests {
         };
         let empty_map = HashMap::new();
 
-        // No entry in stream_name_map, so stream_id "main" is used directly
         let entry = select_entry(&json, &selector, "main", &empty_map).unwrap();
         assert_eq!(entry["title"].as_str().unwrap(), "Fallback");
     }

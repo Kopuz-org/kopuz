@@ -156,14 +156,14 @@ impl MediaSource for YtSource {
         Ok((tracks, Vec::new()))
     }
 
-    async fn discover_home(&self) -> Result<crate::ytmusic::discover::DiscoverHome, SourceError> {
+    async fn discover_home(&self) -> Result<crate::catalog::DiscoverHome, SourceError> {
         self.client.discover_home().await.map_err(SourceError::from)
     }
 
     async fn discover_continuation(
         &self,
         token: &str,
-    ) -> Result<crate::ytmusic::discover::DiscoverHome, SourceError> {
+    ) -> Result<crate::catalog::DiscoverHome, SourceError> {
         self.client
             .discover_continuation(token)
             .await
@@ -245,7 +245,7 @@ impl MediaSource for YtSource {
     async fn fetch_artist(
         &self,
         channel_id: &str,
-    ) -> Result<crate::ytmusic::discover::YtArtist, SourceError> {
+    ) -> Result<crate::catalog::CatalogArtist, SourceError> {
         self.client
             .fetch_artist(channel_id)
             .await

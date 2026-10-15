@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::ytmusic::player::AudioFormat;
+use crate::stream::AudioFormat;
 
 /// Why a media-source operation failed, classified so the UI can react
 /// differently instead of pattern-matching opaque strings.

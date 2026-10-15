@@ -50,7 +50,6 @@ fn search_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     let home = home();
 
-    // Firefox family (GMP). Forks keep Mozilla's layout under their own dir.
     #[cfg(target_os = "linux")]
     if let Some(h) = &home {
         for dir in [
@@ -85,7 +84,6 @@ fn search_roots() -> Vec<PathBuf> {
         }
     }
 
-    // Chromium family.
     #[cfg(target_os = "linux")]
     {
         if let Some(h) = &home {
@@ -257,7 +255,6 @@ mod tests {
 
     #[test]
     fn version_key_orders_numerically_not_lexically() {
-        // The bug this guards: "4.10.999" sorts above "4.10.3050" as a string.
         let older = Path::new("/x/gmp-widevinecdm/4.10.999.0/libwidevinecdm.so");
         let newer = Path::new("/x/gmp-widevinecdm/4.10.3050.0/libwidevinecdm.so");
         assert!(version_key(newer) > version_key(older));
@@ -277,7 +274,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         let name = cdm_file_name();
 
-        // Firefox: flat under the version dir. Chromium: nested one level more.
         let ff = tmp.join("profile/gmp-widevinecdm/4.10.3050.0");
         let cr = tmp.join("WidevineCdm/4.10.2891.0/_platform_specific/linux_x64");
         std::fs::create_dir_all(&ff).unwrap();

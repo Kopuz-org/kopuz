@@ -1,19 +1,3 @@
-// Windows system integration: System Media Transport Controls (SMTC),
-// media keys, Now Playing info, and taskbar thumb buttons.
-//
-// Architecture:
-// - COM must be initialized on the thread that uses WinRT APIs. Since the
-//   Tokio thread pool does not call CoInitializeEx, setup runs on a
-//   dedicated std::thread::spawn thread.
-// - The daemon boots before the app window exists (and kopuzd never has
-//   one), so `init` binds SMTC to a hidden window owned by that dedicated
-//   thread, which then pumps messages for the life of the process so the
-//   window stays alive. Once the app has a window it calls `attach_window`
-//   and SMTC moves to it, which also gives the taskbar its thumb buttons.
-// - SMTC button events (play/pause/next/prev/seek) are forwarded to the
-//   player via an unbounded mpsc channel.
-// - CoInitializeEx + WinRT/COM FFI is documented with // SAFETY: invariants.
-
 use std::os::windows::ffi::OsStrExt;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Mutex as StdMutex, OnceLock};
@@ -108,8 +92,6 @@ pub fn poll_event() -> Option<SystemEvent> {
 }
 
 pub async fn wait_event() -> Option<SystemEvent> {
-    // Create the channel here too: the listener can start before SMTC setup
-    // has run, and must not mistake "not set up yet" for "closed".
     let _ = get_tx();
     if let Some(rx) = EVENT_RECEIVER.get() {
         let mut guard = rx.lock().await;
@@ -122,10 +104,6 @@ pub async fn wait_event() -> Option<SystemEvent> {
 /// A hidden top-level window for SMTC to bind to until the app has one.
 /// Owned by the calling thread, which must keep pumping messages.
 fn create_hidden_window() -> Option<HWND> {
-    // SAFETY:
-    // - "STATIC" is a system window class, so no registration is needed.
-    // - The window is never shown (no WS_VISIBLE), so it has no visual or
-    //   taskbar presence; the return value is checked before use.
     let hwnd = unsafe {
         CreateWindowExW(
             WINDOW_EX_STYLE::default(),
@@ -374,19 +352,9 @@ fn setup_taskbar_buttons(hwnd: HWND, playing: bool) {
     }
 }
 
-// SMTC setup
 use windows::Win32::System::WinRT::ISystemMediaTransportControlsInterop;
 
 fn create_smtc(hwnd: HWND) -> windows::core::Result<SystemMediaTransportControls> {
-    // SAFETY:
-    // - RoGetActivationFactory is a WinRT API that is safe to call
-    //   after CoInitializeEx has been initialized on this thread.
-    // - ISystemMediaTransportControlsInterop::GetForWindow is safe
-    //   with a valid HWND owned by this process.
-    // - All subsequent SMTC method calls are thread-safe COM/WinRT
-    //   operations that do not violate memory safety.
-    // - The TypedEventHandler closures capture the sender by value
-    //   and do not introduce data races.
     unsafe {
         let class_id = windows::core::HSTRING::from("Windows.Media.SystemMediaTransportControls");
         let interop: ISystemMediaTransportControlsInterop = RoGetActivationFactory(&class_id)?;
@@ -461,7 +429,6 @@ fn bind_smtc(hwnd: HWND, only_if_unbound: bool) -> bool {
                 smtc,
                 hwnd: hwnd.0 as isize,
             }) {
-                // Two enabled sessions would show up as two players.
                 let _ = old.smtc.SetIsEnabled(false);
             }
             tracing::debug!("SMTC bound to window");
@@ -475,18 +442,10 @@ fn bind_smtc(hwnd: HWND, only_if_unbound: bool) -> bool {
 }
 
 pub fn init() {
-    // The event channel has to exist before anyone waits on it.
     let _ = get_tx();
     static INIT_ONCE: OnceLock<()> = OnceLock::new();
     INIT_ONCE.get_or_init(|| {
         std::thread::spawn(|| {
-            // CoInitializeEx must be called on the thread that uses WinRT/COM.
-            // The tokio thread pool does not do this, so setup runs here.
-            // SAFETY:
-            // - CoInitializeEx initializes COM for the calling thread with
-            //   the specified concurrency model (apartment-threaded).
-            // - It is safe to call once per thread; subsequent calls return
-            //   S_FALSE or RPC_E_CHANGED_MODE, which we ignore.
             unsafe {
                 let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
             }
@@ -499,10 +458,8 @@ pub fn init() {
                 replay_now_playing();
             }
 
-            // A window dies with the thread that created it, so this thread
-            // stays and pumps its messages for the life of the process.
             let mut msg = MSG::default();
-            // SAFETY: a standard message loop over an owned MSG buffer.
+
             unsafe {
                 while GetMessageW(&mut msg, None, 0, 0).as_bool() {
                     let _ = TranslateMessage(&msg);
@@ -520,8 +477,7 @@ pub fn attach_window(hwnd: isize) {
         return;
     }
     let _ = get_tx();
-    // SAFETY: see `init`; a thread that already initialised COM (as the UI
-    // thread has) just gets S_FALSE or RPC_E_CHANGED_MODE back.
+
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
     }
@@ -552,7 +508,6 @@ fn replay_now_playing() {
     }
 }
 
-// convert seconds to a Windows TimeSpan (unit is 100-nanosecond ticks)
 #[inline]
 fn secs_to_timespan(secs: f64) -> TimeSpan {
     TimeSpan {
@@ -560,8 +515,6 @@ fn secs_to_timespan(secs: f64) -> TimeSpan {
     }
 }
 
-// helper funcs: wrap raw bytes in an in-memory stream SMTC can read
-// or fetch image bytes from either a local path or an url
 fn stream_ref_from_bytes(bytes: &[u8]) -> Option<RandomAccessStreamReference> {
     let stream = InMemoryRandomAccessStream::new().ok()?;
     let writer = DataWriter::CreateDataWriter(&stream).ok()?;
@@ -571,7 +524,7 @@ fn stream_ref_from_bytes(bytes: &[u8]) -> Option<RandomAccessStreamReference> {
         .ok()?
         .block_on(async { writer.StoreAsync().ok()?.await.ok() })?;
     writer.DetachStream().ok()?;
-    stream.Seek(0).ok()?; // rewind so SMTC reads from the start
+    stream.Seek(0).ok()?;
     RandomAccessStreamReference::CreateFromStream(&stream).ok()
 }
 
@@ -654,8 +607,6 @@ pub fn update_now_playing(
         });
     }
 
-    // init in case init() wasn't called before the first track plays; the
-    // state just stored is replayed once SMTC is up.
     init();
 
     let Some(smtc) = current_smtc() else { return };

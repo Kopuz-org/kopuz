@@ -152,7 +152,6 @@ pub fn handle_select_click(
     }
 }
 
-// stop dragging from cover url
 pub fn install_native_artwork_drag_prevention() {
     let _ = eval(
         r#"

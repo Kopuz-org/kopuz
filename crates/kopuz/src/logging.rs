@@ -38,8 +38,7 @@ use tracing_subscriber::{
 struct LogGuards {
     _file: tracing_appender::non_blocking::WorkerGuard,
     _chrome: Option<crate::chrome_trace::FlushGuard>,
-    // Dropped on shutdown, finalizing the UI-profile trace JSON and writing
-    // the ranked render report. `None` unless `KOPUZ_UI_PROFILE` is set.
+
     _ui_profile: Option<crate::ui_profile::UiProfileGuard>,
 }
 
@@ -117,9 +116,6 @@ static TRACE_RELOAD: std::sync::OnceLock<
 /// flushes them so Ctrl+C still yields a valid trace.
 #[cfg(not(target_os = "android"))]
 pub fn init(log_dir: &Path) {
-    // Register the dir for crash reports + the export button, then archive the
-    // previous session's latest.log (and prune old archives) BEFORE the
-    // appender opens a fresh one — so a restart never erases a crashing run.
     utils::logs::set_log_dir(log_dir.to_path_buf());
     utils::logs::rotate_session_log(log_dir);
 
@@ -135,15 +131,8 @@ pub fn init(log_dir: &Path) {
         .with_writer(std::io::stderr)
         .with_filter(console_filter());
 
-    // The chrome trace is controlled solely by the in-app settings toggle
-    // (read from the library, which opens after this) — the UI is the single
-    // source of truth, so there's no `KOPUZ_TRACE` env var. Verbosity and
-    // filters still come from `KOPUZ_LOG` / `RUST_LOG` / `KOPUZ_DEBUG`.
     let (chrome_layer, chrome_reload) = tracing_subscriber::reload::Layer::new(TraceSlot::None);
 
-    // Opt-in developer profiler. Its per-layer filter re-enables Dioxus's
-    // trace-level render/memo spans (suppressed everywhere else via
-    // QUIET_DEPS) for this layer only, so the other sinks stay unaffected.
     let ui_trace_path = log_dir.join("kopuz-ui-profile.json");
     let mut ui_err: Option<String> = None;
     let (ui_layer, ui_guard) = if ui_profile_enabled() {
@@ -163,8 +152,6 @@ pub fn init(log_dir: &Path) {
         (None, None)
     };
 
-    // The reload slot goes first so its layer type is `Layer<Registry>`, which
-    // is what a boxed layer can be named as.
     tracing_subscriber::registry()
         .with(chrome_layer)
         .with(file_layer)
@@ -186,11 +173,6 @@ pub fn init(log_dir: &Path) {
         _ui_profile: ui_guard,
     });
 
-    // SIGINT (Ctrl+C from a terminal `cargo run`) skips stack/global
-    // Drop, losing both the pending queue/config debounce window and the
-    // trace tail. Persist the last stashed snapshots first so their
-    // outcome lands in the log, flush guards, then exit with the
-    // conventional 130.
     let _ = ctrlc::set_handler(|| {
         crate::exit_flush::flush_stashed_blocking();
         shutdown();
@@ -238,22 +220,13 @@ pub fn enable_trace(log_dir: &Path) {
         }
     }
 
-    // tracing-chrome writes through a BufWriter that only reaches disk on
-    // flush or on a clean guard-drop. If the process is killed before the
-    // guard drops (hard exit, or a flush race against another exit path),
-    // the tail is lost mid-event and the JSON won't parse at all. Flushing
-    // on a cadence keeps the on-disk file at complete-event boundaries, so
-    // even an ungraceful exit yields a loadable trace — chrome://tracing and
-    // Perfetto tolerate a missing trailing `]`, they just can't recover a
-    // string cut in half. The clean close (with `]`) still comes from the
-    // guard drop on normal exit; this is the backstop.
     std::thread::spawn(|| {
         loop {
             std::thread::sleep(std::time::Duration::from_millis(500));
             match GUARDS.lock() {
                 Ok(g) => match g.as_ref().and_then(|guards| guards._chrome.as_ref()) {
                     Some(chrome) => chrome.flush(),
-                    // Guards were taken on shutdown — nothing left to flush.
+
                     None => break,
                 },
                 Err(_) => break,
@@ -271,11 +244,7 @@ pub fn enable_trace(log_dir: &Path) {
 #[cfg(not(target_os = "android"))]
 fn install_panic_hook() {
     use std::sync::atomic::{AtomicBool, Ordering};
-    // Only the first panic of the process writes a report. A crash usually
-    // cascades — the unwinding main thread trips in-flight worker tasks, which
-    // panic too — and without this guard each one would spray its own
-    // crash-<timestamp>.txt. The first panic is the root cause; the rest still
-    // reach the default hook (console) but don't duplicate the file.
+
     static CRASH_WRITTEN: AtomicBool = AtomicBool::new(false);
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {

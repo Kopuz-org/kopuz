@@ -29,8 +29,6 @@ pub struct PlayParams {
     pub reporting_id: Option<String>,
 }
 
-// ── Catalog types (used by search, get_song, get_album, etc.) ──────
-
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ArtistRef {
     pub id: String,
@@ -247,8 +245,6 @@ pub struct PlaylistResp {
     pub data: Vec<PlaylistData>,
 }
 
-// ── Search types ───────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct SearchResp {
     #[serde(default)]
@@ -290,32 +286,6 @@ pub struct ArtistSearchAttributes {
     #[serde(default)]
     pub genreNames: Vec<String>,
 }
-
-// ── Library types (format[resources]=map) ──────────────────────────
-
-/// A reference entry in the `data` array of a library response.
-#[derive(Debug, Clone, Deserialize)]
-pub struct LibraryRef {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub ref_type: String,
-}
-
-/// The top-level library response with `data` (references) and `resources` (nested map).
-/// Resources are keyed by type name, then by id: `resources["library-albums"]["l.xxx"]`.
-/// We use `serde_json::Value` because the outer map may contain multiple types
-/// (e.g. "artists" + "library-albums") and only one type is our target.
-#[derive(Debug, Clone, Deserialize)]
-pub struct LibraryResourceResponse {
-    #[serde(default)]
-    pub next: String,
-    #[serde(default)]
-    pub data: Vec<LibraryRef>,
-    #[serde(default)]
-    pub resources: serde_json::Value,
-}
-
-// ── Library song resource ──────────────────────────────────────────
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct LibrarySongResource {
@@ -372,8 +342,6 @@ pub struct LibraryCatalogRef {
     pub ref_type: String,
 }
 
-// ── Library album resource ─────────────────────────────────────────
-
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct LibraryAlbumResource {
     pub id: String,
@@ -410,8 +378,6 @@ pub struct LibraryAlbumRelationships {
     pub artists: RelationshipData<Vec<LibraryCatalogRef>>,
 }
 
-// ── Library artist resource ────────────────────────────────────────
-
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct LibraryArtistResource {
     pub id: String,
@@ -438,8 +404,6 @@ pub struct LibraryArtistRelationships {
     #[serde(default)]
     pub albums: RelationshipData<Vec<LibraryCatalogRef>>,
 }
-
-// ── Library playlist resource ──────────────────────────────────────
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct LibraryPlaylistResource {
@@ -488,51 +452,6 @@ pub struct LibraryPlaylistRelationships {
     #[serde(default)]
     pub catalog: RelationshipData<Vec<LibraryCatalogRef>>,
 }
-
-// ── Library playlist tracks response (also uses resources map) ─────
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct LibraryPlaylistTracksResponse {
-    #[serde(default)]
-    pub next: String,
-    #[serde(default)]
-    pub data: Vec<LibraryRef>,
-    #[serde(default)]
-    pub resources: serde_json::Value,
-}
-
-// ── Web playback types ─────────────────────────────────────────────
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct WebPlaybackResp {
-    #[serde(default)]
-    pub songList: Vec<WebPlaybackSong>,
-    #[serde(default)]
-    pub status: i32,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct WebPlaybackSong {
-    #[serde(default)]
-    #[serde(rename = "hls-playlist-url")]
-    pub hls_playlist_url: String,
-    #[serde(default)]
-    #[serde(rename = "hls-key-cert-url")]
-    pub hls_key_cert_url: String,
-    #[serde(default)]
-    pub assets: Vec<WebPlaybackAsset>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct WebPlaybackAsset {
-    #[serde(default)]
-    pub flavor: String,
-    #[serde(default)]
-    #[serde(rename = "URL")]
-    pub url: String,
-}
-
-// ── Lyrics types ──────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct SongLyricsResponse {

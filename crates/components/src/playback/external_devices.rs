@@ -134,15 +134,12 @@ pub fn ExternalDevicesPanel(
     let source = hooks::sources::use_active_source_info();
     let playing_source = device_source(&source);
 
-    // The rightbar and this panel are mutually exclusive; opening the rightbar
-    // dismisses us.
     use_effect(move || {
         if *is_rightbar_open.read() {
             is_devices_open.set(false);
         }
     });
 
-    // Refresh the device list every time the panel is opened.
     let mut devices = use_resource(move || {
         let api = api.clone();
         let open = is_devices_open();

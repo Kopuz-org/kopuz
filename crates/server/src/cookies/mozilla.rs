@@ -57,8 +57,6 @@ struct Snapshot {
 
 impl Snapshot {
     async fn of(src: &Path) -> Result<Self, String> {
-        // Unique per call (pid + counter) so concurrent reads don't clobber
-        // each other.
         static SEQ: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
             "kopuz-moz-{}-{}",
@@ -69,8 +67,7 @@ impl Snapshot {
             .await
             .map_err(|e| format!("snapshot dir: {e}"))?;
         let snapshot = Self { dir };
-        // The -shm is deliberately left behind: SQLite rebuilds it from the
-        // log, and a copy taken a moment apart from the log is worse than none.
+
         for suffix in ["", "-wal", "-journal"] {
             let from = src.with_file_name(format!("cookies.sqlite{suffix}"));
             if tokio::fs::try_exists(&from).await.unwrap_or(false) {
