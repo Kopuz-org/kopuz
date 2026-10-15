@@ -590,7 +590,7 @@ mod tests {
 
         assert_eq!(
             std::fs::read_to_string(&path).expect("read"),
-            "hero_height = 640\nlanguage = \"tr\"\ntheme = \"nord\"\n"
+            "# mine\nlanguage = \"tr\"\nhero_height = 640\ntheme = \"nord\"\n"
         );
     }
 
