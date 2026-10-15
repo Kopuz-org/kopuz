@@ -838,11 +838,11 @@ fn App() -> Element {
                                 scan_current_file
                                     .set(Some(progress.message.unwrap_or(progress.phase)));
                             }
-                            api::ApiEvent::JobFinished {
-                                kind: api::JobKind::Scan,
-                                ..
-                            } => {
-                                scan_current_file.set(None);
+                            api::ApiEvent::JobFinished { kind, error, .. } => {
+                                if kind == api::JobKind::Scan {
+                                    scan_current_file.set(None);
+                                }
+                                hooks::jobs::say_failure(error.as_ref());
                             }
                             api::ApiEvent::ConfigChanged { .. } => settings_handle.reload(),
                             api::ApiEvent::FrontendPrefsChanged { frontend, .. }

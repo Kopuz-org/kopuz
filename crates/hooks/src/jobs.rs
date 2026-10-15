@@ -86,6 +86,13 @@ pub fn use_library_filling() -> Memo<bool> {
     })
 }
 
+/// Toast a finished job's failure; the app root calls it once per event, so a failure is said once however many pages follow the job.
+pub fn say_failure(error: Option<&api::ErrorBody>) {
+    if let Some(error) = error {
+        crate::toast::toast_api_error(&error.clone().into());
+    }
+}
+
 /// Start a job; while one of `kind` runs, the daemon joins it instead.
 pub fn start(kind: api::JobKind) {
     let api = crate::api::consume_api();
