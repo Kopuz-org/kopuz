@@ -346,7 +346,7 @@ impl SourceService {
                     .iter()
                     .map(|path| path.to_string_lossy().into_owned())
                     .collect();
-                info.settings = vec![crate::services::directories_field(&paths)];
+                info.settings = vec![crate::services::folder_source_field(&paths)];
             }
             config::Source::Server(server_id) => {
                 let server = resolved
@@ -1347,6 +1347,14 @@ mod tests {
 
         let info = service.switch_source("local:b").await.expect("switch");
         assert!(info.active);
+        assert_eq!(
+            info.settings
+                .iter()
+                .map(|field| field.config_key.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("local_sources")],
+            "a pin on the folder sources locks this field"
+        );
         assert_eq!(database.load_sources().await.expect("load").active, b);
         reached_the_session(&session, &b);
 
