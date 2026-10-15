@@ -50,6 +50,13 @@ pub fn error_reason_to_proto(value: Option<api::ErrorReason>) -> ErrorReason {
         Some(R::CredentialRejected) => ErrorReason::CredentialRejected,
         Some(R::DefaultSourceUndeletable) => ErrorReason::DefaultSourceUndeletable,
         Some(R::EmptySourceFolder) => ErrorReason::EmptySourceFolder,
+        Some(R::SourceNameRequired) => ErrorReason::SourceNameRequired,
+        Some(R::SourceFolderRequired) => ErrorReason::SourceFolderRequired,
+        Some(R::SpotifyClientIdRequired) => ErrorReason::SpotifyClientIdRequired,
+        Some(R::AppleMusicStorefrontRequired) => ErrorReason::AppleMusicStorefrontRequired,
+        Some(R::AppleMusicTokenRequired) => ErrorReason::AppleMusicTokenRequired,
+        Some(R::InvalidSmbUrl) => ErrorReason::InvalidSmbUrl,
+        Some(R::InvalidServerUrl) => ErrorReason::InvalidServerUrl,
     }
 }
 
@@ -72,6 +79,13 @@ pub fn error_reason_from_proto(value: i32) -> Option<api::ErrorReason> {
         ErrorReason::CredentialRejected => Some(R::CredentialRejected),
         ErrorReason::DefaultSourceUndeletable => Some(R::DefaultSourceUndeletable),
         ErrorReason::EmptySourceFolder => Some(R::EmptySourceFolder),
+        ErrorReason::SourceNameRequired => Some(R::SourceNameRequired),
+        ErrorReason::SourceFolderRequired => Some(R::SourceFolderRequired),
+        ErrorReason::SpotifyClientIdRequired => Some(R::SpotifyClientIdRequired),
+        ErrorReason::AppleMusicStorefrontRequired => Some(R::AppleMusicStorefrontRequired),
+        ErrorReason::AppleMusicTokenRequired => Some(R::AppleMusicTokenRequired),
+        ErrorReason::InvalidSmbUrl => Some(R::InvalidSmbUrl),
+        ErrorReason::InvalidServerUrl => Some(R::InvalidServerUrl),
     }
 }
 
