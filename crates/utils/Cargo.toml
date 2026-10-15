@@ -25,7 +25,17 @@ tracing = { workspace = true }
 color-thief = { workspace = true }
 image = { workspace = true }
 time = { workspace = true, features = ["formatting", "macros"] }
+icu_collator = { workspace = true }
+icu_locale_core = { workspace = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
 base64 = { workspace = true }
+jni = { workspace = true }
+ndk-context = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { workspace = true, features = ["NSLocale", "NSString"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Globalization"] }
 
