@@ -19,12 +19,17 @@ pub fn describe_errors_with(describe: fn(&api::ApiError) -> String) {
     let _ = ERROR_TEXT.set(describe);
 }
 
-/// Show a daemon failure as an error toast, in the app's language where it gives a reason.
-pub fn toast_api_error(error: &api::ApiError) {
+/// A daemon failure in the app's language, for a hook that keeps it as text.
+pub fn describe(error: &api::ApiError) -> String {
     match ERROR_TEXT.get() {
-        Some(describe) => toast_error(&describe(error)),
-        None => toast_error(&error.message),
+        Some(describe) => describe(error),
+        None => error.message.clone(),
     }
+}
+
+/// Show a daemon failure as an error toast, in the app's language.
+pub fn toast_api_error(error: &api::ApiError) {
+    toast_error(&describe(error));
 }
 
 /// Bottom-centered toast reusing a single `#kopuz-toast` element; `bg`/`border`

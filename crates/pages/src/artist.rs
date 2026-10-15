@@ -197,7 +197,10 @@ pub fn Artist(
         let albums = artist_albums_res.read().clone().and_then(Result::err);
         detail.or(tracks).or(albums).map(|error| match error.code {
             api::ErrorCode::NotFound => i18n::t("artist_not_found"),
-            _ => i18n::t_with("artist_load_failed", &[("error", error.to_string().into())]),
+            _ => i18n::t_with(
+                "artist_load_failed",
+                &[("error", components::forms::error_text(&error).into())],
+            ),
         })
     });
 

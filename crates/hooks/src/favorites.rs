@@ -26,7 +26,7 @@ pub fn toggle_favorite(key: String) {
         if let Err(error) = api.set_favorite(key.clone(), favorite).await {
             // The daemon says what refused it, so a heart that snaps back
             // does not read as a broken button.
-            crate::toast::toast_error(&error.to_string());
+            crate::toast::toast_api_error(&error);
         }
     });
 }
@@ -48,18 +48,18 @@ pub fn set_favorite_many(keys: Vec<String>, on: bool) {
                 return;
             }
         };
-        let mut refused = false;
+        let mut refused = None;
         for key in keys {
             if current.iter().any(|existing| existing == &key) == on {
                 continue;
             }
             if let Err(error) = api.set_favorite(key.clone(), on).await {
                 tracing::warn!(%error, %key, "favorite rejected");
-                refused = true;
+                refused = Some(error);
             }
         }
-        if refused {
-            crate::toast::toast_error("Couldn't update some favorites");
+        if let Some(error) = refused {
+            crate::toast::toast_api_error(&error);
         }
     });
 }

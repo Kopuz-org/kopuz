@@ -32,7 +32,7 @@ fn toggle_pin(id: String, mut pinned_ids: Signal<HashSet<String>>) {
     spawn(async move {
         if let Err(error) = api.pin_radio_station(id.clone(), !pinned).await {
             tracing::warn!(%error, "pinning a station failed");
-            hooks::toast::toast_error(&error.to_string());
+            hooks::toast::toast_api_error(&error);
             if pinned {
                 pinned_ids.write().insert(id);
             } else {
@@ -111,7 +111,7 @@ pub fn Radio(props: RadioProps) -> Element {
         async move {
             api.search_radio(query.trim().to_string(), 60)
                 .await
-                .map_err(|error| error.to_string())
+                .map_err(|error| components::forms::error_text(&error))
         }
     });
 

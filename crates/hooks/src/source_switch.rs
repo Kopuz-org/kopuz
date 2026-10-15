@@ -49,7 +49,7 @@ pub async fn apply_source_switch(id: String) -> bool {
         }
         Err(error) => {
             tracing::warn!(%error, "source switch failed");
-            crate::toast::toast_error(&error.to_string());
+            crate::toast::toast_api_error(&error);
             false
         }
     }
