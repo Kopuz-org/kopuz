@@ -78,19 +78,31 @@ impl IcyDeinterleaver {
     }
 }
 
-/// Values may contain apostrophes, so terminate at the `';` before the
-/// next key, or the last in the block.
+/// Values may contain apostrophes, so a value ends at the first `';` that
+/// the next `key='` or the end of the block follows.
 fn extract_field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     let prefix = format!("{key}='");
     let start = text.find(&prefix)? + prefix.len();
     let rest = &text[start..];
     let end = rest
-        .find("';StreamTitle")
-        .or_else(|| rest.find("';StreamUrl"))
-        .or_else(|| rest.rfind("';"))
+        .match_indices("';")
+        .map(|(at, _)| at)
+        .find(|&at| ends_a_field(&rest[at + 2..]))
         // Some servers drop the trailing semicolon on the last field.
         .or_else(|| rest.ends_with('\'').then(|| rest.len() - 1))?;
     Some(rest[..end].trim())
+}
+
+/// Whether what follows a `';` is the end of the block or another `key='`.
+fn ends_a_field(after: &str) -> bool {
+    let after = after.trim_start();
+    if after.is_empty() {
+        return true;
+    }
+    let key_len = after
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .unwrap_or(after.len());
+    key_len > 0 && after[key_len..].starts_with("='")
 }
 
 /// `None` on a missing/empty title (jingles send `StreamTitle='';`).
@@ -198,6 +210,15 @@ mod tests {
         assert_eq!(
             parse_stream_meta(b"StreamTitle='It's Raining';\0").map(|m| m.title),
             Some("It's Raining".to_string())
+        );
+        assert_eq!(
+            parse_stream_meta(b"StreamTitle='A - B';json='{}';\0").map(|m| m.title),
+            Some("A - B".to_string()),
+            "a field after the title is not part of it"
+        );
+        assert_eq!(
+            parse_stream_meta(b"StreamTitle='Rock';n'Roll';").map(|m| m.title),
+            Some("Rock';n'Roll".to_string())
         );
         assert_eq!(parse_stream_meta(b"StreamTitle='';"), None);
         assert_eq!(parse_stream_meta(b"garbage"), None);
