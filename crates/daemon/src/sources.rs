@@ -431,9 +431,7 @@ impl SourceService {
     async fn upsert_folder_source(&self, draft: SourceDraft) -> Result<SourceInfo, ApiError> {
         self.config.ensure_unlocked(&LOCAL_SOURCES).await?;
         if let Some(problem) = crate::services::check_folders(&draft).first() {
-            return Err(ApiError::invalid_input(crate::services::problem_text(
-                problem,
-            )));
+            return Err(problem.error());
         }
         let id = draft
             .id
@@ -577,12 +575,15 @@ impl SourceService {
         if draft.service == crate::services::FOLDERS {
             return Ok(api::DraftCheck {
                 sign_in: api::SignInKind::None,
-                problems: crate::services::check_folders(&draft),
+                problems: crate::services::problems(&crate::services::check_folders(&draft)),
             });
         }
         let service = Self::drafted_service(&draft)?;
         let (sign_in, problems) = crate::services::check(service, &draft);
-        Ok(api::DraftCheck { sign_in, problems })
+        Ok(api::DraftCheck {
+            sign_in,
+            problems: crate::services::problems(&problems),
+        })
     }
 
     pub async fn upsert_source(&self, draft: SourceDraft) -> Result<SourceInfo, ApiError> {
@@ -603,9 +604,7 @@ impl SourceService {
         let service = Self::drafted_service(&draft)?;
         let (_, problems) = crate::services::check(service, &draft);
         if let Some(problem) = problems.first() {
-            return Err(ApiError::invalid_input(crate::services::problem_text(
-                problem,
-            )));
+            return Err(problem.error());
         }
         let id = draft
             .id
@@ -1291,6 +1290,76 @@ mod tests {
     /// A caller told of a change reads it back straight away, so the session has to hold it by then.
     fn reached_the_session(session: &SessionHandle, active: &config::Source) {
         assert_eq!(session.sources_watch().borrow().active, *active);
+    }
+
+    #[tokio::test]
+    async fn a_source_form_save_that_is_refused_says_why_by_reason() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let database = db::init(&dir.path().join("sources.db")).await.expect("db");
+        let config = Arc::new(ConfigService::new(
+            database.clone(),
+            dir.path().join("settings.toml"),
+            config::Settings::default(),
+        ));
+        let player =
+            player::player::Player::try_with_sink(Box::new(player::engine::NullSink::new()))
+                .expect("headless player starts");
+        let session = SessionHandle::spawn_with_player(
+            Arc::new(NoTracks),
+            player,
+            crate::PlaybackServices::default(),
+        );
+        config.attach_session(session.clone());
+        let service = SourceService::new(database, session.clone(), config, session.sources());
+
+        let draft = |service: &str, name: &str, values: Vec<api::FieldValue>| api::SourceDraft {
+            id: None,
+            name: name.into(),
+            service: service.into(),
+            values,
+            secrets: Vec::new(),
+        };
+        let folders = |paths: &[&str]| {
+            vec![api::FieldValue::new(
+                crate::services::DIRECTORIES,
+                api::schema::encode_directories(
+                    &paths
+                        .iter()
+                        .map(|path| path.to_string())
+                        .collect::<Vec<_>>(),
+                ),
+            )]
+        };
+        for (draft, reason) in [
+            (
+                draft(crate::services::FOLDERS, "Mine", folders(&[""])),
+                ErrorReason::EmptySourceFolder,
+            ),
+            (
+                draft(crate::services::FOLDERS, "Mine", folders(&[])),
+                ErrorReason::SourceFolderRequired,
+            ),
+            (
+                draft(crate::services::FOLDERS, " ", folders(&["/music"])),
+                ErrorReason::SourceNameRequired,
+            ),
+            (
+                draft(
+                    "jellyfin",
+                    "Jelly",
+                    vec![api::FieldValue::new(crate::services::URL, "jelly.local")],
+                ),
+                ErrorReason::InvalidServerUrl,
+            ),
+        ] {
+            let error = service.upsert_source(draft).await.expect_err("refused");
+            assert_eq!(error.reason, Some(reason), "{}", error.message);
+            assert!(
+                !error.message.contains("_"),
+                "a key is no message: {}",
+                error.message
+            );
+        }
     }
 
     #[tokio::test]

@@ -73,10 +73,24 @@ pub enum ErrorReason {
     DefaultSourceUndeletable,
     /// A source folder was left blank.
     EmptySourceFolder,
+    /// A source was given no name.
+    SourceNameRequired,
+    /// A folder source was given no folder at all.
+    SourceFolderRequired,
+    /// A Spotify source was given no client id.
+    SpotifyClientIdRequired,
+    /// An Apple Music source was given no storefront.
+    AppleMusicStorefrontRequired,
+    /// An Apple Music source signing in by token was given none.
+    AppleMusicTokenRequired,
+    /// An SMB address that does not parse.
+    InvalidSmbUrl,
+    /// A server address that is not an http(s) URL.
+    InvalidServerUrl,
 }
 
 impl ErrorReason {
-    pub const ALL: [ErrorReason; 14] = [
+    pub const ALL: [ErrorReason; 21] = [
         Self::SettingLocked,
         Self::ConnectNotOffered,
         Self::ApiKeyMissing,
@@ -91,6 +105,13 @@ impl ErrorReason {
         Self::CredentialRejected,
         Self::DefaultSourceUndeletable,
         Self::EmptySourceFolder,
+        Self::SourceNameRequired,
+        Self::SourceFolderRequired,
+        Self::SpotifyClientIdRequired,
+        Self::AppleMusicStorefrontRequired,
+        Self::AppleMusicTokenRequired,
+        Self::InvalidSmbUrl,
+        Self::InvalidServerUrl,
     ];
 
     /// The i18n key every frontend says this reason with, so they all phrase it alike.
@@ -110,6 +131,13 @@ impl ErrorReason {
             Self::CredentialRejected => "error_credential_rejected",
             Self::DefaultSourceUndeletable => "error_default_source_undeletable",
             Self::EmptySourceFolder => "error_empty_source_folder",
+            Self::SourceNameRequired => "server_name_required",
+            Self::SourceFolderRequired => "folder_required",
+            Self::SpotifyClientIdRequired => "spotify_client_id_required",
+            Self::AppleMusicStorefrontRequired => "apple_music_storefront_required",
+            Self::AppleMusicTokenRequired => "apple_music_token_required",
+            Self::InvalidSmbUrl => "invalid_smb_url",
+            Self::InvalidServerUrl => "invalid_server_url",
         }
     }
 }
