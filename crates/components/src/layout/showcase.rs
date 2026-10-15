@@ -120,7 +120,7 @@ pub fn sorted_track_indices(tracks: &[Track], sort_state: SortState) -> Vec<usiz
 }
 
 fn compare_text(left: &str, right: &str) -> Ordering {
-    left.to_lowercase().cmp(&right.to_lowercase())
+    utils::collation::compare(left, right)
 }
 
 #[derive(Props, Clone, PartialEq)]
@@ -187,7 +187,24 @@ pub fn Showcase(props: ShowcaseProps) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use super::track_row_number;
+    use super::{SortDirection, SortField, Track, sorted_track_indices, track_row_number};
+
+    #[test]
+    fn a_title_sort_collates_like_the_daemons_listings() {
+        let tracks: Vec<Track> = ["Zeynep", "Émile", "apple", "Banana"]
+            .into_iter()
+            .map(|title| Track {
+                title: title.into(),
+                ..Default::default()
+            })
+            .collect();
+        let order: Vec<&str> =
+            sorted_track_indices(&tracks, Some((SortField::Title, SortDirection::Asc)))
+                .into_iter()
+                .map(|index| tracks[index].title.as_str())
+                .collect();
+        assert_eq!(order, ["apple", "Banana", "Émile", "Zeynep"]);
+    }
 
     #[test]
     fn album_rows_prefer_the_metadata_track_number() {

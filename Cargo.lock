@@ -4726,14 +4726,11 @@ dependencies = [
  "arc-swap",
  "async-trait",
  "directories",
- "icu_collator",
- "icu_locale_core",
  "jni 0.21.1",
  "kopuz-config",
  "kopuz-reader",
  "kopuz-utils",
  "ndk-context",
- "objc2-foundation",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -4743,7 +4740,6 @@ dependencies = [
  "toml 0.8.2",
  "tracing",
  "uuid 1.23.5",
- "windows 0.62.2",
 ]
 
 [[package]]
@@ -4984,13 +4980,19 @@ dependencies = [
  "base64 0.22.1",
  "color-thief",
  "directories",
+ "icu_collator",
+ "icu_locale_core",
  "image",
+ "jni 0.21.1",
+ "ndk-context",
+ "objc2-foundation",
  "percent-encoding",
  "serde",
  "serde_json",
  "time",
  "tokio",
  "tracing",
+ "windows 0.62.2",
 ]
 
 [[package]]

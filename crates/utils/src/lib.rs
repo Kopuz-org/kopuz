@@ -6,6 +6,7 @@
 pub mod artist;
 pub mod artwork_image;
 pub mod build_info;
+pub mod collation;
 pub mod color;
 pub mod live_theme;
 pub mod logs;
