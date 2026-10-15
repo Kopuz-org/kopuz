@@ -292,7 +292,7 @@ impl MediaSource for AppleMusicSource {
         Ok(LibrarySnapshot {
             albums,
             tracks,
-            artist_images: Vec::new(),
+            artists: Vec::new(),
         })
     }
 

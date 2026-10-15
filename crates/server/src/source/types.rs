@@ -203,7 +203,8 @@ pub struct ArtistLookup {
 pub struct LibrarySnapshot {
     pub albums: Vec<reader::Album>,
     pub tracks: Vec<reader::Track>,
-    pub artist_images: Vec<(reader::ArtistCredit, String)>,
+    /// The source's own artist listing, with each photo URL it has.
+    pub artists: Vec<(reader::ArtistCredit, Option<String>)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

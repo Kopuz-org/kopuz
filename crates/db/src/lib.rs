@@ -536,6 +536,13 @@ pub trait Storage: ReadStore {
     /// Name the artist `source` issued `id` for as the source's own record does; answers whether the name changed.
     async fn name_artist(&self, source: &Source, id: &str, name: &str) -> Result<bool, DbError>;
 
+    /// Name each `(id, name)` artist of a source's own listing as [`Storage::name_artist`] does; answers how many changed.
+    async fn name_artists(
+        &self,
+        source: &Source,
+        named: &[(String, String)],
+    ) -> Result<usize, DbError>;
+
     /// Set (`Some`) or remove (`None`) one artist's image. `kind` is
     /// `"server" | "local" | "custom"`.
     async fn set_artist_image(

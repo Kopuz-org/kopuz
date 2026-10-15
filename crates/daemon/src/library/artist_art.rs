@@ -89,12 +89,19 @@ impl LibraryService {
         }
     }
 
-    /// One listing for the whole server; only a photo that differs from the stored one is written and announced.
+    /// One listing for the whole server; only a photo or name that differs from the stored one is written and announced.
     async fn refresh_bulk(&self, source: &ActiveSource) -> Result<(), ApiError> {
-        let images = source.fetch_artist_images().await.unwrap_or_default();
-        if images.is_empty() {
+        let listed = source.fetch_artists().await.unwrap_or_default();
+        if listed.is_empty() {
             return Ok(());
         }
+        let mut changed = match source.name_listed_artists(&listed).await {
+            Ok(renamed) => renamed > 0,
+            Err(error) => {
+                tracing::warn!(%error, "could not name the listed artists");
+                false
+            }
+        };
         let scope = source.source().as_str().to_string();
         let (_, photos) = self.db.artist_images().await.map_err(db_error)?;
         let linked = self
@@ -102,8 +109,7 @@ impl LibraryService {
             .linked_artist_keys(source.source())
             .await
             .map_err(db_error)?;
-        let mut changed = false;
-        for (key, url) in changed_photos(images, &scope, &photos, &linked) {
+        for (key, url) in changed_photos(listed, &scope, &photos, &linked) {
             changed |= source
                 .set_artist_image(&key, "server", Some(&url))
                 .await
@@ -316,14 +322,15 @@ fn claim_sweep(
 
 /// The photos of a server's listing that differ from what `scope` already stores, by artist key.
 fn changed_photos(
-    images: Vec<(reader::ArtistCredit, String)>,
+    listed: Vec<(reader::ArtistCredit, Option<String>)>,
     scope: &str,
     photos: &std::collections::HashMap<(String, String), reader::ArtistImageRef>,
     linked: &std::collections::HashMap<String, String>,
 ) -> Vec<(String, String)> {
-    images
+    listed
         .into_iter()
         .filter_map(|(artist, url)| {
+            let url = url?;
             let key = credit_key(&artist, linked)?;
             let stored = photos.get(&(scope.to_string(), key.clone()));
             (stored != Some(&reader::ArtistImageRef::Remote(url.clone()))).then_some((key, url))
@@ -353,8 +360,9 @@ mod tests {
             ("id-ada".to_string(), "ada".to_string()),
             ("id-boris".to_string(), "boris".to_string()),
             ("id-cleo".to_string(), "cleo".to_string()),
+            ("id-dora".to_string(), "dora".to_string()),
         ]);
-        let listing = |id: &str, url: &str| {
+        let listing = |id: &str, url: Option<&str>| {
             (
                 reader::ArtistCredit {
                     name: id.into(),
@@ -362,16 +370,17 @@ mod tests {
                     source: None,
                     key: None,
                 },
-                url.to_string(),
+                url.map(str::to_string),
             )
         };
 
         let changed = changed_photos(
             vec![
-                listing("id-ada", "https://srv/ada.jpg"),
-                listing("id-boris", "https://srv/boris.jpg"),
-                listing("id-cleo", "https://srv/cleo.jpg"),
-                listing("id-nobody", "https://srv/nobody.jpg"),
+                listing("id-ada", Some("https://srv/ada.jpg")),
+                listing("id-boris", Some("https://srv/boris.jpg")),
+                listing("id-cleo", Some("https://srv/cleo.jpg")),
+                listing("id-nobody", Some("https://srv/nobody.jpg")),
+                listing("id-dora", None),
             ],
             "srv",
             &photos,

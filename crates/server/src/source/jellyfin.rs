@@ -90,7 +90,6 @@ impl MediaSource for JellyfinSource {
         use std::path::PathBuf;
         let mut albums = Vec::new();
         let mut tracks = Vec::new();
-        let mut artist_images = Vec::new();
 
         for lib in self.client.get_music_libraries().await? {
             let mut start = 0;
@@ -205,31 +204,14 @@ impl MediaSource for JellyfinSource {
             }
         }
 
-        if let Ok(artists) = self.client.get_artists().await {
-            for artist in artists {
-                if let Some(tags) = &artist.image_tags
-                    && let Some(tag) = tags.get("Primary")
-                {
-                    let url = crate::cover::jellyfin_item_url(
-                        self.client.base_url(),
-                        &artist.id,
-                        Some(tag.as_str()),
-                        self.client.token(),
-                        512,
-                        90,
-                    );
-                    artist_images.push((
-                        reader::ArtistCredit::linked(artist.name, artist.id.clone()),
-                        url,
-                    ));
-                }
-            }
-        }
+        let artists = <Self as MediaSource>::fetch_artists(self)
+            .await
+            .unwrap_or_default();
 
         Ok(LibrarySnapshot {
             albums,
             tracks,
-            artist_images,
+            artists,
         })
     }
 
@@ -466,17 +448,17 @@ impl MediaSource for JellyfinSource {
             .collect())
     }
 
-    async fn fetch_artist_images(
+    async fn fetch_artists(
         &self,
-    ) -> Result<Vec<(reader::ArtistCredit, String)>, SourceError> {
+    ) -> Result<Vec<(reader::ArtistCredit, Option<String>)>, SourceError> {
         let artists = self.client.get_artists().await?;
         let mut out = Vec::new();
         for artist in artists {
-            if let Some(tags) = &artist.image_tags
-                && let Some(tag) = tags.get("Primary")
-            {
-                out.push((
-                    reader::ArtistCredit::linked(&artist.name, &artist.id),
+            let photo = artist
+                .image_tags
+                .as_ref()
+                .and_then(|tags| tags.get("Primary"))
+                .map(|tag| {
                     crate::cover::jellyfin_item_url(
                         self.client.base_url(),
                         &artist.id,
@@ -484,9 +466,12 @@ impl MediaSource for JellyfinSource {
                         self.client.token(),
                         512,
                         90,
-                    ),
-                ));
-            }
+                    )
+                });
+            out.push((
+                reader::ArtistCredit::linked(&artist.name, &artist.id),
+                photo,
+            ));
         }
         Ok(out)
     }

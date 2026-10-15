@@ -135,7 +135,7 @@ impl MediaSource for ClippslySource {
         Ok(LibrarySnapshot {
             albums: albums.into_values().collect(),
             tracks,
-            artist_images: Vec::new(),
+            artists: Vec::new(),
         })
     }
 

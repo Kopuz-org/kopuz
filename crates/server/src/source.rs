@@ -491,11 +491,11 @@ pub trait MediaSource: Send + Sync {
         Ok(Vec::new())
     }
 
-    /// Fetch artist → image-URL pairs from the remote (for the "artist photo"
-    /// view). Default empty (local reads them from the DB; YT has none).
-    async fn fetch_artist_images(
+    /// The remote's own artist listing: each artist as it names itself, with its photo URL when it has one.
+    /// Default empty (local reads them from the DB; YT has none).
+    async fn fetch_artists(
         &self,
-    ) -> Result<Vec<(reader::ArtistCredit, String)>, SourceError> {
+    ) -> Result<Vec<(reader::ArtistCredit, Option<String>)>, SourceError> {
         Ok(Vec::new())
     }
 
@@ -748,6 +748,24 @@ pub trait MediaSource: Send + Sync {
     async fn name_artist(&self, id: &str, name: &str) -> Result<bool, SourceError> {
         self.db()
             .name_artist(self.source(), id, name)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Name every artist of this source's own listing that carries an id; answers how many rows changed. DB op.
+    async fn name_listed_artists(
+        &self,
+        listed: &[(reader::ArtistCredit, Option<String>)],
+    ) -> Result<usize, SourceError> {
+        let named: Vec<(String, String)> = listed
+            .iter()
+            .filter_map(|(artist, _)| Some((artist.id.clone()?, artist.name.clone())))
+            .collect();
+        if named.is_empty() {
+            return Ok(0);
+        }
+        self.db()
+            .name_artists(self.source(), &named)
             .await
             .map_err(SourceError::from)
     }

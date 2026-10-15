@@ -392,6 +392,7 @@ impl CatalogService {
                     .await
                     .unwrap_or(false)
                 {
+                    self.session.invalidate(api::Table::Artists);
                     self.session.invalidate(api::Table::Tracks);
                 }
                 let page = self.page(

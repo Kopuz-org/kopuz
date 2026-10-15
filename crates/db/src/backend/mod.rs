@@ -511,6 +511,14 @@ impl Storage for Native {
         writes::name_artist(&self.pool(), source, id, name).await
     }
 
+    async fn name_artists(
+        &self,
+        source: &crate::Source,
+        named: &[(String, String)],
+    ) -> Result<usize, DbError> {
+        writes::name_artists(&self.pool(), source, named).await
+    }
+
     async fn set_artist_image(
         &self,
         source: &crate::Source,
