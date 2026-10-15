@@ -115,7 +115,7 @@ pub async fn get_web_playback(
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("webPlayback request: {e}"))?;
+        .map_err(|e| format!("webPlayback request: {}", e.without_url()))?;
 
     let status = resp.status();
     tracing::info!("am.webplayback: HTTP {status}");
@@ -127,7 +127,7 @@ pub async fn get_web_playback(
     let json: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| format!("parse webPlayback: {e}"))?;
+        .map_err(|e| format!("parse webPlayback: {}", e.without_url()))?;
 
     let song_list = json["songList"]
         .as_array()
@@ -187,12 +187,12 @@ async fn read_encrypted_playlist(
         .header("User-Agent", USER_AGENT)
         .send()
         .await
-        .map_err(|e| format!("fetch M3U8: {e}"))?;
+        .map_err(|e| format!("fetch M3U8: {}", e.without_url()))?;
 
     let m3u8_body = m3u8_resp
         .text()
         .await
-        .map_err(|e| format!("read M3U8: {e}"))?;
+        .map_err(|e| format!("read M3U8: {}", e.without_url()))?;
 
     let Ok((_, media_playlist)) = m3u8_rs::parse_media_playlist(m3u8_body.as_bytes()) else {
         tracing::debug!("am.webplayback: asset is not a media playlist");
@@ -284,7 +284,7 @@ async fn load_license(
         .json(&envelope)
         .send()
         .await
-        .map_err(|e| format!("license request: {e}"))?;
+        .map_err(|e| format!("license request: {}", e.without_url()))?;
 
     let status = resp.status();
     tracing::info!("am.license: HTTP {status}");
@@ -297,7 +297,7 @@ async fn load_license(
     let resp_body = resp
         .text()
         .await
-        .map_err(|e| format!("read license body: {e}"))?;
+        .map_err(|e| format!("read license body: {}", e.without_url()))?;
     tracing::debug!(
         "am.license: raw response len={} body: {}",
         resp_body.len(),
@@ -641,7 +641,7 @@ async fn open_asset_stream(url: &str, media_user_token: &str) -> Result<AssetStr
         .header("Cookie", format!("media-user-token={media_user_token}"))
         .send()
         .await
-        .map_err(|e| format!("download asset: {e}"))?;
+        .map_err(|e| format!("download asset: {}", e.without_url()))?;
 
     let status = resp.status();
     if !status.is_success() {
@@ -753,7 +753,7 @@ async fn read_whole_body(response: reqwest::Response) -> Result<Vec<u8>, String>
         .bytes()
         .await
         .map(|b| b.to_vec())
-        .map_err(|e| format!("read asset bytes: {e}"))
+        .map_err(|e| format!("read asset bytes: {}", e.without_url()))
 }
 
 /// Download a track asset. Carries the user token: library assets are the
@@ -767,7 +767,7 @@ async fn download_asset(url: &str, media_user_token: &str) -> Result<Vec<u8>, St
         .header("Cookie", format!("media-user-token={media_user_token}"))
         .send()
         .await
-        .map_err(|e| format!("download asset: {e}"))?;
+        .map_err(|e| format!("download asset: {}", e.without_url()))?;
 
     let status = resp.status();
     if !status.is_success() {
@@ -777,7 +777,7 @@ async fn download_asset(url: &str, media_user_token: &str) -> Result<Vec<u8>, St
     resp.bytes()
         .await
         .map(|b| b.to_vec())
-        .map_err(|e| format!("read asset bytes: {e}"))
+        .map_err(|e| format!("read asset bytes: {}", e.without_url()))
 }
 
 /// What the on-disk cache holds for a DRM-protected track.

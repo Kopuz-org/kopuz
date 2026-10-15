@@ -263,17 +263,11 @@ impl MediaSource for NextcloudSource {
     }
 
     async fn fetch_favorites(&self) -> Result<Vec<String>, SourceError> {
-        self.client()?
-            .favorites(&self.folders)
-            .await
-            .map_err(SourceError::Backend)
+        self.client()?.favorites(&self.folders).await
     }
 
     async fn push_favorite(&self, item_id: &str, on: bool) -> Result<(), SourceError> {
-        self.client()?
-            .set_favorite(item_id, on)
-            .await
-            .map_err(SourceError::Backend)
+        self.client()?.set_favorite(item_id, on).await
     }
 
     async fn add_to_playlist(
