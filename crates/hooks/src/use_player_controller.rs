@@ -189,6 +189,30 @@ impl PlayerController {
         self.play_replacement(tracks, Some(start), None);
     }
 
+    /// Play a whole album by its id, so the daemon fills the queue and records where playback came from; `shuffled` starts at a random one of its `track_count` tracks, as [`Self::play_queue_shuffled`] does.
+    pub fn play_album(&mut self, id: String, track_count: usize, shuffled: bool) {
+        use rand::RngExt;
+        if id.is_empty() || track_count == 0 {
+            return;
+        }
+        let start = match shuffled {
+            true => rand::rng().random_range(0..track_count),
+            false => 0,
+        };
+        let handle = self.handle();
+        spawn(async move {
+            let request = api::SetQueueRequest {
+                mode: api::QueueMode::Replace,
+                context: api::QueueContext::Album { id },
+                start_index: Some(start as u32),
+                shuffle: None,
+            };
+            if let Err(error) = handle.set_queue(request).await {
+                tracing::warn!(%error, "playing an album failed");
+            }
+        });
+    }
+
     fn play_replacement(
         &mut self,
         tracks: Vec<Track>,

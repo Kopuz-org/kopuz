@@ -150,6 +150,9 @@ pub struct ShowcaseProps {
     pub on_delete_all: Option<EventHandler<()>>,
     #[props(default = false)]
     pub is_album: bool,
+    /// The album these tracks are, in the daemon's order: playing them all unsorted plays the album, so the queue knows where it came from.
+    #[props(default)]
+    pub album_id: Option<String>,
     #[props(default)]
     pub release_year: Option<u16>,
     #[props(default = false)]

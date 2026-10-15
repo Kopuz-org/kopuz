@@ -53,6 +53,8 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
     let current_song_album = ctrl.current_song_album.read().clone();
     let current_song_duration = *ctrl.current_song_duration.read();
     let tracks_for_play_all = sorted_tracks.clone();
+    let play_all_album = props.album_id.clone();
+    let shuffle_album = props.album_id.clone();
     let selected_queue_tracks: Vec<_> = sorted_tracks
         .iter()
         .filter(|track| props.selected_tracks.contains(&track.key))
@@ -166,7 +168,9 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                 style: "background: var(--color-indigo-500);",
                                 onclick: move |_| {
                                     let is_shuffle = *ctrl.shuffle.peek();
-                                    if is_shuffle {
+                                    if let Some(id) = play_all_album.clone().filter(|_| sort_state.peek().is_none()) {
+                                        ctrl.play_album(id, tracks_for_play_all.len(), is_shuffle);
+                                    } else if is_shuffle {
                                         ctrl.play_queue_shuffled(tracks_for_play_all.clone());
                                     } else {
                                         ctrl.play_queue_linear(tracks_for_play_all.clone());
@@ -180,7 +184,11 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                 style: if *ctrl.shuffle.read() { "background: var(--color-indigo-500); border: 1px solid transparent;" } else { "background: color-mix(in oklab, var(--color-indigo-500) 25%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 40%, transparent);" },
                                 onclick: move |_| {
                                     ctrl.toggle_shuffle();
-                                    ctrl.play_queue_shuffled(tracks_for_shuffle.clone());
+                                    if let Some(id) = shuffle_album.clone().filter(|_| sort_state.peek().is_none()) {
+                                        ctrl.play_album(id, tracks_for_shuffle.len(), true);
+                                    } else {
+                                        ctrl.play_queue_shuffled(tracks_for_shuffle.clone());
+                                    }
                                 },
                                 i { class: "fa-solid fa-shuffle text-xs" }
                                 "{i18n::t(\"shuffle\")}"

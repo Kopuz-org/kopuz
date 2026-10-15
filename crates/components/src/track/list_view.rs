@@ -13,6 +13,9 @@ pub struct TrackListViewProps {
     pub tracks: Vec<Track>,
     #[props(default = false)]
     pub is_album: bool,
+    /// The album these tracks are, in the daemon's order, so playing them all plays the album.
+    #[props(default)]
+    pub album_id: Option<String>,
     #[props(default)]
     pub release_year: Option<u16>,
     pub on_close: EventHandler<()>,
@@ -93,6 +96,7 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                 cover_url: props.cover_url.clone(),
                 tracks: props.tracks.clone(),
                 is_album: props.is_album,
+                album_id: props.album_id.clone(),
                 release_year: props.release_year,
                 is_selection_mode: is_selection_mode(),
                 selected_tracks: selected_tracks.read().clone(),
