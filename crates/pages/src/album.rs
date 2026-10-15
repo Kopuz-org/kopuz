@@ -435,6 +435,8 @@ fn AlbumDetail(
                 })),
                 cover_url,
                 is_album: true,
+                // Only the daemon's own album order plays as the album; an offline subset is a plain list.
+                album_id: (!(cap.downloads && *is_offline.read())).then(|| album.id.clone()),
                 release_year: (album.year > 0).then_some(album.year),
                 tracks: tracks(),
                 on_close,

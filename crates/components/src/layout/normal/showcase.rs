@@ -78,6 +78,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let current_song_album = ctrl.current_song_album.read().clone();
     let current_song_duration = *ctrl.current_song_duration.read();
     let play_all_queue = Arc::clone(&derived.queue);
+    let play_all_album = props.album_id.clone();
     let selected_queue_tracks: Vec<_> = derived
         .queue
         .iter()
@@ -206,7 +207,9 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                              class: "playback-play w-14 h-14 rounded-full bg-indigo-500 hover:bg-indigo-400 text-black flex items-center justify-center transition-transform hover:scale-105",
                              onclick: move |_| {
                                 let is_shuffle = *ctrl.shuffle.peek();
-                                if is_shuffle {
+                                if let Some(id) = play_all_album.clone().filter(|_| sort_state.peek().is_none()) {
+                                    ctrl.play_album(id, play_all_queue.len(), is_shuffle);
+                                } else if is_shuffle {
                                     ctrl.play_queue_shuffled((*play_all_queue).clone());
                                 } else {
                                     ctrl.play_queue_linear((*play_all_queue).clone());
