@@ -9,8 +9,8 @@
 //! not exist. Its 0600 mode is the access control, so the channel carries no
 //! credentials; the pipe carries a DACL that draws the same line (see
 //! `proto::pipe`). A daemon started with `--listen` also serves plain
-//! HTTP/2 on a port, where a bearer token stands in for the OS boundary
-//! (see [`Token`]). Reflection is on:
+//! HTTP/2 on whatever address it is given, with no credentials either.
+//! Reflection is on:
 //!
 //! ```sh
 //! kopuzd
@@ -27,15 +27,14 @@ use daemon::boot::{Core, CoreArgs};
 pub mod identity;
 pub mod service;
 
-pub use service::{GrpcState, Token, bind_socket, serve, serve_tcp};
+pub use service::{GrpcState, bind_socket, serve, serve_tcp};
 
 /// What the daemon binary needs on top of a core.
 #[derive(Debug, Default)]
 pub struct ServeArgs {
     pub socket: Option<PathBuf>,
-    /// A TCP address to serve on as well, gated on the token.
+    /// A TCP address to serve on as well.
     pub listen: Option<std::net::SocketAddr>,
-    pub token_path: Option<PathBuf>,
     pub db_path: Option<String>,
     pub identity: Option<identity::AppIdentity>,
 }
@@ -63,17 +62,6 @@ pub fn default_socket_path() -> Option<PathBuf> {
     Some(dir.join("kopuzd.sock"))
 }
 
-/// Where the TCP token lives unless told otherwise: beside the socket on
-/// Unix, in the user's cache dir on Windows.
-pub fn default_token_path() -> Option<PathBuf> {
-    let base = directories::BaseDirs::new()?;
-    let dir = base
-        .runtime_dir()
-        .map(|runtime| runtime.join("kopuz"))
-        .unwrap_or_else(|| base.cache_dir().join("kopuz"));
-    Some(dir.join("kopuzd.token"))
-}
-
 fn state(core: &Core) -> Arc<GrpcState> {
     Arc::new(GrpcState {
         api: core.api.clone(),
@@ -95,32 +83,18 @@ pub fn listen(
     Ok(serve(listener, state(core)))
 }
 
-/// Bind the port and settle the token that guards it. A port beyond
-/// loopback is reachable from the network, which is worth a warning since
-/// the token is then the only thing between it and the library.
-async fn bind_tcp(
-    address: std::net::SocketAddr,
-    token_path: Option<PathBuf>,
-) -> Result<(tokio::net::TcpListener, Token), Box<dyn std::error::Error>> {
-    let Some(token_path) = token_path.or_else(default_token_path) else {
-        return Err("no usable path for the daemon token".into());
-    };
-    let token = Token::load_or_create(&token_path)?;
+async fn bind_tcp(address: std::net::SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
     let listener = tokio::net::TcpListener::bind(address).await?;
-    let bound = listener.local_addr()?;
-    if !bound.ip().is_loopback() {
-        tracing::warn!(%bound, "listening beyond loopback; the token is the only guard on this port");
-    }
-    tracing::info!(%bound, token = %token_path.display(), "kopuzd listening on tcp");
-    Ok((listener, token))
+    tracing::info!(bound = %listener.local_addr()?, "kopuzd listening on tcp");
+    Ok(listener)
 }
 
 async fn serve_tcp_if(
-    tcp: Option<(tokio::net::TcpListener, Token)>,
+    tcp: Option<tokio::net::TcpListener>,
     state: Arc<GrpcState>,
 ) -> std::io::Result<()> {
     match tcp {
-        Some((listener, token)) => serve_tcp(listener, token, state).await,
+        Some(listener) => serve_tcp(listener, state).await,
         None => std::future::pending().await,
     }
 }
@@ -155,7 +129,7 @@ pub async fn run(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
     let listener = bind_socket(&socket)?;
     tracing::info!(path = %socket.display(), "kopuzd listening");
     let tcp = match args.listen {
-        Some(address) => Some(bind_tcp(address, args.token_path.clone()).await?),
+        Some(address) => Some(bind_tcp(address).await?),
         None => None,
     };
     let result = tokio::select! {

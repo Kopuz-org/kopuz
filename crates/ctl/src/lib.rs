@@ -16,11 +16,8 @@ pub struct Cli {
     #[arg(long, global = true, env = "KOPUZ_SOCKET", conflicts_with = "address")]
     pub socket: Option<PathBuf>,
     /// TCP host:port served by kopuzd --listen.
-    #[arg(long, global = true, requires = "token_file")]
+    #[arg(long, global = true)]
     pub address: Option<String>,
-    /// File containing the daemon's TCP bearer token.
-    #[arg(long, global = true, requires = "address")]
-    pub token_file: Option<PathBuf>,
     /// Print machine-readable JSON.
     #[arg(long, global = true)]
     pub json: bool,
@@ -622,12 +619,12 @@ mod tests {
     fn invalid_options_fail_before_connecting() {
         for args in [
             vec!["kopuzctl", "volume", "101"],
-            vec!["kopuzctl", "--address", "localhost:9000", "status"],
             vec!["kopuzctl", "source", "login", "id", "--password-stdin"],
             vec!["kopuzctl", "queue", "--limit", "0"],
         ] {
             assert!(Cli::try_parse_from(args).is_err());
         }
+        assert!(Cli::try_parse_from(["kopuzctl", "--address", "localhost:9000", "status"]).is_ok());
         assert_eq!(
             Cli::try_parse_from(["kopuzctl", "--help"])
                 .err()
