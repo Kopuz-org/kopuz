@@ -166,7 +166,8 @@ impl ConfigService {
             Err(ApiError::invalid_input(format!(
                 "these settings are pinned: {}",
                 refused.join(", ")
-            )))
+            ))
+            .because(api::ErrorReason::SettingLocked))
         }
     }
 

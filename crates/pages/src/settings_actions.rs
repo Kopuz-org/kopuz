@@ -76,7 +76,7 @@ pub fn add_registry(
                 Err(error) => {
                     registry_error.set(Some(i18n::t_with(
                         "radio_registry_import_failed",
-                        &[("error", error.to_string().into())],
+                        &[("error", components::forms::error_text(&error).into())],
                     )));
                 }
             }
@@ -112,7 +112,10 @@ async fn authenticate_with(
     match api.authenticate_source(server_id).await {
         Ok(_) => error.set(None),
         Err(failure) => {
-            let message = i18n::t_with("signin_failed", &[("error", failure.to_string().into())]);
+            let message = i18n::t_with(
+                "signin_failed",
+                &[("error", components::forms::error_text(&failure).into())],
+            );
             error.set(Some(message.clone()));
             playback_error.set(Some(message.into()));
         }
@@ -132,7 +135,7 @@ async fn activate(
         Ok(source) => source,
         Err(failure) => {
             tracing::warn!(%failure, "switching source failed");
-            hooks::toast::toast_error(&failure.to_string());
+            hooks::toast::toast_api_error(&failure);
             return;
         }
     };
@@ -195,14 +198,14 @@ pub fn add_source(
                     }
                 }
                 Err(failure) => {
-                    error.set(Some(failure.to_string()));
+                    error.set(Some(components::forms::error_text(&failure)));
                     return;
                 }
             }
             let saved = match api.upsert_source(draft).await {
                 Ok(saved) => saved,
                 Err(failure) => {
-                    error.set(Some(failure.to_string()));
+                    error.set(Some(components::forms::error_text(&failure)));
                     return;
                 }
             };
@@ -256,7 +259,7 @@ pub fn add_source_from_session(
                     }
                 }
                 Err(failure) => {
-                    error.set(Some(failure.to_string()));
+                    error.set(Some(components::forms::error_text(&failure)));
                     importing.set(None);
                     return;
                 }
@@ -264,7 +267,7 @@ pub fn add_source_from_session(
             let saved = match api.upsert_source(draft).await {
                 Ok(saved) => saved,
                 Err(failure) => {
-                    error.set(Some(failure.to_string()));
+                    error.set(Some(components::forms::error_text(&failure)));
                     importing.set(None);
                     return;
                 }
@@ -275,7 +278,7 @@ pub fn add_source_from_session(
                 }
                 error.set(Some(i18n::t_with(
                     "signin_failed",
-                    &[("error", failure.to_string().into())],
+                    &[("error", components::forms::error_text(&failure).into())],
                 )));
                 importing.set(None);
                 return;
@@ -310,7 +313,7 @@ pub fn reauth_from_session(
                 }
                 Err(failure) => error.set(Some(i18n::t_with(
                     "signin_failed",
-                    &[("error", failure.to_string().into())],
+                    &[("error", components::forms::error_text(&failure).into())],
                 ))),
             }
             importing.set(None);
@@ -336,7 +339,7 @@ pub fn delete_saved(id: String) {
     spawn(async move {
         if let Err(error) = api.delete_source(id).await {
             tracing::warn!(%error, "deleting a server failed");
-            hooks::toast::toast_error(&error.to_string());
+            hooks::toast::toast_api_error(&error);
         }
     });
 }
@@ -375,7 +378,7 @@ pub fn login_with_password(
             Err(error) => {
                 login_error.set(Some(i18n::t_with(
                     "login_failed",
-                    &[("error", error.to_string().into())],
+                    &[("error", components::forms::error_text(&error).into())],
                 )));
             }
         }

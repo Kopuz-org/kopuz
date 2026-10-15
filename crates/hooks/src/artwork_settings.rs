@@ -24,7 +24,7 @@ pub fn set(value: api::FieldValue, mut done: Signal<u64>) {
             Ok(_) => done += 1,
             Err(error) => {
                 tracing::warn!(%error, "saving a cover setting failed");
-                crate::toast::toast_error(&error.to_string());
+                crate::toast::toast_api_error(&error);
             }
         }
     });

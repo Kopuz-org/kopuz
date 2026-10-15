@@ -12,6 +12,21 @@ pub fn toast_error(msg: &str) {
     show(msg, "rgba(45,18,18,0.96)", "rgba(239,68,68,0.55)");
 }
 
+static ERROR_TEXT: std::sync::OnceLock<fn(&api::ApiError) -> String> = std::sync::OnceLock::new();
+
+/// Say daemon failures through `describe`; this crate has no string table, so the app supplies one at startup.
+pub fn describe_errors_with(describe: fn(&api::ApiError) -> String) {
+    let _ = ERROR_TEXT.set(describe);
+}
+
+/// Show a daemon failure as an error toast, in the app's language where it gives a reason.
+pub fn toast_api_error(error: &api::ApiError) {
+    match ERROR_TEXT.get() {
+        Some(describe) => toast_error(&describe(error)),
+        None => toast_error(&error.message),
+    }
+}
+
 /// Bottom-centered toast reusing a single `#kopuz-toast` element; `bg`/`border`
 /// are re-applied every call so the level (info vs error) always matches `msg`.
 fn show(msg: &str, bg: &str, border: &str) {

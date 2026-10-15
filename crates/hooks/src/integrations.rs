@@ -9,7 +9,7 @@ use dioxus::prelude::*;
 
 use crate::api::{consume_api, use_api};
 use crate::db_reactivity::{Table, use_generations};
-use crate::toast::toast_error;
+use crate::toast::toast_api_error;
 
 /// What this daemon can be connected to, and how each is configured.
 pub fn use_integrations() -> Resource<Vec<api::IntegrationInfo>> {
@@ -31,7 +31,7 @@ pub fn set_settings(id: String, values: Vec<api::FieldValue>, mut done: Signal<u
             Ok(_) => done += 1,
             Err(error) => {
                 tracing::warn!(%error, "saving an integration setting failed");
-                toast_error(&error.to_string());
+                toast_api_error(&error);
             }
         }
     });
@@ -45,7 +45,7 @@ pub fn authenticate(id: String, mut done: Signal<u64>) {
             Ok(_) => done += 1,
             Err(error) => {
                 tracing::warn!(%error, %id, "connecting an integration failed");
-                toast_error(&error.to_string());
+                toast_api_error(&error);
             }
         }
     });
@@ -79,7 +79,7 @@ pub fn connect_from_browser(
             Ok(_) => done += 1,
             Err(error) => {
                 tracing::warn!(%error, %id, "connecting an integration from a browser failed");
-                toast_error(&error.message);
+                toast_api_error(&error);
             }
         }
         busy.set(false);

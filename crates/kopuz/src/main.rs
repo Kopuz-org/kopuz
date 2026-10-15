@@ -165,6 +165,8 @@ fn main() -> std::process::ExitCode {
         unsafe { std::env::set_var("WEBKIT_FORCE_VBLANK_TIMER", "1") };
     }
 
+    hooks::toast::describe_errors_with(components::forms::error_text);
+
     #[cfg(not(target_os = "android"))]
     {
         let log_dir = directories::ProjectDirs::from("moe", "kopuz", "kopuz")

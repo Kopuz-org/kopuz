@@ -14,6 +14,14 @@ pub fn text(text: &api::Text) -> String {
     }
 }
 
+/// A daemon failure in this client's language, or its own message when it gives no reason this build knows.
+pub fn error_text(error: &api::ApiError) -> String {
+    match error.reason {
+        Some(reason) => i18n::t(reason.message_key()),
+        None => error.message.clone(),
+    }
+}
+
 /// A published glyph: a font class, or a mark drawn from a path for the brands
 /// the icon font has none for.
 #[component]
@@ -31,5 +39,33 @@ pub fn Glyph(icon: api::Icon, #[props(default)] class: String) -> Element {
         api::Icon::Class(glyph) => rsx! {
             i { class: "{glyph} {class}" }
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_reason_is_said_in_the_client_language_and_anything_else_as_sent() {
+        let keyless = api::ApiError::invalid_input("set the API key and secret first")
+            .because(api::ErrorReason::ApiKeyMissing);
+        assert_eq!(error_text(&keyless), "Set the API key and secret first.");
+        let plain = api::ApiError::internal("database error: locked");
+        assert_eq!(error_text(&plain), "database error: locked");
+    }
+
+    #[test]
+    fn every_reason_has_a_message_in_the_baseline_locale() {
+        let baseline = include_str!("../../../i18n/locales/en.ftl");
+        for reason in api::ErrorReason::ALL {
+            let key = reason.message_key();
+            assert!(
+                baseline
+                    .lines()
+                    .any(|line| line.starts_with(&format!("{key} ="))),
+                "{key} is missing from en.ftl"
+            );
+        }
     }
 }

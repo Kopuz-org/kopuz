@@ -18,8 +18,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use api::{
-    ApiError, BrowserSession, CredentialProvision, ErrorCode, SourceCapabilities, SourceDraft,
-    SourceFolderEntry, SourceInfo, SourceLoginRequest, SourceState, Table,
+    ApiError, BrowserSession, CredentialProvision, ErrorCode, ErrorReason, SourceCapabilities,
+    SourceDraft, SourceFolderEntry, SourceInfo, SourceLoginRequest, SourceState, Table,
 };
 use server::source::{AuthOutcome, MediaSource};
 use server::sources::Sources;
@@ -596,9 +596,10 @@ impl SourceService {
     async fn delete_folder_source(&self, id: &str) -> Result<(), ApiError> {
         self.config.ensure_unlocked(&LOCAL_SOURCES).await?;
         if id == config::DEFAULT_LOCAL_ID {
-            return Err(ApiError::invalid_input(
-                "the default folder source cannot be deleted",
-            ));
+            return Err(
+                ApiError::invalid_input("the default folder source cannot be deleted")
+                    .because(ErrorReason::DefaultSourceUndeletable),
+            );
         }
         let current = self.current().await;
         if !current
@@ -650,9 +651,10 @@ impl SourceService {
             ));
         };
         if directories.iter().any(|path| path.trim().is_empty()) {
-            return Err(ApiError::invalid_input(
-                "a source directory cannot be empty",
-            ));
+            return Err(
+                ApiError::invalid_input("a source directory cannot be empty")
+                    .because(ErrorReason::EmptySourceFolder),
+            );
         }
         self.config.ensure_unlocked(&LOCAL_SOURCES).await?;
         let current = self.current().await;
@@ -832,9 +834,10 @@ impl SourceService {
         if let Some(folders) = &folders
             && folders.iter().any(|path| path.trim().is_empty())
         {
-            return Err(ApiError::invalid_input(
-                "a source directory cannot be empty",
-            ));
+            return Err(
+                ApiError::invalid_input("a source directory cannot be empty")
+                    .because(ErrorReason::EmptySourceFolder),
+            );
         }
         self.config.ensure_unlocked(&config_keys).await?;
         if !config_keys.is_empty() {
@@ -1238,12 +1241,21 @@ impl SourceService {
             let scratch = server::ytmusic::browser_sessions::scratch_dir();
             let (browser, cookies) = server::ytmusic::browser_sessions::import(session, &scratch)
                 .await
-                .map_err(ApiError::invalid_input)?;
+                .map_err(|error| {
+                    use server::ytmusic::browser_sessions::ImportError;
+                    let reason = match error {
+                        ImportError::ProfileGone => ErrorReason::BrowserProfileGone,
+                        ImportError::CookiesUnreadable(_) => ErrorReason::BrowserCookiesUnreadable,
+                        ImportError::SignedOut { .. } => ErrorReason::BrowserProfileSignedOut,
+                    };
+                    ApiError::invalid_input(error.to_string()).because(reason)
+                })?;
             let secret = try_resume_ytmusic(Some(cookies)).await.ok_or_else(|| {
                 ApiError::invalid_input(format!(
                     "YouTube Music did not accept the session from {}. Open music.youtube.com there to refresh it, then try again.",
                     browser.label()
                 ))
+                .because(ErrorReason::BrowserProfileSignedOut)
             })?;
             self.store_import(id, session, browser, secret).await
         }

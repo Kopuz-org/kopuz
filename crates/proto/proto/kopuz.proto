@@ -2259,6 +2259,31 @@ message ArtworkChunk {
 message ErrorBody {
   ErrorCode code = 1;
   string message = 2;
+  ErrorReason reason = 3;
+}
+
+// Rides an RPC failure as the tonic Status details.
+message ErrorDetail {
+  ErrorReason reason = 1;
+}
+
+// Localize by reason where there is one; the message is the fallback.
+enum ErrorReason {
+  ERROR_REASON_UNSPECIFIED = 0;
+  ERROR_REASON_SETTING_LOCKED = 1;
+  ERROR_REASON_CONNECT_NOT_OFFERED = 2;
+  ERROR_REASON_API_KEY_MISSING = 3;
+  ERROR_REASON_SIGN_IN_NOT_STARTED = 4;
+  ERROR_REASON_BROWSER_NOT_OPENED = 5;
+  ERROR_REASON_SIGN_IN_TIMED_OUT = 6;
+  ERROR_REASON_BROWSER_PROFILE_GONE = 7;
+  ERROR_REASON_BROWSER_COOKIES_UNREADABLE = 8;
+  ERROR_REASON_BROWSER_PROFILE_SIGNED_OUT = 9;
+  ERROR_REASON_BROWSER_PROFILE_NO_TOKEN = 10;
+  ERROR_REASON_INTEGRATION_UNREACHABLE = 11;
+  ERROR_REASON_CREDENTIAL_REJECTED = 12;
+  ERROR_REASON_DEFAULT_SOURCE_UNDELETABLE = 13;
+  ERROR_REASON_EMPTY_SOURCE_FOLDER = 14;
 }
 
 enum ErrorCode {

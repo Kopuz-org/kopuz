@@ -796,7 +796,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                                 registry_toggle_error.set(None);
                                             }
                                             Err(e) => {
-                                                registry_toggle_error.set(Some(i18n::t_with("radio_registry_enable_failed", &[("error", e.to_string().into())])));
+                                                registry_toggle_error.set(Some(i18n::t_with("radio_registry_enable_failed", &[("error", components::forms::error_text(&e).into())])));
                                             }
                                         }
                                     });
@@ -1100,7 +1100,7 @@ fn set_directories(id: String, directories: Vec<String>) {
         let folders = api::FieldValue::new("directories", api::encode_directories(&directories));
         if let Err(error) = api.set_source_settings(id, vec![folders]).await {
             tracing::warn!(%error, "setting the source folders failed");
-            hooks::toast::toast_error(&error.to_string());
+            hooks::toast::toast_api_error(&error);
         }
     });
 }

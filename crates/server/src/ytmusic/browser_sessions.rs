@@ -66,24 +66,46 @@ pub async fn signed_in(scratch: &Path) -> Vec<BrowserProfile> {
     found
 }
 
-pub async fn import(id: &str, scratch: &Path) -> Result<(Browser, String), String> {
+/// Why a profile's session could not be taken.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportError {
+    ProfileGone,
+    CookiesUnreadable(String),
+    SignedOut { browser: String, profile: String },
+}
+
+impl std::fmt::Display for ImportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ProfileGone => f.write_str("That browser profile is no longer there."),
+            Self::CookiesUnreadable(error) => f.write_str(error),
+            Self::SignedOut { browser, profile } => write!(
+                f,
+                "No YouTube Music session in {browser} ({profile}). Sign in to music.youtube.com there first."
+            ),
+        }
+    }
+}
+
+pub async fn import(id: &str, scratch: &Path) -> Result<(Browser, String), ImportError> {
     let profile = profiles::browser_profiles()
         .into_iter()
         .find(|profile| profile.id() == id)
-        .ok_or_else(|| "That browser profile is no longer there.".to_string())?;
+        .ok_or(ImportError::ProfileGone)?;
     let header = session_of(&profile, scratch).await?;
     Ok((profile.browser, header))
 }
 
-async fn session_of(profile: &BrowserProfile, scratch: &Path) -> Result<String, String> {
-    let cookies = profiles::read_cookies(profile, scratch, DOMAIN).await?;
+async fn session_of(profile: &BrowserProfile, scratch: &Path) -> Result<String, ImportError> {
+    let cookies = profiles::read_cookies(profile, scratch, DOMAIN)
+        .await
+        .map_err(ImportError::CookiesUnreadable)?;
     let header = super::cookies::header(&cookies);
     if !SESSION.iter().all(|name| has_cookie(&header, name)) {
-        return Err(format!(
-            "No YouTube Music session in {} ({}). Sign in to music.youtube.com there first.",
-            profile.browser.label(),
-            profile.name
-        ));
+        return Err(ImportError::SignedOut {
+            browser: profile.browser.label().to_string(),
+            profile: profile.name.clone(),
+        });
     }
     Ok(header)
 }

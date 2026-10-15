@@ -188,6 +188,7 @@ mod tests {
                 error: Some(api::ErrorBody {
                     code: api::ErrorCode::Conflict,
                     message: "busy".into(),
+                    reason: Some(api::ErrorReason::SignInTimedOut),
                 }),
                 automatic: false,
             },

@@ -9,8 +9,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use api::{
-    ApiError, ApiEvent, ConnectKind, FieldKind, FieldSpec, FieldValue, Icon, IntegrationInfo,
-    Phase, PlayerState, Text, value_of,
+    ApiError, ApiEvent, ConnectKind, ErrorReason, FieldKind, FieldSpec, FieldValue, Icon,
+    IntegrationInfo, Phase, PlayerState, Text, value_of,
 };
 use reader::Track;
 use tokio::sync::{broadcast, watch};
@@ -968,7 +968,8 @@ impl IntegrationService {
         if info.connect != ConnectKind::WebSignIn {
             return Err(ApiError::unsupported(
                 "this integration does not connect with a web sign-in",
-            ));
+            )
+            .because(ErrorReason::ConnectNotOffered));
         }
         let librefm = id == LIBREFM;
         let (api_key, api_secret) = if librefm {
@@ -981,7 +982,8 @@ impl IntegrationService {
             (held.lastfm_api_key, held.lastfm_api_secret)
         };
         if api_key.trim().is_empty() || api_secret.trim().is_empty() {
-            return Err(ApiError::invalid_input("set the API key and secret first"));
+            return Err(ApiError::invalid_input("set the API key and secret first")
+                .because(ErrorReason::ApiKeyMissing));
         }
         let session_key = web_sign_in(id, &api_key, &api_secret).await?;
         self.credentials
@@ -1010,20 +1012,28 @@ impl IntegrationService {
         if id != LISTENBRAINZ || info.connect != ConnectKind::BrowserProfile {
             return Err(ApiError::unsupported(
                 "this integration does not connect from a browser profile",
-            ));
+            )
+            .because(ErrorReason::ConnectNotOffered));
         }
         let profile = server::cookies::browser_profiles()
             .into_iter()
             .find(|candidate| candidate.dir.to_string_lossy() == profile)
-            .ok_or_else(|| ApiError::not_found("that browser profile is no longer there"))?;
+            .ok_or_else(|| {
+                ApiError::not_found("that browser profile is no longer there")
+                    .because(ErrorReason::BrowserProfileGone)
+            })?;
         let token = listenbrainz_token_from(&profile).await?;
         let user = scrobble::listenbrainz::validate_token(&token)
             .await
-            .map_err(|error| ApiError::internal(format!("could not reach ListenBrainz: {error}")))?
+            .map_err(|error| {
+                ApiError::internal(format!("could not reach ListenBrainz: {error}"))
+                    .because(ErrorReason::IntegrationUnreachable)
+            })?
             .ok_or_else(|| {
                 ApiError::invalid_input(
                     "ListenBrainz does not recognise the token from that profile. Paste your token instead.",
                 )
+                .because(ErrorReason::CredentialRejected)
             })?;
         tracing::info!(%user, browser = profile.browser.id(), "connected to listenbrainz from a browser");
         self.credentials
@@ -1058,6 +1068,7 @@ async fn listenbrainz_token_from(
                 profile.name,
                 profile.browser.label()
             ))
+            .because(ErrorReason::BrowserCookiesUnreadable)
         })?;
     let header = scrobble::listenbrainz::session_header(
         cookies.iter().map(|c| (c.name.as_str(), c.value.as_str())),
@@ -1068,6 +1079,7 @@ async fn listenbrainz_token_from(
             profile.name,
             profile.browser.label()
         ))
+        .because(ErrorReason::BrowserProfileSignedOut)
     })?;
     scrobble::listenbrainz::token_from_session(&header)
         .await
@@ -1075,6 +1087,7 @@ async fn listenbrainz_token_from(
             ApiError::invalid_input(
                 "listenbrainz.org did not show a token for that profile. Paste it from listenbrainz.org/settings instead.",
             )
+            .because(ErrorReason::BrowserProfileNoToken)
         })
 }
 
@@ -1094,14 +1107,19 @@ async fn web_sign_in(id: &str, api_key: &str, api_secret: &str) -> Result<String
     } else {
         scrobble::lastfm::get_auth_token(api_key).await
     }
-    .map_err(|error| ApiError::internal(error.to_string()))?;
+    .map_err(|error| {
+        ApiError::internal(format!("could not start the sign-in: {error}"))
+            .because(ErrorReason::SignInNotStarted)
+    })?;
     let url = if librefm {
         scrobble::librefm::auth_url(api_key, &token)
     } else {
         scrobble::lastfm::auth_url(api_key, &token)
     };
-    webbrowser::open(&url)
-        .map_err(|error| ApiError::internal(format!("could not open a browser: {error}")))?;
+    webbrowser::open(&url).map_err(|error| {
+        ApiError::internal(format!("could not open a browser: {error}"))
+            .because(ErrorReason::BrowserNotOpened)
+    })?;
     for _ in 0..60 {
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         let session = if librefm {
@@ -1113,14 +1131,16 @@ async fn web_sign_in(id: &str, api_key: &str, api_secret: &str) -> Result<String
             return Ok(session);
         }
     }
-    Err(ApiError::internal("the sign-in was not approved in time"))
+    Err(ApiError::internal("the sign-in was not approved in time")
+        .because(ErrorReason::SignInTimedOut))
 }
 
 #[cfg(target_os = "android")]
 async fn web_sign_in(_id: &str, _api_key: &str, _api_secret: &str) -> Result<String, ApiError> {
-    Err(ApiError::unsupported(
-        "web sign-in runs in the app on Android",
-    ))
+    Err(
+        ApiError::unsupported("web sign-in runs in the app on Android")
+            .because(ErrorReason::ConnectNotOffered),
+    )
 }
 
 #[cfg(test)]
@@ -1232,7 +1252,13 @@ mod tests {
                 .await
                 .expect_err("no web sign-in to run");
             assert_eq!(refused.code, api::ErrorCode::Unsupported, "{id}");
+            assert_eq!(refused.reason, Some(ErrorReason::ConnectNotOffered), "{id}");
         }
+        let keyless = service
+            .authenticate(LASTFM)
+            .await
+            .expect_err("no API key to sign in with");
+        assert_eq!(keyless.reason, Some(ErrorReason::ApiKeyMissing));
         let unknown = service
             .authenticate("nope")
             .await

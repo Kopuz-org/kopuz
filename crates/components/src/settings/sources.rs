@@ -354,7 +354,11 @@ fn AccountPicker(source_id: String) -> Element {
     let accounts = use_resource(move || {
         let api = api.clone();
         let id = listed_id.clone();
-        async move { api.accounts(id).await.map_err(|error| error.to_string()) }
+        async move {
+            api.accounts(id)
+                .await
+                .map_err(|error| crate::forms::error_text(&error))
+        }
     });
 
     let accounts = match &*accounts.read() {
@@ -406,7 +410,7 @@ fn AccountPicker(source_id: String) -> Element {
                                 if let Err(error) = api.switch_account(id, account).await {
                                     tracing::warn!(%error, "switching the source account failed");
                                     chosen.set(None);
-                                    hooks::toast::toast_error(&error.to_string());
+                                    hooks::toast::toast_api_error(&error);
                                 }
                             });
                         },
@@ -432,7 +436,7 @@ fn ConnectionTest(source_id: String) -> Element {
         spawn(async move {
             let result = hooks::sources::test_connection(id)
                 .await
-                .map_err(|error| error.to_string());
+                .map_err(|error| crate::forms::error_text(&error));
             report.set(Some(result));
             running.set(false);
         });
