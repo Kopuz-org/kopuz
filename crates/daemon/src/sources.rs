@@ -143,7 +143,7 @@ fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
     }
 }
 
-fn source_error(error: server::source::SourceError) -> ApiError {
+pub(crate) fn source_error(error: server::source::SourceError) -> ApiError {
     use server::source::SourceError;
     match &error {
         SourceError::Unsupported(what) => ApiError::unsupported(*what),
@@ -1033,7 +1033,7 @@ impl SourceService {
             .ok_or_else(|| ApiError::new(ErrorCode::SourceAuthExpired, "not signed in"))?;
         let paths = server::nextcloud::browse_folders(&server.url, user, secret, path)
             .await
-            .map_err(ApiError::internal)?;
+            .map_err(source_error)?;
         Ok(paths
             .into_iter()
             .map(|path| SourceFolderEntry {

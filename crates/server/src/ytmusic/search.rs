@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use super::SOURCE_PREFIX;
 use super::clients::WEB_REMIX;
 use super::innertube::sapisid_hash;
+use crate::source::SourceError;
 
 const ORIGIN_YT_MUSIC: &str = "https://music.youtube.com";
 const SONGS_FILTER: &str = "EgWKAQIIAWoMEAMQBBAJEAoQDhAV";
@@ -48,7 +49,10 @@ struct ParsedRow {
 }
 
 #[tracing::instrument(name = "yt.search", skip(cookies), fields(query = %query))]
-pub async fn music_search_tracks(query: &str, cookies: Option<&str>) -> Result<Vec<Track>, String> {
+pub async fn music_search_tracks(
+    query: &str,
+    cookies: Option<&str>,
+) -> Result<Vec<Track>, SourceError> {
     let http = super::innertube::http_client();
     let (top, songs, videos) = tokio::join!(
         do_search(http, query, None, cookies),
@@ -111,7 +115,7 @@ async fn do_search_raw(
     query: &str,
     params: Option<&str>,
     cookies: Option<&str>,
-) -> Result<Value, String> {
+) -> Result<Value, SourceError> {
     let client = WEB_REMIX;
     let mut body = json!({
         "context": {
@@ -148,14 +152,13 @@ async fn do_search_raw(
             req = req.header("Authorization", auth);
         }
     }
-    req.send()
+    let resp = req.send().await.map_err(SourceError::from_request)?;
+    if !resp.status().is_success() {
+        return Err(SourceError::from_status(resp.status(), "search"));
+    }
+    resp.json::<Value>()
         .await
-        .map_err(|e| format!("search HTTP: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("search HTTP: {e}"))?
-        .json::<Value>()
-        .await
-        .map_err(|e| format!("search JSON: {e}"))
+        .map_err(|e| SourceError::Backend(format!("search JSON: {e}")))
 }
 
 async fn do_search(
@@ -163,7 +166,7 @@ async fn do_search(
     query: &str,
     params: Option<&str>,
     cookies: Option<&str>,
-) -> Result<Vec<Track>, String> {
+) -> Result<Vec<Track>, SourceError> {
     let resp = do_search_raw(http, query, params, cookies).await?;
     Ok(walk_tracks(&resp))
 }

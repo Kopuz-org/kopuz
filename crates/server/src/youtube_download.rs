@@ -150,7 +150,7 @@ impl YoutubeDownloader {
     }
 
     /// Songs on YouTube Music matching `query`, best match first.
-    pub async fn search(&self, query: &str) -> Result<Vec<Track>, String> {
+    pub async fn search(&self, query: &str) -> Result<Vec<Track>, crate::source::SourceError> {
         crate::ytmusic::search::music_search_tracks(query, self.cookies.as_deref()).await
     }
 
