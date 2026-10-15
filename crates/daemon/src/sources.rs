@@ -17,8 +17,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use api::{
-    ApiError, CredentialProvision, ErrorCode, SourceCapabilities, SourceDraft, SourceFolderEntry,
-    SourceInfo, SourceLoginRequest, SourceState, Table,
+    ApiError, CredentialProvision, ErrorCode, ErrorReason, SourceCapabilities, SourceDraft,
+    SourceFolderEntry, SourceInfo, SourceLoginRequest, SourceState, Table,
 };
 use server::source::AuthOutcome;
 use server::sources::Sources;
@@ -471,9 +471,10 @@ impl SourceService {
     async fn delete_folder_source(&self, id: &str) -> Result<(), ApiError> {
         self.config.ensure_unlocked(&LOCAL_SOURCES).await?;
         if id == config::DEFAULT_LOCAL_ID {
-            return Err(ApiError::invalid_input(
-                "the default folder source cannot be deleted",
-            ));
+            return Err(
+                ApiError::invalid_input("the default folder source cannot be deleted")
+                    .because(ErrorReason::DefaultSourceUndeletable),
+            );
         }
         let current = self.current().await;
         if !current
@@ -525,9 +526,10 @@ impl SourceService {
             ));
         };
         if directories.iter().any(|path| path.trim().is_empty()) {
-            return Err(ApiError::invalid_input(
-                "a source directory cannot be empty",
-            ));
+            return Err(
+                ApiError::invalid_input("a source directory cannot be empty")
+                    .because(ErrorReason::EmptySourceFolder),
+            );
         }
         self.config.ensure_unlocked(&LOCAL_SOURCES).await?;
         let current = self.current().await;
@@ -694,9 +696,10 @@ impl SourceService {
         if let Some(folders) = &folders
             && folders.iter().any(|path| path.trim().is_empty())
         {
-            return Err(ApiError::invalid_input(
-                "a source directory cannot be empty",
-            ));
+            return Err(
+                ApiError::invalid_input("a source directory cannot be empty")
+                    .because(ErrorReason::EmptySourceFolder),
+            );
         }
         self.config.ensure_unlocked(&config_keys).await?;
         if !config_keys.is_empty() {

@@ -26,10 +26,54 @@ pub fn error_code_from_proto(value: i32) -> api::ErrorCode {
     }
 }
 
+pub fn error_reason_to_proto(value: Option<api::ErrorReason>) -> ErrorReason {
+    use api::ErrorReason as R;
+    match value {
+        None => ErrorReason::Unspecified,
+        Some(R::SettingLocked) => ErrorReason::SettingLocked,
+        Some(R::ConnectNotOffered) => ErrorReason::ConnectNotOffered,
+        Some(R::ApiKeyMissing) => ErrorReason::ApiKeyMissing,
+        Some(R::SignInNotStarted) => ErrorReason::SignInNotStarted,
+        Some(R::BrowserNotOpened) => ErrorReason::BrowserNotOpened,
+        Some(R::SignInTimedOut) => ErrorReason::SignInTimedOut,
+        Some(R::BrowserProfileGone) => ErrorReason::BrowserProfileGone,
+        Some(R::BrowserCookiesUnreadable) => ErrorReason::BrowserCookiesUnreadable,
+        Some(R::BrowserProfileSignedOut) => ErrorReason::BrowserProfileSignedOut,
+        Some(R::BrowserProfileNoToken) => ErrorReason::BrowserProfileNoToken,
+        Some(R::IntegrationUnreachable) => ErrorReason::IntegrationUnreachable,
+        Some(R::CredentialRejected) => ErrorReason::CredentialRejected,
+        Some(R::DefaultSourceUndeletable) => ErrorReason::DefaultSourceUndeletable,
+        Some(R::EmptySourceFolder) => ErrorReason::EmptySourceFolder,
+    }
+}
+
+/// A reason this build does not know reads as none, so the message stands in for it.
+pub fn error_reason_from_proto(value: i32) -> Option<api::ErrorReason> {
+    use api::ErrorReason as R;
+    match ErrorReason::try_from(value).unwrap_or(ErrorReason::Unspecified) {
+        ErrorReason::Unspecified => None,
+        ErrorReason::SettingLocked => Some(R::SettingLocked),
+        ErrorReason::ConnectNotOffered => Some(R::ConnectNotOffered),
+        ErrorReason::ApiKeyMissing => Some(R::ApiKeyMissing),
+        ErrorReason::SignInNotStarted => Some(R::SignInNotStarted),
+        ErrorReason::BrowserNotOpened => Some(R::BrowserNotOpened),
+        ErrorReason::SignInTimedOut => Some(R::SignInTimedOut),
+        ErrorReason::BrowserProfileGone => Some(R::BrowserProfileGone),
+        ErrorReason::BrowserCookiesUnreadable => Some(R::BrowserCookiesUnreadable),
+        ErrorReason::BrowserProfileSignedOut => Some(R::BrowserProfileSignedOut),
+        ErrorReason::BrowserProfileNoToken => Some(R::BrowserProfileNoToken),
+        ErrorReason::IntegrationUnreachable => Some(R::IntegrationUnreachable),
+        ErrorReason::CredentialRejected => Some(R::CredentialRejected),
+        ErrorReason::DefaultSourceUndeletable => Some(R::DefaultSourceUndeletable),
+        ErrorReason::EmptySourceFolder => Some(R::EmptySourceFolder),
+    }
+}
+
 pub fn error_body_to_proto(value: &api::ErrorBody) -> ErrorBody {
     ErrorBody {
         code: error_code_to_proto(value.code) as i32,
         message: value.message.clone(),
+        reason: error_reason_to_proto(value.reason) as i32,
     }
 }
 
@@ -37,5 +81,6 @@ pub fn error_body_from_proto(value: &ErrorBody) -> api::ErrorBody {
     api::ErrorBody {
         code: error_code_from_proto(value.code),
         message: value.message.clone(),
+        reason: error_reason_from_proto(value.reason),
     }
 }

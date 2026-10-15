@@ -30,7 +30,7 @@ pub use catalog::{
     CatalogDetail, CatalogDetailRequest, CatalogItem, CatalogItemKind, CatalogPage, CatalogShelf,
     ReleaseKind,
 };
-pub use error::{ApiError, ErrorBody, ErrorCode};
+pub use error::{ApiError, ErrorBody, ErrorCode, ErrorReason};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
 pub use jobs::{
     DownloadCandidate, DownloadHistoryEntry, DownloadItemState, DownloadItemStatus, DownloadState,
@@ -675,10 +675,7 @@ mod handshake_tests {
     /// A status that never arrived proves nothing, so it is the caller's error, not a match.
     #[tokio::test]
     async fn a_failed_status_is_an_error_not_a_match() {
-        let gone = ApiError {
-            code: ErrorCode::DaemonGone,
-            message: "gone".into(),
-        };
+        let gone = ApiError::new(ErrorCode::DaemonGone, "gone");
 
         let result = Daemon(Err(gone.clone())).handshake().await;
 

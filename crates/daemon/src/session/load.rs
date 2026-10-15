@@ -135,6 +135,7 @@ impl Session {
             self.error = Some(api::ErrorBody {
                 code: api::ErrorCode::SourceUnreachable,
                 message: message.to_string(),
+                reason: None,
             });
             return false;
         }

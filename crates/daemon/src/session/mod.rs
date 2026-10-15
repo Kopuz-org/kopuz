@@ -2079,6 +2079,7 @@ impl Session {
         self.error = Some(api::ErrorBody {
             code: api::ErrorCode::Internal,
             message: format!("couldn't load this track: {error}"),
+            reason: None,
         });
         self.buffered.clear();
         match intent {

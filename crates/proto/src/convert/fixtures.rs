@@ -65,6 +65,7 @@ pub(super) fn sample_state() -> api::PlayerState {
         error: Some(api::ErrorBody {
             code: api::ErrorCode::SourceUnreachable,
             message: "m".into(),
+            reason: None,
         }),
         output_latency_ms: Some(120),
     }

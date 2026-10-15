@@ -92,9 +92,8 @@ and presents the token on every call, the event stream included.
 
 ## Errors
 
-RPC failures are gRPC statuses, and the status code is the whole story —
-localize by it, never by the message. The mapping is one-to-one, so
-nothing rides alongside it in metadata:
+RPC failures are gRPC statuses. Localize by the status code, never by the
+message; the mapping is one-to-one:
 
 | gRPC code | `ErrorCode` | meaning |
 |---|---|---|
@@ -116,6 +115,13 @@ never sent -- the daemon cannot report its own absence.
 The `ErrorCode` enum in the schema is for failures
 reported *inside* a message, where there is no status to carry them, such
 as `JobStatus.error`. Treat an unrecognized status code as `internal`.
+
+A failure a person can act on, such as a pinned setting or an integration
+sign-in that was not approved in time, also carries an `ErrorReason`: in
+the status details as an encoded `ErrorDetail`, and in `ErrorBody.reason`.
+Say the reason in the client's own language where there is one. The
+message is English and meant for logs; show it only for a reason the
+client does not know, or none.
 
 ## Events and playback
 

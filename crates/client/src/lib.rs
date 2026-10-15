@@ -116,16 +116,10 @@ impl GrpcApi {
     /// header cannot carry is the one thing reported here.
     pub fn connect_tcp(address: impl Into<String>, token: &str) -> Result<Self, ApiError> {
         let address = address.into();
-        let header =
-            MetadataValue::try_from(format!("Bearer {}", token.trim())).map_err(|_| ApiError {
-                code: api::ErrorCode::InvalidInput,
-                message: "the daemon token is not printable ASCII".into(),
-            })?;
+        let header = MetadataValue::try_from(format!("Bearer {}", token.trim()))
+            .map_err(|_| ApiError::invalid_input("the daemon token is not printable ASCII"))?;
         let channel = Endpoint::from_shared(format!("http://{address}"))
-            .map_err(|error| ApiError {
-                code: api::ErrorCode::InvalidInput,
-                message: format!("{address}: {error}"),
-            })?
+            .map_err(|error| ApiError::invalid_input(format!("{address}: {error}")))?
             .connect_lazy();
         Ok(Self {
             address: Address::Tcp(address),
