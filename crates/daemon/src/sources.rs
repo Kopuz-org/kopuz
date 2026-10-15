@@ -2106,9 +2106,18 @@ mod tests {
             name: "B".into(),
             directories: Vec::new(),
         });
+        let settings_path = dir.path().join("settings.toml");
+        config::store::save_settings(
+            &settings_path,
+            &seeded,
+            &[config::SettingKey::Library(
+                config::LibraryKey::LocalSources,
+            )],
+        )
+        .expect("seed the settings file");
         let config = Arc::new(ConfigService::new(
             database.clone(),
-            dir.path().join("settings.toml"),
+            settings_path,
             seeded.clone(),
         ));
         let player =
