@@ -869,7 +869,7 @@ impl SourceService {
             server::provider::ProviderClient::new(server.service, server.url, device_id)
                 .login(request.username.trim(), &request.password)
                 .await
-                .map_err(|error| ApiError::new(ErrorCode::SourceAuthExpired, error))?
+                .map_err(source_error)?
         };
         self.provision_credentials(CredentialProvision {
             server_id: request.server_id,

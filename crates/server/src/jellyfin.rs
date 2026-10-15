@@ -312,7 +312,8 @@ impl JellyfinClient {
         &mut self,
         username: &str,
         password: &str,
-    ) -> Result<(String, String), String> {
+    ) -> Result<(String, String), crate::source::SourceError> {
+        use crate::source::SourceError;
         let url = format!("{}/Users/AuthenticateByName", self.base_url);
 
         let body = LoginRequest { username, password };
@@ -329,15 +330,16 @@ impl JellyfinClient {
             .json(&body)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(SourceError::from_request)?;
 
         if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(format!("Login failed with status: {} - {}", status, text));
+            return Err(SourceError::from_status(resp.status(), "Jellyfin login"));
         }
 
-        let login_resp: LoginResponse = resp.json().await.map_err(|e| e.to_string())?;
+        let login_resp: LoginResponse = resp
+            .json()
+            .await
+            .map_err(|e| SourceError::Backend(e.to_string()))?;
 
         self.access_token = Some(login_resp.access_token.clone());
         self.user_id = Some(login_resp.user.id.clone());

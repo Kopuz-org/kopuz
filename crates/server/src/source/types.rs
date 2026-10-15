@@ -17,6 +17,23 @@ impl SourceError {
     pub fn unsupported(op: &'static str) -> Self {
         SourceError::Unsupported(op)
     }
+
+    /// A request that got no answer, not one the server refused.
+    pub fn from_request(error: reqwest::Error) -> Self {
+        if error.is_connect() || error.is_timeout() {
+            SourceError::Connectivity
+        } else {
+            SourceError::Backend(error.without_url().to_string())
+        }
+    }
+
+    /// A non-success HTTP status, where 401 and 403 mean the credentials were refused.
+    pub fn from_status(status: reqwest::StatusCode, what: &str) -> Self {
+        match status.as_u16() {
+            401 | 403 => SourceError::Auth,
+            _ => SourceError::Backend(format!("{what} failed: {status}")),
+        }
+    }
 }
 
 impl fmt::Display for SourceError {

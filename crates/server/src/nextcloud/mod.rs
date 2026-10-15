@@ -98,6 +98,18 @@ pub async fn browse_folders(
         .await
 }
 
+/// A refused credential and a server that did not answer, told apart from whatever else went wrong.
+pub(crate) fn source_error(error: nextcloud::Error) -> crate::source::SourceError {
+    use crate::source::SourceError;
+    if error.is_auth_error() {
+        return SourceError::Auth;
+    }
+    match error {
+        nextcloud::Error::Http(error) => SourceError::from_request(error),
+        other => SourceError::Backend(utils::redact::redact_url(&other.to_string())),
+    }
+}
+
 pub(crate) struct NextcloudClient {
     nc: Nextcloud,
     /// Carries userinfo, unlike the one inside `nc`.
