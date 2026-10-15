@@ -83,7 +83,7 @@ pub fn DownloadOverlay() -> Element {
                             evt.stop_propagation();
                             hooks::downloads::cancel();
                         },
-                        "Stop"
+                        {i18n::t("stop")}
                     }
                     i {
                         class: format!(

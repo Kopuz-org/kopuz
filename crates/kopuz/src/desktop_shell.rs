@@ -34,13 +34,12 @@ pub fn tray_backend_available() -> bool {
 
 #[cfg(not(target_os = "android"))]
 pub fn show_tray_missing_popup() {
-    let msg = "System tray unavailable: appindicator library not found. \
-               Install libayatana-appindicator (Debian/Ubuntu/Arch) or \
-               libappindicator-gtk3 (Fedora). Closing the window will quit \
-               the app instead of minimizing to tray.";
-    let escaped = serde_json::to_string(msg).unwrap_or_else(|_| "\"\"".to_string());
+    let escaped = serde_json::to_string(&i18n::t("tray_unavailable_message"))
+        .unwrap_or_else(|_| "\"\"".to_string());
+    let title = serde_json::to_string(&i18n::t("tray_unavailable_title"))
+        .unwrap_or_else(|_| "\"\"".to_string());
     let js = format!(
-        r#"(function(m){{
+        r#"(function(h, m){{
             let t = document.getElementById('kopuz-tray-popup');
             if (!t) {{
                 t = document.createElement('div');
@@ -49,11 +48,14 @@ pub fn show_tray_missing_popup() {
                 t.onclick = () => {{ t.style.opacity = '0'; }};
                 document.body.appendChild(t);
             }}
-            t.innerHTML = '<div style="font-weight:600;margin-bottom:4px;color:#ffb347;">Tray icon unavailable</div>' + m;
+            const head = document.createElement('div');
+            head.style.cssText = 'font-weight:600;margin-bottom:4px;color:#ffb347;';
+            head.textContent = h;
+            t.replaceChildren(head, m);
             requestAnimationFrame(() => {{ t.style.opacity = '1'; }});
             clearTimeout(t._h);
             t._h = setTimeout(() => {{ t.style.opacity = '0'; }}, 8000);
-        }})({escaped});"#
+        }})({title}, {escaped});"#
     );
     let _ = dioxus::document::eval(&js);
 }

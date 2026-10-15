@@ -672,7 +672,9 @@ fn App() -> Element {
         use std::cell::RefCell;
         use std::rc::Rc;
 
-        let tray_slot: Rc<RefCell<Option<TrayIcon>>> = use_hook(|| Rc::new(RefCell::new(None)));
+        // The tray menu lives outside the window, so it keeps the language it was labelled in until relabelled.
+        let tray_slot: Rc<RefCell<Option<(TrayIcon, String)>>> =
+            use_hook(|| Rc::new(RefCell::new(None)));
         let tray_warned: Rc<RefCell<bool>> = use_hook(|| Rc::new(RefCell::new(false)));
 
         const TRAY_SHOW_ID: &str = "kopuz-tray-show";
@@ -739,31 +741,39 @@ fn App() -> Element {
                     WindowCloseBehaviour::WindowCloses
                 });
 
+                let language = settings.read().ui.language.clone();
+                let tray_menu = || -> Box<dyn dioxus::desktop::trayicon::menu::ContextMenu> {
+                    use dioxus::desktop::trayicon::menu::{Menu, MenuItem};
+
+                    let menu = Menu::new();
+                    let show =
+                        MenuItem::with_id(TRAY_SHOW_ID, i18n::t("tray_show_hide"), true, None);
+                    let quit = MenuItem::with_id(TRAY_QUIT_ID, i18n::t("tray_quit"), true, None);
+                    if let Err(e) = menu.append_items(&[&show, &quit]) {
+                        tracing::warn!("Failed to build tray menu: {e}");
+                    }
+                    Box::new(menu)
+                };
                 let mut slot = tray_slot.borrow_mut();
-                match (enabled, slot.is_some()) {
-                    (true, false) => {
-                        use dioxus::desktop::trayicon::menu::{Menu, MenuItem};
-
-                        let menu = Menu::new();
-                        let show = MenuItem::with_id(TRAY_SHOW_ID, "Show / Hide Kopuz", true, None);
-                        let quit = MenuItem::with_id(TRAY_QUIT_ID, "Quit Kopuz", true, None);
-                        if let Err(e) = menu.append_items(&[&show, &quit]) {
-                            tracing::warn!("Failed to build tray menu: {e}");
-                        }
-
+                match (enabled, slot.as_mut()) {
+                    (true, None) => {
                         let mut builder = TrayIconBuilder::new()
                             .with_tooltip("Kopuz")
-                            .with_menu(Box::new(menu))
+                            .with_menu(tray_menu())
                             .with_menu_on_left_click(false);
                         if let Some(icon) = desktop_shell::build_tray_icon() {
                             builder = builder.with_icon(icon);
                         }
                         match builder.build() {
-                            Ok(tray) => *slot = Some(tray),
+                            Ok(tray) => *slot = Some((tray, language)),
                             Err(e) => tracing::warn!("Failed to build tray icon: {e}"),
                         }
                     }
-                    (false, true) => *slot = None,
+                    (true, Some((tray, labelled))) if *labelled != language => {
+                        tray.set_menu(Some(tray_menu()));
+                        *labelled = language;
+                    }
+                    (false, Some(_)) => *slot = None,
                     _ => {}
                 }
             }
@@ -1364,7 +1374,7 @@ fn App() -> Element {
                             span {
                                 class: "text-[10px] text-white/35 font-mono truncate",
                                 if file.is_empty() {
-                                    "Scanning library…"
+                                    {i18n::t("scanning_library")}
                                 } else {
                                     "{file}"
                                 }
@@ -1400,9 +1410,9 @@ fn App() -> Element {
                             i { class: if is_offline { "fa-solid fa-wifi-slash text-xs" } else { "fa-solid fa-wifi text-xs" } }
                             span {
                                 if is_offline {
-                                    "No internet connection — switched to offline mode"
+                                    {i18n::t("network_offline_banner")}
                                 } else {
-                                    "Back online — switched to server mode"
+                                    {i18n::t("network_online_banner")}
                                 }
                             }
                             if is_offline {
@@ -1420,7 +1430,7 @@ fn App() -> Element {
                                         }
                                         network_banner.set(None);
                                     },
-                                    "Keep server mode"
+                                    {i18n::t("keep_server_mode")}
                                 }
                             }
                         }

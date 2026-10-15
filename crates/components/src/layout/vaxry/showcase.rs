@@ -298,7 +298,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                                     class: "grid items-center p-2 rounded-lg hover:bg-white/5 group transition-colors relative select-none",
                                                     style: format!("grid-template-columns: {columns};"),
                                                     i { class: "fa-solid fa-compact-disc" }
-                                                    p { "Disc {track.disc_number.unwrap_or(1)}" }
+                                                    p { {i18n::t_with("disc_heading", &[("number", track.disc_number.unwrap_or(1).into())])} }
                                                 }
                                             }
                                         }

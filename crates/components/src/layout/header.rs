@@ -79,7 +79,7 @@ pub fn Header(
                             } else {
                                 "shrink-0 w-8 h-8 rounded-full bg-white/5 text-white/55 flex items-center justify-center active:scale-95 transition-transform"
                             },
-                            aria_label: if all_selected { "Deselect all tracks" } else { "Select all tracks" },
+                            aria_label: if all_selected { i18n::t("deselect_all_tracks") } else { i18n::t("select_all_tracks") },
                             onclick: move |_| handler.call(!all_selected),
                             i { class: "fa-solid fa-check text-[11px]" }
                         }
@@ -113,7 +113,7 @@ pub fn Header(
                                       } else {
                                           "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
                                       },
-                                      aria_label: if all_selected { "Deselect all tracks" } else { "Select all tracks" },
+                                      aria_label: if all_selected { i18n::t("deselect_all_tracks") } else { i18n::t("select_all_tracks") },
                                       onclick: move |_| handler.call(!all_selected),
                                       if all_selected {
                                           i { class: "fa-solid fa-check", style: "font-size: 9px;" }
@@ -186,7 +186,7 @@ pub fn Header(
                                               } else {
                                                   "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
                                               },
-                                              aria_label: if all_selected { "Deselect all tracks" } else { "Select all tracks" },
+                                              aria_label: if all_selected { i18n::t("deselect_all_tracks") } else { i18n::t("select_all_tracks") },
                                               onclick: move |_| handler.call(!all_selected),
                                               if all_selected {
                                                   i { class: "fa-solid fa-check", style: "font-size: 9px;" }

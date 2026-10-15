@@ -16,13 +16,15 @@ use hooks::use_db_queries::{use_active_source, use_album, use_album_tracks, use_
 /// `components`, so the page carries its own tiny copy).
 fn copy_album_link(url: String) {
     let value = serde_json::to_string(&url).unwrap_or_else(|_| "\"\"".to_string());
+    let copied =
+        serde_json::to_string(&i18n::t("share_copied")).unwrap_or_else(|_| "\"\"".to_string());
     let js = format!(
         "navigator.clipboard.writeText({value}).then(() => {{\
             let t = document.getElementById('kopuz-toast');\
             if (!t) {{ t = document.createElement('div'); t.id = 'kopuz-toast';\
                 t.style.cssText = 'position:fixed;left:50%;bottom:88px;transform:translateX(-50%);background:rgba(20,20,20,0.95);color:#fff;padding:10px 18px;border-radius:8px;font:14px system-ui,sans-serif;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,0.4);pointer-events:none;border:1px solid rgba(255,255,255,0.1);';\
                 document.body.appendChild(t); }}\
-            t.textContent = 'Copied link'; t.style.opacity = '1';\
+            t.textContent = {copied}; t.style.opacity = '1';\
             clearTimeout(t._h); t._h = setTimeout(() => {{ t.style.opacity = '0'; }}, 1800);\
         }}).catch((e) => console.error('clipboard writeText failed', e));"
     );
