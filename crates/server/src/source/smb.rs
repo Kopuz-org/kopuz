@@ -173,7 +173,7 @@ impl MediaSource for SmbSource {
         Ok(LibrarySnapshot {
             albums: library.albums,
             tracks: library.tracks,
-            artist_images: Vec::new(),
+            artists: Vec::new(),
         })
     }
 

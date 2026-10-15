@@ -237,7 +237,7 @@ impl MediaSource for NextcloudSource {
         Ok(LibrarySnapshot {
             albums: out_albums,
             tracks: out_tracks,
-            artist_images: Vec::new(),
+            artists: Vec::new(),
         })
     }
 

@@ -375,11 +375,18 @@ impl LibraryService {
             self.invalidate(Table::Tracks);
         }
         let linked = self.db.linked_artist_keys(&src).await.map_err(db_error)?;
-        for (artist, url) in &snapshot.artist_images {
-            let Some(key) = super::artist_art::credit_key(artist, &linked) else {
+        for (artist, url) in &snapshot.artists {
+            let (Some(key), Some(url)) = (super::artist_art::credit_key(artist, &linked), url)
+            else {
                 continue;
             };
             let _ = source.set_artist_image(&key, "server", Some(url)).await;
+        }
+        // After the tracks: a listing renames only the rows they filed, and outranks their credits.
+        match source.name_listed_artists(&snapshot.artists).await {
+            Ok(0) => {}
+            Ok(_) => self.invalidate(Table::Artists),
+            Err(error) => tracing::warn!(%error, "could not name the listed artists"),
         }
         let keep_keys: Vec<String> = snapshot
             .tracks

@@ -740,11 +740,37 @@ pub async fn name_artist(
     id: &str,
     name: &str,
 ) -> Result<bool, DbError> {
+    let mut conn = pool.acquire().await?;
+    rename_artist(&mut conn, source.as_str(), id, name).await
+}
+
+/// [`name_artist`] for each `(id, name)` a listing reports, in one transaction; answers how many rows changed.
+#[tracing::instrument(skip_all, fields(source = %source.as_str(), count = named.len()))]
+pub async fn name_artists(
+    pool: &SqlitePool,
+    source: &Source,
+    named: &[(String, String)],
+) -> Result<usize, DbError> {
+    let src = source.as_str();
+    let mut tx = pool.begin().await?;
+    let mut changed = 0;
+    for (id, name) in named {
+        changed += usize::from(rename_artist(&mut tx, src, id, name).await?);
+    }
+    tx.commit().await?;
+    Ok(changed)
+}
+
+async fn rename_artist(
+    conn: &mut sqlx::SqliteConnection,
+    src: &str,
+    id: &str,
+    name: &str,
+) -> Result<bool, DbError> {
     let name = name.trim();
     if name.is_empty() {
         return Ok(false);
     }
-    let src = source.as_str();
     let name_key = utils::artist::normalize_artist_key(name);
     let changed = sqlx::query!(
         "UPDATE artists SET name = ?3, name_key = ?4, named_by_source = 1 \
@@ -755,7 +781,7 @@ pub async fn name_artist(
         name,
         name_key
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await?
     .rows_affected();
     Ok(changed > 0)

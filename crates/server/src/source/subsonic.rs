@@ -157,20 +157,10 @@ impl MediaSource for SubsonicSource {
         use std::path::PathBuf;
         let mut albums = Vec::new();
         let mut tracks = Vec::new();
-        let mut artist_images = Vec::new();
         let mut seen = std::collections::HashSet::new();
-
-        if let Ok(artists) = self.client.get_artists().await {
-            for artist in artists {
-                if let Some(cover_art_id) = artist.cover_art.as_deref().filter(|id| !id.is_empty())
-                {
-                    artist_images.push((
-                        reader::ArtistCredit::linked(artist.name, artist.id.clone()),
-                        cover_ref(self.service, Some(cover_art_id)),
-                    ));
-                }
-            }
-        }
+        let artists = <Self as MediaSource>::fetch_artists(self)
+            .await
+            .unwrap_or_default();
 
         let mut offset = 0;
         let batch = 250;
@@ -249,7 +239,7 @@ impl MediaSource for SubsonicSource {
         Ok(LibrarySnapshot {
             albums,
             tracks,
-            artist_images,
+            artists,
         })
     }
 
@@ -436,18 +426,21 @@ impl MediaSource for SubsonicSource {
         ))
     }
 
-    async fn fetch_artist_images(
+    async fn fetch_artists(
         &self,
-    ) -> Result<Vec<(reader::ArtistCredit, String)>, SourceError> {
+    ) -> Result<Vec<(reader::ArtistCredit, Option<String>)>, SourceError> {
         let artists = self.client.get_artists().await?;
         let mut out = Vec::new();
         for artist in artists {
-            if let Some(cover_art_id) = artist.cover_art.as_deref().filter(|id| !id.is_empty()) {
-                out.push((
-                    reader::ArtistCredit::linked(&artist.name, &artist.id),
-                    cover_ref(self.service, Some(cover_art_id)),
-                ));
-            }
+            let photo = artist
+                .cover_art
+                .as_deref()
+                .filter(|id| !id.is_empty())
+                .map(|id| cover_ref(self.service, Some(id)));
+            out.push((
+                reader::ArtistCredit::linked(&artist.name, &artist.id),
+                photo,
+            ));
         }
         Ok(out)
     }

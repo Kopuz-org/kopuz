@@ -590,6 +590,85 @@ async fn once_the_source_names_an_artist_a_credit_no_longer_renames_it() {
 }
 
 #[tokio::test]
+async fn a_name_the_source_reports_replaces_a_stale_one() {
+    let db = db::init(&unique_db()).await.unwrap();
+    let source = Source::Server("yt".into());
+    let unlinked = |text: &str| track("t2", vec![ArtistCredit::unlinked(text)]);
+    db.upsert_tracks(
+        &source,
+        &[
+            track("t1", vec![ArtistCredit::linked("Aimer", "UC-aimer")]),
+            unlinked("Aimer"),
+        ],
+    )
+    .await
+    .unwrap();
+    assert!(db.name_artist(&source, "UC-aimer", "Aimer").await.unwrap());
+
+    assert!(
+        db.name_artist(&source, "UC-aimer", "Aimerrhythm")
+            .await
+            .unwrap(),
+        "a header naming a source-named row anew renames it"
+    );
+    let named = db.artist(&source, "UC-aimer").await.unwrap().unwrap();
+    assert_eq!(named.name, "Aimerrhythm");
+
+    let listed = |name: &str| vec![("UC-aimer".to_string(), name.to_string())];
+    assert_eq!(db.name_artists(&source, &listed("Aimer")).await.unwrap(), 1);
+    assert_eq!(
+        db.name_artists(&source, &listed("Aimer")).await.unwrap(),
+        0,
+        "already so"
+    );
+    let names: Vec<(Option<String>, String)> = db
+        .artists(&source)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| (row.source_id, row.name))
+        .collect();
+    assert!(names.contains(&(Some("UC-aimer".into()), "Aimer".into())));
+    assert!(
+        names.contains(&(None, "Aimer".into())),
+        "the unlinked row its name keys is left alone"
+    );
+}
+
+#[tokio::test]
+async fn a_credit_spelling_never_overwrites_a_listing_name() {
+    let db = db::init(&unique_db()).await.unwrap();
+    let source = Source::Server("srv".into());
+    let billed = |text: &str| track("t1", vec![ArtistCredit::linked(text, "ar-ada")]);
+    db.upsert_tracks(&source, &[billed("Ada feat. Boris")])
+        .await
+        .unwrap();
+    assert_eq!(
+        db.artist(&source, "ar-ada").await.unwrap().unwrap().name,
+        "Ada feat. Boris",
+        "a credit names a row nothing else has"
+    );
+
+    let listing = vec![
+        ("ar-ada".to_string(), "Ada".to_string()),
+        ("ar-nobody".to_string(), "Nobody".to_string()),
+    ];
+    assert_eq!(db.name_artists(&source, &listing).await.unwrap(), 1);
+    db.upsert_tracks(&source, &[billed("ADA (feat. Cleo)")])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        db.artist(&source, "ar-ada").await.unwrap().unwrap().name,
+        "Ada"
+    );
+    assert!(
+        db.artist(&source, "ar-nobody").await.unwrap().is_none(),
+        "a listing renames rows, it files none"
+    );
+}
+
+#[tokio::test]
 async fn a_queue_round_trips_through_its_rows() {
     let db = db::init(&unique_db()).await.unwrap();
     let mut listed = track("t1", Vec::new());
