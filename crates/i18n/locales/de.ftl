@@ -13,7 +13,7 @@ playlists = Playlists
 album = Album
 release_single = Single
 release_ep = EP
-release_audiobook = Audiobook
+release_audiobook = Hörbuch
 artist = Künstler
 home = Start
 search = Suchen
@@ -98,9 +98,9 @@ titlebar_system = Systemdekorationen
 titlebar_off = Keine Titelleiste
 volume = Lautstärke
 source = Source
-sources = Sources
-manage_sources = Manage sources
-source_on_this_device = On this device
+sources = Quellen
+manage_sources = Quellen verwalten
+source_on_this_device = Auf diesem Gerät
 server = Server
 downloader = Downloads
 
@@ -654,7 +654,7 @@ interface_scale = Interface size
 interface_scale_description = Scales text and controls across the whole app.
 
 choose = Choose
-daemon_unreachable = Can't reach the kopuz daemon
+daemon_unreachable = Der Kopuz-Dienst ist nicht erreichbar
 download_offline = Offline herunterladen
 go_to_album = Zum Album
 go_to_artist = Zum Künstler
@@ -670,10 +670,10 @@ settings_offline = Offline Downloads
 settings_player = Player
 settings_tools = Tools
 share = Share
-share_copied = Copied link
-share_no_page = Couldn't find a page for this track
+share_copied = Link kopiert
+share_no_page = Für diesen Titel wurde keine Seite gefunden
 explicit = Explizit
-start_daemon = Start Daemon
+start_daemon = Dienst starten
 
 first_run_title = Welcome to Kopuz
 first_run_subtitle = Point Kopuz at your music and it takes care of the rest.
@@ -724,8 +724,8 @@ metadata_number_invalid = Enter a number, or leave it empty to clear the tag.
 metadata_batch_keep = Leave unchanged
 metadata_batch_count =
     { $count ->
-        [one] Editing { $count } track
-       *[other] Editing { $count } tracks
+        [one] { $count } Titel wird bearbeitet
+       *[other] { $count } Titel werden bearbeitet
     }
 interface_font = Interface font
 interface_font_description = The font family to draw the interface with.
@@ -801,7 +801,7 @@ stopping = Stopping…
 starting = Starting…
 clear = Clear
 retry_failed = Retry failed
-retry_now = Retry now
+retry_now = Jetzt erneut versuchen
 view = View
 undo = Undo
 quit = Quit
@@ -813,7 +813,7 @@ tray_show_hide = Kopuz anzeigen / ausblenden
 tray_quit = Kopuz beenden
 tray_unavailable_title = Tray-Symbol nicht verfügbar
 tray_unavailable_message = Systemtray nicht verfügbar: Die appindicator-Bibliothek wurde nicht gefunden. Installiere libayatana-appindicator (Debian/Ubuntu/Arch) oder libappindicator-gtk3 (Fedora). Das Schließen des Fensters beendet die App, statt sie in den Tray zu minimieren.
-reconnecting_attempt = Reconnecting… (attempt { $attempt })
+reconnecting_attempt = Verbindung wird wiederhergestellt… (Versuch { $attempt })
 downloads_summary = { $done } downloaded, { $failed } failed
 job_scan = Library scan
 job_library_sync = Library sync
@@ -881,16 +881,16 @@ discover_no_results_hint = Try fewer words, or switch source and look again.
 discover_show_less = Show less
 discover_genre_count =
     { $count ->
-        [one] { $count } genre
-       *[other] { $count } genres
+        [one] { $count } Genre
+       *[other] { $count } Genres
     }
 discover_read_failed = Couldn't load your library: { $error }
 palette_all_results = All results for "{ $query }" in Discover
 
 library_count =
     { $count ->
-        [one] { $count } item
-       *[other] { $count } items
+        [one] { $count } Eintrag
+       *[other] { $count } Einträge
     }
 library_filter_placeholder = Filter the library…
 library_chip_downloaded = Downloaded
@@ -916,8 +916,8 @@ library_default_view = Grids open as
 library_default_view_description = Whether albums, artists and playlists start as tiles or as rows.
 library_artist_tracks =
     { $count ->
-        [one] { $count } track
-       *[other] { $count } tracks
+        [one] { $count } Titel
+       *[other] { $count } Titel
     }
 library_selected = { $count } selected
 library_whole_selection = Everything that matches
@@ -959,8 +959,8 @@ interface_skin_description = The shape of the interface: how round things are, h
 
 home_plays =
     { $count ->
-        [one] { $count } play
-       *[other] { $count } plays
+        [one] { $count } Wiedergabe
+       *[other] { $count } Wiedergaben
     }
 
 interface_ambient = Ambient light
@@ -990,8 +990,8 @@ upload_music = Upload music
 uploading_music = Uploading { $name }…
 music_uploaded =
     { $count ->
-        [one] Uploaded { $count } file.
-       *[other] Uploaded { $count } files.
+        [one] { $count } Datei hochgeladen.
+       *[other] { $count } Dateien hochgeladen.
     }
 music_upload_too_large = Audio files must be no larger than 500 MiB.
 cloud_storage_loading = Loading storage usage…
@@ -1033,33 +1033,33 @@ connection_step_passed = Bestanden
 connection_step_failed = Fehlgeschlagen
 connection_step_skipped = Übersprungen
 
-sync_interval = Sync and rescan every
-sync_interval_never = Never
-sync_interval_minutes = { $count } min
-sync_interval_hours = { $count } h
-sync_interval_days = { $count } d
+sync_interval = Synchronisieren und neu einlesen alle
+sync_interval_never = Nie
+sync_interval_minutes = { $count } Min.
+sync_interval_hours = { $count } Std.
+sync_interval_days = { $count } Tg.
 
-error_setting_locked = A managed settings file pins this setting, so it cannot be changed here.
-error_connect_not_offered = This integration does not connect that way.
-error_api_key_missing = Set the API key and secret first.
-error_sign_in_not_started = The service did not start the sign-in. Check the API key and your connection.
-error_browser_not_opened = Could not open a browser for the sign-in.
-error_sign_in_timed_out = The sign-in was not approved in time.
-error_browser_profile_gone = That browser profile is no longer there.
-error_browser_cookies_unreadable = Could not read the cookies of that browser profile.
-error_browser_profile_signed_out = That browser profile is not signed in to the service. Sign in there, or paste your token instead.
-error_browser_profile_no_token = The service did not show a token for that profile. Paste it instead.
-error_integration_unreachable = Could not reach the service. Check your connection.
-error_credential_rejected = The service does not accept that token. Paste your token instead.
-error_default_source_undeletable = The default folder source cannot be deleted.
-error_empty_source_folder = A source folder cannot be empty.
-error_code_invalid_input = Not accepted: { $detail }
-error_code_not_found = That is no longer there.
-error_code_conflict = Already in use or in progress: { $detail }
-error_code_source_auth_expired = The source did not accept the sign-in. Sign in again in Settings.
-error_code_source_unreachable = The source could not be reached. Check your connection.
-error_code_unsupported = Not supported here: { $detail }
-error_code_internal = Something went wrong: { $detail }
-error_code_source_challenged = The source wants to check that you're not a bot. Wait a few minutes and try again.
-error_code_source_refused = The source refused the request. This is on its side and usually clears up on its own.
-error_code_item_unavailable = The source can't play this. It may have been removed, made private or blocked in your region.
+error_setting_locked = Eine verwaltete Einstellungsdatei legt diese Einstellung fest, daher kann sie hier nicht geändert werden.
+error_connect_not_offered = Diese Integration verbindet sich nicht auf diese Weise.
+error_api_key_missing = Trage zuerst den API-Schlüssel und das Geheimnis ein.
+error_sign_in_not_started = Der Dienst hat die Anmeldung nicht gestartet. Prüfe den API-Schlüssel und deine Verbindung.
+error_browser_not_opened = Für die Anmeldung konnte kein Browser geöffnet werden.
+error_sign_in_timed_out = Die Anmeldung wurde nicht rechtzeitig bestätigt.
+error_browser_profile_gone = Dieses Browserprofil gibt es nicht mehr.
+error_browser_cookies_unreadable = Die Cookies dieses Browserprofils konnten nicht gelesen werden.
+error_browser_profile_signed_out = Dieses Browserprofil ist beim Dienst nicht angemeldet. Melde dich dort an oder füge stattdessen dein Token ein.
+error_browser_profile_no_token = Der Dienst hat für dieses Profil kein Token angezeigt. Füge es stattdessen ein.
+error_integration_unreachable = Der Dienst ist nicht erreichbar. Prüfe deine Verbindung.
+error_credential_rejected = Der Dienst akzeptiert dieses Token nicht. Füge stattdessen dein Token ein.
+error_default_source_undeletable = Die Standard-Ordnerquelle kann nicht gelöscht werden.
+error_empty_source_folder = Ein Quellordner darf nicht leer sein.
+error_code_invalid_input = Nicht akzeptiert: { $detail }
+error_code_not_found = Das gibt es nicht mehr.
+error_code_conflict = Bereits in Verwendung oder in Arbeit: { $detail }
+error_code_source_auth_expired = Die Quelle hat die Anmeldung nicht akzeptiert. Melde dich in den Einstellungen erneut an.
+error_code_source_unreachable = Die Quelle ist nicht erreichbar. Prüfe deine Verbindung.
+error_code_unsupported = Hier nicht unterstützt: { $detail }
+error_code_internal = Etwas ist schiefgelaufen: { $detail }
+error_code_source_challenged = Die Quelle möchte prüfen, ob du kein Bot bist. Warte ein paar Minuten und versuche es erneut.
+error_code_source_refused = Die Quelle hat die Anfrage abgelehnt. Das Problem liegt bei ihr und verschwindet meist von selbst.
+error_code_item_unavailable = Die Quelle kann das nicht abspielen. Es wurde möglicherweise entfernt, auf privat gestellt oder in deiner Region gesperrt.
