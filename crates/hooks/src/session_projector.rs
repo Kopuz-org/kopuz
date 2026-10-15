@@ -83,10 +83,10 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
         &mut ctrl.playback_error,
         state
             .error
-            .as_ref()
+            .clone()
             .map(|error| crate::use_player_controller::PlaybackError {
                 code: Some(error.code),
-                message: error.message.clone(),
+                message: crate::toast::describe(&error.into()),
             }),
     );
     // Which device an integration is playing on, so a picker can mark it and

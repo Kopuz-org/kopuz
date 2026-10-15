@@ -56,7 +56,7 @@ pub fn PlaylistsPage(
                     playlist_name.set(String::new());
                 }
                 Err(e) => {
-                    error.set(Some(e.to_string()));
+                    error.set(Some(components::forms::error_text(&e)));
                 }
             }
         });
@@ -219,7 +219,7 @@ pub fn PlaylistsPage(
                                     })
                                     .unwrap_or_default();
                                 if let Err(error) = api.create_playlist(folder_name, refs).await {
-                                    hooks::toast::toast_error(&error.to_string());
+                                    hooks::toast::toast_api_error(&error);
                                 }
                             });
                             error.set(None);

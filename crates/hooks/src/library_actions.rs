@@ -12,7 +12,7 @@
 use dioxus::prelude::*;
 
 use crate::api::consume_api;
-use crate::toast::toast_error;
+use crate::toast::toast_api_error;
 
 /// Rewrite one track's tags, and its embedded cover with them.
 pub fn edit_track(patch: api::TrackMetadataPatch) {
@@ -20,7 +20,7 @@ pub fn edit_track(patch: api::TrackMetadataPatch) {
     spawn(async move {
         if let Err(error) = api.update_track_metadata(patch).await {
             tracing::warn!(%error, "saving track tags failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -35,7 +35,7 @@ pub fn delete_tracks(keys: Vec<String>, from_disk: bool) {
     spawn(async move {
         if let Err(error) = api.delete_tracks(keys, from_disk).await {
             tracing::warn!(%error, "deleting tracks failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -45,7 +45,7 @@ pub fn delete_album(id: String, from_disk: bool) {
     spawn(async move {
         if let Err(error) = api.delete_album(id, from_disk).await {
             tracing::warn!(%error, "deleting an album failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -62,7 +62,7 @@ pub fn upload_artwork(target: api::ArtworkTarget, content_type: String, bytes: V
         };
         if let Err(error) = api.upload_artwork(upload).await {
             tracing::warn!(%error, "setting artwork failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -72,7 +72,7 @@ pub fn remove_artwork(target: api::ArtworkTarget) {
     spawn(async move {
         if let Err(error) = api.remove_artwork(target).await {
             tracing::warn!(%error, "removing artwork failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -112,7 +112,7 @@ pub fn with_album_keys(album_id: String, then: impl FnOnce(Vec<String>) + 'stati
             Ok(page) => page,
             Err(error) => {
                 tracing::warn!(%error, "reading an album's tracks failed");
-                toast_error(&error.to_string());
+                toast_api_error(&error);
                 return;
             }
         };
@@ -128,7 +128,7 @@ pub fn rate(item_ref: String, rating: api::Rating, then: impl FnOnce() + 'static
             Ok(()) => then(),
             Err(error) => {
                 tracing::warn!(%error, "rating failed");
-                toast_error(&error.to_string());
+                toast_api_error(&error);
             }
         }
     });
@@ -141,7 +141,7 @@ pub fn follow(artist_ref: String, follow: bool, then: impl FnOnce() + 'static) {
             Ok(()) => then(),
             Err(error) => {
                 tracing::warn!(%error, "following failed");
-                toast_error(&error.to_string());
+                toast_api_error(&error);
             }
         }
     });
@@ -154,7 +154,7 @@ pub fn save(item_ref: String, saved: bool, then: impl FnOnce() + 'static) {
             Ok(()) => then(),
             Err(error) => {
                 tracing::warn!(%error, "saving to the library failed");
-                toast_error(&error.to_string());
+                toast_api_error(&error);
             }
         }
     });
@@ -167,7 +167,7 @@ pub fn remove_from_history(token: String, then: impl FnOnce() + 'static) {
             Ok(()) => then(),
             Err(error) => {
                 tracing::warn!(%error, "removing from history failed");
-                toast_error(&error.to_string());
+                toast_api_error(&error);
             }
         }
     });

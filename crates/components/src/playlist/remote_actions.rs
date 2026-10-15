@@ -174,7 +174,7 @@ pub fn RemotePlaylistMenu(
                                                 Ok(()) => on_deleted.call(()),
                                                 Err(error) => {
                                                     tracing::warn!(%error, "deleting a playlist failed");
-                                                    hooks::toast::toast_error(&error.to_string());
+                                                    hooks::toast::toast_api_error(&error);
                                                 }
                                             }
                                         });

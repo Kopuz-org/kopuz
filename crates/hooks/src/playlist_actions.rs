@@ -12,7 +12,7 @@
 use dioxus::prelude::*;
 
 use crate::api::consume_api;
-use crate::toast::toast_error;
+use crate::toast::toast_api_error;
 
 /// Add tracks to an existing playlist. Empty keys are a no-op, matching the
 /// old call sites, which all guarded on it.
@@ -24,7 +24,7 @@ pub fn add_tracks(playlist_id: String, keys: Vec<String>) {
     spawn(async move {
         if let Err(error) = api.add_playlist_tracks(playlist_id, keys).await {
             tracing::warn!(%error, "adding to a playlist failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -38,7 +38,7 @@ pub fn create_with(name: String, keys: Vec<String>) {
     spawn(async move {
         if let Err(error) = api.create_playlist(name, keys).await {
             tracing::warn!(%error, "creating a playlist failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -48,7 +48,7 @@ pub fn rename(playlist_id: String, name: String) {
     spawn(async move {
         if let Err(error) = api.rename_playlist(playlist_id, name).await {
             tracing::warn!(%error, "renaming a playlist failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -60,7 +60,7 @@ pub fn edit(playlist_id: String, edit: api::PlaylistEdit, then: impl FnOnce() + 
             Ok(()) => then(),
             Err(error) => {
                 tracing::warn!(%error, "editing a playlist failed");
-                toast_error(&error.to_string());
+                toast_api_error(&error);
             }
         }
     });
@@ -71,7 +71,7 @@ pub fn delete(playlist_id: String) {
     spawn(async move {
         if let Err(error) = api.delete_playlist(playlist_id).await {
             tracing::warn!(%error, "deleting a playlist failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -82,7 +82,7 @@ pub fn remove_track(playlist_id: String, index: usize) {
     spawn(async move {
         if let Err(error) = api.remove_playlist_track(playlist_id, index as u32).await {
             tracing::warn!(%error, "removing from a playlist failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -96,7 +96,7 @@ pub fn reorder(playlist_id: String, from: usize, to: usize) {
         };
         if let Err(error) = api.reorder_playlist(playlist_id, reorder).await {
             tracing::warn!(%error, "reordering a playlist failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -106,7 +106,7 @@ pub fn create_folder(name: String) {
     spawn(async move {
         if let Err(error) = api.create_playlist_folder(name).await {
             tracing::warn!(%error, "creating a folder failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -123,7 +123,7 @@ pub fn create_folder_with(name: String, playlist_id: String, then: impl FnOnce()
         };
         if let Err(error) = result {
             tracing::warn!(%error, "creating a folder for a playlist failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
         then();
     });
@@ -134,7 +134,7 @@ pub fn rename_folder(folder_id: String, name: String) {
     spawn(async move {
         if let Err(error) = api.rename_playlist_folder(folder_id, name).await {
             tracing::warn!(%error, "renaming a folder failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -144,7 +144,7 @@ pub fn delete_folder(folder_id: String) {
     spawn(async move {
         if let Err(error) = api.delete_playlist_folder(folder_id).await {
             tracing::warn!(%error, "deleting a folder failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }
@@ -155,7 +155,7 @@ pub fn move_to_folder(playlist_id: String, folder_id: Option<String>) {
     spawn(async move {
         if let Err(error) = api.move_playlist(playlist_id, folder_id).await {
             tracing::warn!(%error, "moving a playlist failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }

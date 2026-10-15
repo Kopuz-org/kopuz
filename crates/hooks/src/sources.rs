@@ -174,7 +174,7 @@ pub fn set_source_settings(id: String, values: Vec<api::FieldValue>) {
     spawn(async move {
         if let Err(error) = api.set_source_settings(id, values).await {
             tracing::warn!(%error, "saving a source setting failed");
-            crate::toast::toast_error(&error.to_string());
+            crate::toast::toast_api_error(&error);
         }
     });
 }

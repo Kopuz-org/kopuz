@@ -13,7 +13,7 @@ use dioxus::prelude::*;
 
 use crate::api::{consume_api, use_api};
 use crate::db_reactivity::{Table, use_generations};
-use crate::toast::toast_error;
+use crate::toast::toast_api_error;
 
 /// The offline state of the library, as a row renders it.
 #[derive(Clone, Default, PartialEq)]
@@ -71,7 +71,7 @@ pub fn start(keys: Vec<String>) {
     spawn(async move {
         if let Err(error) = api.download(keys).await {
             tracing::warn!(%error, "starting a download failed");
-            toast_error(&error.to_string());
+            toast_api_error(&error);
         }
     });
 }

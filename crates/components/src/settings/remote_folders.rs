@@ -52,7 +52,7 @@ pub fn RemoteFolderPicker(settings: RemoteFolderSettings) -> Element {
             }
             api.browse_source(id, at)
                 .await
-                .map_err(|error| error.to_string())
+                .map_err(|error| crate::forms::error_text(&error))
         }
     });
 

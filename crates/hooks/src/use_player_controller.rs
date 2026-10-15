@@ -228,7 +228,7 @@ impl PlayerController {
             };
             if let Err(error) = handle.set_queue(request).await {
                 tracing::warn!(%error, "playing by id failed");
-                crate::toast::toast_error(&error.message);
+                crate::toast::toast_api_error(&error);
             }
             loading.set(false);
         });

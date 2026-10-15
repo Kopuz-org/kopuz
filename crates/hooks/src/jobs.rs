@@ -92,7 +92,7 @@ pub fn start(kind: api::JobKind) {
     spawn(async move {
         if let Err(error) = api.start_job(kind).await {
             tracing::warn!(%error, ?kind, "could not start job");
-            crate::toast::toast_error(&error.to_string());
+            crate::toast::toast_api_error(&error);
         }
     });
 }

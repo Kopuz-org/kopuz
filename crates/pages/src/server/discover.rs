@@ -22,12 +22,15 @@ use super::shelves;
 pub struct DiscoverNowPlaying(pub Signal<Option<String>>);
 
 /// What a failure says. A source that has not been signed into is the one
-/// case worth wording ourselves; everything else is the daemon's message.
+/// case worth wording ourselves.
 pub(crate) fn failure_text(error: &api::ApiError) -> String {
     if error.code == api::ErrorCode::SourceAuthExpired {
         return i18n::t("source_anon_discover");
     }
-    i18n::t_with("discover_failed", &[("error", error.to_string().into())])
+    i18n::t_with(
+        "discover_failed",
+        &[("error", components::forms::error_text(error).into())],
+    )
 }
 
 fn keys_of(tracks: &[TrackInfo]) -> Vec<String> {
