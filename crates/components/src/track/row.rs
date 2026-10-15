@@ -734,9 +734,9 @@ pub fn share_track(track: Track) {
         match api.track_web_url(track.key.clone()).await {
             Ok(Some(url)) => {
                 copy_to_clipboard(&url);
-                toast("Copied link");
+                toast(&i18n::t("share_copied"));
             }
-            _ => toast("Couldn't find a page for this track"),
+            _ => toast(&i18n::t("share_no_page")),
         }
     });
 }

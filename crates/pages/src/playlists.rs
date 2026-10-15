@@ -443,7 +443,7 @@ fn PlaylistsGrid(mut selected_playlist_id: Signal<Option<String>>) -> Element {
                                 if caps().downloads {
                                     button {
                                         class: "absolute top-4 right-4 w-8 h-8 rounded-full bg-black/40 border border-white/10 flex items-center justify-center text-white/60 hover:text-white hover:border-white/30 transition-colors opacity-0 group-hover:opacity-100",
-                                        title: if all_downloaded { "Remove downloads" } else { "Download playlist for offline playback" },
+                                        title: if all_downloaded { i18n::t("remove_download") } else { i18n::t("download_offline") },
                                         disabled: is_dl,
                                         onclick: move |evt| {
                                             evt.stop_propagation();

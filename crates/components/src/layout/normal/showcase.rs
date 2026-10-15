@@ -217,7 +217,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                          if props.on_download_all.is_some() || props.on_delete_all.is_some() {
                              button {
                                  class: "w-12 h-12 rounded-full border border-white/20 hover:border-white/40 text-white/70 hover:text-white hover:bg-white/10 flex items-center justify-center transition-colors active:scale-95",
-                                 title: if all_downloaded { "Remove downloads" } else { "Download all for offline playback" },
+                                 title: if all_downloaded { i18n::t("remove_download") } else { i18n::t("download_offline") },
                                  disabled: props.is_downloading_all,
                                  onclick: move |_| {
                                      if all_downloaded {
@@ -312,7 +312,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                                  class: "grid items-center p-2 rounded-lg hover:bg-white/5 group transition-colors relative select-none",
                                                  style: format!("grid-template-columns: {columns}; column-gap: {column_gap};"),
                                                  i { class: "fa-solid fa-compact-disc text-center" }
-                                                 p { "Disc {track.disc_number.unwrap_or(1)}" }
+                                                 p { {i18n::t_with("disc_heading", &[("number", track.disc_number.unwrap_or(1).into())])} }
                                              }
                                          }
                                      }
