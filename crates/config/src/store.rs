@@ -744,8 +744,6 @@ mod tests {
                 },
             ],
             active_source: crate::Source::LocalLibrary("local:two".into()),
-            spotify_browser: Some("brave".into()),
-            spotify_prefer_active_device: false,
             theme: "custom-one".into(),
             discord_presence: Some(false),
             discord_presence_paused: None,
@@ -824,11 +822,6 @@ mod tests {
         let restored: AppConfig = serde_json::from_value(base).unwrap();
 
         assert_eq!(restored.local_sources, cfg.local_sources);
-        assert_eq!(restored.spotify_browser, cfg.spotify_browser);
-        assert_eq!(
-            restored.spotify_prefer_active_device,
-            cfg.spotify_prefer_active_device
-        );
         assert_eq!(restored.theme, cfg.theme);
         assert_eq!(restored.discord_presence, cfg.discord_presence);
         assert_eq!(restored.language, cfg.language);

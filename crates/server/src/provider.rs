@@ -55,9 +55,13 @@ impl ProviderClient {
                 })
             }
             MusicService::Clippsly => {
-                let client = crate::clippsly::ClippslyClient::new(&self.server_url, password).map_err(|e| e.to_string())?;
+                let client = crate::clippsly::ClippslyClient::new(&self.server_url, password)
+                    .map_err(|e| e.to_string())?;
                 let account = client.account().await.map_err(|e| e.to_string())?;
-                Ok(AuthSession { access_token: password.to_string(), user_id: account.id.to_string() })
+                Ok(AuthSession {
+                    access_token: password.to_string(),
+                    user_id: account.id.to_string(),
+                })
             }
             MusicService::Nextcloud => {
                 // The password is expected to be an app password (Settings,
@@ -97,7 +101,7 @@ impl ProviderClient {
                     .to_string(),
             ),
             MusicService::Spotify => Err(
-                "Spotify uses OAuth browser sign-in; call spotify::auth::launch_signin_and_extract() \
+                "Spotify uses OAuth browser sign-in; call spotify::auth::sign_in() \
                  instead of username/password login"
                     .to_string(),
             ),

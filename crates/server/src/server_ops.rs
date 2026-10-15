@@ -28,7 +28,7 @@ impl ServerConn {
     /// cookies and ignores any token kept from an earlier sign-in;
     /// Jellyfin/Subsonic/Custom additionally require
     /// a `user_id` (YouTube Music authenticates by cookie only and Spotify by
-    /// OAuth token only, so a missing user_id is fine for both). Centralizing this stops every UI call site from
+    /// its stored credentials, so a missing user_id is fine for both). Centralizing this stops every UI call site from
     /// coercing an absent user_id into `""` and firing a malformed
     /// authenticated request that silently fails.
     pub fn resolve(config: &config::AppConfig) -> Option<Self> {

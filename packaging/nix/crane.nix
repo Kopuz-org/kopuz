@@ -103,6 +103,7 @@ let
             (s + /crates)
             (s + /data)
             (s + /packaging/systemd)
+            (s + /vendor)
 
             (s + /Cargo.toml)
             (s + /Cargo.lock)
