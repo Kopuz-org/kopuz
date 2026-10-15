@@ -1609,14 +1609,14 @@ struct MemoryRecorder {
 
 #[async_trait::async_trait]
 impl PlaybackRecorder for MemoryRecorder {
-    async fn record_recent(&self, track: &Track) {
+    async fn record_recent(&self, _: Option<&server::source::ActiveSource>, track: &Track) {
         self.recents
             .lock()
             .expect("recorder lock")
             .push(track.title.clone());
     }
 
-    async fn bump_listen_count(&self, track: &Track) {
+    async fn bump_listen_count(&self, _: Option<&server::source::ActiveSource>, track: &Track) {
         self.listens
             .lock()
             .expect("recorder lock")
@@ -1669,6 +1669,66 @@ async fn recents_record_once_and_completion_bumps_listens() {
     assert_eq!(recents.len(), 2, "resume must not re-record the same track");
 }
 
+/// Notes which source each listen was credited to.
+#[derive(Default)]
+struct CreditRecorder {
+    listens: Mutex<Vec<Option<String>>>,
+}
+
+#[async_trait::async_trait]
+impl PlaybackRecorder for CreditRecorder {
+    async fn record_recent(&self, _: Option<&server::source::ActiveSource>, _: &Track) {}
+
+    async fn bump_listen_count(&self, source: Option<&server::source::ActiveSource>, _: &Track) {
+        self.listens
+            .lock()
+            .expect("recorder lock")
+            .push(source.map(|source| source.source().as_str().to_string()));
+    }
+}
+
+/// A listen after a source switch belongs to the source switched to, not the one the session started with.
+#[tokio::test]
+async fn a_listen_is_credited_to_the_source_active_when_it_played() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database = db::init(&dir.path().join("credit.db")).await.expect("db");
+    let source_of = |active: config::Source| -> server::source::ActiveSource {
+        let sources = server::sources::Sources {
+            active,
+            ..Default::default()
+        };
+        Arc::from(server::source::active(database.clone(), &sources))
+    };
+    let recorder = Arc::new(CreditRecorder::default());
+    let harness = harness_with_services(
+        |_| {},
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+        Some(recorder.clone()),
+    );
+    let session = harness.api.session.clone();
+    session.set_active_source(Some(source_of(config::Source::default())));
+    session.set_active_source(Some(source_of(config::Source::LocalLibrary(
+        "local:b".into(),
+    ))));
+
+    harness
+        .api
+        .set_queue(replace(&["short-a", "short-b"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+    drive_until(&harness, "auto-advance to second track", |state| {
+        state.queue.index == Some(1) && matches!(state.intent, Intent::Committed { .. })
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    assert_eq!(
+        recorder.listens.lock().expect("lock").as_slice(),
+        [Some("local:b".to_string())]
+    );
+}
+
 /// Writes play history slowly, into the same log a listening client writes what it hears.
 struct SlowRecorder {
     log: Arc<Mutex<Vec<&'static str>>>,
@@ -1683,11 +1743,11 @@ impl SlowRecorder {
 
 #[async_trait::async_trait]
 impl PlaybackRecorder for SlowRecorder {
-    async fn record_recent(&self, _: &Track) {
+    async fn record_recent(&self, _: Option<&server::source::ActiveSource>, _: &Track) {
         self.write().await;
     }
 
-    async fn bump_listen_count(&self, _: &Track) {
+    async fn bump_listen_count(&self, _: Option<&server::source::ActiveSource>, _: &Track) {
         self.write().await;
     }
 }

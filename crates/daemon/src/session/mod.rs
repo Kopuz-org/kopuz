@@ -68,12 +68,12 @@ pub trait QueueMaterializer: Send + Sync {
 }
 
 /// Durable playback bookkeeping: recents on commit, listen counts when a
-/// track completes or crossfades out. Implemented over the active source;
-/// tests inject a stub.
+/// track completes or crossfades out, credited to the source that was active
+/// when it played. Implemented over that source; tests inject a stub.
 #[async_trait::async_trait]
 pub trait PlaybackRecorder: Send + Sync {
-    async fn record_recent(&self, track: &Track);
-    async fn bump_listen_count(&self, track: &Track);
+    async fn record_recent(&self, source: Option<&server::source::ActiveSource>, track: &Track);
+    async fn bump_listen_count(&self, source: Option<&server::source::ActiveSource>, track: &Track);
 }
 
 /// Playback dependencies that will eventually be owned by daemon services.
@@ -1725,8 +1725,9 @@ impl Session {
         self.last_recent_key = Some(uid);
         if let Some(recorder) = self.recorder.clone() {
             let events = self.events.clone();
+            let source = self.active_source.clone();
             tokio::spawn(async move {
-                recorder.record_recent(&track).await;
+                recorder.record_recent(source.as_ref(), &track).await;
                 announce_history(&events);
             });
         }
@@ -1747,8 +1748,9 @@ impl Session {
         self.last_recent_key = Some(uid);
         let track = track.clone();
         let events = self.events.clone();
+        let source = self.active_source.clone();
         tokio::spawn(async move {
-            recorder.record_recent(&track).await;
+            recorder.record_recent(source.as_ref(), &track).await;
             announce_history(&events);
         });
     }
@@ -1770,8 +1772,9 @@ impl Session {
             return;
         }
         let events = self.events.clone();
+        let source = self.active_source.clone();
         tokio::spawn(async move {
-            recorder.bump_listen_count(&track).await;
+            recorder.bump_listen_count(source.as_ref(), &track).await;
             announce_history(&events);
         });
     }

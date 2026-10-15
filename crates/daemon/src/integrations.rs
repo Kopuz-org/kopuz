@@ -24,28 +24,30 @@ const JELLYFIN_KEEPALIVE_TICKS: u32 = 6;
 const DISCORD_TICK_SECS: u64 = 30;
 const YOUTUBE_REPORT_SECS: u64 = 1;
 
-/// Durable recents + listen counts over the active source, matching the
-/// pump: recents record under the DB key, listen counts under the uid.
-pub struct SourceRecorder {
-    source: server::source::ActiveSource,
-}
-
-impl SourceRecorder {
-    pub fn new(source: server::source::ActiveSource) -> Self {
-        Self { source }
-    }
-}
+/// Durable recents + listen counts over the source a track played from,
+/// matching the pump: recents record under the DB key, listen counts under the uid.
+pub struct SourceRecorder;
 
 #[async_trait::async_trait]
 impl PlaybackRecorder for SourceRecorder {
-    async fn record_recent(&self, track: &Track) {
-        if let Err(error) = self.source.record_recent(&track.id.key()).await {
+    async fn record_recent(&self, source: Option<&server::source::ActiveSource>, track: &Track) {
+        let Some(source) = source else {
+            return;
+        };
+        if let Err(error) = source.record_recent(&track.id.key()).await {
             tracing::warn!(%error, "recent record failed");
         }
     }
 
-    async fn bump_listen_count(&self, track: &Track) {
-        if let Err(error) = self.source.bump_listen_count(&track.id.key()).await {
+    async fn bump_listen_count(
+        &self,
+        source: Option<&server::source::ActiveSource>,
+        track: &Track,
+    ) {
+        let Some(source) = source else {
+            return;
+        };
+        if let Err(error) = source.bump_listen_count(&track.id.key()).await {
             tracing::warn!(%error, "listen count persist failed");
         }
     }
