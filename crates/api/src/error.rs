@@ -15,6 +15,33 @@ pub enum ErrorCode {
     Internal,
 }
 
+impl ErrorCode {
+    pub const ALL: [ErrorCode; 8] = [
+        Self::InvalidInput,
+        Self::NotFound,
+        Self::Conflict,
+        Self::SourceAuthExpired,
+        Self::SourceUnreachable,
+        Self::DaemonGone,
+        Self::Unsupported,
+        Self::Internal,
+    ];
+
+    /// The i18n key a failure with no reason is said with; the message is passed to it as `detail`.
+    pub fn message_key(self) -> &'static str {
+        match self {
+            Self::InvalidInput => "error_code_invalid_input",
+            Self::NotFound => "error_code_not_found",
+            Self::Conflict => "error_code_conflict",
+            Self::SourceAuthExpired => "error_code_source_auth_expired",
+            Self::SourceUnreachable => "error_code_source_unreachable",
+            Self::DaemonGone => "daemon_unreachable",
+            Self::Unsupported => "error_code_unsupported",
+            Self::Internal => "error_code_internal",
+        }
+    }
+}
+
 /// Why a call failed, for a frontend to say in its own language; the daemon has no locale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorReason {

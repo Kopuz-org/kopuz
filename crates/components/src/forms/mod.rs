@@ -14,11 +14,14 @@ pub fn text(text: &api::Text) -> String {
     }
 }
 
-/// A daemon failure in this client's language, or its own message when it gives no reason this build knows.
+/// A daemon failure in this client's language: by its reason, else by its code with the message as detail.
 pub fn error_text(error: &api::ApiError) -> String {
     match error.reason {
         Some(reason) => i18n::t(reason.message_key()),
-        None => error.message.clone(),
+        None => i18n::t_with(
+            error.code.message_key(),
+            &[("detail", error.message.clone().into())],
+        ),
     }
 }
 
@@ -47,19 +50,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_reason_is_said_in_the_client_language_and_anything_else_as_sent() {
+    fn a_reason_is_said_in_the_client_language_and_anything_else_by_its_code() {
         let keyless = api::ApiError::invalid_input("set the API key and secret first")
             .because(api::ErrorReason::ApiKeyMissing);
         assert_eq!(error_text(&keyless), "Set the API key and secret first.");
         let plain = api::ApiError::internal("database error: locked");
-        assert_eq!(error_text(&plain), "database error: locked");
+        assert_eq!(
+            error_text(&plain).replace(['\u{2068}', '\u{2069}'], ""),
+            "Something went wrong: database error: locked"
+        );
+        let offline = api::ApiError::new(api::ErrorCode::SourceUnreachable, "timed out");
+        assert!(!error_text(&offline).contains("timed out"));
     }
 
     #[test]
-    fn every_reason_has_a_message_in_the_baseline_locale() {
+    fn every_reason_and_code_has_a_message_in_the_baseline_locale() {
         let baseline = include_str!("../../../i18n/locales/en.ftl");
-        for reason in api::ErrorReason::ALL {
-            let key = reason.message_key();
+        let keys = api::ErrorReason::ALL
+            .iter()
+            .map(|reason| reason.message_key())
+            .chain(api::ErrorCode::ALL.iter().map(|code| code.message_key()));
+        for key in keys {
             assert!(
                 baseline
                     .lines()
