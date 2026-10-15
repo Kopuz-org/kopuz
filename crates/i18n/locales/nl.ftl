@@ -167,6 +167,7 @@ radio_empty = Geen vergelijkbare nummers gevonden
 radio_failed = Kan radio niet starten
 remove_from_queue = Uit wachtrij verwijderen
 downloading = Bezig met downloaden…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = Meer acties voor { $name }
 share_musicbrainz = Delen (MusicBrainz)
 share_link_copied = MusicBrainz-link gekopieerd

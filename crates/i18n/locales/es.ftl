@@ -114,6 +114,7 @@ radio_empty = No se encontraron canciones similares
 radio_failed = No se pudo iniciar la radio
 remove_from_queue = Quitar de la Cola
 downloading = Descargando…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = Más acciones para { $name }
 share_musicbrainz = Compartir (MusicBrainz)
 share_link_copied = Enlace de MusicBrainz copiado

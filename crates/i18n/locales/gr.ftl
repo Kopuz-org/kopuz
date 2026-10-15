@@ -114,6 +114,7 @@ radio_empty = Δεν βρέθηκαν παρόμοια τραγούδια
 radio_failed = Δεν ήταν δυνατή η έναρξη του ραδιοφώνου
 remove_from_queue = Αφαίρεση από την Ουρά
 downloading = Γίνεται λήψη…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = Περισσότερες ενέργειες για { $name }
 share_musicbrainz = Κοινοποίηση (MusicBrainz)
 share_link_copied = Ο σύνδεσμος MusicBrainz αντιγράφηκε

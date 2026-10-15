@@ -114,6 +114,7 @@ radio_empty = לא נמצאו שירים דומים
 radio_failed = לא ניתן להפעיל רדיו
 remove_from_queue = הסרה מהתור
 downloading = מוריד…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = פעולות נוספות עבור { $name }
 share_musicbrainz = שיתוף (MusicBrainz)
 share_link_copied = קישור MusicBrainz הועתק

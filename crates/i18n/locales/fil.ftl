@@ -167,6 +167,7 @@ radio_empty = Walang nahanap na katulad na kanta
 radio_failed = Hindi masimulan ang radyo
 remove_from_queue = Alisin sa Queue
 downloading = Nagda-download…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = Iba pang aksyon para sa { $name }
 share_musicbrainz = Ibahagi (MusicBrainz)
 share_link_copied = Nakopya ang link ng MusicBrainz

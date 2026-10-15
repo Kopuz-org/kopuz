@@ -167,6 +167,7 @@ radio_empty = Không tìm thấy bài hát tương tự
 radio_failed = Không thể bắt đầu radio
 remove_from_queue = Xóa khỏi hàng đợi
 downloading = Đang tải xuống…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = Thao tác khác cho { $name }
 share_musicbrainz = Chia sẻ (MusicBrainz)
 share_link_copied = Đã sao chép liên kết MusicBrainz

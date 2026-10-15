@@ -114,6 +114,7 @@ radio_empty = 유사한 곡을 찾을 수 없습니다
 radio_failed = 라디오를 시작할 수 없습니다
 remove_from_queue = 대기열에서 제거
 downloading = 다운로드 중…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = { $name } 추가 작업
 share_musicbrainz = 공유 (MusicBrainz)
 share_link_copied = MusicBrainz 링크가 복사됨

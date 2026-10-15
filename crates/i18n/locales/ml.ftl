@@ -167,6 +167,7 @@ radio_empty = സമാനമായ പാട്ടുകളൊന്നും �
 radio_failed = റേഡിയോ ആരംഭിക്കാനായില്ല
 remove_from_queue = ക്യൂവിൽ നിന്ന് നീക്കം ചെയ്യുക
 downloading = ഡൗൺലോഡ് ചെയ്യുന്നു…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = { $name } എന്നതിനുള്ള കൂടുതൽ പ്രവർത്തനങ്ങൾ
 share_musicbrainz = പങ്കിടുക (MusicBrainz)
 share_link_copied = MusicBrainz ലിങ്ക് പകർത്തി

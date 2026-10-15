@@ -114,6 +114,7 @@ radio_empty = mi lon ala e kalama sama
 radio_failed = mi ken ala open e nasin kalama
 remove_from_queue = o weka tan nasin kalama
 downloading = ilo li awen e kalama…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = pali ante pi { $name }
 share_musicbrainz = o pana (MusicBrainz)
 share_link_copied = linja MusicBrainz li kama jo

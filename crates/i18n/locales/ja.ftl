@@ -114,6 +114,7 @@ radio_empty = 類似する曲が見つかりません
 radio_failed = ラジオを開始できませんでした
 remove_from_queue = キューから削除
 downloading = ダウンロード中…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = { $name } のその他の操作
 share_musicbrainz = 共有 (MusicBrainz)
 share_link_copied = MusicBrainzのリンクをコピーしました
