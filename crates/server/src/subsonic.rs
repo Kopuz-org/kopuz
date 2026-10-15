@@ -369,7 +369,7 @@ impl SubsonicClient {
         &self,
         offset: usize,
         size: usize,
-    ) -> Result<Vec<SubsonicAlbum>, String> {
+    ) -> Result<Vec<SubsonicAlbum>, SourceError> {
         let data = self
             .call::<GetAlbumList2Data>(
                 "getAlbumList2.view",
@@ -383,7 +383,7 @@ impl SubsonicClient {
         Ok(data.album_list2.album)
     }
 
-    pub async fn get_album_songs(&self, album_id: &str) -> Result<Vec<SubsonicSong>, String> {
+    pub async fn get_album_songs(&self, album_id: &str) -> Result<Vec<SubsonicSong>, SourceError> {
         let data = self
             .call::<GetAlbumData>(
                 "getAlbum.view",
@@ -404,7 +404,7 @@ impl SubsonicClient {
         &self,
         song_id: &str,
         count: usize,
-    ) -> Result<Vec<SubsonicSong>, String> {
+    ) -> Result<Vec<SubsonicSong>, SourceError> {
         if self.has_sonic_similarity().await {
             match self.get_sonic_similar_tracks(song_id, count).await {
                 Ok(songs) if !songs.is_empty() => return Ok(songs),
@@ -445,7 +445,7 @@ impl SubsonicClient {
         &self,
         song_id: &str,
         count: usize,
-    ) -> Result<Vec<SubsonicSong>, String> {
+    ) -> Result<Vec<SubsonicSong>, SourceError> {
         let data = self
             .call_within::<GetSonicSimilarTracksData>(
                 "getSonicSimilarTracks.view",
@@ -466,7 +466,7 @@ impl SubsonicClient {
         &self,
         song_id: &str,
         count: usize,
-    ) -> Result<Vec<SubsonicSong>, String> {
+    ) -> Result<Vec<SubsonicSong>, SourceError> {
         let data = self
             .call_within::<GetSimilarSongsData>(
                 "getSimilarSongs.view",
@@ -482,7 +482,7 @@ impl SubsonicClient {
 
     /// One song by id. Radio uses it to put the seed at the head of the queue:
     /// `getSimilarSongs2` never includes the seed itself.
-    pub async fn get_song(&self, song_id: &str) -> Result<Option<SubsonicSong>, String> {
+    pub async fn get_song(&self, song_id: &str) -> Result<Option<SubsonicSong>, SourceError> {
         let data = self
             .call::<GetSongData>(
                 "getSong.view",
@@ -492,7 +492,7 @@ impl SubsonicClient {
         Ok(data.song)
     }
 
-    pub async fn get_playlists(&self) -> Result<Vec<SubsonicPlaylist>, String> {
+    pub async fn get_playlists(&self) -> Result<Vec<SubsonicPlaylist>, SourceError> {
         let data = self
             .call::<GetPlaylistsData>("getPlaylists.view", vec![])
             .await?;
@@ -502,7 +502,7 @@ impl SubsonicClient {
     pub async fn get_playlist_entries(
         &self,
         playlist_id: &str,
-    ) -> Result<Vec<SubsonicSong>, String> {
+    ) -> Result<Vec<SubsonicSong>, SourceError> {
         let data = self
             .call::<GetPlaylistData>(
                 "getPlaylist.view",
@@ -512,7 +512,11 @@ impl SubsonicClient {
         Ok(data.playlist.map(|p| p.entry).unwrap_or_default())
     }
 
-    pub async fn create_playlist(&self, name: &str, item_ids: &[&str]) -> Result<String, String> {
+    pub async fn create_playlist(
+        &self,
+        name: &str,
+        item_ids: &[&str],
+    ) -> Result<String, SourceError> {
         let mut params = vec![("name".to_string(), name.to_string())];
         for item_id in item_ids {
             params.push(("songId".to_string(), (*item_id).to_string()));
@@ -526,10 +530,16 @@ impl SubsonicClient {
             return Ok(playlist.id);
         }
 
-        Err("Subsonic createPlaylist did not return a playlist id".to_string())
+        Err(SourceError::Backend(
+            "Subsonic createPlaylist did not return a playlist id".to_string(),
+        ))
     }
 
-    pub async fn add_to_playlist(&self, playlist_id: &str, item_id: &str) -> Result<(), String> {
+    pub async fn add_to_playlist(
+        &self,
+        playlist_id: &str,
+        item_id: &str,
+    ) -> Result<(), SourceError> {
         self.call::<EmptyData>(
             "updatePlaylist.view",
             vec![
@@ -545,7 +555,7 @@ impl SubsonicClient {
         &self,
         playlist_id: &str,
         song_index: usize,
-    ) -> Result<(), String> {
+    ) -> Result<(), SourceError> {
         self.call::<EmptyData>(
             "updatePlaylist.view",
             vec![
@@ -562,7 +572,7 @@ impl SubsonicClient {
         playlist_id: &str,
         ordered_song_ids: &[&str],
         total_tracks: usize,
-    ) -> Result<(), String> {
+    ) -> Result<(), SourceError> {
         let mut params: Vec<(String, String)> =
             vec![("playlistId".to_string(), playlist_id.to_string())];
         for i in 0..total_tracks {
@@ -576,7 +586,7 @@ impl SubsonicClient {
             .map(|_| ())
     }
 
-    pub async fn get_artists(&self) -> Result<Vec<SubsonicArtist>, String> {
+    pub async fn get_artists(&self) -> Result<Vec<SubsonicArtist>, SourceError> {
         let data = self
             .call::<GetArtistsData>("getArtists.view", vec![])
             .await?;
@@ -588,7 +598,7 @@ impl SubsonicClient {
             .collect())
     }
 
-    pub async fn get_starred_song_ids(&self) -> Result<Vec<String>, String> {
+    pub async fn get_starred_song_ids(&self) -> Result<Vec<String>, SourceError> {
         let data = self
             .call::<GetStarred2Data>("getStarred2.view", vec![])
             .await?;
@@ -598,13 +608,13 @@ impl SubsonicClient {
             .unwrap_or_default())
     }
 
-    pub async fn star(&self, item_id: &str) -> Result<(), String> {
+    pub async fn star(&self, item_id: &str) -> Result<(), SourceError> {
         self.call::<EmptyData>("star.view", vec![("id".to_string(), item_id.to_string())])
             .await
             .map(|_| ())
     }
 
-    pub async fn unstar(&self, item_id: &str) -> Result<(), String> {
+    pub async fn unstar(&self, item_id: &str) -> Result<(), SourceError> {
         self.call::<EmptyData>("unstar.view", vec![("id".to_string(), item_id.to_string())])
             .await
             .map(|_| ())
@@ -637,7 +647,7 @@ impl SubsonicClient {
         Ok(url.to_string())
     }
 
-    pub async fn scrobble_now_playing(&self, item_id: &str) -> Result<(), String> {
+    pub async fn scrobble_now_playing(&self, item_id: &str) -> Result<(), SourceError> {
         self.call::<EmptyData>(
             "scrobble.view",
             vec![
@@ -649,7 +659,7 @@ impl SubsonicClient {
         .map(|_| ())
     }
 
-    pub async fn scrobble(&self, item_id: &str) -> Result<(), String> {
+    pub async fn scrobble(&self, item_id: &str) -> Result<(), SourceError> {
         self.call::<EmptyData>(
             "scrobble.view",
             vec![
@@ -681,7 +691,7 @@ impl SubsonicClient {
         Ok(url.to_string())
     }
 
-    pub async fn get_play_queue(&self) -> Result<Option<SubsonicPlayQueue>, String> {
+    pub async fn get_play_queue(&self) -> Result<Option<SubsonicPlayQueue>, SourceError> {
         let data = self
             .call::<GetPlayQueueData>("getPlayQueue.view", vec![])
             .await?;
@@ -694,7 +704,7 @@ impl SubsonicClient {
         item_ids: &[&str],
         current_id: Option<&str>,
         position_ms: Option<u64>,
-    ) -> Result<(), String> {
+    ) -> Result<(), SourceError> {
         let mut params: Vec<(String, String)> = item_ids
             .iter()
             .map(|id| ("id".to_string(), (*id).to_string()))
@@ -737,7 +747,7 @@ impl SubsonicClient {
         &self,
         endpoint: &str,
         extra_params: Vec<(String, String)>,
-    ) -> Result<T, String> {
+    ) -> Result<T, SourceError> {
         self.call_within(endpoint, extra_params, DEFAULT_TIMEOUT)
             .await
     }
@@ -747,10 +757,8 @@ impl SubsonicClient {
         endpoint: &str,
         extra_params: Vec<(String, String)>,
         timeout: std::time::Duration,
-    ) -> Result<T, String> {
-        self.request(endpoint, extra_params, timeout)
-            .await
-            .map_err(|error| error.to_string())
+    ) -> Result<T, SourceError> {
+        self.request(endpoint, extra_params, timeout).await
     }
 
     #[tracing::instrument(name = "subsonic.call", skip_all, fields(endpoint = %endpoint))]
@@ -828,6 +836,11 @@ mod tests {
         let error = unreachable.ping().await.expect_err("nothing listens");
         assert_eq!(error, SourceError::Connectivity);
         assert_no_credentials(&error.to_string());
+        assert_eq!(
+            unreachable.get_album_list(0, 10).await.err(),
+            Some(SourceError::Connectivity),
+            "a library call keeps the kind too"
+        );
 
         let server = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await

@@ -160,10 +160,7 @@ impl MediaSource for NextcloudSource {
         use std::path::PathBuf;
 
         let client = self.client()?;
-        let (albums, tracks) = client
-            .scan(&self.folders)
-            .await
-            .map_err(SourceError::Backend)?;
+        let (albums, tracks) = client.scan(&self.folders).await?;
 
         // Nothing persists until the snapshot is whole, so a serial pass here stalls the sync.
         let mut jobs = Vec::with_capacity(albums.len());

@@ -1,6 +1,8 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+use crate::source::SourceError;
+
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Serialize)]
@@ -204,16 +206,12 @@ impl JellyfinClient {
         }
     }
 
-    fn user_id(&self) -> Result<&str, String> {
-        self.user_id
-            .as_deref()
-            .ok_or_else(|| "No user ID available".to_string())
+    fn user_id(&self) -> Result<&str, SourceError> {
+        self.user_id.as_deref().ok_or(SourceError::Auth)
     }
 
-    fn access_token(&self) -> Result<&str, String> {
-        self.access_token
-            .as_deref()
-            .ok_or_else(|| "No access token available".to_string())
+    fn access_token(&self) -> Result<&str, SourceError> {
+        self.access_token.as_deref().ok_or(SourceError::Auth)
     }
 
     /// The server base URL — for building image URLs outside the client.
@@ -234,7 +232,7 @@ impl JellyfinClient {
         }
     }
 
-    fn auth_header(&self) -> Result<String, String> {
+    fn auth_header(&self) -> Result<String, SourceError> {
         let token = self.access_token()?;
         Ok(format!(
             "MediaBrowser Client=\"Kopuz\", Device=\"Kopuz\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
@@ -246,7 +244,7 @@ impl JellyfinClient {
         &self,
         method: reqwest::Method,
         path: &str,
-    ) -> Result<reqwest::RequestBuilder, String> {
+    ) -> Result<reqwest::RequestBuilder, SourceError> {
         let auth_header = self.auth_header()?;
         Ok(self
             .http_client
@@ -257,23 +255,29 @@ impl JellyfinClient {
     async fn ensure_success(
         resp: reqwest::Response,
         context: &str,
-    ) -> Result<reqwest::Response, String> {
+    ) -> Result<reqwest::Response, SourceError> {
         if resp.status().is_success() {
             return Ok(resp);
         }
 
         let status = resp.status();
+        if matches!(status.as_u16(), 401 | 403) {
+            return Err(SourceError::Auth);
+        }
         let text = resp.text().await.unwrap_or_default();
 
         if text.is_empty() {
-            Err(format!("{}: {}", context, status))
+            Err(SourceError::Backend(format!("{}: {}", context, status)))
         } else {
-            Err(format!("{}: {} - {}", context, status, text))
+            Err(SourceError::Backend(format!(
+                "{}: {} - {}",
+                context, status, text
+            )))
         }
     }
 
     #[tracing::instrument(name = "jellyfin.request", skip_all, fields(path = %path))]
-    async fn request<T>(&self, path: &str) -> Result<T, String>
+    async fn request<T>(&self, path: &str) -> Result<T, SourceError>
     where
         T: DeserializeOwned,
     {
@@ -281,16 +285,18 @@ impl JellyfinClient {
             .authorized_request(reqwest::Method::GET, path)?
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(SourceError::from_request)?;
 
         let context = format!("Request failed for {}", path);
         let resp = Self::ensure_success(resp, &context).await?;
 
-        resp.json::<T>().await.map_err(|e| e.to_string())
+        resp.json::<T>()
+            .await
+            .map_err(|e| SourceError::Backend(e.without_url().to_string()))
     }
 
     #[tracing::instrument(name = "jellyfin.request", skip_all, fields(path = %path))]
-    async fn request_with_query<T, Q>(&self, path: &str, query: &Q) -> Result<T, String>
+    async fn request_with_query<T, Q>(&self, path: &str, query: &Q) -> Result<T, SourceError>
     where
         T: DeserializeOwned,
         Q: Serialize + ?Sized,
@@ -300,12 +306,14 @@ impl JellyfinClient {
             .query(query)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(SourceError::from_request)?;
 
         let context = format!("Request failed for {}", path);
         let resp = Self::ensure_success(resp, &context).await?;
 
-        resp.json::<T>().await.map_err(|e| e.to_string())
+        resp.json::<T>()
+            .await
+            .map_err(|e| SourceError::Backend(e.without_url().to_string()))
     }
 
     pub async fn login(
@@ -347,7 +355,7 @@ impl JellyfinClient {
         Ok((login_resp.access_token, login_resp.user.id))
     }
 
-    pub async fn get_views(&self) -> Result<Vec<ViewItem>, String> {
+    pub async fn get_views(&self) -> Result<Vec<ViewItem>, SourceError> {
         let user_id = self.user_id()?;
         let path = format!("/Users/{}/Views", user_id);
         self.request::<ViewItemsResponse>(&path)
@@ -355,7 +363,7 @@ impl JellyfinClient {
             .map(|r| r.items)
     }
 
-    pub async fn get_music_libraries(&self) -> Result<Vec<ViewItem>, String> {
+    pub async fn get_music_libraries(&self) -> Result<Vec<ViewItem>, SourceError> {
         let views = self.get_views().await?;
         let music_libs = views
             .into_iter()
@@ -369,7 +377,7 @@ impl JellyfinClient {
         parent_id: &str,
         start_index: usize,
         limit: usize,
-    ) -> Result<Vec<Item>, String> {
+    ) -> Result<Vec<Item>, SourceError> {
         let user_id = self.user_id()?;
         let path = format!("/Users/{}/Items", user_id);
 
@@ -391,7 +399,7 @@ impl JellyfinClient {
         Ok(items_resp.items)
     }
 
-    pub async fn get_playlists(&self) -> Result<Vec<Item>, String> {
+    pub async fn get_playlists(&self) -> Result<Vec<Item>, SourceError> {
         let user_id = self.user_id()?;
         let path = format!("/Users/{}/Items", user_id);
 
@@ -417,12 +425,13 @@ impl JellyfinClient {
     }
 
     #[tracing::instrument(name = "jellyfin.playlist_create", skip_all, fields(count = item_ids.len()))]
-    pub async fn create_playlist(&self, name: &str, item_ids: &[&str]) -> Result<String, String> {
-        let user_id = self.user_id.as_ref().ok_or("No user ID available")?;
-        let token = self
-            .access_token
-            .as_ref()
-            .ok_or("No access token available")?;
+    pub async fn create_playlist(
+        &self,
+        name: &str,
+        item_ids: &[&str],
+    ) -> Result<String, SourceError> {
+        let user_id = self.user_id.as_ref().ok_or(SourceError::Auth)?;
+        let token = self.access_token.as_ref().ok_or(SourceError::Auth)?;
 
         let url = format!("{}/Playlists", self.base_url);
 
@@ -446,25 +455,25 @@ impl JellyfinClient {
             .json(&body)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(SourceError::from_request)?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(format!("Failed to create playlist: {} - {}", status, text));
-        }
+        let resp = Self::ensure_success(resp, "Failed to create playlist").await?;
 
-        let result: PlaylistCreationResult = resp.json().await.map_err(|e| e.to_string())?;
+        let result: PlaylistCreationResult = resp
+            .json()
+            .await
+            .map_err(|e| SourceError::Backend(e.without_url().to_string()))?;
         Ok(result.id)
     }
 
     #[tracing::instrument(name = "jellyfin.playlist_add", skip(self), fields(playlist_id = %playlist_id, item_id = %item_id))]
-    pub async fn add_to_playlist(&self, playlist_id: &str, item_id: &str) -> Result<(), String> {
-        let user_id = self.user_id.as_ref().ok_or("No user ID available")?;
-        let token = self
-            .access_token
-            .as_ref()
-            .ok_or("No access token available")?;
+    pub async fn add_to_playlist(
+        &self,
+        playlist_id: &str,
+        item_id: &str,
+    ) -> Result<(), SourceError> {
+        let user_id = self.user_id.as_ref().ok_or(SourceError::Auth)?;
+        let token = self.access_token.as_ref().ok_or(SourceError::Auth)?;
 
         let url = format!("{}/Playlists/{}/Items", self.base_url, playlist_id);
 
@@ -480,16 +489,19 @@ impl JellyfinClient {
             .header("Authorization", auth_header)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(SourceError::from_request)?;
 
         if !resp.status().is_success() {
-            return Err(format!("Failed to add item to playlist: {}", resp.status()));
+            return Err(SourceError::from_status(
+                resp.status(),
+                "Jellyfin: add item to playlist",
+            ));
         }
 
         Ok(())
     }
 
-    pub async fn get_playlist_items(&self, playlist_id: &str) -> Result<Vec<Item>, String> {
+    pub async fn get_playlist_items(&self, playlist_id: &str) -> Result<Vec<Item>, SourceError> {
         let user_id = self.user_id()?;
         let path = format!("/Playlists/{}/Items", playlist_id);
 
@@ -504,11 +516,8 @@ impl JellyfinClient {
         &self,
         playlist_id: &str,
         entry_id: &str,
-    ) -> Result<(), String> {
-        let token = self
-            .access_token
-            .as_ref()
-            .ok_or("No access token available")?;
+    ) -> Result<(), SourceError> {
+        let token = self.access_token.as_ref().ok_or(SourceError::Auth)?;
 
         let url = format!("{}/Playlists/{}/Items", self.base_url, playlist_id);
 
@@ -524,12 +533,12 @@ impl JellyfinClient {
             .header("Authorization", auth_header)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(SourceError::from_request)?;
 
         if !resp.status().is_success() {
-            return Err(format!(
-                "Failed to remove item from playlist: {}",
-                resp.status()
+            return Err(SourceError::from_status(
+                resp.status(),
+                "Jellyfin: remove item from playlist",
             ));
         }
 
@@ -542,11 +551,8 @@ impl JellyfinClient {
         playlist_id: &str,
         item_id: &str,
         new_index: usize,
-    ) -> Result<(), String> {
-        let token = self
-            .access_token
-            .as_ref()
-            .ok_or("No access token available")?;
+    ) -> Result<(), SourceError> {
+        let token = self.access_token.as_ref().ok_or(SourceError::Auth)?;
 
         let url = format!(
             "{}/Playlists/{}/Items/{}/Move/{}",
@@ -565,10 +571,13 @@ impl JellyfinClient {
             .header("Content-Length", "0")
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(SourceError::from_request)?;
 
         if !resp.status().is_success() {
-            return Err(format!("Failed to move playlist item: {}", resp.status()));
+            return Err(SourceError::from_status(
+                resp.status(),
+                "Jellyfin: move playlist item",
+            ));
         }
 
         Ok(())
@@ -580,7 +589,7 @@ impl JellyfinClient {
         playlist_id: &str,
         image_bytes: Vec<u8>,
         content_type: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), SourceError> {
         let resp = self
             .authorized_request(
                 reqwest::Method::POST,
@@ -590,7 +599,7 @@ impl JellyfinClient {
             .body(image_bytes)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(SourceError::from_request)?;
 
         Self::ensure_success(resp, "Failed to upload playlist image").await?;
         Ok(())
@@ -601,7 +610,7 @@ impl JellyfinClient {
         parent_id: &str,
         start_index: usize,
         limit: usize,
-    ) -> Result<(Vec<AlbumItem>, u32), String> {
+    ) -> Result<(Vec<AlbumItem>, u32), SourceError> {
         let user_id = self.user_id()?;
         let path = format!("/Users/{}/Items", user_id);
 
@@ -626,11 +635,8 @@ impl JellyfinClient {
     }
 
     #[tracing::instrument(name = "jellyfin.playback_report", skip(self), fields(item_id = %item_id))]
-    pub async fn report_playback_start(&self, item_id: &str) -> Result<(), String> {
-        let token = self
-            .access_token
-            .as_ref()
-            .ok_or("No access token available")?;
+    pub async fn report_playback_start(&self, item_id: &str) -> Result<(), SourceError> {
+        let token = self.access_token.as_ref().ok_or(SourceError::Auth)?;
         let url = format!("{}/Sessions/Playing", self.base_url);
 
         let auth_header = format!(
@@ -652,12 +658,12 @@ impl JellyfinClient {
             .json(&body)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(SourceError::from_request)?;
 
         if !resp.status().is_success() {
-            return Err(format!(
-                "Failed to report playback start: {}",
-                resp.status()
+            return Err(SourceError::from_status(
+                resp.status(),
+                "Jellyfin: report playback start",
             ));
         }
 
@@ -670,11 +676,8 @@ impl JellyfinClient {
         item_id: &str,
         position_ticks: u64,
         is_paused: bool,
-    ) -> Result<(), String> {
-        let token = self
-            .access_token
-            .as_ref()
-            .ok_or("No access token available")?;
+    ) -> Result<(), SourceError> {
+        let token = self.access_token.as_ref().ok_or(SourceError::Auth)?;
         let url = format!("{}/Sessions/Playing/Progress", self.base_url);
 
         let auth_header = format!(
@@ -696,12 +699,12 @@ impl JellyfinClient {
             .json(&body)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(SourceError::from_request)?;
 
         if !resp.status().is_success() {
-            return Err(format!(
-                "Failed to report playback progress: {}",
-                resp.status()
+            return Err(SourceError::from_status(
+                resp.status(),
+                "Jellyfin: report playback progress",
             ));
         }
 
@@ -713,11 +716,8 @@ impl JellyfinClient {
         &self,
         item_id: &str,
         position_ticks: u64,
-    ) -> Result<(), String> {
-        let token = self
-            .access_token
-            .as_ref()
-            .ok_or("No access token available")?;
+    ) -> Result<(), SourceError> {
+        let token = self.access_token.as_ref().ok_or(SourceError::Auth)?;
         let url = format!("{}/Sessions/Playing/Stopped", self.base_url);
 
         let auth_header = format!(
@@ -737,12 +737,12 @@ impl JellyfinClient {
             .json(&body)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(SourceError::from_request)?;
 
         if !resp.status().is_success() {
-            return Err(format!(
-                "Failed to report playback stopped: {}",
-                resp.status()
+            return Err(SourceError::from_status(
+                resp.status(),
+                "Jellyfin: report playback stopped",
             ));
         }
 
@@ -754,22 +754,19 @@ impl JellyfinClient {
     /// A 401/403 surfaces in the error string so callers can tell auth-expired
     /// (`Expired`) from unreachable.
     #[tracing::instrument(name = "jellyfin.ping", skip_all)]
-    pub async fn ping(&self) -> Result<(), String> {
+    pub async fn ping(&self) -> Result<(), SourceError> {
         let resp = self
             .authorized_request(reqwest::Method::GET, "/Users/Me")?
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(SourceError::from_request)?;
         Self::ensure_success(resp, "Ping failed").await?;
         Ok(())
     }
 
-    pub async fn mark_favorite(&self, item_id: &str) -> Result<(), String> {
-        let user_id = self.user_id.as_ref().ok_or("No user ID available")?;
-        let token = self
-            .access_token
-            .as_ref()
-            .ok_or("No access token available")?;
+    pub async fn mark_favorite(&self, item_id: &str) -> Result<(), SourceError> {
+        let user_id = self.user_id.as_ref().ok_or(SourceError::Auth)?;
+        let token = self.access_token.as_ref().ok_or(SourceError::Auth)?;
 
         let url = format!(
             "{}/Users/{}/FavoriteItems/{}",
@@ -787,21 +784,21 @@ impl JellyfinClient {
             .header("Authorization", auth_header)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(SourceError::from_request)?;
 
         if !resp.status().is_success() {
-            return Err(format!("Failed to mark favorite: {}", resp.status()));
+            return Err(SourceError::from_status(
+                resp.status(),
+                "Jellyfin: mark favorite",
+            ));
         }
 
         Ok(())
     }
 
-    pub async fn unmark_favorite(&self, item_id: &str) -> Result<(), String> {
-        let user_id = self.user_id.as_ref().ok_or("No user ID available")?;
-        let token = self
-            .access_token
-            .as_ref()
-            .ok_or("No access token available")?;
+    pub async fn unmark_favorite(&self, item_id: &str) -> Result<(), SourceError> {
+        let user_id = self.user_id.as_ref().ok_or(SourceError::Auth)?;
+        let token = self.access_token.as_ref().ok_or(SourceError::Auth)?;
 
         let url = format!(
             "{}/Users/{}/FavoriteItems/{}",
@@ -819,16 +816,19 @@ impl JellyfinClient {
             .header("Authorization", auth_header)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(SourceError::from_request)?;
 
         if !resp.status().is_success() {
-            return Err(format!("Failed to unmark favorite: {}", resp.status()));
+            return Err(SourceError::from_status(
+                resp.status(),
+                "Jellyfin: unmark favorite",
+            ));
         }
 
         Ok(())
     }
 
-    pub async fn get_artists(&self) -> Result<Vec<Item>, String> {
+    pub async fn get_artists(&self) -> Result<Vec<Item>, SourceError> {
         let user_id = self.user_id()?;
         let path = format!("/Users/{}/Items", user_id);
         let fields = "ImageTags";
@@ -841,7 +841,7 @@ impl JellyfinClient {
         Ok(items_resp.items)
     }
 
-    pub async fn get_favorite_items(&self) -> Result<Vec<Item>, String> {
+    pub async fn get_favorite_items(&self) -> Result<Vec<Item>, SourceError> {
         let user_id = self.user_id()?;
         let path = format!("/Users/{}/Items", user_id);
 

@@ -39,7 +39,7 @@ impl MediaSource for ReadSeekSource {
     }
 }
 
-pub fn open_file(path: &Path) -> Result<(Box<dyn MediaSource>, Hint), Box<dyn std::error::Error>> {
+pub fn open_file(path: &Path) -> std::io::Result<(Box<dyn MediaSource>, Hint)> {
     let file = std::fs::File::open(path)?;
     let len = file.metadata().ok().map(|m| m.len());
 

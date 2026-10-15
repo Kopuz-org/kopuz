@@ -1269,7 +1269,7 @@ fn try_load_with(
     factory: SourceFactory,
     duration: Duration,
     transition: Transition,
-) -> Result<LoadOutcome, String> {
+) -> Result<LoadOutcome, super::Failure> {
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
     engine.send(Command::Load(LoadRequest {
         token,
@@ -1293,7 +1293,7 @@ fn factory_error_reports_and_keeps_prior_audio() {
     load(&engine, 1, factory, duration);
     wait_until("phase Playing", || engine.status().phase == Phase::Playing);
 
-    let broken: SourceFactory = Box::new(|| Err("boom".to_string()));
+    let broken: SourceFactory = Box::new(|| Err(std::io::Error::other("boom")));
     let result = try_load_with(
         &engine,
         2,
@@ -1321,6 +1321,34 @@ fn factory_error_reports_and_keeps_prior_audio() {
 }
 
 #[test]
+fn a_source_that_cannot_open_fails_by_what_kept_it_shut() {
+    let (_sink, engine) = spawn_engine();
+    for (kind, expected) in [
+        (std::io::ErrorKind::NotFound, super::FailureKind::NotFound),
+        (
+            std::io::ErrorKind::NotConnected,
+            super::FailureKind::Unreachable,
+        ),
+        (std::io::ErrorKind::InvalidData, super::FailureKind::Other),
+    ] {
+        let broken: SourceFactory = Box::new(move || Err(std::io::Error::new(kind, "shut")));
+        let result = try_load_with(
+            &engine,
+            2,
+            broken,
+            Duration::from_secs(1),
+            Transition::Immediate,
+        );
+        assert_eq!(
+            result.map_err(|error| error.kind),
+            Err(expected),
+            "{kind:?}"
+        );
+    }
+    engine.shutdown();
+}
+
+#[test]
 fn panicking_worker_fails_the_load_instead_of_hanging() {
     // Symphonia can panic on malformed streams. A panic on the decode worker
     // must surface as a failed load (the thread-boundary guard reports it);
@@ -1341,7 +1369,7 @@ fn panicking_worker_fails_the_load_instead_of_hanging() {
         Transition::Immediate,
     );
     assert!(
-        result.is_err_and(|e| e.contains("panicked")),
+        result.is_err_and(|e| e.message.contains("panicked")),
         "a worker panic must resolve the load as an error"
     );
 
@@ -1718,7 +1746,7 @@ fn live_worker_failure_retires_the_session_and_reports() {
     let _ = actor_tx.send(super::actor::ActorMsg::Worker(
         super::worker::WorkerMsg::Failed {
             token: 1,
-            error: "re-probe failed".to_string(),
+            error: "re-probe failed".to_string().into(),
         },
     ));
 
@@ -1999,7 +2027,10 @@ fn load_paced_source(
         service_replay_gain: config::ReplayGainInfo::default(),
         reply: Some(reply_tx),
     }));
-    reply_rx.blocking_recv().expect("load reply")?;
+    reply_rx
+        .blocking_recv()
+        .expect("load reply")
+        .map_err(|error| error.message)?;
     Ok((sink, engine))
 }
 

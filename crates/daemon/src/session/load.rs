@@ -425,7 +425,7 @@ impl Session {
             }
             Some(Err(error)) => {
                 tracing::error!(error = %error, "playback failed");
-                if self.fail_load(finished.token, api::ErrorCode::Internal, error) {
+                if self.fail_load(finished.token, engine_failure_code(error.kind), error) {
                     self.publish(state_tx, false);
                 }
             }
@@ -666,11 +666,7 @@ impl ClassifiedLoad {
                     source
                         .open_stream(item_id, buffer_progress.clone())
                         .await
-                        .map_err(|error| LoadFailure {
-                            token: self.token,
-                            code: crate::sources::source_error_code(&error),
-                            message: error.to_string(),
-                        })?
+                        .map_err(|error| LoadFailure::from_source(self.token, &error))?
                 } else {
                     None
                 }
@@ -686,9 +682,7 @@ impl ClassifiedLoad {
         let mut loudness_db = None;
         let factory: SourceFactory = match source {
             ClassifiedSource::Factory(factory) => factory,
-            ClassifiedSource::Local(path) => Box::new(move || {
-                player::decoder::open_file(&path).map_err(|error| error.to_string())
-            }),
+            ClassifiedSource::Local(path) => Box::new(move || player::decoder::open_file(&path)),
             ClassifiedSource::Cached {
                 path,
                 source,
@@ -702,18 +696,18 @@ impl ClassifiedLoad {
                     Ok(parts) => Ok(parts),
                     Err(error) => {
                         tracing::warn!(error = %error, "cached file failed to open; falling back to the server stream");
-                        let source = source
-                            .as_ref()
-                            .ok_or_else(|| "no active source for cache fallback".to_string())?;
+                        let source = source.as_ref().ok_or_else(|| {
+                            std::io::Error::other("no active source for cache fallback")
+                        })?;
                         if let Some(stream) = rt_handle
                             .block_on(source.open_stream(&item_id, buffer_progress.clone()))
-                            .map_err(|error| error.to_string())?
+                            .map_err(source_io_error)?
                         {
                             return Ok(player::decoder::from_stream(stream));
                         }
                         let info = rt_handle
                             .block_on(source.resolve_stream(&item_id, quality))
-                            .map_err(|error| error.to_string())?;
+                            .map_err(source_io_error)?;
                         network_factory(
                             info.url,
                             info.format,
@@ -739,11 +733,7 @@ impl ClassifiedLoad {
                             .await
                             .map_err(|error| {
                                 tracing::error!(error = %error, "stream URL resolve failed");
-                                LoadFailure {
-                                    token: self.token,
-                                    code: crate::sources::source_error_code(&error),
-                                    message: error.to_string(),
-                                }
+                                LoadFailure::from_source(self.token, &error)
                             })?;
                         duration_secs = info.duration_secs;
                         bitrate = info.bitrate;
@@ -812,8 +802,38 @@ pub(super) struct LoadFailure {
     message: String,
 }
 
+impl LoadFailure {
+    fn from_source(token: u64, error: &server::source::SourceError) -> Self {
+        Self {
+            token,
+            code: crate::sources::source_error_code(error),
+            message: error.to_string(),
+        }
+    }
+}
+
+/// A source's failure inside a stream factory, as the I/O error the engine tells an unreachable host by.
+fn source_io_error(error: server::source::SourceError) -> std::io::Error {
+    use server::source::{Refusal, SourceError};
+    match error {
+        SourceError::Connectivity | SourceError::Refused(Refusal::Network, _) => {
+            std::io::Error::new(std::io::ErrorKind::NotConnected, error.to_string())
+        }
+        other => std::io::Error::other(other.to_string()),
+    }
+}
+
+/// The error code a failure from the engine is shown under.
+pub(super) fn engine_failure_code(kind: player::engine::FailureKind) -> api::ErrorCode {
+    match kind {
+        player::engine::FailureKind::Unreachable => api::ErrorCode::SourceUnreachable,
+        player::engine::FailureKind::NotFound => api::ErrorCode::NotFound,
+        player::engine::FailureKind::Other => api::ErrorCode::Internal,
+    }
+}
+
 pub(super) struct LoadFinished {
     token: u64,
-    result: Option<Result<player::engine::LoadOutcome, String>>,
+    result: Option<Result<player::engine::LoadOutcome, player::engine::Failure>>,
     clear_pending_resume: bool,
 }

@@ -15,8 +15,8 @@ use super::rt::{GainRamp, Retired, RtCmd, RtSession, RtState};
 use super::sink::{AudioSink, DataCallbackFactory, SinkConfig};
 use super::worker::{WorkerCmd, WorkerHandle, WorkerMsg};
 use super::{
-    Command, EngineStatus, Event, FadingStatus, LoadOutcome, LoadReply, LoadRequest, Phase,
-    Transition,
+    Command, EngineStatus, Event, FadingStatus, Failure, LoadOutcome, LoadReply, LoadRequest,
+    Phase, Transition,
 };
 use crate::player::PlayerInitError;
 #[cfg(any(target_os = "android", target_os = "linux", target_os = "macos"))]
@@ -491,7 +491,7 @@ impl Actor {
         let worker = match super::worker::spawn(token, factory, self.self_tx.clone()) {
             Ok(worker) => worker,
             Err(e) => {
-                let message = format!("failed to spawn decode worker: {e}");
+                let message = Failure::from(format!("failed to spawn decode worker: {e}"));
                 if let Some(reply) = reply {
                     let _ = reply.send(Err(message.clone()));
                 }
@@ -609,11 +609,11 @@ impl Actor {
             }
             Err(error) => {
                 if let Some(reply) = reply {
-                    let _ = reply.send(Err(error.clone()));
+                    let _ = reply.send(Err(error.clone().into()));
                 }
                 self.emit(Event::Error {
                     token,
-                    message: error,
+                    message: error.into(),
                 });
                 // The pending load is gone; without this the status keeps
                 // advertising it (and a transition) forever.
@@ -978,7 +978,7 @@ impl Actor {
                     self.retire_session(current);
                     self.emit(Event::Error {
                         token,
-                        message: "output stream lost".to_string(),
+                        message: "output stream lost".to_string().into(),
                     });
                 }
                 // The user chooses whether a device CHANGE keeps playing on the
@@ -1009,7 +1009,7 @@ impl Actor {
                 self.rt_rings_outstanding = 0;
                 self.emit(Event::Error {
                     token,
-                    message: format!("output device lost: {e}"),
+                    message: format!("output device lost: {e}").into(),
                 });
             }
         }
