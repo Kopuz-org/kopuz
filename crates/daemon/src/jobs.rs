@@ -237,6 +237,17 @@ impl JobRunner {
         Ok(JobRef { job_id: id })
     }
 
+    /// The job of `kind` running now, if any.
+    pub fn running(&self, kind: JobKind) -> Option<JobRef> {
+        let entries = self.entries.lock().ok()?;
+        entries
+            .iter()
+            .find(|entry| entry.status.kind == kind && entry.status.state == JobState::Running)
+            .map(|entry| JobRef {
+                job_id: entry.status.id.clone(),
+            })
+    }
+
     pub fn list(&self) -> Vec<JobStatus> {
         self.entries
             .lock()

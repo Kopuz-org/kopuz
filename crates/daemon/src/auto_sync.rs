@@ -1,4 +1,4 @@
-//! Syncs a remote source's library, playlists and favorites at startup and whenever the configured interval has passed.
+//! Syncs a remote source's library, playlists and favorites the first time it is active, then whenever the configured interval has passed.
 
 use std::future::Future;
 use std::sync::Arc;
@@ -27,7 +27,7 @@ fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
-fn stamp_key(kind: JobKind) -> Option<&'static str> {
+pub fn stamp_key(kind: JobKind) -> Option<&'static str> {
     match kind {
         JobKind::LibrarySync => Some("synced:library"),
         JobKind::PlaylistSync => Some("synced:playlists"),
@@ -87,17 +87,17 @@ struct Plan {
     next: Option<Duration>,
 }
 
-/// A due kind is about to run, so its next one is a full interval away.
+/// A due kind is about to run, so its next one is a full interval away; a kind never synced is due even with no interval.
 async fn plan(db: &db::Db, source: &config::Source, interval: Option<Duration>) -> Plan {
-    let Some(interval) = interval else {
-        return Plan {
-            due: Vec::new(),
-            next: None,
-        };
-    };
     let mut due = Vec::new();
     let mut next: Option<Duration> = None;
     for kind in KINDS {
+        let Some(interval) = interval else {
+            if last_synced(db, kind, source).await.is_none() {
+                due.push(kind);
+            }
+            continue;
+        };
         let left = until_due(db, kind, source, interval).await;
         let wait = if left.is_zero() {
             due.push(kind);
@@ -398,9 +398,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_zero_interval_still_syncs_a_source_never_synced_once() {
+        let (db, _dir) = store().await;
+        mark_synced(&db, JobKind::LibrarySync, &server()).await;
+        let found = plan(&db, &server(), None).await;
+        assert_eq!(
+            found,
+            Plan {
+                due: vec![JobKind::PlaylistSync, JobKind::FavoritesSync],
+                next: None,
+            }
+        );
+    }
+
+    #[tokio::test]
     async fn a_zero_interval_starts_nothing_and_schedules_nothing() {
         let (db, _dir) = store().await;
         stock(&db).await;
+        for kind in super::KINDS {
+            mark_synced(&db, kind, &server()).await;
+        }
         let found = plan(&db, &server(), None).await;
         assert_eq!(
             found,

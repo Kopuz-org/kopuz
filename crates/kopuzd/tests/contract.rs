@@ -747,6 +747,42 @@ async fn a_job_says_whether_the_daemons_schedule_started_it_on_every_transport()
     }
 }
 
+#[tokio::test]
+async fn starting_a_running_kind_joins_the_job_on_every_transport() {
+    let pair = spawn_pair().await;
+    let (finish, finished) = tokio::sync::oneshot::channel::<()>();
+    let running = pair
+        .jobs
+        .start_as(
+            api::JobKind::Scan,
+            daemon::jobs::Trigger::Schedule,
+            |_| async move {
+                let _ = finished.await;
+                Ok(())
+            },
+        )
+        .expect("the first scan starts");
+
+    let local = pair.local.start_job(api::JobKind::Scan).await;
+    let wire = pair.wire.start_job(api::JobKind::Scan).await;
+    let tcp = pair.tcp.start_job(api::JobKind::Scan).await;
+    assert_eq!(local.expect("joined locally"), running);
+    assert_eq!(wire.expect("joined on the wire"), running);
+    assert_eq!(tcp.expect("joined over tcp"), running);
+    let scans = pair
+        .local
+        .jobs()
+        .await
+        .expect("jobs")
+        .into_iter()
+        .filter(|job| job.kind == api::JobKind::Scan)
+        .count();
+    assert_eq!(scans, 1, "no second scan");
+
+    let _ = finish.send(());
+    all_jobs_settled(&pair.local).await;
+}
+
 const SYNC_INTERVAL: config::SettingKey =
     config::SettingKey::Library(config::LibraryKey::SyncIntervalMinutes);
 
@@ -805,8 +841,36 @@ async fn the_daemons_own_syncs_are_automatic_on_every_transport() {
 }
 
 #[tokio::test]
-async fn a_zero_sync_interval_starts_no_syncs() {
+async fn a_zero_sync_interval_still_syncs_a_source_never_synced() {
     let pair = spawn_pair().await;
+    activate_jellyfin(&pair, 0).await;
+    spawn_auto_sync(&pair);
+
+    for kind in [
+        api::JobKind::LibrarySync,
+        api::JobKind::PlaylistSync,
+        api::JobKind::FavoritesSync,
+    ] {
+        assert!(wait_job(&pair.wire, kind).await.automatic, "{kind:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_zero_sync_interval_starts_no_syncs_of_a_synced_source() {
+    let pair = spawn_pair().await;
+    let source = config::Source::Server("srv-1".into());
+    // Synced long ago, so only the interval keeps the syncs from being due.
+    for kind in [
+        api::JobKind::LibrarySync,
+        api::JobKind::PlaylistSync,
+        api::JobKind::FavoritesSync,
+    ] {
+        let key = daemon::auto_sync::stamp_key(kind).expect("a sync kind");
+        pair.database
+            .meta_put(key, source.as_str(), "0")
+            .await
+            .expect("stamped");
+    }
     activate_jellyfin(&pair, 0).await;
     spawn_auto_sync(&pair);
 

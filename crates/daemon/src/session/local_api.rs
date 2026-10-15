@@ -630,7 +630,7 @@ impl api::JobApi for LocalApi {
                 "this daemon runs without a job runner",
             ));
         };
-        match kind {
+        let started = match kind {
             api::JobKind::Scan => match &self.library {
                 Some(library) => library.spawn_scan(runner, Trigger::User),
                 None => Err(ApiError::unsupported("no library service")),
@@ -652,7 +652,12 @@ impl api::JobApi for LocalApi {
             api::JobKind::Download | api::JobKind::UrlDownload | api::JobKind::Unknown => {
                 Err(ApiError::unsupported("this job kind has no direct starter"))
             }
-        }
+        };
+        // These kinds carry no request, so a second start is the same job and joins it.
+        started.or_else(|error| match error.code {
+            api::ErrorCode::Conflict => runner.running(kind).ok_or(error),
+            _ => Err(error),
+        })
     }
 
     async fn download_url(&self, url: String, format: String) -> Result<api::JobRef, ApiError> {

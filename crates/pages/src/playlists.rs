@@ -25,7 +25,6 @@ pub fn PlaylistsPage(
     let mut playlist_name = use_signal(String::new);
     let mut error = use_signal(|| Option::<String>::None);
     let mut saving = use_signal(|| false);
-    let mut playlist_refresh_trigger = use_signal(|| 0u64);
 
     let playlists_res = use_playlists();
 
@@ -51,7 +50,7 @@ pub fn PlaylistsPage(
                     // A server create mirrors into the DB but a re-sync still
                     // reconciles remote-side details, so the sync path re-fetches.
                     if caps().sync {
-                        playlist_refresh_trigger.with_mut(|v| *v += 1);
+                        hooks::jobs::start(hooks::JobKind::PlaylistSync);
                     }
                     show_add_playlist.set(false);
                     playlist_name.set(String::new());
@@ -229,10 +228,7 @@ pub fn PlaylistsPage(
                     }
                 }
 
-                PlaylistsGrid {
-                    selected_playlist_id,
-                    refresh_trigger: playlist_refresh_trigger,
-                }
+                PlaylistsGrid { selected_playlist_id }
             }
         }
     }
@@ -255,10 +251,7 @@ enum PlaylistCardAction {
 /// folders, else a flat remote list with downloads + remote sync. One component,
 /// gated on [`Capabilities`].
 #[component]
-fn PlaylistsGrid(
-    mut selected_playlist_id: Signal<Option<String>>,
-    refresh_trigger: Signal<u64>,
-) -> Element {
+fn PlaylistsGrid(mut selected_playlist_id: Signal<Option<String>>) -> Element {
     let caps = hooks::sources::use_capabilities();
     let is_offline = use_context::<Signal<bool>>();
     let downloads = hooks::downloads::use_downloads();
@@ -275,20 +268,10 @@ fn PlaylistsGrid(
     let rename_folder_id = use_signal(|| Option::<String>::None);
     let rename_folder_name = use_signal(String::new);
 
-    // The pull runs in the daemon, single-flight, so this only has to ask.
-    // The stamp that stops an automatic re-sync lives there too, which is why
-    // no dedup key or request id is kept here any more.
+    // The daemon schedules the pull itself; this page only follows it and offers a refresh.
     let sync_job = hooks::jobs::use_job_progress(hooks::JobKind::PlaylistSync);
     let is_syncing = use_memo(move || sync_job.read().running);
     let synced_so_far = use_memo(move || sync_job.read().current.unwrap_or(0) as usize);
-
-    use_effect(move || {
-        if caps().sync {
-            // Naming the trigger keeps the effect subscribed to it.
-            let _ = *refresh_trigger.read();
-            hooks::jobs::start(hooks::JobKind::PlaylistSync);
-        }
-    });
 
     let store = playlists_res.read().clone().unwrap_or_default();
 
