@@ -329,14 +329,14 @@ impl YouTubeMusicClient {
         mix::fetch_continuation(playlist_id, token, self.cookies.as_deref().unwrap_or("")).await
     }
 
-    pub async fn discover_home(&self) -> Result<discover::DiscoverHome, String> {
+    pub async fn discover_home(&self) -> Result<crate::catalog::DiscoverHome, String> {
         discover::fetch_home(self.cookies.as_deref().unwrap_or("")).await
     }
 
     pub async fn discover_continuation(
         &self,
         token: &str,
-    ) -> Result<discover::DiscoverHome, String> {
+    ) -> Result<crate::catalog::DiscoverHome, String> {
         discover::fetch_continuation(token, self.cookies.as_deref().unwrap_or("")).await
     }
 
@@ -352,7 +352,10 @@ impl YouTubeMusicClient {
         discover::fetch_album(browse_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
-    pub async fn fetch_artist(&self, channel_id: &str) -> Result<discover::YtArtist, String> {
+    pub async fn fetch_artist(
+        &self,
+        channel_id: &str,
+    ) -> Result<crate::catalog::CatalogArtist, String> {
         discover::fetch_artist(channel_id, self.cookies.as_deref().unwrap_or("")).await
     }
 

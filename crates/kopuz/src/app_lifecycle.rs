@@ -114,7 +114,7 @@ pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signa
                     is_offline.set(false);
                 }
                 state = Reachability::default();
-                utils::sleep(std::time::Duration::from_secs(30)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                 continue;
             }
             let reached = probe(&client, &targets)
@@ -131,7 +131,7 @@ pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signa
                 tracing::info!(offline, "connectivity changed");
                 is_offline.set(offline);
             }
-            utils::sleep(state.next_probe()).await;
+            tokio::time::sleep(state.next_probe()).await;
         }
     });
 
@@ -141,7 +141,7 @@ pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signa
         } else if network_banner.peek().as_ref() == Some(&true) {
             network_banner.set(Some(false));
             spawn(async move {
-                utils::sleep(std::time::Duration::from_secs(4)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(4)).await;
                 if network_banner.read().as_ref() == Some(&false) {
                     network_banner.set(None);
                 }

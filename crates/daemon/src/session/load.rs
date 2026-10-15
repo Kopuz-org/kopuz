@@ -36,7 +36,7 @@ impl Session {
                 Transition::Immediate
             };
         let deferred = transition != Transition::Immediate;
-        let item_ref = PlaybackItemRef::parse(&track_key);
+        let item_ref = PlaybackItemRef::from_id(&track.id);
         let is_radio = item_ref.is_radio();
         let is_server = item_ref.is_server();
         let item_id = item_ref.primary_id().unwrap_or_default().to_string();

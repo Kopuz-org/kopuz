@@ -8,8 +8,8 @@ use api::{
     ApiError, ArtworkRef, ArtworkTarget, CatalogDetail, CatalogDetailRequest, CatalogItem,
     CatalogItemKind, CatalogPage, CatalogShelf,
 };
+use server::catalog::{DiscoverHome, DiscoverItem};
 use server::source::RadioPage;
-use server::ytmusic::discover::{DiscoverHome, DiscoverItem};
 
 use crate::library::LibraryService;
 use crate::session::SessionHandle;

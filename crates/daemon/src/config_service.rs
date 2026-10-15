@@ -13,7 +13,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
-use api::{ApiError, ConfigView};
+use api::{ApiError, ConfigUpdate, ConfigView, ErrorCode};
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use crate::session::SessionHandle;
@@ -220,10 +220,19 @@ impl ConfigService {
     /// audio-setting updates.
     pub async fn set(
         &self,
-        incoming: config::AppConfig,
+        update: ConfigUpdate,
     ) -> Result<(ConfigView, config::AppConfig, Vec<String>), ApiError> {
         let mut held = self.current.write().await;
-        let updated = with_daemon_owned_fields(incoming, &held.config);
+        if update.expected_revision != held.revision {
+            return Err(ApiError::new(
+                ErrorCode::Conflict,
+                format!(
+                    "settings changed since revision {} (current revision {})",
+                    update.expected_revision, held.revision
+                ),
+            ));
+        }
+        let updated = with_daemon_owned_fields(update.config, &held.config);
 
         let changed = changed_keys(&held.config, &updated)?;
         if changed.is_empty() {
@@ -407,7 +416,13 @@ mod tests {
         let mut next = view.config.clone();
         next.hero_height = 320;
         next.crossfade_seconds = 4;
-        let (view, updated, changed) = service.set(next).await.expect("set");
+        let (view, updated, changed) = service
+            .set(ConfigUpdate {
+                config: next,
+                expected_revision: view.revision,
+            })
+            .await
+            .expect("set");
         assert_eq!(view.config.hero_height, 320);
         assert_eq!(updated.crossfade_seconds, 4);
         assert_eq!(changed.len(), 2, "only the two edited keys are reported");
@@ -434,7 +449,13 @@ mod tests {
         );
 
         let view = service.view().await.expect("view");
-        let (_, _, changed) = service.set(view.config).await.expect("idempotent set");
+        let (_, _, changed) = service
+            .set(ConfigUpdate {
+                config: view.config,
+                expected_revision: view.revision,
+            })
+            .await
+            .expect("idempotent set");
         assert!(changed.is_empty());
     }
 
@@ -457,7 +478,10 @@ mod tests {
         let mut changed_locked = view.config.clone();
         changed_locked.theme = "other".to_string();
         let err = service
-            .set(changed_locked)
+            .set(ConfigUpdate {
+                config: changed_locked,
+                expected_revision: view.revision,
+            })
             .await
             .expect_err("changing a locked key is refused");
         assert_eq!(err.code, api::ErrorCode::InvalidInput);
@@ -466,7 +490,13 @@ mod tests {
         // still works while a managed layer pins this one.
         let mut other = view.config.clone();
         other.crossfade_seconds = 6;
-        let (_, updated, changed) = service.set(other).await.expect("untouched locked key");
+        let (_, updated, changed) = service
+            .set(ConfigUpdate {
+                config: other,
+                expected_revision: view.revision,
+            })
+            .await
+            .expect("untouched locked key");
         assert_eq!(updated.crossfade_seconds, 6);
         assert_eq!(changed, vec!["crossfade_seconds".to_string()]);
     }
@@ -515,10 +545,16 @@ mod tests {
         };
         let service =
             ConfigService::new(database.clone(), dir.path().join("settings.toml"), seeded);
-        let snapshot = service.view().await.expect("view").config;
+        let snapshot = service.view().await.expect("view");
 
         service.set_volume(0.2, false).await.expect("set volume");
-        let (view, updated, changed) = service.set(snapshot).await.expect("set");
+        let (view, updated, changed) = service
+            .set(ConfigUpdate {
+                config: snapshot.config,
+                expected_revision: snapshot.revision + 1,
+            })
+            .await
+            .expect("set");
 
         assert_eq!(view.config.volume, 0.2, "the view reports the live volume");
         assert_eq!(updated.volume, 0.2);
@@ -560,7 +596,14 @@ mod tests {
             .expect("cover settings");
 
         snapshot.theme = "nord".to_string();
-        let (view, updated, changed) = service.set(snapshot).await.expect("set");
+        let revision = service.view().await.expect("view").revision;
+        let (view, updated, changed) = service
+            .set(ConfigUpdate {
+                config: snapshot,
+                expected_revision: revision,
+            })
+            .await
+            .expect("set");
 
         assert!(!view.config.auto_fetch_covers, "automatic covers stay off");
         assert_eq!(
