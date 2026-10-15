@@ -12,6 +12,7 @@ use std::collections::HashSet;
 pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let _nav_ctrl = use_context::<NavigationController>();
+    let all_downloaded = !props.tracks.is_empty() && props.tracks.iter().all(|t| t.offline);
 
     let duration = api::total_duration_secs(&props.tracks)
         .map(|secs| format!(" · {} {}", secs / 60, i18n::t("min")))
@@ -197,18 +198,18 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                 button {
                                     class: "inline-flex items-center justify-center h-9 w-9 rounded-full text-sm font-medium transition-colors border border-white/12 hover:bg-white/10 active:scale-95",
                                     style: "color: var(--color-white); opacity: 0.6;",
+                                    title: if all_downloaded { i18n::t("remove_download") } else { i18n::t("download_offline") },
                                     disabled: props.is_downloading_all,
                                     onclick: move |_| {
-                                        if props.on_delete_all.is_some() {
-                                            if let Some(ref h) = props.on_delete_all {
-                                                h.call(());
-                                            }
-                                        } else if let Some(ref h) = props.on_download_all {
+                                        let handler = if all_downloaded { &props.on_delete_all } else { &props.on_download_all };
+                                        if let Some(h) = handler {
                                             h.call(());
                                         }
                                     },
                                     if props.is_downloading_all {
                                         i { class: "fa-solid fa-spinner fa-spin text-xs" }
+                                    } else if all_downloaded {
+                                        i { class: "fa-solid fa-trash text-xs" }
                                     } else {
                                         i { class: "fa-solid fa-download text-xs" }
                                     }
