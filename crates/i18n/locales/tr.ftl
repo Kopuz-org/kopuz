@@ -118,6 +118,7 @@ radio_empty = Benzer parça bulunamadı
 radio_failed = Radyo başlatılamadı
 remove_from_queue = Sıradan Kaldır
 downloading = İndiriliyor…
+downloading_progress = İndiriliyor: { $done } / { $total }
 more_actions_for = { $name } için diğer eylemler
 share_musicbrainz = Paylaş (MusicBrainz)
 share_link_copied = MusicBrainz bağlantısı kopyalandı

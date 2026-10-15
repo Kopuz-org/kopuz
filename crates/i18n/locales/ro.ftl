@@ -118,6 +118,7 @@ radio_empty = Nu s-au găsit piese similare
 radio_failed = Nu s-a putut porni radioul
 remove_from_queue = Elimină din Coadă
 downloading = Se descarcă…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = Mai multe acțiuni pentru { $name }
 share_musicbrainz = Distribuie (MusicBrainz)
 share_link_copied = Link MusicBrainz copiat

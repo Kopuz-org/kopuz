@@ -179,6 +179,7 @@ radio_empty = Inga liknande låtar hittades
 radio_failed = Kunde inte starta radion
 remove_from_queue = Ta bort från kön
 downloading = Laddar ner…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = Fler åtgärder för { $name }
 share_musicbrainz = Dela (MusicBrainz)
 share_link_copied = MusicBrainz länk kopierad

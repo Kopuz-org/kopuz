@@ -118,6 +118,7 @@ radio_empty = Nem található hasonló szám
 radio_failed = A rádió indítása sikertelen
 remove_from_queue = Eltávolítás a sorból
 downloading = Letöltés folyamatban…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = További műveletek: { $name }
 share_musicbrainz = Megosztás (MusicBrainz)
 share_link_copied = MusicBrainz-link másolva

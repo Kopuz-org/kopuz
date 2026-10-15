@@ -179,6 +179,7 @@ radio_empty = ஒத்த பாடல்கள் எதுவும் இல
 radio_failed = வானொலியைத் தொடங்க முடியவில்லை
 remove_from_queue = வரிசையிலிருந்து அகற்று
 downloading = பதிவிறக்குகிறது…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = { $name } க்கான மேலும் செயல்கள்
 share_musicbrainz = பகிர் (MusicBrainz)
 share_link_copied = MusicBrainz இணைப்பு நகலெடுக்கப்பட்டது

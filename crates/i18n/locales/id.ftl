@@ -179,6 +179,7 @@ radio_empty = Tidak ada lagu serupa ditemukan
 radio_failed = Tidak dapat memulai radio
 remove_from_queue = Hapus dari Antrian
 downloading = Mengunduh…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = Tindakan lainnya untuk { $name }
 share_musicbrainz = Bagikan (MusicBrainz)
 share_link_copied = Tautan MusicBrainz disalin

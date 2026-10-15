@@ -118,6 +118,7 @@ radio_empty = 未找到相似歌曲
 radio_failed = 无法启动电台
 remove_from_queue = 从播放队列中移除
 downloading = 正在下载…
+downloading_progress = Downloading { $done } / { $total }
 more_actions_for = { $name } 的更多操作
 share_musicbrainz = 分享 (MusicBrainz)
 share_link_copied = MusicBrainz 链接已复制
