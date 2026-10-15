@@ -443,6 +443,70 @@ async fn a_derived_album_is_billed_by_all_its_tracks_not_the_last_one_written() 
 }
 
 #[tokio::test]
+async fn a_derived_album_byline_never_picks_a_credit_by_its_name() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let source = Source::Server("srv".into());
+    let track = |id: &str, artist: &str, credits: Vec<reader::ArtistCredit>| Track {
+        id: TrackId::Server {
+            service: config::MusicService::YtMusic,
+            item_id: id.into(),
+        },
+        album_id: "alb".into(),
+        artist: artist.into(),
+        artists: credits.iter().map(|credit| credit.name.clone()).collect(),
+        credits,
+        ..local("/unused", "Song")
+    };
+    db.upsert_tracks(
+        &source,
+        &[
+            track(
+                "t1",
+                "Rin",
+                vec![
+                    reader::ArtistCredit::linked("Kana", "UC-kana"),
+                    reader::ArtistCredit::linked("Rin", "UC-rin"),
+                ],
+            ),
+            track(
+                "t2",
+                "Mio",
+                vec![reader::ArtistCredit::linked("Mio", "UC-mio")],
+            ),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let album = db.album(&source, "alb").await.unwrap().unwrap();
+    let billed = db
+        .artist(&source, album.artist_key.as_deref().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        billed.source_id.as_deref(),
+        Some("UC-kana"),
+        "the founding track's first credit, though the byline spells another"
+    );
+    let sampled: Vec<String> = db
+        .artist_sample_tracks(&source, 10)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|track| track.id.key().into_owned())
+        .collect();
+    assert_eq!(
+        sampled,
+        ["t1", "t2"],
+        "tiles sort by billed name: t1 bills Kana, its first credit, ahead of Mio, not Rin after"
+    );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
 async fn a_joined_album_artist_is_billed_to_the_artists_its_tracks_credit() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();

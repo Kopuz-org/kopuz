@@ -99,22 +99,16 @@ impl Fill {
 async fn fill_derived_albums(pool: &SqlitePool) -> Result<(), DbError> {
     let mut tx = pool.begin().await?;
     // Each derived album against the first of its tracks, which is the one that made it.
-    let derived: Vec<(i64, i64, String)> = sqlx::query_as(
-        "SELECT al.rowid_pk, t.rowid_pk, t.artist FROM albums al \
+    let derived: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT al.rowid_pk, t.rowid_pk FROM albums al \
            JOIN tracks t ON t.rowid_pk = (SELECT MIN(rowid_pk) FROM tracks \
                 WHERE source = al.source AND source_album_id = al.source_album_id) \
           WHERE al.derived = 1",
     )
     .fetch_all(&mut *tx)
     .await?;
-    for (album, track, byline) in derived {
-        let credits: Vec<(String, i64)> = sqlx::query_as(
-            "SELECT name, artist_pk FROM track_credits WHERE track_pk = ?1 ORDER BY position",
-        )
-        .bind(track)
-        .fetch_all(&mut *tx)
-        .await?;
-        if let Some(artist) = super::writes::billed_credit(&byline, &credits) {
+    for (album, track) in derived {
+        if let Some(artist) = super::writes::first_credit(&mut tx, track).await? {
             sqlx::query("UPDATE albums SET artist_pk = ?1 WHERE rowid_pk = ?2")
                 .bind(artist)
                 .bind(album)
@@ -1834,12 +1828,14 @@ mod artist_fill_tests {
                (3, 'srv', NULL, 'Boris', 'boris'); \
              INSERT INTO albums (source, source_album_id, title, artist, artist_pk, derived) VALUES \
                ('srv', 'al-1', 'One', 'Ada', 2, 1), \
-               ('srv', 'al-2', 'Two', 'Boris', 3, 0); \
+               ('srv', 'al-2', 'Two', 'Boris', 3, 0), \
+               ('srv', 'al-3', 'Three', 'Boris', 3, 1); \
              INSERT INTO tracks (rowid_pk, source, track_key, source_album_id, title, artist, album) VALUES \
                (10, 'srv', 't1', 'al-1', 'a', 'Ada', 'One'), \
-               (11, 'srv', 't2', 'al-2', 'b', 'Boris', 'Two'); \
+               (11, 'srv', 't2', 'al-2', 'b', 'Boris', 'Two'), \
+               (12, 'srv', 't3', 'al-3', 'c', 'Boris', 'Three'); \
              INSERT INTO track_credits (track_pk, position, artist_pk, name) VALUES \
-               (10, 0, 1, 'Ada'), (11, 0, 1, 'Ada');",
+               (10, 0, 1, 'Ada'), (11, 0, 1, 'Ada'), (12, 0, 1, 'Ada'), (12, 1, 3, 'Boris');",
         )
         .execute(&pool)
         .await
@@ -1853,7 +1849,11 @@ mod artist_fill_tests {
         .fetch_all(&pool)
         .await
         .unwrap();
-        assert_eq!(billed, [("al-1".into(), 1), ("al-2".into(), 3)]);
+        assert_eq!(
+            billed,
+            [("al-1".into(), 1), ("al-2".into(), 3), ("al-3".into(), 1)],
+            "a derived byline spelling a later credit still takes the first"
+        );
         let rows: Vec<i64> = sqlx::query_scalar("SELECT id FROM artists ORDER BY id")
             .fetch_all(&pool)
             .await
