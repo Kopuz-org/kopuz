@@ -86,18 +86,13 @@ pub fn use_library_filling() -> Memo<bool> {
     })
 }
 
-/// Start a job, ignoring the conflict a second start of the same kind
-/// returns -- one is already running, which is what the caller wanted.
+/// Start a job; while one of `kind` runs, the daemon joins it instead.
 pub fn start(kind: api::JobKind) {
     let api = crate::api::consume_api();
     spawn(async move {
-        match api.start_job(kind).await {
-            Ok(_) => {}
-            Err(error) if error.code == api::ErrorCode::Conflict => {}
-            Err(error) => {
-                tracing::warn!(%error, ?kind, "could not start job");
-                crate::toast::toast_error(&error.to_string());
-            }
+        if let Err(error) = api.start_job(kind).await {
+            tracing::warn!(%error, ?kind, "could not start job");
+            crate::toast::toast_error(&error.to_string());
         }
     });
 }

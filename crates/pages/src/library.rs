@@ -107,26 +107,7 @@ pub fn LibraryPage(
     // flight is its business rather than a generation counter kept here.
     let sync_job = hooks::jobs::use_job_progress(hooks::JobKind::LibrarySync);
     let is_loading = use_memo(move || sync_job.read().running);
-    let mut has_fetched = use_signal(|| false);
-    let mut sync_server = move || {
-        has_fetched.set(true);
-        hooks::jobs::start(hooks::JobKind::LibrarySync);
-    };
-    // First visit with an empty server library → auto-pull once.
-    use_effect(move || {
-        if !caps().sync {
-            return;
-        }
-        if !*has_fetched.read()
-            && let Some(total) = *window.total.read()
-        {
-            if total == 0 {
-                sync_server();
-            } else {
-                has_fetched.set(true);
-            }
-        }
-    });
+    let sync_server = move || hooks::jobs::start(hooks::JobKind::LibrarySync);
 
     let mut ctrl = use_context::<PlayerController>();
     let mut active_menu_track = use_signal(|| None::<String>);

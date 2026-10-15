@@ -394,7 +394,7 @@ pub trait ArtworkApi: Send + Sync {
 pub trait JobApi: Send + Sync {
     /// Start a long-running job (`scan`, `library_sync`, `favorites_sync`).
     /// Progress arrives as `job.progress` / `job.finished` events; a second
-    /// start of an already-running kind returns `conflict`.
+    /// start of an already-running kind joins it and returns its ref.
     async fn start_job(&self, kind: JobKind) -> Result<JobRef, ApiError>;
 
     async fn jobs(&self) -> Result<Vec<JobStatus>, ApiError>;

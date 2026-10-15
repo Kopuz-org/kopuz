@@ -120,7 +120,6 @@ pub fn HomeBody(
     let mut prefs = hooks::ui_prefs::use_ui_prefs();
     let source = use_active_source();
     let caps = hooks::sources::use_capabilities();
-    let mut has_fetched = use_signal(|| false);
     // Which card has its overflow menu open, keyed by track uid / playlist id.
     // Owned here because the section renderers are plain functions, so they
     // cannot hold hook state of their own.
@@ -229,26 +228,6 @@ pub fn HomeBody(
         let albums = albums_res.read().clone().and_then(Result::err);
         let downloaded = offline_tracks_res.read().clone().and_then(Result::err);
         albums.or(downloaded)
-    });
-
-    // Catalog sources fill an empty cache by syncing; folder sources are populated by the scan.
-    let mut fetch_remote = move || {
-        has_fetched.set(true);
-        hooks::jobs::start(hooks::JobKind::LibrarySync);
-    };
-
-    use_effect(move || {
-        // Offline the listing holds only downloaded albums, so an empty one is no reason to sync.
-        if !caps().sync || *has_fetched.read() || *is_offline.read() {
-            return;
-        }
-        if let Some(Ok(albums)) = albums_res.read().as_ref() {
-            if albums.is_empty() {
-                fetch_remote();
-            } else {
-                has_fetched.set(true);
-            }
-        }
     });
 
     let source_albums_all = use_memo(move || -> Vec<AlbumCard> {

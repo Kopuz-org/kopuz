@@ -9,9 +9,7 @@ use components::track_list_view::TrackListView;
 use components::view_mode_toggle::ViewModeToggle;
 use config::AlbumViewMode;
 use dioxus::prelude::*;
-use hooks::use_db_queries::{
-    use_active_source, use_album, use_album_tracks, use_albums, use_albums_window,
-};
+use hooks::use_db_queries::{use_active_source, use_album, use_album_tracks, use_albums};
 
 /// Copy a link to the clipboard and flash a small toast. Used by the catalog album
 /// page's share button (the `track_row` clipboard helper is crate-private to
@@ -37,28 +35,9 @@ pub fn Album(
     mut queue: Signal<Vec<api::TrackInfo>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let source = use_active_source();
-    let caps = hooks::sources::use_capabilities();
     let nav_ctrl = use_context::<components::NavigationController>();
 
     let open_album_menu = use_signal(|| None::<String>);
-
-    let any_album_query = use_memo(|| Some(hooks::AlbumQuery::default()));
-    let any_album_res = use_albums_window(source, any_album_query, 1);
-
-    // First visit to a server with an empty cache → pull once.
-    let mut has_fetched = use_signal(|| false);
-    use_effect(move || {
-        if !caps().sync || *has_fetched.read() {
-            return;
-        }
-        if let Some(Ok(albums)) = any_album_res.read().clone() {
-            has_fetched.set(true);
-            if albums.is_empty() {
-                hooks::jobs::start(hooks::JobKind::LibrarySync);
-            }
-        }
-    });
 
     rsx! {
         div {
