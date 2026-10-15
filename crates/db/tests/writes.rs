@@ -418,6 +418,72 @@ async fn a_derived_album_follows_its_track_once_the_credit_is_linked() {
 }
 
 #[tokio::test]
+async fn a_derived_album_is_billed_by_all_its_tracks_not_the_last_one_written() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let source = Source::Server("srv".into());
+    let track = |id: &str, album: &str, artist: &str, credits: Vec<reader::ArtistCredit>| Track {
+        id: TrackId::Server {
+            service: config::MusicService::YtMusic,
+            item_id: id.into(),
+        },
+        album_id: album.into(),
+        artist: artist.into(),
+        artists: credits.iter().map(|credit| credit.name.clone()).collect(),
+        credits,
+        ..local("/unused", "Song")
+    };
+    let unlinked = reader::ArtistCredit::unlinked;
+    let both = || {
+        vec![
+            reader::ArtistCredit::linked("Kana", "UC-kana"),
+            reader::ArtistCredit::linked("Rin", "UC-rin"),
+        ]
+    };
+    db.upsert_tracks(
+        &source,
+        &[
+            track("e1", "emo", "Nat / Teto", vec![unlinked("Nat / Teto")]),
+            track(
+                "e2",
+                "emo",
+                "Nat / Teto / Kiri",
+                vec![unlinked("Nat / Teto / Kiri")],
+            ),
+            track(
+                "e3",
+                "emo",
+                "Nat / Gumi / Teto",
+                vec![unlinked("Nat / Gumi / Teto")],
+            ),
+            track("d1", "duo", "Kana & Rin", both()),
+            track("d2", "duo", "Kana & Rin", both()),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let mut billed = Vec::new();
+    for album in ["emo", "duo"] {
+        let row = db.album(&source, album).await.unwrap().unwrap();
+        let artist = db
+            .artist(&source, row.artist_key.as_deref().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        billed.push((artist.name, artist.source_id));
+    }
+    assert_eq!(
+        billed[0],
+        ("Nat / Teto".to_string(), None),
+        "no shared credit keeps the byline's own row"
+    );
+    assert_eq!(billed[1].1.as_deref(), Some("UC-kana"));
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
 async fn a_joined_album_artist_is_billed_to_the_artists_its_tracks_credit() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();

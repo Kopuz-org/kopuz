@@ -150,13 +150,36 @@ async fn ensure_album(
         true => "Singles",
         false => t.album.as_str(),
     };
+    let existing: Option<(bool, String)> = sqlx::query_as(
+        "SELECT derived, artist FROM albums WHERE source = ?1 AND source_album_id = ?2",
+    )
+    .bind(src)
+    .bind(&t.album_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if matches!(existing, Some((false, _))) {
+        return Ok(());
+    }
+    let byline = existing.map_or_else(|| t.artist.clone(), |(_, artist)| artist);
+    // The album's first track wrote its byline, so the byline's own row is found among that track's credits.
+    let founder = sqlx::query_scalar::<_, Option<i64>>(
+        "SELECT MIN(rowid_pk) FROM tracks WHERE source = ?1 AND source_album_id = ?2",
+    )
+    .bind(src)
+    .bind(&t.album_id)
+    .fetch_one(&mut **tx)
+    .await?
+    .unwrap_or(pk);
     let credits: Vec<(String, i64)> = sqlx::query_as(
         "SELECT name, artist_pk FROM track_credits WHERE track_pk = ?1 ORDER BY position",
     )
-    .bind(pk)
+    .bind(founder)
     .fetch_all(&mut **tx)
     .await?;
-    let artist_pk = billed_credit(&t.artist, &credits);
+    let artist_pk = match credited_album_artist(tx, src, &t.album_id).await? {
+        Some(shared) => Some(shared),
+        None => billed_credit(&byline, &credits),
+    };
     // A derived row follows its tracks' credits as they gain ids; a synced or scanned row stays as written.
     sqlx::query!(
         "INSERT INTO albums (source, source_album_id, title, artist, cover_path, artist_pk, derived) \
