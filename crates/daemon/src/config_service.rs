@@ -65,6 +65,11 @@ impl ConfigService {
     #[tracing::instrument(name = "config.reload", skip_all)]
     pub async fn reload(&self) -> Result<bool, ApiError> {
         let mut held = self.current.write().await;
+        self.take_in_disk(&mut held)
+    }
+
+    /// Bring what is held up to the files as they are now; every write decides on this rather than the last poll, so a pin that landed since is honoured.
+    fn take_in_disk(&self, held: &mut RwLockWriteGuard<'_, Held>) -> Result<bool, ApiError> {
         let layers = held.layers.reread();
         let settings = settings_of(&layers)?;
         let locks = layers.locks();
@@ -79,7 +84,7 @@ impl ConfigService {
         );
         held.settings = settings;
         held.locks = locks;
-        self.publish(&mut held, changed);
+        self.publish(held, changed);
         Ok(true)
     }
 
@@ -152,7 +157,8 @@ impl ConfigService {
 
     /// Refuse a write that a managed settings file has pinned, naming the keys the caller is about to change.
     pub async fn ensure_unlocked(&self, keys: &[SettingKey]) -> Result<(), ApiError> {
-        let held = self.current.read().await;
+        let mut held = self.current.write().await;
+        self.take_in_disk(&mut held)?;
         let refused: Vec<&str> = keys
             .iter()
             .filter(|key| held.locks.iter().any(|lock| lock.key == **key))
@@ -176,6 +182,7 @@ impl ConfigService {
         mutate: impl FnOnce(&mut config::Settings) + Send,
     ) -> Result<config::Settings, ApiError> {
         let mut held = self.current.write().await;
+        self.take_in_disk(&mut held)?;
         let mut next = held.settings.clone();
         mutate(&mut next);
         if next == held.settings {
@@ -199,6 +206,7 @@ impl ConfigService {
     /// Answer each edit in order: a daemon-owned key names the API that sets it, a pinned one is locked, and the rest apply unless their value breaks a rule; what applied is saved and published once.
     pub async fn edit(&self, edits: Vec<SettingsEdit>) -> Result<EditReport, ApiError> {
         let mut held = self.current.write().await;
+        self.take_in_disk(&mut held)?;
         let locked: Vec<SettingKey> = held.locks.iter().map(|lock| lock.key).collect();
         let mut next = held.settings.clone();
         let mut changed: Vec<SettingKey> = Vec::new();
@@ -629,6 +637,32 @@ mod tests {
             !service.reload().await.expect("reload"),
             "nothing moved since"
         );
+    }
+
+    /// A pin that lands between two polls must still refuse the next edit, not be found by the poll after the write.
+    #[tokio::test]
+    async fn a_drop_in_written_since_the_last_poll_locks_the_next_edit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (service, path) = loaded(&dir).await;
+        std::fs::write(&path, "crossfade_seconds = 3\n").expect("write");
+        assert!(service.reload().await.expect("reload"));
+        let dropins = config::store::dropin_dir_for(&path);
+        std::fs::create_dir_all(&dropins).expect("mkdir");
+        std::fs::write(dropins.join("40-race.toml"), "crossfade_seconds = 1\n").expect("pin");
+
+        let report = service.edit(vec![crossfade(9)]).await.expect("edit");
+
+        assert_eq!(report.outcomes, vec![EditOutcome::Locked]);
+        assert_eq!(report.view.settings.playback.crossfade_seconds, 1);
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            "crossfade_seconds = 3\n"
+        );
+        let crossfade_key = SettingKey::Playback(PlaybackKey::CrossfadeSeconds);
+        service
+            .ensure_unlocked(&[crossfade_key])
+            .await
+            .expect_err("pinned");
     }
 
     #[tokio::test]
