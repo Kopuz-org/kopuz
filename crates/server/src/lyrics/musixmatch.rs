@@ -27,7 +27,7 @@ pub(super) async fn fetch_from_musixmatch_enhanced(
         return None;
     }
 
-    let client = reqwest::Client::new();
+    let client = utils::http::client();
     let started = Instant::now();
     let search = musixmatch_get(
         &client,

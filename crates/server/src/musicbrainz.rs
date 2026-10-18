@@ -43,7 +43,7 @@ pub async fn search_recording_id(artist: &str, title: &str) -> Option<String> {
         utf8_percent_encode(&recording_query(artist, title), NON_ALPHANUMERIC)
     );
 
-    let client = reqwest::Client::builder()
+    let client = utils::http::builder()
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(15))
         .build()

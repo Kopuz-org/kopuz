@@ -14,7 +14,7 @@ use super::clients::{ORIGIN_YOUTUBE_MUSIC, YouTubeClient};
 /// /youtubei/v1 hits a typical library sync makes.
 pub fn http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
+    CLIENT.get_or_init(utils::http::client)
 }
 
 /// Builds the `Authorization: SAPISIDHASH <ts>_<sha1(ts " " SAPISID " " origin)>` header.
@@ -470,7 +470,7 @@ mod tests {
         { font-family: verdana, arial, sans-serif; }</style></head><body>...";
 
     fn sign(body: &mut Value) -> reqwest::Request {
-        let req = reqwest::Client::new().post("https://music.youtube.com/youtubei/v1/browse");
+        let req = http_client().post("https://music.youtube.com/youtubei/v1/browse");
         signed(req, body, "SAPISID=abc", "SAPISIDHASH 1_x".into())
             .build()
             .expect("request")

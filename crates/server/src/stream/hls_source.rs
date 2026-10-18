@@ -20,7 +20,7 @@ use std::time::Duration;
 const MAX_TOTAL_BYTES: usize = 1024 * 1024 * 1024;
 
 fn client() -> reqwest::blocking::Client {
-    reqwest::blocking::Client::builder()
+    utils::http::blocking_builder()
         .timeout(Duration::from_secs(30))
         .build()
         .unwrap_or_default()

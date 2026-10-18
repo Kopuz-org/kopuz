@@ -159,7 +159,7 @@ struct TokenResponse {
 }
 
 async fn exchange(params: &[(&str, &str)]) -> Result<TokenResponse, String> {
-    let resp = reqwest::Client::new()
+    let resp = utils::http::client()
         .post(TOKEN_URL)
         .form(params)
         .send()
@@ -176,7 +176,7 @@ async fn exchange(params: &[(&str, &str)]) -> Result<TokenResponse, String> {
 }
 
 async fn fetch_user_id(access: &str) -> String {
-    let Ok(resp) = reqwest::Client::new()
+    let Ok(resp) = utils::http::client()
         .get("https://api.spotify.com/v1/me")
         .bearer_auth(access)
         .send()

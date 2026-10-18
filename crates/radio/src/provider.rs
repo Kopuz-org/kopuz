@@ -79,11 +79,11 @@ async fn start_rest_metadata(
     station_name: String,
     tx: mpsc::UnboundedSender<RadioMetadata>,
 ) {
-    let client = reqwest::Client::builder()
+    let client = utils::http::builder()
         .user_agent(format!("Kopuz/{}", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(10))
         .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+        .unwrap_or_else(|_| utils::http::client());
     let url = def
         .stream_url_map
         .get(&stream_id)

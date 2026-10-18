@@ -104,7 +104,7 @@ async fn fetch_content(
                 format!("{}/{}", base, url_or_path.trim_start_matches("./"))
             };
 
-            let client = reqwest::Client::builder()
+            let client = utils::http::builder()
                 .timeout(std::time::Duration::from_secs(10))
                 .build()
                 .map_err(|e| RegistryError::Network(e.to_string()))?;

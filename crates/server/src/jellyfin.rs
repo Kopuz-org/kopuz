@@ -193,9 +193,9 @@ impl JellyfinClient {
     ) -> Self {
         let clean_base_url = base_url.trim_end_matches('/');
 
-        let builder = reqwest::Client::builder();
+        let builder = utils::http::builder();
         let builder = builder.timeout(std::time::Duration::from_secs(10));
-        let http_client = builder.build().unwrap_or_else(|_| reqwest::Client::new());
+        let http_client = builder.build().unwrap_or_else(|_| utils::http::client());
 
         Self {
             http_client,

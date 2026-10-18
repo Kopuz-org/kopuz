@@ -432,7 +432,7 @@ async fn is_gated(info: &YtStreamInfo) -> bool {
         return false;
     };
     let client = CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
+        utils::http::builder()
             .timeout(GATE_PROBE_TIMEOUT)
             .build()
             .unwrap_or_default()

@@ -19,6 +19,7 @@ workspace = true
 md5 = { workspace = true }
 tracing = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
+utils = { workspace = true, features = ["http"] }
 config.workspace = true
 db.workspace = true
 serde.workspace = true

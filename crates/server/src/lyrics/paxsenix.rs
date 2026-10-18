@@ -20,7 +20,7 @@ pub(super) async fn fetch_from_paxsenix_youtube(
     track_path: &str,
     reach: &ProviderReach,
 ) -> Option<Lyrics> {
-    let client = reqwest::Client::new();
+    let client = utils::http::client();
     let video_id = if let Some(video_id) = extract_youtube_video_id(track_path) {
         video_id
     } else {
@@ -164,7 +164,7 @@ pub(super) async fn fetch_from_paxsenix_apple_music(
         return None;
     }
 
-    let client = reqwest::Client::new();
+    let client = utils::http::client();
     let search = client
         .get(ITUNES_SEARCH_ROOT_URL)
         .query(&[

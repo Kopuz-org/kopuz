@@ -297,7 +297,7 @@ impl DownloadsService {
         let http = |error: reqwest::Error| {
             ApiError::internal(format!("download request failed: {}", error.without_url()))
         };
-        let client = reqwest::Client::builder()
+        let client = utils::http::builder()
             .read_timeout(Duration::from_secs(15))
             .build()
             .map_err(http)?;

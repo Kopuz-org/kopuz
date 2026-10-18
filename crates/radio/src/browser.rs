@@ -70,7 +70,7 @@ struct ServerEntry {
 }
 
 fn http_client() -> Result<reqwest::Client, BrowserError> {
-    reqwest::Client::builder()
+    utils::http::builder()
         .user_agent(format!("Kopuz/{}", env!("CARGO_PKG_VERSION")))
         // Short connect timeout so a dead address family
         // (mirrors publish AAAA records) falls back within the request budget.

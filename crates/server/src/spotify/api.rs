@@ -22,7 +22,7 @@ const PAGE: u32 = 50;
 /// playback calls (fewer connections = less chance of tripping the rate limit).
 fn client() -> &'static reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
+    CLIENT.get_or_init(utils::http::client)
 }
 
 /// Seconds to wait after a 429, from the `Retry-After` header (clamped so a

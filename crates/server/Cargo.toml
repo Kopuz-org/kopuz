@@ -38,7 +38,7 @@ tokio-tungstenite = { workspace = true }
 futures-util = { workspace = true }
 reader = { workspace = true }
 db = { workspace = true }
-utils = { workspace = true }
+utils = { workspace = true, features = ["http"] }
 async-trait = { workspace = true }
 quick-xml = { workspace = true }
 lofty = { workspace = true }

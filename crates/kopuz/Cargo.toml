@@ -64,7 +64,7 @@ http = { workspace = true }
 hooks = { workspace = true }
 percent-encoding = { workspace = true }
 image = { workspace = true }
-utils = { workspace = true }
+utils = { workspace = true, features = ["http"] }
 rand = { workspace = true }
 material-colors = "0.4.2"
 serde = { workspace = true }

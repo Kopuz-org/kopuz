@@ -34,7 +34,7 @@ pub fn youtube_cover_art_url(track: &Track) -> Option<String> {
 }
 
 fn build_client() -> Result<reqwest::Client, reqwest::Error> {
-    reqwest::Client::builder().user_agent(USER_AGENT).build()
+    utils::http::builder().user_agent(USER_AGENT).build()
 }
 
 #[derive(Debug, Deserialize)]

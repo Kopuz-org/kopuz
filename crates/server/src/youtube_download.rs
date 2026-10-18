@@ -240,7 +240,7 @@ pub async fn fetch_stream(
     cancelled: &(dyn Fn() -> bool + Send + Sync),
     progress: Progress<'_>,
 ) -> Result<(), String> {
-    let client = reqwest::Client::builder()
+    let client = utils::http::builder()
         .connect_timeout(Duration::from_secs(20))
         .build()
         .map_err(|error| format!("the download client could not start: {error}"))?;

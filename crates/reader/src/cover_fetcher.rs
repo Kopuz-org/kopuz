@@ -33,7 +33,7 @@ impl CoverFetcher {
         let lastfm_api_key = lastfm_api_key
             .map(|key| key.trim().to_string())
             .filter(|key| !key.is_empty());
-        let client = reqwest::Client::builder()
+        let client = ::utils::http::builder()
             .user_agent(concat!(
                 "Kopuz/",
                 env!("CARGO_PKG_VERSION"),

@@ -672,7 +672,7 @@ mod tests {
             "WEB_REMIX should return signed formats"
         );
         let url = deciphered_url(&player.0, fmt).await.expect("decipher");
-        let resp = reqwest::Client::new()
+        let resp = utils::http::client()
             .get(&url)
             .header("Range", "bytes=0-1023")
             .send()
@@ -710,7 +710,7 @@ mod tests {
         let url = deciphered_url(&player.0, fmt).await.expect("decipher");
         // A second solve exercises reuse of the warm isolate.
         let _ = deciphered_url(&player.0, fmt).await.expect("decipher 2");
-        let resp = reqwest::Client::new()
+        let resp = utils::http::client()
             .get(&url)
             .header("Range", "bytes=0-1023")
             .send()

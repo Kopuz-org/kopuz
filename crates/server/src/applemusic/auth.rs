@@ -13,7 +13,7 @@ pub async fn get_bearer_token() -> Result<String, String> {
     }
     tracing::debug!("am.auth: scraping bearer token from music.apple.com");
 
-    let client = reqwest::Client::new();
+    let client = utils::http::client();
     let resp = client
         .get("https://music.apple.com")
         .header("User-Agent", USER_AGENT)

@@ -15,6 +15,10 @@ name = "utils"
 [lints]
 workspace = true
 
+[features]
+# HTTP client builders, for the crates that reach the network; a frontend leaves this off.
+http = ["dep:reqwest"]
+
 [dependencies]
 percent-encoding = { workspace = true }
 directories = { workspace = true }
@@ -27,6 +31,7 @@ image = { workspace = true }
 time = { workspace = true, features = ["formatting", "macros"] }
 icu_collator = { workspace = true }
 icu_locale_core = { workspace = true }
+reqwest = { workspace = true, optional = true, features = ["blocking"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 base64 = { workspace = true }

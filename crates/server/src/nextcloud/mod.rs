@@ -120,11 +120,15 @@ pub(crate) struct NextcloudClient {
 
 impl NextcloudClient {
     pub(crate) fn new(url: &str, user_id: &str, password: &str) -> Result<Self, String> {
+        let http = utils::http::builder()
+            .user_agent(concat!("Kopuz/", env!("CARGO_PKG_VERSION")))
+            .timeout(std::time::Duration::from_secs(180)) // scans run long
+            .build()
+            .map_err(|e| format!("HTTP client unavailable: {e}"))?;
         let nc = Nextcloud::builder(url)
             .basic_auth(user_id, password)
             .user_id(user_id)
-            .user_agent(concat!("Kopuz/", env!("CARGO_PKG_VERSION")))
-            .timeout(Some(std::time::Duration::from_secs(180))) // scans run long
+            .http_client(http)
             .build()
             .map_err(|e| format!("invalid Nextcloud server URL: {e}"))?;
 

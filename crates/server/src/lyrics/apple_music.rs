@@ -46,7 +46,7 @@ pub(super) async fn fetch_apple_music_lyrics(
     const AM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
     const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-    let client = reqwest::Client::new();
+    let client = utils::http::client();
 
     // Resolve library ID to catalog ID if needed.
     let catalog_id = resolve_catalog_id(&client, auth, reach).await;

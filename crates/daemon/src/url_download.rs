@@ -300,7 +300,11 @@ async fn fetch_cover(track: &reader::Track) -> Option<Vec<u8>> {
         .cover
         .as_deref()
         .filter(|url| url.starts_with("http"))?;
-    let response = reqwest::get(full_size_cover(url)).await.ok()?;
+    let response = utils::http::client()
+        .get(full_size_cover(url))
+        .send()
+        .await
+        .ok()?;
     if !response.status().is_success() {
         return None;
     }

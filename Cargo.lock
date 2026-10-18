@@ -4750,6 +4750,7 @@ dependencies = [
  "kopuz-config",
  "kopuz-db",
  "kopuz-reader",
+ "kopuz-utils",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
@@ -4845,6 +4846,7 @@ dependencies = [
  "cpal",
  "jni 0.21.1",
  "kopuz-config",
+ "kopuz-utils",
  "mpris-server",
  "ndk-context",
  "objc2",
@@ -4883,6 +4885,7 @@ name = "kopuz-radio"
 version = "0.21.0"
 dependencies = [
  "futures-util",
+ "kopuz-utils",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
@@ -4898,6 +4901,7 @@ name = "kopuz-reader"
 version = "0.21.0"
 dependencies = [
  "kopuz-config",
+ "kopuz-utils",
  "lofty",
  "reqwest 0.13.4",
  "serde",
@@ -4917,6 +4921,7 @@ version = "0.21.0"
 dependencies = [
  "kopuz-config",
  "kopuz-db",
+ "kopuz-utils",
  "md5",
  "reqwest 0.13.4",
  "serde",
@@ -4987,6 +4992,7 @@ dependencies = [
  "ndk-context",
  "objc2-foundation",
  "percent-encoding",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "time",

@@ -96,7 +96,7 @@ pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signa
     // which is active is the daemon's answer.
     let active = hooks::sources::use_active_source_info();
     use_future(move || async move {
-        let Ok(client) = reqwest::Client::builder()
+        let Ok(client) = utils::http::builder()
             .timeout(std::time::Duration::from_secs(5))
             .redirect(reqwest::redirect::Policy::none())
             .build()

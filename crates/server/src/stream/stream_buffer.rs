@@ -99,11 +99,11 @@ impl StreamBuffer {
             async move {
                 let ua = user_agent
                     .unwrap_or_else(|| concat!("Kopuz/", env!("CARGO_PKG_VERSION")).to_string());
-                let client = reqwest::Client::builder()
+                let client = utils::http::builder()
                     .tcp_nodelay(true)
                     .user_agent(ua)
                     .build()
-                    .unwrap_or_else(|_| reqwest::Client::new());
+                    .unwrap_or_else(|_| utils::http::client());
 
                 // Radio directories often hand out a playlist (.pls/.m3u par example)
                 // instead of the stream; follow it to its first entry.

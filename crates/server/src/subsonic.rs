@@ -345,9 +345,9 @@ pub fn stream_url_with_bitrate(
 
 impl SubsonicClient {
     pub fn new(base_url: &str, username: &str, password: &str) -> Self {
-        let builder = reqwest::Client::builder();
+        let builder = utils::http::builder();
         let builder = builder.timeout(DEFAULT_TIMEOUT);
-        let http_client = builder.build().unwrap_or_else(|_| reqwest::Client::new());
+        let http_client = builder.build().unwrap_or_else(|_| utils::http::client());
 
         Self {
             http_client,

@@ -11,10 +11,10 @@ const VALIDATE: &str = "https://api.listenbrainz.org/1/validate-token";
 const TIMEOUT: Duration = Duration::from_secs(15);
 
 fn client() -> Client {
-    Client::builder()
+    utils::http::builder()
         .timeout(TIMEOUT)
         .build()
-        .unwrap_or_else(|_| Client::new())
+        .unwrap_or_else(|_| utils::http::client())
 }
 
 /// The user the token belongs to, or `None` for a token ListenBrainz does not

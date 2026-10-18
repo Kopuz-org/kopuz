@@ -577,7 +577,12 @@ fn stream_ref_from_bytes(bytes: &[u8]) -> Option<RandomAccessStreamReference> {
 
 fn fetch_artwork_bytes(path: &str) -> Option<Vec<u8>> {
     if path.starts_with("http://") || path.starts_with("https://") {
-        let resp = reqwest::blocking::get(path).ok()?;
+        let resp = utils::http::blocking_builder()
+            .build()
+            .ok()?
+            .get(path)
+            .send()
+            .ok()?;
         if resp.status().is_success() {
             resp.bytes().ok().map(|b| b.to_vec())
         } else {

@@ -139,7 +139,7 @@ impl AppleMusicApi {
             media_user_token.is_some()
         );
         Self {
-            http: Client::new(),
+            http: utils::http::client(),
             media_user_token,
             storefront: sf,
             language: lang,

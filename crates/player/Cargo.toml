@@ -66,6 +66,7 @@ windows = { workspace = true, features = [
 ] }
 tokio = { workspace = true, features = ["full"] }
 reqwest = { workspace = true, features = ["blocking"] }
+utils = { workspace = true, features = ["http"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = { workspace = true }

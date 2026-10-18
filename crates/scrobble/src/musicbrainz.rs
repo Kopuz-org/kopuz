@@ -1,4 +1,3 @@
-use reqwest::Client;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -54,10 +53,10 @@ pub async fn submit_listens(
     } else {
         REQUEST_TIMEOUT
     };
-    let client = Client::builder()
+    let client = utils::http::builder()
         .timeout(timeout)
         .build()
-        .unwrap_or_else(|_| Client::new());
+        .unwrap_or_else(|_| utils::http::client());
     let url = "https://api.listenbrainz.org/1/submit-listens";
     let auth = auth_header(token);
     let count = listens.len();

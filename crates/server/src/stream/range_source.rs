@@ -247,7 +247,7 @@ fn shared_client(ua: &str) -> IoResult<reqwest::blocking::Client> {
     if let Some(client) = clients.get(ua) {
         return Ok(client.clone());
     }
-    let client = reqwest::blocking::Client::builder()
+    let client = utils::http::blocking_builder()
         .tcp_nodelay(true)
         .user_agent(ua)
         .timeout(REQUEST_TIMEOUT)

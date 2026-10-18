@@ -10,3 +10,15 @@ await-holding-invalid-types = [
 # Dioxus render helpers naturally take many props (title/eyebrow/data + several
 # event handlers + a scroll callback); 8 is a reasonable ceiling for this UI crate.
 too-many-arguments-threshold = 8
+
+# reqwest switches every client to native-tls once any crate compiles it in, so clients name their backend in utils::http.
+disallowed-methods = [
+  { path = "reqwest::Client::new", reason = "build HTTP clients through utils::http" },
+  { path = "reqwest::Client::builder", reason = "build HTTP clients through utils::http" },
+  { path = "reqwest::ClientBuilder::new", reason = "build HTTP clients through utils::http" },
+  { path = "reqwest::get", reason = "build HTTP clients through utils::http" },
+  { path = "reqwest::blocking::Client::new", reason = "build HTTP clients through utils::http" },
+  { path = "reqwest::blocking::Client::builder", reason = "build HTTP clients through utils::http" },
+  { path = "reqwest::blocking::ClientBuilder::new", reason = "build HTTP clients through utils::http" },
+  { path = "reqwest::blocking::get", reason = "build HTTP clients through utils::http" },
+]

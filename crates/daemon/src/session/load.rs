@@ -551,7 +551,13 @@ pub(super) async fn fetch_cover_to_temp(url: &str, key: &str) -> Option<String> 
         return Some(path.to_string_lossy().to_string());
     }
     let fetch = async {
-        let response = reqwest::get(url).await.ok()?.error_for_status().ok()?;
+        let response = utils::http::client()
+            .get(url)
+            .send()
+            .await
+            .ok()?
+            .error_for_status()
+            .ok()?;
         response.bytes().await.ok()
     };
     let bytes = tokio::time::timeout(Duration::from_secs(30), fetch)

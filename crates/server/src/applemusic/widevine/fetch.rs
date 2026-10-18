@@ -142,7 +142,7 @@ pub async fn resolve() -> Result<CdmRelease, String> {
     let url = manifest_url(platform);
     tracing::debug!("am.widevine.fetch: resolving CDM for {platform}");
 
-    let xml = reqwest::Client::new()
+    let xml = utils::http::client()
         .get(&url)
         .send()
         .await
@@ -264,7 +264,7 @@ async fn install(release: &CdmRelease) -> Result<std::path::PathBuf, String> {
         release.size / (1024 * 1024)
     );
 
-    let bytes = reqwest::Client::new()
+    let bytes = utils::http::client()
         .get(&release.url)
         .send()
         .await

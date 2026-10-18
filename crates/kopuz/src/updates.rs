@@ -106,7 +106,7 @@ fn is_newer_version(current: &str, candidate: &str) -> bool {
 }
 
 fn http_client(timeout: std::time::Duration) -> Option<reqwest::Client> {
-    reqwest::Client::builder()
+    utils::http::builder()
         .user_agent(format!("kopuz/{}", env!("CARGO_PKG_VERSION")))
         .timeout(timeout)
         .build()

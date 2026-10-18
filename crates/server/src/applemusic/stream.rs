@@ -100,7 +100,7 @@ pub async fn get_web_playback(
     bearer_token: &str,
     media_user_token: &str,
 ) -> Result<WebPlayback, String> {
-    let client = reqwest::Client::new();
+    let client = utils::http::client();
     let body = web_playback_body(adam_id);
 
     let resp = client
@@ -271,7 +271,7 @@ async fn load_license(
         serde_json::to_string(&envelope).unwrap_or_default()
     );
 
-    let client = reqwest::Client::new();
+    let client = utils::http::client();
     let resp = client
         .post(LICENSE_SERVER_URL)
         .header("Content-Type", "application/json")
@@ -634,7 +634,7 @@ enum AssetStream {
 /// only to them.
 async fn open_asset_stream(url: &str, media_user_token: &str) -> Result<AssetStream, String> {
     tracing::info!("am.stream: downloading encrypted fMP4 from {url}");
-    let resp = reqwest::Client::new()
+    let resp = utils::http::client()
         .get(url)
         .header("User-Agent", USER_AGENT)
         .header("x-apple-music-user-token", media_user_token)
@@ -759,7 +759,7 @@ async fn read_whole_body(response: reqwest::Response) -> Result<Vec<u8>, String>
 /// Download a track asset. Carries the user token: library assets are the
 /// user's own files and are served only to them.
 async fn download_asset(url: &str, media_user_token: &str) -> Result<Vec<u8>, String> {
-    let client = reqwest::Client::new();
+    let client = utils::http::client();
     let resp = client
         .get(url)
         .header("User-Agent", USER_AGENT)

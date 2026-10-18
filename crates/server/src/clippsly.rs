@@ -105,7 +105,7 @@ impl ClippslyClient {
         {
             return Err(SourceError::InvalidInput("invalid Clippsly URL".into()));
         }
-        let http = Client::builder()
+        let http = utils::http::builder()
             .connect_timeout(Duration::from_secs(15))
             .timeout(Duration::from_secs(60))
             .redirect(reqwest::redirect::Policy::none())

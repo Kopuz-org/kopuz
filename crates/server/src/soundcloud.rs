@@ -44,7 +44,7 @@ const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
+    utils::http::builder()
         .timeout(std::time::Duration::from_secs(15))
         .user_agent(USER_AGENT)
         .build()

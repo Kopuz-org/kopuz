@@ -238,7 +238,7 @@ impl ArtworkService {
             catalog: OnceLock::new(),
             radio: OnceLock::new(),
             cache_dir,
-            http: reqwest::Client::new(),
+            http: utils::http::client(),
         })
     }
 

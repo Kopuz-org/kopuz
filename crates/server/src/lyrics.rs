@@ -969,7 +969,7 @@ async fn fetch_from_lrclib(
         url.push_str(&format!("&duration={}", duration));
     }
 
-    let client = reqwest::Client::new();
+    let client = utils::http::client();
     let res = match client
         .get(&url)
         .header("User-Agent", concat!("Kopuz/", env!("CARGO_PKG_VERSION")))

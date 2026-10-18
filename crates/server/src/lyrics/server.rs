@@ -86,7 +86,7 @@ pub(super) async fn fetch_jellyfin_lyrics(
         server_url.trim_end_matches('/'),
         item_id
     );
-    let client = reqwest::Client::new();
+    let client = utils::http::client();
     let resp = client
         .get(&url)
         .header("X-Emby-Token", token)
@@ -156,7 +156,7 @@ pub(super) async fn fetch_subsonic_lyrics(
     reach: &ProviderReach,
 ) -> Option<Lyrics> {
     let base_url = server_url.trim_end_matches('/');
-    let client = reqwest::Client::new();
+    let client = utils::http::client();
     let salt = "kopuzlyrics";
     let token = format!("{:x}", md5::compute(format!("{}{}", password, salt)));
 
