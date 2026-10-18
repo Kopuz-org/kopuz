@@ -22,10 +22,10 @@ pub(crate) fn network_factory(
     Box::new(move || {
         let build = || -> std::io::Result<_> {
             if is_radio {
-                let stream = server::stream::stream_buffer::StreamBuffer::with_user_agent(
+                let stream = server::stream::stream_buffer::StreamBuffer::new(
                     stream_url,
                     true,
-                    yt_user_agent,
+                    server::stream::stream_buffer::radio_client(yt_user_agent),
                     icy_tx,
                     rt_handle,
                 );
@@ -71,15 +71,14 @@ pub(crate) fn network_factory(
                     // No-pot fallback: googlevideo 403s deep ranges, and the
                     // probe reads the webm tail — stream sequentially instead
                     // of failing outright (issue #386). No scrubbing.
-                    let stream =
-                        server::stream::stream_buffer::StreamBuffer::with_user_agent_and_progress(
-                            stream_url,
-                            false,
-                            yt_user_agent,
-                            None,
-                            rt_handle,
-                            buffer_progress,
-                        );
+                    let stream = server::stream::stream_buffer::StreamBuffer::with_progress(
+                        stream_url,
+                        false,
+                        server::stream::stream_buffer::stream_client(yt_user_agent),
+                        None,
+                        rt_handle,
+                        buffer_progress,
+                    );
                     stream.wait_for_response_headers();
                     if let Some(error) = stream.response_error() {
                         return Err(error);
@@ -172,15 +171,14 @@ pub(crate) fn network_factory(
                     }
                     Err(error) => {
                         tracing::debug!(%error, "HTTP ranges unavailable; using progressive stream");
-                        let stream =
-                            server::stream::stream_buffer::StreamBuffer::with_user_agent_and_progress(
-                                stream_url,
-                                false,
-                                yt_user_agent,
-                                None,
-                                rt_handle,
-                                buffer_progress,
-                            );
+                        let stream = server::stream::stream_buffer::StreamBuffer::with_progress(
+                            stream_url,
+                            false,
+                            server::stream::stream_buffer::stream_client(yt_user_agent),
+                            None,
+                            rt_handle,
+                            buffer_progress,
+                        );
                         stream.wait_for_response_headers();
                         if let Some(error) = stream.response_error() {
                             return Err(error);

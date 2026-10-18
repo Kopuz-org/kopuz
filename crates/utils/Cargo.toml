@@ -38,6 +38,10 @@ base64 = { workspace = true }
 jni = { workspace = true }
 ndk-context = { workspace = true }
 
+# Radio streams only; the other clients stay on rustls (see http.rs). Android trusts its store through rustls.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+reqwest = { workspace = true, optional = true, features = ["native-tls"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-foundation = { workspace = true, features = ["NSLocale", "NSString"] }
 

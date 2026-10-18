@@ -18,3 +18,9 @@ pub fn client() -> reqwest::Client {
 pub fn blocking_builder() -> reqwest::blocking::ClientBuilder {
     reqwest::blocking::Client::builder().tls_backend_rustls()
 }
+
+/// A client builder on the platform's TLS (OpenSSL on Linux), for servers that reset rustls's handshake.
+#[cfg(not(target_os = "android"))]
+pub fn native_tls_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder().tls_backend_native()
+}
