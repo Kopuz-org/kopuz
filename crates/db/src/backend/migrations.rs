@@ -69,10 +69,17 @@ enum Fill {
     Queue,
     State,
     DerivedAlbums,
+    DiscFolders,
 }
 
 impl Fill {
-    const ALL: [Fill; 4] = [Fill::Artists, Fill::Queue, Fill::State, Fill::DerivedAlbums];
+    const ALL: [Fill; 5] = [
+        Fill::Artists,
+        Fill::Queue,
+        Fill::State,
+        Fill::DerivedAlbums,
+        Fill::DiscFolders,
+    ];
 
     /// The migration the fill follows, and the one it must precede.
     fn between(self) -> (i64, i64) {
@@ -81,6 +88,7 @@ impl Fill {
             Fill::Queue => (QUEUE_ROWS_CREATED, 20260930000001),
             Fill::State => (STATE_TABLES_CREATED, 20260930000006),
             Fill::DerivedAlbums => (LYRICS_CACHE_DROPPED, 20260930000008),
+            Fill::DiscFolders => (DISC_FOLDER_FILL_BEFORE, DISC_FOLDER_FILL_AFTER),
         }
     }
 
@@ -90,6 +98,7 @@ impl Fill {
             Fill::Queue => fill_queue(pool).await,
             Fill::State => fill_state(pool, settings_path).await,
             Fill::DerivedAlbums => fill_derived_albums(pool).await,
+            Fill::DiscFolders => fill_disc_folders(pool).await,
         }
     }
 }
@@ -121,10 +130,36 @@ async fn fill_derived_albums(pool: &SqlitePool) -> Result<(), DbError> {
     Ok(())
 }
 
+/// Numbers the disc of each local file with no disc tag from its disc folder ("CD1", "Disc 2"), as a scan now does; a file a scan already keeps is never read again.
+async fn fill_disc_folders(pool: &SqlitePool) -> Result<(), DbError> {
+    let mut tx = pool.begin().await?;
+    let untagged: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT rowid_pk, path FROM tracks WHERE disc_number IS NULL AND path IS NOT NULL",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    for (pk, path) in untagged {
+        let Some(disc) = reader::utils::folder_disc(Path::new(&path)) else {
+            continue;
+        };
+        sqlx::query(
+            "UPDATE tracks SET disc_number = ?1 WHERE rowid_pk = ?2 AND disc_number IS NULL",
+        )
+        .bind(i64::from(disc))
+        .bind(pk)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 const ARTISTS_CREATED: i64 = 20260922000000;
 const QUEUE_ROWS_CREATED: i64 = 20260930000000;
 const STATE_TABLES_CREATED: i64 = 20260930000005;
 const LYRICS_CACHE_DROPPED: i64 = 20260930000007;
+const DISC_FOLDER_FILL_BEFORE: i64 = 20261019000008;
+const DISC_FOLDER_FILL_AFTER: i64 = 20261019000009;
 
 async fn migrate(pool: &SqlitePool, migrator: &sqlx::migrate::Migrator) -> Result<(), DbError> {
     let adapted;
@@ -2555,5 +2590,35 @@ mod album_identity_tests {
                 ("v3".into(), String::new()),
             ]
         );
+    }
+
+    /// A file a scan already keeps is never read again, so its disc folder has to number it here.
+    #[tokio::test]
+    async fn an_untagged_file_in_a_disc_folder_takes_its_disc() {
+        let pool = migrated_before(DISC_FOLDER_FILL_AFTER).await;
+        sqlx::raw_sql(
+            "INSERT INTO tracks (rowid_pk, source, track_key, path, service, disc_number) VALUES \
+               (1, 'local', '/m/Live/CD1 - Live/01.flac', '/m/Live/CD1 - Live/01.flac', NULL, NULL), \
+               (2, 'local', '/m/Live/Disc 2 of 2/01.flac', '/m/Live/Disc 2 of 2/01.flac', NULL, 3), \
+               (3, 'local', '/m/Live/01.flac', '/m/Live/01.flac', NULL, NULL), \
+               (4, 'jf', 'item-1', NULL, 'Jellyfin', NULL);",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let discs = |pool: SqlitePool| async move {
+            sqlx::query_as::<_, (i64, Option<i64>)>(
+                "SELECT rowid_pk, disc_number FROM tracks ORDER BY rowid_pk",
+            )
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+        };
+        let expected = vec![(1, Some(1)), (2, Some(3)), (3, None), (4, None)];
+
+        run_migrations(&pool, None).await.unwrap();
+        assert_eq!(discs(pool.clone()).await, expected);
+        fill_disc_folders(&pool).await.unwrap();
+        assert_eq!(discs(pool).await, expected);
     }
 }

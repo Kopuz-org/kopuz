@@ -122,6 +122,11 @@ pub fn disc_of(dir_name: &str) -> Option<u32> {
     digits.parse::<u32>().ok().filter(|n| (1..=99).contains(n))
 }
 
+/// The disc a file in a disc folder ("CD1", "Disc 2 of 2") belongs to, for a file whose tags name none.
+pub fn folder_disc(track_path: &Path) -> Option<u32> {
+    disc_of(track_path.parent()?.file_name()?.to_str()?)
+}
+
 pub fn save_cover(
     album_id: &str,
     data: &[u8],

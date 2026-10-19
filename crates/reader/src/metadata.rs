@@ -246,7 +246,9 @@ pub fn extract_metadata(
         duration: properties.duration().as_secs()
             + u64::from(properties.duration().subsec_nanos() > 0),
         track_number: tag.and_then(|t| t.track()),
-        disc_number: tag.and_then(|t| t.disk()),
+        disc_number: tag
+            .and_then(|t| t.disk())
+            .or_else(|| super::utils::folder_disc(track_path)),
         musicbrainz_release_id,
         musicbrainz_recording_id,
         musicbrainz_track_id,
@@ -587,7 +589,8 @@ pub fn read_with_symphonia(
             &["DISCNUMBER"],
         )
         .and_then(symphonia_tag_to_string)
-        .and_then(|value| value.parse().ok()),
+        .and_then(|value| value.parse().ok())
+        .or_else(|| super::utils::folder_disc(track_path)),
         musicbrainz_release_id,
         musicbrainz_recording_id: find_symphonia_tag(
             &tags,
@@ -764,5 +767,22 @@ mod tests {
         tag.insert_text(ItemKey::RecordingDate, "2011-01-24".to_string());
 
         assert_eq!(release_year(Some(&tag)), 2011);
+    }
+
+    #[test]
+    fn a_disc_folder_names_the_disc_its_tags_leave_out() {
+        let disc = |path: &str, tagged: Option<&str>| {
+            let mut tag = Tag::new(lofty::tag::TagType::VorbisComments);
+            if let Some(number) = tagged {
+                tag.insert_text(ItemKey::DiscNumber, number.to_string());
+            }
+            extract_metadata(Some(&tag), &FileProperties::default(), Path::new(path), 0).disc_number
+        };
+        assert_eq!(disc("/music/Live Set/Disc 2 of 2/01.flac", None), Some(2));
+        assert_eq!(
+            disc("/music/Live Set/CD1 - Live/01.flac", Some("3")),
+            Some(3)
+        );
+        assert_eq!(disc("/music/Live Set/01.flac", None), None);
     }
 }
