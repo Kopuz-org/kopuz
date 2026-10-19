@@ -37,14 +37,16 @@ impl Native {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| DbError::Io(e.to_string()))?;
         }
-        migrations::snapshot_if_pending(path).await;
         let pool = open_pool(path).await?;
+        // Read once on the pool that applies them, so a boot with nothing pending opens no second pool and runs no fill.
+        let pending = migrations::Pending::read(&pool).await?;
+        migrations::snapshot_if_pending(path, &pending);
         let db_dir = match path.parent() {
             Some(parent) if !parent.as_os_str().is_empty() => parent,
             _ => Path::new("."),
         };
         let settings_path = config::store::settings_path_for(db_dir);
-        migrations::run_migrations(&pool, Some(&settings_path)).await?;
+        migrations::apply(&pool, Some(&settings_path), &pending).await?;
         Ok(Self {
             pool: ArcSwap::from_pointee(pool),
             settings_path,

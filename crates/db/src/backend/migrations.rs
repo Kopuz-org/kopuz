@@ -25,7 +25,7 @@ use std::path::Path;
 use serde::Deserialize;
 use sqlx::SqlitePool;
 
-use super::{open_pool, with_ext};
+use super::with_ext;
 use crate::{DbError, ImportReport};
 use reader::models::{Track, TrackId};
 
@@ -40,11 +40,18 @@ pub(super) async fn run_migrations(
     pool: &SqlitePool,
     settings_path: Option<&Path>,
 ) -> Result<(), DbError> {
-    for fill in Fill::ALL {
-        let (made_room, dropped_old) = fill.between();
-        if applied(pool, dropped_old).await? {
-            continue;
-        }
+    let pending = Pending::read(pool).await?;
+    apply(pool, settings_path, &pending).await
+}
+
+/// [`run_migrations`] with what is pending already read, so a boot with nothing to apply runs no fill at all.
+pub(super) async fn apply(
+    pool: &SqlitePool,
+    settings_path: Option<&Path>,
+    pending: &Pending,
+) -> Result<(), DbError> {
+    for fill in Fill::due(pending) {
+        let (made_room, _) = fill.between();
         let mut through = sqlx::migrate::Migrator {
             migrations: std::borrow::Cow::Owned(
                 MIGRATOR
@@ -60,6 +67,43 @@ pub(super) async fn run_migrations(
         fill.run(pool, settings_path).await?;
     }
     migrate(pool, &MIGRATOR).await
+}
+
+/// The migrations a database has yet to apply, as sqlx's own table records them.
+#[derive(Debug, Default)]
+pub(super) struct Pending {
+    /// The newest migration already applied, if any.
+    applied: Option<i64>,
+    versions: std::collections::BTreeSet<i64>,
+}
+
+impl Pending {
+    pub(super) async fn read(pool: &SqlitePool) -> Result<Self, DbError> {
+        use sqlx::migrate::Migrate as _;
+        let tracked: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations')",
+        )
+        .fetch_one(pool)
+        .await?;
+        let applied = match tracked {
+            true => pool.acquire().await?.list_applied_migrations().await?,
+            false => Vec::new(),
+        };
+        let done: std::collections::BTreeSet<i64> = applied.iter().map(|m| m.version).collect();
+        Ok(Self {
+            applied: done.last().copied(),
+            // By membership, not by the newest applied: ours numbered below master's newest can still be due.
+            versions: MIGRATOR
+                .iter()
+                .map(|m| m.version)
+                .filter(|version| !done.contains(version))
+                .collect(),
+        })
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.versions.is_empty()
+    }
 }
 
 /// Data SQL can't move, filled in Rust after the migration that makes room for it and before the one dropping its old home.
@@ -80,6 +124,13 @@ impl Fill {
         Fill::DerivedAlbums,
         Fill::DiscFolders,
     ];
+
+    /// The fills a database still needs: those whose closing migration has not been applied.
+    fn due(pending: &Pending) -> impl Iterator<Item = Fill> + '_ {
+        Fill::ALL
+            .into_iter()
+            .filter(|fill| pending.versions.contains(&fill.between().1))
+    }
 
     /// The migration the fill follows, and the one it must precede.
     fn between(self) -> (i64, i64) {
@@ -544,30 +595,12 @@ async fn reconcile_eol_checksums(pool: &SqlitePool) -> Result<(), DbError> {
 }
 
 /// Before applying new migrations to an existing DB, copy it (plus WAL sidecars)
-/// to `<db>.pre-<applied_version>.bak` so a downgrade can restore it. Best-effort.
-pub(super) async fn snapshot_if_pending(path: &Path) {
-    if !path.exists() {
-        return; // fresh DB, nothing to snapshot
-    }
-    let Ok(pool) = open_pool(path).await else {
+/// to `<db>.pre-<applied_version>.bak` so a downgrade can restore it. Best-effort; nothing pending, nothing copied.
+pub(super) fn snapshot_if_pending(path: &Path, pending: &Pending) {
+    // A database that never applied a migration has no older schema to go back to.
+    let Some(stamp) = pending.applied.filter(|_| !pending.is_empty()) else {
         return;
     };
-    // Max applied version (the table won't exist on a pre-migration legacy DB).
-    let applied: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations")
-        .fetch_one(&pool)
-        .await
-        .unwrap_or(None);
-    let available = MIGRATOR.iter().map(|m| m.version).max();
-    let pending = match (applied, available) {
-        (Some(a), Some(v)) => v > a,
-        (None, Some(_)) => false, // fresh/just-created DB with no migrations yet → not a downgrade risk
-        _ => false,
-    };
-    pool.close().await;
-    if !pending {
-        return;
-    }
-    let stamp = applied.unwrap_or(0);
     // Keep the first snapshot at this version as the authoritative rollback
     // point. A retry of the same pending migration (or the EOL reconciler having
     // since re-stamped `_sqlx_migrations`) must not overwrite it with an
@@ -1440,10 +1473,13 @@ async fn db_has_data(pool: &SqlitePool) -> Result<bool, DbError> {
         sqlx::query_scalar!("SELECT 1 AS \"configured!: i64\" FROM app_state WHERE id = 1")
             .fetch_optional(pool)
             .await?;
-    let ntracks: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM tracks")
+    if has_cfg.is_some() {
+        return Ok(true);
+    }
+    let any_track: i64 = sqlx::query_scalar!("SELECT EXISTS (SELECT 1 FROM tracks)")
         .fetch_one(pool)
         .await?;
-    Ok(has_cfg.is_some() || ntracks > 0)
+    Ok(any_track != 0)
 }
 
 async fn count(pool: &SqlitePool, sql: &str) -> usize {
@@ -1713,6 +1749,7 @@ impl Default for LegacyData {
 #[cfg(test)]
 mod eol_reconcile_tests {
     use super::*;
+    use crate::backend::open_pool;
     use sha2::{Digest, Sha384};
 
     /// A DB created by a CRLF build (Windows) must open under this (LF) build,
@@ -2174,6 +2211,13 @@ mod master_order_tests {
         .run(&pool)
         .await
         .unwrap();
+        let pending = Pending::read(&pool).await.unwrap();
+        assert!(
+            pending
+                .versions
+                .iter()
+                .any(|version| ours_before_master(*version))
+        );
 
         run_migrations(&pool, None).await.unwrap();
 
@@ -2659,5 +2703,58 @@ mod album_identity_tests {
         std::fs::write(&path, &edited).unwrap();
         fill_state(&pool, Some(&path)).await.unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), edited);
+    }
+
+    fn snapshots(dir: &Path) -> usize {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .filter(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                name.contains(".pre-") && name.ends_with(".bak")
+            })
+            .count()
+    }
+
+    /// Every boot reads what is pending; one with nothing to apply must stop there.
+    #[tokio::test]
+    async fn a_boot_with_nothing_pending_runs_no_fill_and_copies_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kopuz.db");
+        let pool = super::super::open_pool(&path).await.unwrap();
+        run_migrations(&pool, None).await.unwrap();
+
+        let pending = Pending::read(&pool).await.unwrap();
+        assert!(pending.is_empty());
+        assert_eq!(Fill::due(&pending).count(), 0);
+        snapshot_if_pending(&path, &pending);
+        assert_eq!(snapshots(dir.path()), 0);
+    }
+
+    #[tokio::test]
+    async fn a_pending_migration_is_snapshotted_and_only_its_fill_is_due() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kopuz.db");
+        let pool = super::super::open_pool(&path).await.unwrap();
+        sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|m| m.version < DISC_FOLDER_FILL_AFTER)
+                    .cloned()
+                    .collect(),
+            ),
+            ..sqlx::migrate::Migrator::DEFAULT
+        }
+        .run(&pool)
+        .await
+        .unwrap();
+
+        let pending = Pending::read(&pool).await.unwrap();
+        assert!(!pending.is_empty());
+        let due: Vec<Fill> = Fill::due(&pending).collect();
+        assert!(matches!(due.as_slice(), [Fill::DiscFolders]));
+        snapshot_if_pending(&path, &pending);
+        assert_eq!(snapshots(dir.path()), 1);
     }
 }

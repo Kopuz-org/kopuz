@@ -1,10 +1,10 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT COUNT(*) FROM tracks",
+  "query": "SELECT EXISTS (SELECT 1 FROM tracks)",
   "describe": {
     "columns": [
       {
-        "name": "COUNT(*)",
+        "name": "EXISTS (SELECT 1 FROM tracks)",
         "ordinal": 0,
         "type_info": "Integer"
       }
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "98d3dd8da8ad3db5f0acf49d33de28e60533ada680a406456f92f6829955de50"
+  "hash": "b8808673b8694d66e5f36e85a6acfd64ba8e07019935d198e977209968e8b6a1"
 }
