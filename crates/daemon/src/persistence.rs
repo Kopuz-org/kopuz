@@ -53,8 +53,10 @@ pub(crate) fn empty_queue_fingerprint() -> String {
     queue_fingerprint([""; 0], None, 0)
 }
 
-/// The source, rows and shuffle last written, so a save that only moved the playhead rewrites one row.
-type Written = Option<(config::Source, Vec<reader::Track>, Vec<usize>)>;
+/// The source, rows, shuffle and station records last written, so a save that only moved the playhead rewrites one row.
+type Written = Option<(config::Source, Vec<reader::Track>, Vec<usize>, Stations)>;
+
+type Stations = std::collections::BTreeMap<String, String>;
 
 pub struct DbQueueStore {
     db: db::Db,
@@ -78,7 +80,7 @@ impl QueueStore for DbQueueStore {
 
     async fn forget(&self, source: &config::Source) {
         let mut written = self.written.lock().await;
-        if written.as_ref().is_some_and(|(at, _, _)| at == source) {
+        if written.as_ref().is_some_and(|(at, _, _, _)| at == source) {
             *written = None;
         }
         if let Err(error) = self.db.clear_queue(source).await {
@@ -89,16 +91,26 @@ impl QueueStore for DbQueueStore {
     async fn save(&self, source: &config::Source, snapshot: db::QueueSnapshot) {
         // Held across the write, so two saves never interleave their rows.
         let mut written = self.written.lock().await;
-        let unchanged = written.as_ref().is_some_and(|(at, queue, shuffle)| {
-            at == source && *queue == snapshot.queue && *shuffle == snapshot.shuffle_order
-        });
+        let unchanged = written
+            .as_ref()
+            .is_some_and(|(at, queue, shuffle, stations)| {
+                at == source
+                    && *queue == snapshot.queue
+                    && *shuffle == snapshot.shuffle_order
+                    && *stations == snapshot.stations
+            });
         let saved = match unchanged {
             true => self.db.save_queue_position(source, &snapshot).await,
             false => self.db.save_queue(source, &snapshot).await,
         };
         match saved {
             Ok(()) if !unchanged => {
-                *written = Some((source.clone(), snapshot.queue, snapshot.shuffle_order));
+                *written = Some((
+                    source.clone(),
+                    snapshot.queue,
+                    snapshot.shuffle_order,
+                    snapshot.stations,
+                ));
             }
             Ok(()) => {}
             Err(error) => {
@@ -214,6 +226,7 @@ fn remote_queue_to_adopt(
         shuffle_enabled: false,
         radio_cursor: None,
         origin: None,
+        stations: Default::default(),
     })
 }
 

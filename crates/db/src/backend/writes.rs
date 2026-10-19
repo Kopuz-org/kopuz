@@ -1375,7 +1375,14 @@ pub(crate) async fn write_queue(
     source: &str,
     snap: &QueueSnapshot,
 ) -> Result<(), DbError> {
-    write_queue_rows(conn, source, &snap.queue, &snap.shuffle_order).await?;
+    write_queue_rows(
+        conn,
+        source,
+        &snap.queue,
+        &snap.shuffle_order,
+        &snap.stations,
+    )
+    .await?;
     write_queue_position(conn, source, snap).await
 }
 
@@ -1437,6 +1444,7 @@ async fn write_queue_rows(
     source: &str,
     queue: &[Track],
     shuffle_order: &[usize],
+    stations: &std::collections::BTreeMap<String, String>,
 ) -> Result<(), DbError> {
     // Credits and the shuffle cascade from the rows they point at.
     sqlx::query!("DELETE FROM queue_tracks WHERE source = ?1", source)
@@ -1445,6 +1453,7 @@ async fn write_queue_rows(
     for (position, t) in queue.iter().enumerate() {
         let position = position as i64;
         let track_key = t.id.key().into_owned();
+        let station = stations.get(&track_key).map(String::as_str);
         let service = t.id.service().map(service_str);
         let duration = (t.duration != u64::MAX).then_some(t.duration as i64);
         let khz = t.khz as i64;
@@ -1460,9 +1469,9 @@ async fn write_queue_rows(
             "INSERT INTO queue_tracks (source, position, track_key, service, source_album_id, title, \
                artist, album, duration, khz, bitrate, track_number, disc_number, cover_path, \
                mb_release_id, mb_recording_id, mb_track_id, playlist_item_id, \
-               rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak, explicit, plays) \
+               rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak, explicit, plays, station) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, \
-                     ?19, ?20, ?21, ?22, ?23, ?24)",
+                     ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
             source,
             position,
             track_key,
@@ -1486,7 +1495,8 @@ async fn write_queue_rows(
             rg_album_gain,
             rg_album_peak,
             explicit,
-            t.plays
+            t.plays,
+            station
         )
         .execute(&mut *conn)
         .await?;

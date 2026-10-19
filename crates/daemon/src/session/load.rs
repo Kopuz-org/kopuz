@@ -68,7 +68,7 @@ impl Session {
         let remote_ref = if factory_override.is_some() || offline_path.is_some() {
             None
         } else if is_radio {
-            let station = self.station_registry.get(&item_id);
+            let station = self.station(&item_id);
             use_icy = station.is_some_and(|station| !station.has_live_metadata());
             let cover = station
                 .and_then(|station| match &station.metadata {
@@ -161,8 +161,7 @@ impl Session {
 
         if is_radio
             && let Some(station) = self
-                .station_registry
-                .get(&item_id)
+                .station(&item_id)
                 .filter(|station| station.has_live_metadata())
                 .cloned()
         {

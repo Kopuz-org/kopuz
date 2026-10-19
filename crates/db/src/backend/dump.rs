@@ -135,7 +135,7 @@ pub async fn load_queue(
         "SELECT position, track_key, service, source_album_id, title, artist, album, duration, \
            khz, bitrate, track_number, disc_number, cover_path, mb_release_id, mb_recording_id, \
            mb_track_id, playlist_item_id, rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak, \
-           explicit, plays \
+           explicit, plays, station \
          FROM queue_tracks WHERE source = ?1 ORDER BY position",
         src
     )
@@ -157,9 +157,13 @@ pub async fn load_queue(
             .or_default()
             .push(credit.into());
     }
+    let mut stations = std::collections::BTreeMap::new();
     let saved: Vec<reader::Track> = rows
         .into_iter()
-        .map(|row| {
+        .map(|mut row| {
+            if let Some(station) = row.station.take() {
+                stations.insert(row.track_key.clone(), station);
+            }
             let credits = by_row.remove(&row.position).unwrap_or_default();
             row.into_track(credits)
         })
@@ -183,6 +187,7 @@ pub async fn load_queue(
         shuffle_enabled: row.shuffle_enabled != 0,
         radio_cursor: row.radio_cursor,
         origin: row.origin,
+        stations,
     })
 }
 

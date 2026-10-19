@@ -827,6 +827,7 @@ pub async fn run_json_import(
         shuffle_enabled: queue.shuffle_enabled,
         radio_cursor: None,
         origin: None,
+        stations: Default::default(),
     };
     super::writes::write_queue(&mut tx, imported_source.as_str(), &snapshot).await?;
 

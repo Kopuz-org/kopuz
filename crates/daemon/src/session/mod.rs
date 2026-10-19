@@ -26,7 +26,9 @@ mod load;
 mod origin;
 mod radio_feed;
 mod reconciler;
+mod stations;
 mod versions;
+pub(crate) use stations::has_unrecorded_station;
 
 use load::{LoadFailure, LoadFinished, PreparedLoad};
 use radio_feed::RadioFeed;
@@ -377,6 +379,7 @@ impl SessionHandle {
             sources: services.sources,
             active_source: services.active_source,
             station_registry: services.station_registry,
+            queue_stations: Default::default(),
             offline: services.offline.clone(),
             cmd_tx: cmd_tx.clone(),
             factory_override,
@@ -796,6 +799,8 @@ struct Session {
     sources: Arc<server::sources::Sources>,
     active_source: Option<server::source::ActiveSource>,
     station_registry: Arc<radio::registry::StationRegistry>,
+    /// The records of queued stations the registry may no longer list.
+    queue_stations: std::collections::HashMap<String, radio::manifest::StationManifest>,
     offline: crate::offline::OfflineIndex,
     cmd_tx: mpsc::UnboundedSender<SessionCmd>,
     factory_override: Option<FactoryOverride>,
@@ -938,7 +943,10 @@ impl Session {
                     self.push_external_now_playing();
                 }
             }
-            SessionCmd::SetStationRegistry(registry) => self.station_registry = registry,
+            SessionCmd::SetStationRegistry(registry) => {
+                self.keep_queued_stations();
+                self.station_registry = registry;
+            }
             SessionCmd::SetActiveSource(source) => self.active_source = source,
             SessionCmd::ClearError => {
                 self.error = None;
@@ -1950,7 +1958,7 @@ impl Session {
     /// seed a paused resume point at the saved progress.
     fn handle_restore(
         &mut self,
-        snapshot: db::QueueSnapshot,
+        mut snapshot: db::QueueSnapshot,
         state_tx: &watch::Sender<PlayerState>,
     ) -> Result<CommandAck, ApiError> {
         // A restore replaces whatever is playing, an integration's device included.
@@ -1960,6 +1968,7 @@ impl Session {
         self.position_token = None;
         self.last_recent_key = None;
 
+        self.adopt_station_records(&mut snapshot);
         self.set_radio_feed(snapshot.radio_cursor);
         let restored = self.model.restore(
             snapshot.queue,
@@ -2012,6 +2021,7 @@ impl Session {
             shuffle_enabled: self.model.shuffle(),
             radio_cursor: self.radio_cursor(),
             origin: self.origin.as_ref().and_then(origin::encode),
+            stations: self.station_records(),
         }
     }
 

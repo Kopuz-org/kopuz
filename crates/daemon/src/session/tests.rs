@@ -1939,6 +1939,7 @@ async fn restore_seeds_a_paused_resume_point_and_play_continues_there() {
         shuffle_enabled: false,
         radio_cursor: None,
         origin: None,
+        stations: Default::default(),
     };
     harness
         .api
@@ -5169,4 +5170,61 @@ async fn upcoming_edits_during_a_crossfade_spare_the_track_fading_in() {
         state.track.as_ref().map(|track| track.title.as_str()),
         Some("track-1")
     );
+}
+
+/// A station a search found is in no registry after a restart, so its row has to bring its own record back.
+#[tokio::test]
+async fn a_queued_station_survives_a_restart_without_the_registry() {
+    use crate::persistence::QueueStore as _;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database = db::init(&dir.path().join("queue.db")).await.expect("db");
+    let store = Arc::new(crate::persistence::DbQueueStore::new(database));
+    let source = config::Source::default();
+    let searched = r#"{"schema_version":"1","id":"searched","name":"Searched FM","description":"","streams":[{"id":"main","name":"MP3","url":"https://radio.example.test/main.mp3"}],"metadata":null}"#;
+    let mut queue: Vec<Track> = ["track-0", "radio:searched:main", "radio:gone:main"]
+        .iter()
+        .map(|key| test_track(&(*key).to_string()))
+        .collect();
+    for row in &mut queue[1..] {
+        row.duration = u64::MAX;
+    }
+    store
+        .save(
+            &source,
+            db::QueueSnapshot {
+                version: 1,
+                queue,
+                current_queue_index: 1,
+                stations: [("radio:searched:main".to_string(), searched.to_string())].into(),
+                ..Default::default()
+            },
+        )
+        .await;
+
+    let player = Player::try_with_sink(Box::new(FakeSink(FakeSinkHandle::default())))
+        .expect("headless player starts");
+    let services = PlaybackServices {
+        queue_store: Some(store.clone()),
+        ..Default::default()
+    };
+    let session = SessionHandle::spawn_with_factory(
+        Arc::new(StubLibrary),
+        player,
+        services,
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+    let api = LocalApi::new(session.clone());
+    let saved = store.load(&source).await.expect("load");
+    session.restore_queue(saved).await.expect("restore");
+
+    assert_eq!(queue_titles(&api).await, ["track-0", "radio:searched:main"]);
+    let state = api.player_state().await.expect("state");
+    assert_eq!(state.queue.index, Some(1));
+
+    session.persist_now().await;
+    let resaved = store.load(&source).await.expect("reload");
+    assert_eq!(resaved.queue.len(), 2);
+    let record: radio::manifest::StationManifest =
+        serde_json::from_str(&resaved.stations["radio:searched:main"]).expect("record");
+    assert_eq!(record.streams[0].url, "https://radio.example.test/main.mp3");
 }

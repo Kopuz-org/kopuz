@@ -699,6 +699,7 @@ async fn a_queue_round_trips_through_its_rows() {
         shuffle_enabled: true,
         radio_cursor: None,
         origin: Some(r#"{"kind":"album","id":"a"}"#.into()),
+        stations: Default::default(),
     };
 
     db.save_queue(&Source::default(), &saved).await.unwrap();

@@ -208,9 +208,23 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         session.sources_watch(),
         presence_pause.watch(),
     );
+    let radio_service = crate::RadioService::new(
+        database.clone(),
+        config_service.clone(),
+        library.clone(),
+        session.clone(),
+    );
+    let mut radio_loaded = false;
     let restored_source = session.sources().active.clone();
     match queue_store.load(&restored_source).await {
         Ok(snapshot) if !snapshot.queue.is_empty() => {
+            // A row saved before rows kept their station can only resolve through the registry, so it must be loaded first.
+            if crate::session::has_unrecorded_station(&snapshot) {
+                if let Err(error) = radio_service.reload().await {
+                    tracing::warn!(%error, "radio registry could not be loaded");
+                }
+                radio_loaded = true;
+            }
             let restored = snapshot.queue.len();
             // A restored queue can hold rows the library never stored -- last
             // session's radio mix, say. Register them the way a live listing is,
@@ -280,12 +294,6 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     config_service.spawn_file_watch(session.settings_watch());
     let config_service_for_api = config_service.clone();
     let catalog = crate::CatalogService::new(database.clone(), session.clone(), library.clone());
-    let radio_service = crate::RadioService::new(
-        database.clone(),
-        config_service.clone(),
-        library.clone(),
-        session.clone(),
-    );
     library.attach_catalog(catalog.clone());
     artwork.attach_library(library.clone());
     artwork.attach_catalog(catalog.clone());
@@ -293,12 +301,14 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     // The registry starts empty and is built from config here, rather than
     // by whichever frontend happened to be open.
     radio_service.watch_config(session.settings_watch());
-    let radio_boot = radio_service.clone();
-    tokio::spawn(async move {
-        if let Err(error) = radio_boot.reload().await {
-            tracing::warn!(%error, "radio registry could not be loaded");
-        }
-    });
+    if !radio_loaded {
+        let radio_boot = radio_service.clone();
+        tokio::spawn(async move {
+            if let Err(error) = radio_boot.reload().await {
+                tracing::warn!(%error, "radio registry could not be loaded");
+            }
+        });
+    }
     let downloader =
         crate::UrlDownloadService::new(database.clone(), config_service.clone(), sources.clone());
     downloader.attach_rescan(library.clone(), jobs.clone());

@@ -153,6 +153,7 @@ pub struct QueueTrackRow {
     pub rg_album_peak: Option<f64>,
     pub explicit: i64,
     pub plays: Option<String>,
+    pub station: Option<String>,
 }
 
 impl QueueTrackRow {
