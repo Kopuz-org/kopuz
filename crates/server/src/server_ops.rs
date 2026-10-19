@@ -27,15 +27,17 @@ impl ServerConn {
     /// Build connection params from app config for the active server, or
     /// `None` when a field the active service requires is missing. An access
     /// token is required except by anonymous YouTube Music, which runs on empty
-    /// cookies and ignores any token kept from an earlier sign-in;
-    /// Jellyfin/Subsonic/Custom additionally require
+    /// cookies and ignores any token kept from an earlier sign-in, and by a
+    /// physical audio CD; Jellyfin/Subsonic/Custom additionally require
     /// a `user_id` (YouTube Music authenticates by cookie only and Spotify by
     /// OAuth token only, so a missing user_id is fine for both). Centralizing this stops every UI call site from
     /// coercing an absent user_id into `""` and firing a malformed
     /// authenticated request that silently fails.
     pub fn resolve(config: &config::AppConfig) -> Option<Self> {
         let server = config.server.as_ref()?;
-        let token = if server.service == MusicService::YtMusic && server.yt_anonymous {
+        let token = if server.service == MusicService::AudioCd
+            || (server.service == MusicService::YtMusic && server.yt_anonymous)
+        {
             String::new()
         } else {
             server.access_token.clone()?
@@ -44,6 +46,7 @@ impl ServerConn {
             MusicService::YtMusic
             | MusicService::AppleMusic
             | MusicService::Spotify
+            | MusicService::AudioCd
             | MusicService::Clippsly => server.user_id.clone().unwrap_or_default(),
             _ => server.user_id.clone()?,
         };
@@ -94,6 +97,13 @@ mod tests {
             server: Some(serde_json::from_value(server).unwrap()),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn audio_cd_needs_no_credentials() {
+        let connection = ServerConn::resolve(&cfg("AudioCd", None, None)).unwrap();
+        assert_eq!(connection.service, MusicService::AudioCd);
+        assert!(connection.token.is_empty());
     }
 
     #[test]

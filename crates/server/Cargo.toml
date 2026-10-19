@@ -48,9 +48,13 @@ m3u8-rs = "6"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 symphonia = { workspace = true }
 smb2 = "0.27.2"
+libloading = { workspace = true }
 
 [build-dependencies]
 cc = "1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }
 
 # Browser-cookie import. Not on Windows: rookie pulls `libesedb` (a bundled C
 # library) there, which can't cross-compile. Not on Android either: rookie only

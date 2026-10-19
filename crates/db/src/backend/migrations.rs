@@ -1350,6 +1350,7 @@ fn service_str(s: config::MusicService) -> &'static str {
         config::MusicService::Nextcloud => "Nextcloud",
         config::MusicService::Clippsly => "Clippsly",
         config::MusicService::Smb => "Smb",
+        config::MusicService::AudioCd => "AudioCd",
     }
 }
 

@@ -1415,6 +1415,7 @@ fn App() -> Element {
 
     rsx! {
         WindowsToolbarIconAssets {}
+        components::RemovablePrompt {}
         material3::SystemColors { config, artwork: palette }
 
         div {

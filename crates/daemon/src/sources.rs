@@ -10,6 +10,8 @@
 //! profile or a loopback listener, and ends holding a secret, which makes it
 //! system-level work regardless of who triggered it.
 
+mod removable;
+
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
@@ -45,6 +47,7 @@ pub struct SourceService {
     /// The core's runtime. The desktop UI calls this service in-process on
     /// its own thread, and work that blocks has to run here instead.
     runtime: tokio::runtime::Handle,
+    removable: tokio::sync::Mutex<HashMap<String, config::MusicServer>>,
 }
 
 #[async_trait::async_trait]
@@ -109,6 +112,7 @@ fn capabilities(source: &dyn server::source::MediaSource) -> SourceCapabilities 
         watch_history: caps.watch_history,
         sync: caps.sync,
         downloads: caps.downloads,
+        rip_audio: false,
         uploads: caps.uploads,
         storage_quota: caps.storage_quota,
         discover: caps.discover,
@@ -237,6 +241,7 @@ impl SourceService {
             upstream,
             recovery: Recovery::default(),
             runtime: tokio::runtime::Handle::current(),
+            removable: tokio::sync::Mutex::new(HashMap::new()),
         })
     }
 
@@ -269,7 +274,11 @@ impl SourceService {
     /// A source id reserved for local libraries must not be claimed by a
     /// server, or the two namespaces collide.
     fn validate_server_id(id: &str) -> Result<(), ApiError> {
-        if id.is_empty() || id == "local" || id.starts_with("local:") {
+        if id.is_empty()
+            || id == "local"
+            || id.starts_with("local:")
+            || id.starts_with("removable:")
+        {
             return Err(ApiError::invalid_input(
                 "that id is reserved for local sources",
             ));
@@ -296,12 +305,16 @@ impl SourceService {
                 config.set_active_local_source(config::Source::LocalLibrary(local_id));
             }
             config::Source::Server(server_id) => {
-                let server = self
-                    .db
-                    .load_server(&server_id)
-                    .await
-                    .map_err(db_error)?
-                    .ok_or_else(|| ApiError::not_found("no such server"))?;
+                let temporary = self.removable.lock().await.get(&server_id).cloned();
+                let server = match temporary {
+                    Some(server) => server,
+                    None => self
+                        .db
+                        .load_server(&server_id)
+                        .await
+                        .map_err(db_error)?
+                        .ok_or_else(|| ApiError::not_found("no such server"))?,
+                };
                 config.set_active_server_snapshot(server);
             }
         }
@@ -311,15 +324,22 @@ impl SourceService {
 
     pub async fn sources(&self) -> Result<Vec<SourceInfo>, ApiError> {
         let config = self.current().await;
-        let ids: Vec<String> = config
+        let mut ids: Vec<String> = config
             .local_sources
             .iter()
             .map(|source| source.id.clone())
             .chain(config.servers.iter().map(|server| server.id.clone()))
             .collect();
+        let mut temporary: Vec<_> = self.removable.lock().await.keys().cloned().collect();
+        temporary.sort();
+        ids.extend(temporary);
         let mut sources = Vec::with_capacity(ids.len());
         for id in ids {
-            sources.push(self.source_info(&id).await?);
+            match self.source_info(&id).await {
+                Ok(info) => sources.push(info),
+                Err(_) if id.starts_with("removable:") => {}
+                Err(error) => return Err(error),
+            }
         }
         Ok(sources)
     }
@@ -335,6 +355,11 @@ impl SourceService {
             state: self.status(key.as_str()),
             ..Default::default()
         };
+        info.temporary = self.removable.lock().await.contains_key(id);
+        if info.temporary {
+            info.state = Some(SourceState::Online);
+        }
+        info.capabilities.rip_audio = source.rip_audio();
         match &key {
             config::Source::LocalLibrary(local_id) => {
                 let saved = resolved
@@ -360,17 +385,21 @@ impl SourceService {
                     .ok_or_else(|| ApiError::not_found("no such server"))?;
                 let view = crate::services::ServerView::from(server);
                 info.name = server.name.clone();
-                info.needs_network = true;
+                info.needs_network = server.service != config::MusicService::AudioCd;
                 info.service = crate::services::service_ref(server.service);
                 // An anonymous source needs no token to be usable, which is
                 // why this is not simply "has a token".
-                info.authenticated = server.access_token.is_some() || server.yt_anonymous;
+                info.authenticated = server.access_token.is_some()
+                    || server.yt_anonymous
+                    || server.service == config::MusicService::AudioCd;
                 info.sign_in = crate::services::sign_in(&view, info.authenticated);
                 // What signing in again takes, for credentials that went stale.
                 info.reauth = crate::services::sign_in(&view, false);
                 info.detail = crate::services::detail(&view);
                 info.anonymous = server.yt_anonymous;
-                info.settings = crate::services::settings(&view, &current);
+                if !info.temporary {
+                    info.settings = crate::services::settings(&view, &current);
+                }
                 let signed_in = server
                     .access_token
                     .as_deref()
@@ -428,6 +457,16 @@ impl SourceService {
 
     pub async fn switch_source(&self, id: &str) -> Result<SourceInfo, ApiError> {
         self.config.ensure_unlocked(&["active_source", "server"])?;
+        {
+            // Serialize acceptance with removal, so a disappearing disc cannot become active.
+            let removable = self.removable.lock().await;
+            if let Some(server) = removable.get(id) {
+                self.config.set_temporary_source(server.clone()).await;
+                drop(removable);
+                self.finish_source_change();
+                return self.source_info(id).await;
+            }
+        }
         let previous = self.current().await.active_source;
         let (target, _) = self.resolve(id).await?;
         let source = target.active_source.clone();
@@ -586,6 +625,11 @@ impl SourceService {
     }
 
     pub async fn upsert_source(&self, draft: SourceDraft) -> Result<SourceInfo, ApiError> {
+        if draft.service == "cdda" {
+            return Err(ApiError::invalid_input(
+                "Audio CDs are detected automatically when inserted",
+            ));
+        }
         if draft.service == crate::services::FOLDERS {
             return self.upsert_folder_source(draft).await;
         }
@@ -1299,6 +1343,9 @@ impl SourceService {
 
     /// Probe `id` and record the answer; `announce` shows it as checking meanwhile, for a source with no answer of its own yet.
     async fn probe(&self, id: &str, announce: bool) -> Result<SourceState, ApiError> {
+        if self.removable.lock().await.contains_key(id) {
+            return Ok(SourceState::Online);
+        }
         let probe = self.probes.fetch_add(1, Ordering::Relaxed) + 1;
         if announce {
             self.record_status(id, probe, SourceState::Checking);
