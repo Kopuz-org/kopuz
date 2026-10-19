@@ -116,7 +116,8 @@ impl Default for PlaybackServices {
 /// Only a move to another track or a stop is worth a network call.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RemoteQueueMark {
-    queue_rev: u64,
+    /// What the server stores of the queue, its track ids in play order, so a cover or counterpart learned is no edit.
+    tracks: u64,
     current_key: Option<String>,
     playing: bool,
 }
@@ -334,7 +335,7 @@ impl SessionHandle {
             services.queue_store.clone(),
         ));
 
-        let session = Session {
+        let mut session = Session {
             model: QueueModel::default(),
             player,
             intent: PlaybackIntent::Stopped,
@@ -367,6 +368,7 @@ impl SessionHandle {
             queue_unread: false,
             persisting: None,
             remote_synced,
+            remote_loaded: None,
             remote_writer,
             recorder: services.recorder,
             scrobbler: services.scrobbler,
@@ -385,6 +387,8 @@ impl SessionHandle {
             factory_override,
             counterparts: std::collections::HashMap::new(),
         };
+        // A fresh start is not a clear, and must not wipe what another device saved before the boot adopt reads it.
+        session.remote_loaded = Some(session.remote_mark());
         let (state_tx, state_rx) = watch::channel(session.build_state());
         tokio::spawn(session.run(cmd_rx, engine_events, state_tx));
         Self {
@@ -784,6 +788,8 @@ struct Session {
     /// The last queue save in flight; each waits for the one before, so awaiting this awaits them all.
     persisting: Option<tokio::task::JoinHandle<()>>,
     remote_synced: SyncedMark,
+    /// The queue and place a restore left, owed to no server until they move; cleared by the first push after.
+    remote_loaded: Option<(RemoteQueueMark, u64)>,
     remote_writer: mpsc::UnboundedSender<RemoteQueueJob>,
     recorder: Option<Arc<dyn PlaybackRecorder>>,
     scrobbler: Option<Arc<crate::scrobbler::Scrobbler>>,
@@ -2000,6 +2006,7 @@ impl Session {
         }
         let ack = self.publish(state_tx, true);
         self.queue_dirty = false;
+        self.remote_loaded = Some(self.remote_mark());
         Ok(ack)
     }
 
@@ -2083,29 +2090,49 @@ impl Session {
         self.queue_unread = unread;
     }
 
+    /// The queue as the server would store it, and the place in it.
+    fn remote_mark(&self) -> (RemoteQueueMark, u64) {
+        use std::hash::{Hash, Hasher};
+        let mut tracks = std::hash::DefaultHasher::new();
+        for position in 0..self.model.len() {
+            if let Some(track) = self.model.track_at(position) {
+                track.id.key().hash(&mut tracks);
+            }
+        }
+        let mark = RemoteQueueMark {
+            tracks: tracks.finish(),
+            current_key: self.model.current_track().map(|track| track.id.uid()),
+            playing: self.phase == ApiPhase::Playing,
+        };
+        let position_ms =
+            crate::persistence::whole_seconds(self.displayed_position().as_millis() as u64) * 1000;
+        (mark, position_ms)
+    }
+
     /// Hand the queue to the remote writer, unless the server already took this
-    /// mark; `force` skips that check, for the flush on quit. Whether it was sent.
+    /// mark or nothing moved since a restore; `force` skips the first check, for
+    /// the flush on quit. Whether it was sent.
     fn push_remote_queue(&mut self, force: bool) -> bool {
         let Some(source) = self.active_source.clone() else {
             return false;
         };
-        // An empty queue nobody touched yet is a fresh start, not a clear, and
-        // must not wipe what another device saved before the boot adopt reads it.
-        if !source.capabilities().play_queue || (self.model.is_empty() && self.queue_rev == 0) {
+        if !source.capabilities().play_queue {
             return false;
         }
-        let mark = RemoteQueueMark {
-            queue_rev: self.queue_rev,
-            current_key: self.model.current_track().map(|track| track.id.uid()),
-            playing: self.phase == ApiPhase::Playing,
-        };
+        let (mark, position_ms) = self.remote_mark();
+        // Between ticks only the mark counts, as for a synced push; the flush on quit also owes a moved place.
+        let untouched = self
+            .remote_loaded
+            .as_ref()
+            .is_some_and(|(loaded, at)| *loaded == mark && (!force || *at == position_ms));
         let synced = self
             .remote_synced
             .lock()
             .is_ok_and(|synced| synced.as_ref() == Some(&mark));
-        if !force && synced {
+        if untouched || (!force && synced) {
             return false;
         }
+        self.remote_loaded = None;
         // Play order, not storage order: another client reading this queue
         // plays it top to bottom and has no shuffle permutation to apply.
         let queue: Vec<Track> = (0..self.model.len())
@@ -2116,9 +2143,7 @@ impl Session {
             store_key: self.sources.active.clone(),
             queue,
             current_index: self.model.current_position(),
-            position_ms: crate::persistence::whole_seconds(
-                self.displayed_position().as_millis() as u64
-            ) * 1000,
+            position_ms,
             mark,
         };
         self.remote_writer.send(RemoteQueueJob::Push(push)).is_ok()

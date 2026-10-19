@@ -3816,7 +3816,7 @@ async fn a_remote_queue_push_counts_only_once_the_server_takes_it() {
     let writer_store: Arc<dyn crate::persistence::QueueStore> = store.clone();
     tokio::spawn(write_remote_queue(rx, synced.clone(), Some(writer_store)));
     let mark = RemoteQueueMark {
-        queue_rev: 1,
+        tracks: 1,
         current_key: Some("a".into()),
         playing: false,
     };
@@ -3948,6 +3948,108 @@ async fn an_adopted_queue_never_replaces_a_newer_local_one() {
         .expect("adopt");
     assert!(cleared.is_some());
     assert!(queue_titles(&harness.api).await.is_empty());
+}
+
+/// Entering a source loads its queue, which is no edit: only what is done to it there reaches its server.
+#[tokio::test]
+async fn switching_to_a_queue_server_pushes_only_the_edits_made_there() {
+    let (server, _dir) = queue_server().await;
+    let player = Player::try_with_sink(Box::new(FakeSink(FakeSinkHandle::default())))
+        .expect("headless player starts");
+    let mut config = config::Settings::default();
+    config.library.local_sources.push(config::SavedLocalSource {
+        id: "local:b".into(),
+        name: "B".into(),
+        directories: Vec::new(),
+    });
+    let on_a = active_on(config::Source::default());
+    let on_b = active_on(config::Source::LocalLibrary("local:b".into()));
+    let services = PlaybackServices {
+        settings: config,
+        sources: on_a.clone(),
+        queue_store: Some(Arc::new(MemoryStore::default())),
+        ..Default::default()
+    };
+    let session = SessionHandle::spawn_with_factory(
+        Arc::new(StubLibrary),
+        player,
+        services,
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+    let api = LocalApi::new(session.clone());
+    api.set_queue(replace(&["a-0", "a-1"]))
+        .await
+        .expect("set queue");
+    wait_committed(&api).await;
+
+    session.set_active_source(Some(server.clone()));
+    session.set_sources(on_b.clone());
+    session.persist_now().await;
+    assert!(
+        server.saves.lock().expect("lock").is_empty(),
+        "the switch pushed the queue it loaded"
+    );
+
+    api.set_queue(replace(&["b-0"])).await.expect("set queue");
+    wait_committed(&api).await;
+    session.persist_now().await;
+    assert_eq!(*server.saves.lock().expect("lock"), [["b-0"]]);
+
+    session.set_active_source(None);
+    session.set_sources(on_a);
+    session.persist_now().await;
+    session.set_active_source(Some(server.clone()));
+    session.set_sources(on_b);
+    session.persist_now().await;
+    assert_eq!(
+        server.saves.lock().expect("lock").len(),
+        1,
+        "resuming the parked queue pushed it"
+    );
+}
+
+/// A queue taken from the server is not sent back to it.
+#[tokio::test]
+async fn an_adopted_queue_is_not_pushed_back() {
+    let (server, _dir) = queue_server().await;
+    let player = Player::try_with_sink(Box::new(FakeSink(FakeSinkHandle::default())))
+        .expect("headless player starts");
+    let store = Arc::new(MemoryStore::default());
+    let services = PlaybackServices {
+        active_source: Some(server.clone()),
+        queue_store: Some(store.clone()),
+        ..Default::default()
+    };
+    let session = SessionHandle::spawn_with_factory(
+        Arc::new(StubLibrary),
+        player,
+        services,
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+    let remote = db::QueueSnapshot {
+        version: 1,
+        queue: ["remote-0", "remote-1"]
+            .iter()
+            .map(|key| test_track(&(*key).to_string()))
+            .collect(),
+        progress_secs: 3,
+        ..Default::default()
+    };
+    let adopted = session
+        .adopt_queue(
+            remote,
+            &config::Source::default(),
+            session.state().queue.rev,
+        )
+        .await
+        .expect("adopt");
+    assert!(adopted.is_some());
+    session.persist_now().await;
+
+    assert!(server.saves.lock().expect("lock").is_empty());
+    let saved = store.saved.lock().expect("store lock");
+    let (_, last) = saved.last().expect("the adopted queue is stored here");
+    assert_eq!(last.queue.len(), 2);
 }
 
 #[tokio::test]
