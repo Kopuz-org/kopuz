@@ -73,7 +73,7 @@ pub fn debug_db_section() -> Element {
                                     "imported: {} tracks, {} albums, {} playlists, {} favorites",
                                     r.tracks, r.albums, r.playlists, r.favorites
                                 )),
-                                Ok(_) => status.set("import skipped (DB not empty)".into()),
+                                Ok(_) => status.set("import skipped (this install already imported, or the DB is not empty)".into()),
                                 Err(e) => status.set(format!("import failed: {e}")),
                             }
                             bump_all();

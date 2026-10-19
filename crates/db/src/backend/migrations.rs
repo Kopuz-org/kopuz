@@ -7,7 +7,7 @@
 //!
 //! ## JSON importer
 //!
-//! Runs once per database (gated on the DB being empty), so it's safe to call
+//! Runs once per install, recorded by a marker beside the legacy files, so it's safe to call
 //! on every launch. The whole import is a single transaction — a crash before
 //! commit leaves the DB empty and the JSONs untouched, so it re-runs cleanly.
 //! A file that fails to parse is skipped (and left in place for repair); the
@@ -603,17 +603,22 @@ const LEGACY_FILES: [&str; 5] = [
     "queue_state.json",
 ];
 
-/// The on-disk source for one legacy store: the plain `X.json` if it's still
-/// there, else the `X.json.bak` a previous finalize moved it to. The fallback
-/// matters because debug (`kopuz-debug.db`) and release (`kopuz.db`) are
-/// separate databases — whichever imports second finds only the `.bak`s.
+/// The on-disk source for one legacy store; a `.bak` copy is one an import already consumed, so it is never read.
 fn legacy_source(config_dir: &Path, name: &str) -> Option<std::path::PathBuf> {
     let plain = config_dir.join(name);
-    if plain.exists() {
-        return Some(plain);
+    plain.exists().then_some(plain)
+}
+
+/// Beside the legacy files rather than in the database, because the database is what a reset or a corruption recreates.
+fn import_marker(config_dir: &Path) -> std::path::PathBuf {
+    config_dir.join(".legacy-json-imported")
+}
+
+fn mark_imported(config_dir: &Path) {
+    let marker = import_marker(config_dir);
+    if let Err(error) = std::fs::write(&marker, "") {
+        tracing::warn!(%error, path = %marker.display(), "the legacy import marker could not be written");
     }
-    let bak = config_dir.join(format!("{name}.bak"));
-    bak.exists().then_some(bak)
 }
 
 #[tracing::instrument(skip_all)]
@@ -622,15 +627,18 @@ pub async fn run_json_import(
     config_dir: &Path,
     settings_path: &Path,
 ) -> Result<ImportReport, DbError> {
-    // Gate on THIS database being empty — no shared sentinel, so each DB
-    // (debug/release) imports once on its own.
-    if db_has_data(pool).await? {
+    if import_marker(config_dir).exists() {
         return Ok(ImportReport::default());
     }
     if !LEGACY_FILES
         .iter()
         .any(|f| legacy_source(config_dir, f).is_some())
     {
+        return Ok(ImportReport::default());
+    }
+    // An install that is using its database is past its import, even one from before the marker.
+    if db_has_data(pool).await? {
+        mark_imported(config_dir);
         return Ok(ImportReport::default());
     }
 
@@ -878,6 +886,7 @@ pub async fn run_json_import(
     }
 
     tx.commit().await?;
+    mark_imported(config_dir);
     super::cfg_store::write_settings(&imported_settings, settings_path)?;
 
     let report = ImportReport {
@@ -1474,7 +1483,7 @@ fn read_json_tolerant<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> 
 
 /// Rename `X.json` → `X.json.bak`. If a `.bak` already exists, the OLD one is
 /// aged to `.bak.<unix>` so the plain `.bak` is always the freshest copy —
-/// `legacy_source` only ever reads the plain `.bak`. Never deletes. Best-effort.
+/// a later import never reads a `.bak`. Never deletes. Best-effort.
 fn backup_aside(src: &Path) {
     let mut dst = src.as_os_str().to_os_string();
     dst.push(".bak");
