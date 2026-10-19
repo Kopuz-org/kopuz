@@ -412,6 +412,24 @@ impl FileLayers {
         parse(kept)
     }
 
+    /// Every setting the file [`Self::save`] writes into leaves out.
+    pub fn absent_keys(&self) -> Vec<SettingKey> {
+        let written = match self.managed {
+            true => self.local.as_ref(),
+            false => self.main.as_ref(),
+        };
+        SettingKey::iter()
+            .filter(|key| {
+                written.is_none_or(|table| {
+                    // The retired key still holds the folder sources until a save moves it.
+                    let retired = *key == SettingKey::Library(LibraryKey::LocalSources)
+                        && table.contains_key("music_directory");
+                    !table.contains_key(key.name()) && !retired
+                })
+            })
+            .collect()
+    }
+
     /// Write `keys` of `settings` into the file, or beside it when it is managed ([`local_path_for`]), leaving every other key there as it was; answers whether anything was written.
     pub fn save(&self, settings: &Settings, keys: &[SettingKey]) -> std::io::Result<bool> {
         let written_path = match is_managed(&self.path, self.prefix()) {

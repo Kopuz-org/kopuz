@@ -492,9 +492,10 @@ async fn fill_state(pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(
     tx.commit().await?;
 
     if let Some(path) = settings_path {
-        let every_key: Vec<config::SettingKey> = config::SettingKey::iter().collect();
+        // Only what the file lacks, so a replay leaves a file edited since the first run as it is.
+        let absent = layers.absent_keys();
         layers
-            .save(&settings, &every_key)
+            .save(&settings, &absent)
             .map_err(|error| DbError::Io(format!("{}: {error}", path.display())))?;
     }
     Ok(())
@@ -2629,5 +2630,34 @@ mod album_identity_tests {
         assert_eq!(discs(pool.clone()).await, expected);
         fill_disc_folders(&pool).await.unwrap();
         assert_eq!(discs(pool).await, expected);
+    }
+
+    /// The state fill replays when the drop after it never landed; a file edited since the first run must come through it untouched.
+    #[tokio::test]
+    async fn a_replayed_state_fill_leaves_an_edited_settings_file_as_it_is() {
+        let pool = migrated_before(20260930000006).await;
+        sqlx::raw_sql(
+            r#"INSERT INTO app_config (id, json) VALUES (1, '{"theme":"dark","volume":0.3,"crossfade_seconds":4}');"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        fill_state(&pool, Some(&path)).await.unwrap();
+        let first = std::fs::read_to_string(&path).unwrap();
+        assert!(first.contains("theme = \"dark\""), "{first}");
+
+        // A hand edit, and a value this build cannot use, which the merged settings replace with the blob's.
+        let edited = format!(
+            "# kept by hand\n{}",
+            first
+                .replace("\"dark\"", "\"nord\"")
+                .replace("crossfade_seconds = 4", "crossfade_seconds = \"soon\"")
+        );
+        assert!(edited.contains("\"soon\""), "{edited}");
+        std::fs::write(&path, &edited).unwrap();
+        fill_state(&pool, Some(&path)).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), edited);
     }
 }
