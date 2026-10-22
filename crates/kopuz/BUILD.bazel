@@ -29,7 +29,7 @@ rust_binary(
     deps = all_crate_deps(normal = True) + [
         ":kopuz_build_script",
         "//crates/components",
-        "//crates/config",
+        "//shared/config",
         "//crates/db",
         "//crates/discord-presence:discord_presence",
         "//crates/hooks",
@@ -40,7 +40,7 @@ rust_binary(
         "//crates/radio",
         "//crates/reader",
         "//crates/server",
-        "//crates/utils",
+        "//shared/utils",
     ],
     edition = crate_edition(),
     proc_macro_deps = all_crate_deps(proc_macro = True),

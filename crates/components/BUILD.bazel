@@ -6,7 +6,7 @@ exports_files(["Cargo.toml"])
 kopuz_rust_library(
     name = "components",
     extra_deps = [
-        "//crates/config",
+        "//shared/config",
         "//crates/hooks",
         "//crates/i18n",
         "//crates/kopuz_route",
@@ -14,6 +14,6 @@ kopuz_rust_library(
         "//crates/reader",
         "//crates/scrobble",
         "//crates/server",
-        "//crates/utils",
+        "//shared/utils",
     ],
 )

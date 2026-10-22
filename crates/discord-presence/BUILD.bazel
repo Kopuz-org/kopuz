@@ -7,6 +7,6 @@ kopuz_rust_library(
     name = "discord_presence",
     extra_deps = [
         "//crates/reader",
-        "//crates/utils",
+        "//shared/utils",
     ],
 )

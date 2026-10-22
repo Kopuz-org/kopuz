@@ -107,6 +107,7 @@ let
             (s + /.cargo)
             # build.rs embeds Android configuration even for desktop builds.
             (s + /android-src)
+            (s + /shared)
             (s + /crates)
             (s + /data)
             (s + /packaging/systemd)

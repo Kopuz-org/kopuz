@@ -5,6 +5,6 @@ exports_files(["Cargo.toml"])
 
 kopuz_rust_library(
     name = "player",
-    extra_deps = ["//crates/config"],
+    extra_deps = ["//shared/config"],
     test_compile_data = glob(["src/engine/testdata/**"]),
 )

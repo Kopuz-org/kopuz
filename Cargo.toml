@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*"]
+members = ["shared/*", "crates/*"]
 resolver = "3"
 
 [workspace.package]
@@ -129,11 +129,11 @@ reader = { package = "kopuz-reader", version = "0.22.0", path = "./crates/reader
 components = { package = "kopuz-components", version = "0.22.0", path = "./crates/components" }
 hooks = { package = "kopuz-hooks", version = "0.22.0", path = "./crates/hooks" }
 pages = { package = "kopuz-pages", version = "0.22.0", path = "./crates/pages" }
-utils = { package = "kopuz-utils", version = "0.22.0", path = "./crates/utils" }
-config = { package = "kopuz-config", version = "0.22.0", path = "./crates/config" }
+utils = { package = "kopuz-utils", version = "0.22.0", path = "./shared/utils" }
+config = { package = "kopuz-config", version = "0.22.0", path = "./shared/config" }
 db = { package = "kopuz-db", version = "0.22.0", path = "./crates/db" }
-api = { package = "kopuz-api", version = "0.22.0", path = "./crates/api" }
-proto = { package = "kopuz-proto", version = "0.22.0", path = "./crates/proto" }
+api = { package = "kopuz-api", version = "0.22.0", path = "./shared/api" }
+proto = { package = "kopuz-proto", version = "0.22.0", path = "./shared/proto" }
 daemon = { package = "kopuz-daemon", version = "0.22.0", path = "./crates/daemon" }
 kopuzd = { package = "kopuz-kopuzd", version = "0.22.0", path = "./crates/kopuzd" }
 client = { package = "kopuz-client", version = "0.22.0", path = "./crates/client" }

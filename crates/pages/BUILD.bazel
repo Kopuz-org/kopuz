@@ -7,7 +7,7 @@ kopuz_rust_library(
     name = "pages",
     extra_deps = [
         "//crates/components",
-        "//crates/config",
+        "//shared/config",
         "//crates/hooks",
         "//crates/i18n",
         "//crates/kopuz_route",
@@ -15,6 +15,6 @@ kopuz_rust_library(
         "//crates/radio",
         "//crates/reader",
         "//crates/server",
-        "//crates/utils",
+        "//shared/utils",
     ],
 )

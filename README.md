@@ -562,7 +562,7 @@ Cargo manifests remain the source of truth for dependency versions and features.
 After changing a manifest or `Cargo.lock`, regenerate Bazel's resolution lock:
 
 ```bash
-CARGO_BAZEL_REPIN=1 bazel build //crates/config:config
+CARGO_BAZEL_REPIN=1 bazel build //shared/config:config
 ```
 
 Tailwind output is committed because Dioxus consumes it as an application asset.

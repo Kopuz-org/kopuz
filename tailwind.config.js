@@ -9,8 +9,8 @@ module.exports = {
     "./crates/player/**/*.{rs,html,css}",
     "./crates/reader/**/*.{rs,html,css}",
     "./crates/server/**/*.{rs,html,css}",
-    "./crates/utils/**/*.{rs,html,css}",
-    "./crates/config/**/*.{rs,html,css}",
+    "./shared/utils/**/*.{rs,html,css}",
+    "./shared/config/**/*.{rs,html,css}",
     "./crates/kopuz_route/**/*.{rs,html,css}",
   ],
   theme: {

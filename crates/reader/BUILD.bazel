@@ -5,5 +5,5 @@ exports_files(["Cargo.toml"])
 
 kopuz_rust_library(
     name = "reader",
-    extra_deps = ["//crates/config"],
+    extra_deps = ["//shared/config"],
 )

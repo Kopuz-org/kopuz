@@ -13,10 +13,10 @@ kopuz_rust_library(
         "tests/fixtures/*",
     ]),
     extra_deps = [
-        "//crates/config",
+        "//shared/config",
         "//crates/db",
         "//crates/reader",
-        "//crates/utils",
+        "//shared/utils",
     ],
     test_compile_data = glob([
         "src/ytmusic/fixtures/*",
