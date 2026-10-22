@@ -1296,6 +1296,11 @@ select:disabled {
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
 }
 
+.app-select-menu.app-select-menu-up {
+    top: auto;
+    bottom: calc(100% + 0.35rem);
+}
+
 .app-select-option {
     display: flex;
     width: 100%;

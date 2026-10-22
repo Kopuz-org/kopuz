@@ -163,6 +163,51 @@ pub fn AppSelect(
     } else {
         ("fixed inset-0 z-0 cursor-default", "app-select-menu")
     };
+    // Where the open menu fits: upward when the scroller has more room above, and no taller than that room.
+    let mut placement = use_signal(|| None::<(bool, u32)>);
+    let measure_trigger_id = trigger_id.clone();
+    use_effect(move || {
+        if !open() || cfg!(target_os = "android") {
+            placement.set(None);
+            return;
+        }
+        let script = format!(
+            r#"const t = document.getElementById('{measure_trigger_id}');
+            if (!t) {{ dioxus.send([false, 0]); }} else {{
+                const r = t.getBoundingClientRect();
+                let top = 0, bottom = window.innerHeight;
+                for (let p = t.parentElement; p; p = p.parentElement) {{
+                    const y = getComputedStyle(p).overflowY;
+                    if (y === 'auto' || y === 'scroll') {{
+                        const b = p.getBoundingClientRect();
+                        top = Math.max(top, b.top);
+                        bottom = Math.min(bottom, b.bottom);
+                        break;
+                    }}
+                }}
+                const below = bottom - r.bottom, above = r.top - top;
+                const wanted = Math.min(320, window.innerHeight * 0.55);
+                const up = below < wanted && above > below;
+                dioxus.send([up, Math.max(0, Math.floor((up ? above : below) - 12))]);
+            }}"#
+        );
+        spawn(async move {
+            let mut eval = document::eval(&script);
+            if let Ok((up, room)) = eval.recv::<(bool, u32)>().await {
+                placement.set(Some((up, room)));
+            }
+        });
+    });
+    let (menu_up, menu_room) = placement().unwrap_or((false, 0));
+    let menu_class = if menu_up {
+        format!("{menu_class} app-select-menu-up")
+    } else {
+        menu_class.to_string()
+    };
+    let menu_style = match menu_room {
+        0 => String::new(),
+        room => format!("max-height: min(20rem, 55vh, {room}px);"),
+    };
     let active_option_id = format!("app-select-option-{instance_id}-{}", active_index());
     let keyboard_options = options.clone();
     let keyboard_trigger_id = trigger_id.clone();
@@ -300,6 +345,7 @@ pub fn AppSelect(
                     role: "listbox",
                     aria_labelledby: "{trigger_id}",
                     class: "{menu_class}",
+                    style: "{menu_style}",
                     onwheel: move |event| event.stop_propagation(),
                     for (index, (option_value, label)) in options.iter().enumerate() {
                         {
