@@ -393,9 +393,10 @@ pub fn TrackRow(
                         }
                         if is_downloaded {
                             i {
-                                class: "fa-solid fa-arrow-down-to-line text-[9px] shrink-0",
+                                class: "fa-solid fa-circle-arrow-down text-[9px] shrink-0",
                                 style: "color: var(--color-indigo-500); opacity: 0.7;",
                                 title: "{offline_mark}",
+                                aria_label: "{offline_mark}",
                             }
                         } else if is_cached {
                             i {
