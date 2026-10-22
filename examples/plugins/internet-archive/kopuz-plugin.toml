@@ -1,0 +1,15 @@
+id = "internet-archive"
+name = "Internet Archive"
+version = "0.1.0"
+api = "0.1"
+description = "Albums and live recordings from archive.org, added by the address of an item or a collection."
+
+[permissions]
+network = ["archive.org"]
+
+[[service]]
+id = "internet-archive"
+name = "Internet Archive"
+summary = "Freely licensed albums and live recordings from archive.org"
+accent = "#428bca"
+capabilities = { sync = true, downloads = true }
