@@ -433,10 +433,12 @@ pub fn HomeBody(
     let prefs_snapshot = prefs.read();
     let listen_now_style = prefs_snapshot.listen_now_style;
     let catalog = catalog();
+    // The catalog is the source's live feed, which offline mode never reaches.
+    let live_feed = catalog && !*is_offline.read();
     let sections: Vec<(String, bool)> = prefs_snapshot
         .home_layout(catalog)
         .iter()
-        .filter(|s| catalog || s.key != "catalog")
+        .filter(|s| live_feed || s.key != "catalog")
         .map(|s| (s.key.clone(), s.enabled))
         .collect();
     drop(prefs_snapshot);
