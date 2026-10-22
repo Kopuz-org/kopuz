@@ -118,7 +118,9 @@ impl Scrobbler {
         let source = is_server.then(|| server::source::active(self.db.clone(), &session.sources()));
         let include_ids = !is_server;
 
-        self.spawn_playing_now_heartbeat(&session, &track, token, &credentials, include_ids);
+        if !session.offline().offline_mode() {
+            self.spawn_playing_now_heartbeat(&session, &track, token, &credentials, include_ids);
+        }
 
         let scrobbler = self.clone();
         let span = tracing::info_span!(
@@ -163,8 +165,11 @@ impl Scrobbler {
         if track.artist.trim().is_empty() || track.title.trim().is_empty() {
             return;
         }
+        // A play in offline mode is still queued below: its submissions fail as transient.
+        let offline = session.offline().offline_mode();
 
-        if let (Some(source), Some(id)) = (&source, item_id.as_deref())
+        if !offline
+            && let (Some(source), Some(id)) = (&source, item_id.as_deref())
             && let Err(error) = source.scrobble_now_playing(id).await
         {
             tracing::warn!(%error, "now-playing scrobble failed");
@@ -178,7 +183,7 @@ impl Scrobbler {
             librefm_session_key,
         } = credentials;
         let has_lastfm = !lastfm_api_key.is_empty() && !lastfm_api_secret.is_empty();
-        if has_lastfm {
+        if has_lastfm && !offline {
             let playing_now =
                 scrobble::lastfm::make_playing_now(&track.artist, &track.title, Some(&track.album));
             if let Err(error) = scrobble::lastfm::submit_now_playing(
@@ -194,7 +199,7 @@ impl Scrobbler {
         }
 
         let has_librefm = !librefm_session_key.is_empty();
-        if has_librefm {
+        if has_librefm && !offline {
             let playing_now = scrobble::librefm::make_playing_now(
                 &track.artist,
                 &track.title,
@@ -221,7 +226,7 @@ impl Scrobbler {
             return;
         }
 
-        if let (Some(source), Some(id)) = (&source, item_id.as_deref()) {
+        if !offline && let (Some(source), Some(id)) = (&source, item_id.as_deref()) {
             match source.scrobble(id).await {
                 Ok(_) => tracing::info!("scrobbled: {} - {}", track.artist, track.title),
                 Err(error) => tracing::warn!(%error, "scrobble failed"),
@@ -409,6 +414,12 @@ impl Scrobbler {
 
     /// Startup drain: anything queued while offline gets resubmitted once.
     pub async fn drain_queue(&self) {
+        if self
+            .session()
+            .is_some_and(|session| session.offline().offline_mode())
+        {
+            return;
+        }
         let held = self.credentials.snapshot();
         let has_lastfm = !held.lastfm_api_key.is_empty() && !held.lastfm_api_secret.is_empty();
         let creds = scrobble::queue::Credentials {

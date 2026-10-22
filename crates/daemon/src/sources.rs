@@ -1869,7 +1869,13 @@ impl SourceService {
                 let id = next.0.as_str().to_string();
                 let moved = probed.as_ref() != Some(&next);
                 let unsettled = retry_due && service.status(&id) != Some(SourceState::Online);
-                if moved || unsettled {
+                // Left unprobed, so the first retry after offline mode ends probes it.
+                let held = service.session.offline().offline_mode()
+                    && !network::is_local(
+                        &next.0,
+                        next.1.as_ref().map(|server| server.url.as_str()),
+                    );
+                if (moved || unsettled) && !held {
                     let fresh = probed.as_ref().is_none_or(|(source, _)| *source != next.0);
                     probed = Some(next);
                     // Spawned, so a slow unreachable server cannot hold up probing the next source.
@@ -1906,6 +1912,9 @@ impl SourceService {
             let mut since_client_version = 0u32;
             loop {
                 ticker.tick().await;
+                if service.session.offline().offline_mode() {
+                    continue;
+                }
                 if since_client_version == 0 {
                     service.refresh_ytmusic_client_version().await;
                 }

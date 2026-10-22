@@ -1,7 +1,6 @@
 //! Whether the internet is down or only one server is, asked only after a source that needs the internet stops answering.
 
 use std::future::Future;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -53,9 +52,9 @@ pub fn answered(status: u16, body: &str) -> bool {
     status == 204 || (status == 200 && body.trim() == "success")
 }
 
-/// A client that neither follows a redirect nor waits long, since a portal answers with one and a dead link with silence.
+/// A client that neither follows a redirect nor waits long, since a portal answers with one and a dead link with silence; offline mode lets it through.
 pub fn check_client() -> Option<reqwest::Client> {
-    utils::http::builder()
+    utils::http::internet_builder()
         .timeout(CHECK_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
         .build()
@@ -85,7 +84,7 @@ pub fn is_local(source: &config::Source, server_url: Option<&str>) -> bool {
         config::Source::LocalLibrary(_) => true,
         config::Source::Server(_) => server_url
             .and_then(|url| reqwest::Url::parse(url.trim()).ok())
-            .and_then(|url| url.host_str().map(local_host))
+            .and_then(|url| url.host_str().map(utils::http::local_host))
             .unwrap_or(false),
     }
 }
@@ -104,29 +103,6 @@ pub fn cacheable(sources: &server::sources::Sources) -> bool {
             service,
             Some(config::MusicService::Smb | config::MusicService::Spotify)
         )
-}
-
-fn local_host(host: &str) -> bool {
-    let host = host.trim_start_matches('[').trim_end_matches(']');
-    match host.parse::<IpAddr>() {
-        Ok(IpAddr::V4(ip)) => local_v4(ip),
-        Ok(IpAddr::V6(ip)) => local_v6(ip),
-        Err(_) => {
-            let name = host.trim_end_matches('.').to_ascii_lowercase();
-            name == "localhost" || name.ends_with(".local")
-        }
-    }
-}
-
-fn local_v4(ip: Ipv4Addr) -> bool {
-    ip.is_loopback() || ip.is_private() || ip.is_link_local()
-}
-
-fn local_v6(ip: Ipv6Addr) -> bool {
-    let first = ip.segments()[0];
-    let unique_local = first & 0xfe00 == 0xfc00;
-    let link_local = first & 0xffc0 == 0xfe80;
-    ip.is_loopback() || unique_local || link_local || ip.to_ipv4_mapped().is_some_and(local_v4)
 }
 
 /// Where to look when the internet is down, best first: the default folder library, the other folder libraries, then the servers on this network.

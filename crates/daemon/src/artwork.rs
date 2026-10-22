@@ -456,7 +456,7 @@ impl ArtworkService {
             .ok()
             .and_then(|written| written.elapsed().ok())
             .is_some_and(|age| age < REMOTE_ARTWORK_TTL);
-        if let Some(bytes) = cached.as_ref().filter(|_| fresh) {
+        if let Some(bytes) = cached.as_ref().filter(|_| fresh || utils::http::offline()) {
             let content_type = sniff_content_type(bytes);
             return Ok(self.payload(bytes.clone(), content_type));
         }

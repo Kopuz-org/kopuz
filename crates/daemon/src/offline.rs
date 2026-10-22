@@ -66,6 +66,7 @@ impl OfflineIndex {
 
     pub(crate) fn set_offline_mode(&self, on: bool) {
         self.offline_mode.store(on, Ordering::SeqCst);
+        utils::http::set_offline(on);
     }
 
     /// Whether `item_id` has a downloaded or a cached copy.

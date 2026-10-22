@@ -123,6 +123,8 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let offline = crate::OfflineIndex::load(&database)
         .await?
         .with_cache(cache);
+    // Before anything below starts reaching the network.
+    offline.set_offline_mode(args.offline);
     let downloads_pruned = offline.pruned();
     let (volume, muted) = database.playback_state().await?;
     let presence_pause = crate::integrations::PresencePause::load(&database).await?;

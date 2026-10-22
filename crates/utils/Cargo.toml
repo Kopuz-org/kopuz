@@ -17,7 +17,7 @@ workspace = true
 
 [features]
 # HTTP client builders, for the crates that reach the network; a frontend leaves this off.
-http = ["dep:reqwest"]
+http = ["dep:reqwest", "tokio/net"]
 
 [dependencies]
 percent-encoding = { workspace = true }

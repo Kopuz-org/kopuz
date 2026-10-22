@@ -725,6 +725,14 @@ pub fn cached_lyrics_for_request(request: &LyricsRequest) -> Option<Option<Lyric
         .and_then(|mut cache| cache.get_cloned(&cache_key))
 }
 
+/// The words a file on disk carries, beside it or embedded, without asking any provider and without caching the answer.
+pub async fn local_lyrics_for_request(request: &LyricsRequest) -> Option<Lyrics> {
+    if is_remote_track(&request.track_path) {
+        return None;
+    }
+    fetch_local_lrc(&request.track_path).await
+}
+
 fn has_word_timestamps(lyrics: &Lyrics) -> bool {
     match lyrics {
         Lyrics::Synced(lines) => lines.iter().any(|line| line.chunks.len() > 1),

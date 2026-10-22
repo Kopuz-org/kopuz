@@ -23,6 +23,8 @@ pub struct RadioService {
     config: Arc<ConfigService>,
     library: Arc<LibraryService>,
     session: SessionHandle,
+    /// The last rebuild skipped the registry imports for offline mode.
+    imports_held: std::sync::atomic::AtomicBool,
 }
 
 /// A station's own picture, where its metadata carries one.
@@ -70,6 +72,7 @@ impl RadioService {
             config,
             library,
             session,
+            imports_held: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -83,7 +86,10 @@ impl RadioService {
                 ApiError::internal(format!("pinned stations unreadable: {error}"))
             })?;
         let mut registry = StationRegistry::new();
-        for entry in registries.iter().filter(|entry| entry.enabled) {
+        let offline = self.session.offline().offline_mode();
+        self.imports_held
+            .store(offline, std::sync::atomic::Ordering::SeqCst);
+        for entry in registries.iter().filter(|entry| entry.enabled && !offline) {
             if let Err(error) = registry.import_registry(&entry.url).await {
                 tracing::warn!(url = %entry.url, %error, "radio registry import failed");
             }
@@ -104,14 +110,30 @@ impl RadioService {
     /// pin would cost a round of network for nothing.
     pub fn watch_config(self: &Arc<Self>, mut config: watch::Receiver<config::Settings>) {
         let service = self.clone();
+        let mut events = self.session.subscribe();
         tokio::spawn(async move {
             let mut current = registry_key(&config.borrow());
-            while config.changed().await.is_ok() {
-                let next = registry_key(&config.borrow());
-                if next == current {
-                    continue;
+            loop {
+                tokio::select! {
+                    changed = config.changed() => {
+                        if changed.is_err() {
+                            return;
+                        }
+                        let next = registry_key(&config.borrow());
+                        if next == current {
+                            continue;
+                        }
+                        current = next;
+                    }
+                    event = events.recv() => match event {
+                        // The imports offline mode held back are fetched once it ends.
+                        Ok(api::ApiEvent::NetworkStatus(status))
+                            if !status.offline_mode.is_on()
+                                && service.imports_held.load(std::sync::atomic::Ordering::SeqCst) => {}
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                        _ => continue,
+                    },
                 }
-                current = next;
                 if let Err(error) = service.reload().await {
                     tracing::warn!(%error, "radio registry reload failed");
                 }

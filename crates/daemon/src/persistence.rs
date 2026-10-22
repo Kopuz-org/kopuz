@@ -148,7 +148,7 @@ pub async fn adopt_remote_queue(
     source: &server::source::ActiveSource,
     store: &dyn QueueStore,
 ) {
-    if !source.capabilities().play_queue {
+    if !source.capabilities().play_queue || session.offline().offline_mode() {
         return;
     }
     // Anything the person does to the queue while the server answers wins over what it says.

@@ -382,6 +382,9 @@ impl FavoritesService {
                 if nudged {
                     tokio::time::sleep(NUDGE_DEBOUNCE).await;
                 }
+                if service.session.offline().offline_mode() {
+                    continue;
+                }
                 let reason = if nudged {
                     if service.mutation_nudge.swap(false, Ordering::Relaxed) {
                         SyncReason::AfterMutation

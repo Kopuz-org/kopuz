@@ -61,6 +61,9 @@ impl LibraryService {
 
     /// Look up every artist of the active source still missing a photo; `fresh` says a sync just stored new ones, which no spacing holds back.
     pub(super) async fn sweep_artist_photos(&self, fresh: bool) {
+        if self.offline().offline_mode() {
+            return;
+        }
         let scope = self.current_sources().active.as_str().to_string();
         let due = match self.photo_sweeps.lock() {
             Ok(mut sweeps) => claim_sweep(&mut sweeps, scope, fresh, Instant::now()),

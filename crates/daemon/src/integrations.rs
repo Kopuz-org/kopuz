@@ -84,6 +84,7 @@ pub fn spawn_jellyfin_reporter(
     sources: watch::Receiver<Arc<server::sources::Sources>>,
 ) -> tokio::task::JoinHandle<()> {
     let mut events = session.subscribe();
+    let offline = session.offline().clone();
     tokio::spawn(async move {
         let mut last_id: Option<String> = None;
         let mut last_state: Option<(Box<PlayerState>, Instant)> = None;
@@ -93,11 +94,14 @@ pub fn spawn_jellyfin_reporter(
         report.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
-            let jellyfin_configured = sources
-                .borrow()
-                .server
-                .as_ref()
-                .is_some_and(|server| server.service == config::MusicService::Jellyfin);
+            let jellyfin_configured = {
+                let sources = sources.borrow();
+                sources
+                    .server
+                    .as_ref()
+                    .is_some_and(|server| server.service == config::MusicService::Jellyfin)
+                    && !(offline.offline_mode() && crate::network::needs_internet(&sources))
+            };
 
             tokio::select! {
                 state = next_state(&mut events) => {
@@ -223,7 +227,8 @@ pub fn spawn_youtube_reporter(
                     };
                     let received = Instant::now();
                     let signed_in = youtube_signed_in(&sources.borrow());
-                    let history_paused = settings.borrow().playback.pause_watch_history;
+                    let history_paused = settings.borrow().playback.pause_watch_history
+                        || session.offline().offline_mode();
                     let live_id = (signed_in
                         && !history_paused
                         && matches!(state.phase, Phase::Playing | Phase::Paused))
@@ -548,6 +553,7 @@ fn project(
                     .and_then(discord_presence::cover_art::youtube_cover_art_url)
                 {
                     Some(url) => Some(url),
+                    None if session.offline().offline_mode() => None,
                     None => {
                         let mbid = track.and_then(|track| track.musicbrainz_release_id);
                         discord_presence::cover_art::resolve_cover_art_url_cached(

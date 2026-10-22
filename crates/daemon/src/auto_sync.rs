@@ -20,6 +20,9 @@ const KINDS: [JobKind; 3] = [
     JobKind::FavoritesSync,
 ];
 
+/// How soon a sync held back by offline mode looks again.
+const OFFLINE_RECHECK: Duration = Duration::from_secs(60);
+
 fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -125,6 +128,9 @@ impl Syncs {
         let active = server::source::active(self.db.clone(), sources);
         if !active.capabilities().sync {
             return None;
+        }
+        if self.library.offline_reads() {
+            return Some(OFFLINE_RECHECK);
         }
         let source = &sources.active;
         let plan = plan(&self.db, source, interval(config)).await;

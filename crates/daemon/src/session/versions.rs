@@ -6,7 +6,11 @@ impl Session {
     /// Ask the source once per track for its counterpart; the answer lands as
     /// [`SessionCmd::CounterpartFound`].
     pub(super) fn ask_counterpart(&mut self, track: &Track) {
-        if track.counterpart.is_some() || track.id.service().is_none() {
+        // Unrecorded in offline mode, so the track is asked about again once it is off.
+        if track.counterpart.is_some()
+            || track.id.service().is_none()
+            || self.offline.offline_mode()
+        {
             return;
         }
         let Some(source) = self.active_source.clone() else {

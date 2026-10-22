@@ -628,6 +628,16 @@ fn App() -> Element {
         did_check_updates.set(true);
         spawn(
             async move {
+                let offline = hooks::api::consume_api()
+                    .network_status()
+                    .await
+                    .is_ok_and(|status| status.offline_mode.is_on());
+                if offline {
+                    tracing::debug!(
+                        "offline mode is on; the update check waits for the next start"
+                    );
+                    return;
+                }
                 if let Some(update) = updates::fetch_available().await {
                     update_banner.set(Some(update));
                 }

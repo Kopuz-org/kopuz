@@ -454,6 +454,7 @@ impl LibraryService {
             // Apple Music's own words need the account's token and a bearer
             // fetched for the session -- both credentials, so both are here.
             if server.service == config::MusicService::AppleMusic
+                && !self.offline().offline_mode()
                 && let Some(token) = server.access_token.clone()
                 && let Some(catalog_id) = key.strip_prefix("applemusic:")
             {
@@ -483,6 +484,9 @@ impl LibraryService {
                 Some(persisted) => {
                     server::lyrics::prime(&cache_key, persisted.clone());
                     persisted
+                }
+                None if self.offline().offline_mode() => {
+                    server::lyrics::local_lyrics_for_request(&request).await
                 }
                 None => {
                     let fetched = server::lyrics::fetch_lyrics_for_request(&request).await;
