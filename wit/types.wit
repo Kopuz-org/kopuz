@@ -1,0 +1,183 @@
+/// The values a plugin and the host exchange. They mirror the host's own
+/// models closely, so the host converts each one once at the boundary.
+interface types {
+    /// Why an operation failed, classified so the host can react to the kind
+    /// instead of matching on message text.
+    variant source-error {
+        /// The plugin does not implement the operation. The host falls back
+        /// to its own behavior where it has one.
+        unsupported(string),
+        /// The request got no answer: the server is down or unreachable.
+        connectivity,
+        /// The server refused the credentials.
+        auth,
+        invalid-input(string),
+        backend(string),
+    }
+
+    enum auth-outcome {
+        valid,
+        expired,
+        unreachable,
+    }
+
+    /// What a session acts as. The host builds it from the saved server and
+    /// its credentials; the plugin never sees where they are stored.
+    record connection {
+        /// The service slug the session was opened for, one of the slugs the
+        /// manifest lists. A plugin serving several services (Subsonic and a
+        /// custom Subsonic-compatible server) tells them apart by it.
+        service: string,
+        url: string,
+        token: string,
+        user-id: string,
+        device-id: string,
+        /// The account a multi-account sign-in acts as; none is its own.
+        account: option<string>,
+        /// Library roots for folder-tree backends. Empty means auto-detect.
+        folders: list<string>,
+    }
+
+    record auth-session {
+        access-token: string,
+        user-id: string,
+    }
+
+    record artist-credit {
+        name: string,
+        /// The id the source issued for the artist, when it has one.
+        id: option<string>,
+    }
+
+    record replay-gain {
+        track-gain-db: option<f32>,
+        track-peak: option<f32>,
+        album-gain-db: option<f32>,
+        album-peak: option<f32>,
+    }
+
+    /// One track. Its identity is `item-id` within the session's service; the
+    /// host adds the service.
+    record track {
+        item-id: string,
+        /// A cover reference in the host's stored form (see the SDK's
+        /// `cover` helpers), or none.
+        cover: option<string>,
+        album-id: string,
+        title: string,
+        artist: string,
+        album: string,
+        duration-secs: u64,
+        sample-rate: u32,
+        bitrate-kbps: u32,
+        track-number: option<u32>,
+        disc-number: option<u32>,
+        musicbrainz-release-id: option<string>,
+        musicbrainz-recording-id: option<string>,
+        musicbrainz-track-id: option<string>,
+        /// Set only on a row fetched as a playlist entry.
+        playlist-item-id: option<string>,
+        artists: list<string>,
+        /// Every credit in billing order.
+        credits: list<artist-credit>,
+        replay-gain: replay-gain,
+        explicit: bool,
+    }
+
+    record album {
+        id: string,
+        title: string,
+        artist: string,
+        genre: string,
+        year: u16,
+        cover: option<string>,
+        artist-id: option<string>,
+    }
+
+    record artist-listing {
+        credit: artist-credit,
+        photo: option<string>,
+    }
+
+    record library-snapshot {
+        albums: list<album>,
+        tracks: list<track>,
+        artists: list<artist-listing>,
+    }
+
+    record search-results {
+        tracks: list<track>,
+        albums: list<album>,
+    }
+
+    record playlist-meta {
+        id: string,
+        name: string,
+        image-tag: option<string>,
+    }
+
+    /// One entry of a playlist as the host holds it.
+    record playlist-entry {
+        key: string,
+        playlist-item-id: option<string>,
+    }
+
+    record track-page {
+        tracks: list<track>,
+        /// The cursor for the next page; none once exhausted.
+        next: option<string>,
+    }
+
+    record remote-play-queue {
+        tracks: list<track>,
+        /// The playing track's item id.
+        current-id: option<string>,
+        position-ms: u64,
+        changed-by: option<string>,
+    }
+
+    enum stream-quality {
+        low,
+        normal,
+        high,
+    }
+
+    record stream-info {
+        url: string,
+        /// The URL is an HLS playlist of fragmented-MP4 AAC segments, which
+        /// the host assembles, rather than a file it can read straight.
+        hls: bool,
+        user-agent: option<string>,
+        duration-secs: option<u64>,
+        bitrate: option<u32>,
+        content-length: option<u64>,
+        loudness-db: option<f32>,
+    }
+
+    record storage-quota {
+        used-bytes: u64,
+        quota-bytes: u64,
+        remaining-bytes: u64,
+    }
+
+    enum check-step {
+        reach,
+        session,
+        signed-in-playback,
+        anonymous-playback,
+        playback-token,
+    }
+
+    enum check-outcome {
+        passed,
+        failed,
+        skipped,
+    }
+
+    /// One step of a connection test.
+    record check {
+        step: check-step,
+        outcome: check-outcome,
+        detail: string,
+    }
+}
