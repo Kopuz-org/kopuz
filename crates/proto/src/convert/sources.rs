@@ -311,6 +311,7 @@ pub fn source_info_to_proto(value: &api::SourceInfo) -> SourceInfo {
         anonymous: value.anonymous,
         settings: value.settings.iter().map(field_spec_to_proto).collect(),
         needs_network: value.needs_network,
+        works_offline: value.works_offline,
         permanent: value.permanent,
         state: value
             .state
@@ -337,6 +338,7 @@ pub fn source_info_from_proto(value: &SourceInfo) -> api::SourceInfo {
         anonymous: value.anonymous,
         settings: value.settings.iter().map(field_spec_from_proto).collect(),
         needs_network: value.needs_network,
+        works_offline: value.works_offline,
         permanent: value.permanent,
         state: value.state.map(super::enums::source_state_from_proto),
         avatar: value.avatar.as_ref().and_then(artwork_ref_from_proto),
@@ -530,6 +532,7 @@ mod tests {
             anonymous: false,
             settings: vec![url_field()],
             needs_network: true,
+            works_offline: true,
             permanent: true,
             state: Some(api::SourceState::AuthExpired),
             avatar: Some(api::ArtworkRef::new(

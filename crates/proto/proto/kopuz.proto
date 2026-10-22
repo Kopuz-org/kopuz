@@ -1023,6 +1023,8 @@ message SourceInfo {
   // What the daemon's last probe found; absent until it has probed this source.
   optional SourceState state = 20;
   optional ArtworkRef avatar = 21;
+  // Keeps working with the internet down: a folder library, or a server on this machine or its network.
+  bool works_offline = 22;
 }
 
 message GetSourcesRequest {}

@@ -477,6 +477,7 @@ impl SourceService {
                 info.name = saved.name.clone();
                 info.service = crate::services::folders_ref();
                 info.authenticated = true;
+                info.works_offline = true;
                 info.permanent = saved.id == config::DEFAULT_LOCAL_ID;
                 let paths: Vec<String> = saved
                     .directories
@@ -493,6 +494,7 @@ impl SourceService {
                 let view = crate::services::ServerView::from(server);
                 info.name = server.name.clone();
                 info.needs_network = true;
+                info.works_offline = network::is_local(&key, Some(&server.url));
                 info.service = crate::services::service_ref(server.service);
                 // An anonymous source needs no token to be usable, which is
                 // why this is not simply "has a token".
@@ -2864,6 +2866,20 @@ mod tests {
                 fixture.sources.set_offline(false).offline_mode,
                 OfflineMode::Off
             );
+        }
+
+        #[tokio::test]
+        async fn each_source_says_whether_it_works_without_the_internet() {
+            let fixture = signed_in(scripted(&[])).await;
+            let sources = fixture.sources.sources().await.expect("sources");
+            let works_offline = |id: &str| {
+                sources
+                    .iter()
+                    .find(|source| source.id == id)
+                    .map(|source| source.works_offline)
+            };
+            assert_eq!(works_offline(config::DEFAULT_LOCAL_ID), Some(true));
+            assert_eq!(works_offline("yt"), Some(false));
         }
 
         #[tokio::test]

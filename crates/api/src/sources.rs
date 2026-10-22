@@ -174,6 +174,8 @@ pub struct SourceInfo {
     pub settings: Vec<FieldSpec>,
     /// Reachability is worth watching: the library lives across the network.
     pub needs_network: bool,
+    /// Keeps working with the internet down: a folder library, or a server on this machine or its network.
+    pub works_offline: bool,
     /// Every install has it, so it cannot be deleted.
     pub permanent: bool,
     /// What the daemon's last probe found; `None` until it has probed this source.
