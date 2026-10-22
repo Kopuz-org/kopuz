@@ -529,7 +529,7 @@ symlink.
 Test one crate or the complete workspace:
 
 ```bash
-bazel test //crates/db:db_test
+bazel test //daemon/db:db_test
 bazel test //:tests
 ```
 

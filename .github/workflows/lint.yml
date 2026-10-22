@@ -10,6 +10,7 @@ on:
       - 'rust-toolchain.toml'
       - 'crates/**'
       - 'shared/**'
+      - 'daemon/**'
   pull_request:
     paths:
       - 'README.md'
@@ -19,6 +20,7 @@ on:
       - 'rust-toolchain.toml'
       - 'crates/**'
       - 'shared/**'
+      - 'daemon/**'
 
 jobs:
   deno-fmt:

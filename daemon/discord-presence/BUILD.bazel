@@ -6,7 +6,7 @@ exports_files(["Cargo.toml"])
 kopuz_rust_library(
     name = "discord_presence",
     extra_deps = [
-        "//crates/reader",
+        "//daemon/reader",
         "//shared/utils",
     ],
 )

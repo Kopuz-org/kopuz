@@ -19,14 +19,14 @@ for the human process and `README.md` for platform setup.
 
 Run clippy (debug + release), fmt, and the tests covering your change before each commit.
 
-## Database (`crates/db`)
+## Database (`daemon/db`)
 
-- SQLite via `sqlx`. Schema migrations are `crates/db/migrations/*.sql`; sqlx
+- SQLite via `sqlx`. Schema migrations are `daemon/db/migrations/*.sql`; sqlx
   checksums their bytes, so keep them **LF** and never edit an already-applied
   migration — add a new one.
-- `query!` / `query_as!` macros are compile-checked against `crates/db/.sqlx/`.
+- `query!` / `query_as!` macros are compile-checked against `daemon/db/.sqlx/`.
   After adding or changing one, regenerate the cache: point `DATABASE_URL` at a
-  temp DB, `sqlx migrate run`, then `cargo sqlx prepare` (run from `crates/db`).
+  temp DB, `sqlx migrate run`, then `cargo sqlx prepare` (run from `daemon/db`).
   Runtime `sqlx::query_as` (most track queries) is not macro-checked and needs no
   prepare.
 - **Crate wall:** the frontend crates (`hooks`, `pages`, `components`) reach
@@ -49,7 +49,7 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
   citing that file's path or the var's name. The daemon polls the files' mtimes
   and reloads live; env is read once.
 
-## Sources & covers (`crates/server`, daemon-only)
+## Sources & covers (`daemon/server`, daemon-only)
 
 - Each backend implements the `MediaSource` trait (`source.rs`): Local, Jellyfin,
   Subsonic/Custom, YtMusic, SoundCloud, Spotify, Apple Music, Nextcloud. The
@@ -88,18 +88,18 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
   embedding + Android packaging). Hosts the daemon core in-process.
 - `shared/api` — the client-facing trait and its wire types; `shared/proto` —
   the gRPC schema; `crates/client` — the same trait over a socket.
-- `crates/daemon` — the core: session, library, catalog, radio, sources,
-  mutations, jobs, artwork, and `LocalApi` over them. `crates/kopuzd` — the
+- `daemon/core` — the core: session, library, catalog, radio, sources,
+  mutations, jobs, artwork, and `LocalApi` over them. `daemon/kopuzd` — the
   headless binary and the tonic shell.
 - `shared/config` — `Settings` and its typed edits, the settings store, `Source`, `MusicService`, `MusicServer`.
-- `crates/reader` — domain models (`Track`, `Album`, `TrackId`), scanner, tag
+- `daemon/reader` — domain models (`Track`, `Album`, `TrackId`), scanner, tag
   IO. Daemon-side: what crosses to a frontend is `api::TrackInfo`.
-- `crates/db` — SQLite backend, `ReadStore` / `Storage`, migrations.
-- `crates/server` — `MediaSource` backends, sync, cover resolution.
+- `daemon/db` — SQLite backend, `ReadStore` / `Storage`, migrations.
+- `daemon/server` — `MediaSource` backends, sync, cover resolution.
 - `crates/hooks` — Dioxus data hooks over the API (queries, player controller,
   artwork, sources).
 - `crates/pages`, `crates/components`, `crates/kopuz_route` — UI + routing.
-- `crates/player` audio · `crates/radio` · `crates/scrobble` · `crates/discord-presence`
+- `daemon/player` audio · `daemon/radio` · `daemon/scrobble` · `daemon/discord-presence`
   · `crates/i18n` · `shared/utils` (`CoverUrl`, image-URL builders; its cover
   cache is behind the `db-cache` feature, so a frontend never links SQLite).
 - `android-src/` — Kotlin media-session classes patched in by `build.rs`.

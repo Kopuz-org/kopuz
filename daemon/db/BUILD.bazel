@@ -11,7 +11,7 @@ kopuz_rust_library(
     ]),
     extra_deps = [
         "//shared/config",
-        "//crates/reader",
+        "//daemon/reader",
     ],
     rustc_env = {"SQLX_OFFLINE": "true"},
 )
@@ -22,7 +22,7 @@ kopuz_rust_integration_test(
     extra_deps = [
         ":db",
         "//shared/config",
-        "//crates/reader",
+        "//daemon/reader",
     ],
     rustc_env = {"SQLX_OFFLINE": "true"},
 )
@@ -33,7 +33,7 @@ kopuz_rust_integration_test(
     extra_deps = [
         ":db",
         "//shared/config",
-        "//crates/reader",
+        "//daemon/reader",
     ],
     rustc_env = {"SQLX_OFFLINE": "true"},
 )
@@ -44,7 +44,7 @@ kopuz_rust_integration_test(
     extra_deps = [
         ":db",
         "//shared/config",
-        "//crates/reader",
+        "//daemon/reader",
     ],
     rustc_env = {"SQLX_OFFLINE": "true"},
 )
@@ -55,7 +55,7 @@ kopuz_rust_integration_test(
     extra_deps = [
         ":db",
         "//shared/config",
-        "//crates/reader",
+        "//daemon/reader",
     ],
     rustc_env = {"SQLX_OFFLINE": "true"},
 )
@@ -66,7 +66,7 @@ kopuz_rust_integration_test(
     extra_deps = [
         ":db",
         "//shared/config",
-        "//crates/reader",
+        "//daemon/reader",
     ],
     rustc_env = {"SQLX_OFFLINE": "true"},
 )
@@ -77,7 +77,7 @@ kopuz_rust_integration_test(
     extra_deps = [
         ":db",
         "//shared/config",
-        "//crates/reader",
+        "//daemon/reader",
     ],
     rustc_env = {"SQLX_OFFLINE": "true"},
 )
@@ -88,7 +88,7 @@ kopuz_rust_integration_test(
     extra_deps = [
         ":db",
         "//shared/config",
-        "//crates/reader",
+        "//daemon/reader",
     ],
     rustc_env = {"SQLX_OFFLINE": "true"},
 )
@@ -99,7 +99,7 @@ kopuz_rust_integration_test(
     extra_deps = [
         ":db",
         "//shared/config",
-        "//crates/reader",
+        "//daemon/reader",
     ],
     rustc_env = {"SQLX_OFFLINE": "true"},
 )

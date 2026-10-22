@@ -2,7 +2,7 @@
 rustc-wrapper = ""
 
 [env]
-# Use the committed crates/db/.sqlx query cache instead of a live DB at build time.
+# Use the committed daemon/db/.sqlx query cache instead of a live DB at build time.
 SQLX_OFFLINE = "true"
 
 # Google Play mandates 16 KB page-size support for native libraries (all new

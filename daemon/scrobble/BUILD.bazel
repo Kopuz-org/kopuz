@@ -7,6 +7,6 @@ kopuz_rust_library(
     name = "scrobble",
     extra_deps = [
         "//shared/config",
-        "//crates/db",
+        "//daemon/db",
     ],
 )

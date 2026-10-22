@@ -3,9 +3,9 @@
 @source "./crates/components/**/*.rs";
 @source "./crates/pages/**/*.rs";
 @source "./crates/hooks/**/*.rs";
-@source "./crates/player/**/*.rs";
-@source "./crates/reader/**/*.rs";
-@source "./crates/server/**/*.rs";
+@source "./daemon/player/**/*.rs";
+@source "./daemon/reader/**/*.rs";
+@source "./daemon/server/**/*.rs";
 @source "./shared/utils/**/*.rs";
 @source "./shared/config/**/*.rs";
 @source "./crates/kopuz_route/**/*.rs";

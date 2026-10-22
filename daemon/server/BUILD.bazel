@@ -14,8 +14,8 @@ kopuz_rust_library(
     ]),
     extra_deps = [
         "//shared/config",
-        "//crates/db",
-        "//crates/reader",
+        "//daemon/db",
+        "//daemon/reader",
         "//shared/utils",
     ],
     test_compile_data = glob([
@@ -35,8 +35,8 @@ rust_test(
     crate_name = "source",
     deps = [
         ":server",
-        "//crates/db",
-        "//crates/reader",
+        "//daemon/db",
+        "//daemon/reader",
     ] + all_crate_deps(
         normal = True,
         normal_dev = True,
