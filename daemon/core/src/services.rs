@@ -854,7 +854,7 @@ mod summary_tests {
 
     #[test]
     fn every_service_says_what_it_is_in_the_baseline_locale() {
-        let baseline = include_str!("../../../crates/i18n/locales/en.ftl");
+        let baseline = include_str!("../../../apps/common/i18n/locales/en.ftl");
         let services = all();
         assert_eq!(services.len(), MusicService::ALL.len() + 1, "folders too");
         for service in services {

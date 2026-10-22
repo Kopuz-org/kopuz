@@ -39,7 +39,7 @@ jobs:
         run: npm ci
 
       - name: Build CSS
-        run: npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css --content './crates/kopuz/**/*.rs,./crates/components/**/*.rs,./crates/pages/**/*.rs,./crates/hooks/**/*.rs,./daemon/player/**/*.rs,./daemon/reader/**/*.rs'
+        run: npx @tailwindcss/cli -i ./tailwind.css -o ./apps/dioxus/kopuz/assets/tailwind.css --content './apps/dioxus/kopuz/**/*.rs,./apps/dioxus/components/**/*.rs,./apps/dioxus/pages/**/*.rs,./apps/dioxus/hooks/**/*.rs,./daemon/player/**/*.rs,./daemon/reader/**/*.rs'
 
       - name: Read and verify version
         id: version
@@ -70,7 +70,7 @@ jobs:
 
           cp target/dx/kopuz/release/linux/app/kopuz AppDir/usr/bin/kopuz
           cp data/moe.kopuz.kopuz.desktop AppDir/usr/share/applications/
-          cp crates/kopuz/assets/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/moe.kopuz.kopuz.png
+          cp apps/dioxus/kopuz/assets/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/moe.kopuz.kopuz.png
 
       - name: Download linuxdeploy
         run: |
@@ -157,7 +157,7 @@ jobs:
         run: npm ci
 
       - name: Build CSS
-        run: npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css --content './crates/kopuz/**/*.rs,./crates/components/**/*.rs,./crates/pages/**/*.rs,./crates/hooks/**/*.rs,./daemon/player/**/*.rs,./daemon/reader/**/*.rs'
+        run: npx @tailwindcss/cli -i ./tailwind.css -o ./apps/dioxus/kopuz/assets/tailwind.css --content './apps/dioxus/kopuz/**/*.rs,./apps/dioxus/components/**/*.rs,./apps/dioxus/pages/**/*.rs,./apps/dioxus/hooks/**/*.rs,./daemon/player/**/*.rs,./daemon/reader/**/*.rs'
 
       - name: Read and verify version
         id: version
@@ -246,7 +246,7 @@ jobs:
         run: npm ci
 
       - name: Build CSS
-        run: npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css --content './crates/kopuz/**/*.rs,./crates/components/**/*.rs,./crates/pages/**/*.rs,./crates/hooks/**/*.rs,./daemon/player/**/*.rs,./daemon/reader/**/*.rs'
+        run: npx @tailwindcss/cli -i ./tailwind.css -o ./apps/dioxus/kopuz/assets/tailwind.css --content './apps/dioxus/kopuz/**/*.rs,./apps/dioxus/components/**/*.rs,./apps/dioxus/pages/**/*.rs,./apps/dioxus/hooks/**/*.rs,./daemon/player/**/*.rs,./daemon/reader/**/*.rs'
 
       - name: Read and verify version
         id: version
@@ -335,7 +335,7 @@ jobs:
         run: npm ci
 
       - name: Build CSS
-        run: npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css --content './crates/kopuz/**/*.rs,./crates/components/**/*.rs,./crates/pages/**/*.rs,./crates/hooks/**/*.rs,./daemon/player/**/*.rs,./daemon/reader/**/*.rs'
+        run: npx @tailwindcss/cli -i ./tailwind.css -o ./apps/dioxus/kopuz/assets/tailwind.css --content './apps/dioxus/kopuz/**/*.rs,./apps/dioxus/components/**/*.rs,./apps/dioxus/pages/**/*.rs,./apps/dioxus/hooks/**/*.rs,./daemon/player/**/*.rs,./daemon/reader/**/*.rs'
 
       - name: Read and verify version
         id: version

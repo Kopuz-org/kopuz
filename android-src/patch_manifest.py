@@ -145,7 +145,7 @@ if __name__ == '__main__':
     # Detect res dir relative to the manifest path
     for path in sys.argv[1:]:
         res_dir = os.path.join(os.path.dirname(path), 'res')
-        logo = os.path.join(os.path.dirname(__file__), '..', 'crates', 'kopuz', 'assets', 'logo.png')
+        logo = os.path.join(os.path.dirname(__file__), '..', 'apps', 'dioxus', 'kopuz', 'assets', 'logo.png')
         logo = os.path.normpath(logo)
         if os.path.isdir(res_dir) and os.path.exists(logo):
             generate_icons(logo, res_dir)

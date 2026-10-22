@@ -2,7 +2,7 @@ default:
     @just --list
 
 tailwind:
-    npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css
+    npx @tailwindcss/cli -i ./tailwind.css -o ./apps/dioxus/kopuz/assets/tailwind.css
 
 serve: tailwind
     dx serve
@@ -47,7 +47,7 @@ ios_ipa_dir := "target/ipa"
 
 # Debug-signed APK for sideloading onto a dev device. The Kotlin sources,
 # manifest patches, launcher icons and R8 keep rules are all injected by
-# crates/kopuz/build.rs during `dx build` — nothing to copy in afterwards.
+# apps/dioxus/kopuz/build.rs during `dx build` — nothing to copy in afterwards.
 android-patch:
     dx build --package kopuz --platform android --release
     cd {{android_project}} && ./gradlew assembleDebug

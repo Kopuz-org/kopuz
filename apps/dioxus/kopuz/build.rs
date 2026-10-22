@@ -294,8 +294,12 @@ fn main() {
         Err(_) => return,
     };
 
-    // android-src lives at the repo root (crates/kopuz/../../android-src).
-    let android_src = crate_dir.join("..").join("..").join("android-src");
+    // android-src lives at the repo root (apps/dioxus/kopuz/../../../android-src).
+    let android_src = crate_dir
+        .join("..")
+        .join("..")
+        .join("..")
+        .join("android-src");
     // Re-run when files are added/removed under android-src. Note: a directory's mtime
     // does NOT change when an existing file inside it is edited, so this alone misses
     // edits — copy_file/copy_kt_dir additionally emit rerun-if-changed per source file.
@@ -728,7 +732,7 @@ fn patch_manifest(path: &Path) {
             ("launchMode", "singleTask"),
             (
                 "configChanges",
-                include_str!("../../android-src/activity-config-changes.txt").trim(),
+                include_str!("../../../android-src/activity-config-changes.txt").trim(),
             ),
         ] {
             let marker = format!("android:{key}=\"");

@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn every_reason_and_code_has_a_message_in_the_baseline_locale() {
-        let baseline = include_str!("../../../i18n/locales/en.ftl");
+        let baseline = include_str!("../../../../common/i18n/locales/en.ftl");
         let keys = api::ErrorReason::ALL
             .iter()
             .map(|reason| reason.message_key())

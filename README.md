@@ -1,6 +1,6 @@
 <!--markdownlint-disable MD013 MD033 MD041 -->
 <div align="center">
-  <img src="crates/kopuz/assets/banner.png" alt="Kopuz Logo" height="300"/>
+  <img src="apps/dioxus/kopuz/assets/banner.png" alt="Kopuz Logo" height="300"/>
   <h1>Kopuz</h1>
   <p>
     Kopuz is a modern, lightweight, music player application built with Rust
@@ -523,7 +523,7 @@ bazel build --config=release //:kopuz
 
 The first Bazel invocation downloads the pinned Bazel and Rust toolchains plus
 the third-party crates recorded in `Cargo.lock` and `Cargo.Bazel.lock`. The
-built binary is available through the stable `bazel-bin/crates/kopuz/kopuz`
+built binary is available through the stable `bazel-bin/apps/dioxus/kopuz/kopuz`
 symlink.
 
 Test one crate or the complete workspace:
@@ -540,7 +540,7 @@ bazel build \
   --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect \
   --output_groups=clippy_checks \
   --@rules_rust//rust/settings:clippy_flag=-Dwarnings \
-  //crates/...
+  //shared/... //daemon/... //apps/...
 ```
 
 Check formatting without changing files:
@@ -549,13 +549,13 @@ Check formatting without changing files:
 bazel build \
   --aspects=@rules_rust//rust:defs.bzl%rustfmt_aspect \
   --output_groups=rustfmt_checks \
-  //crates/...
+  //shared/... //daemon/... //apps/...
 ```
 
 Apply rustfmt:
 
 ```bash
-bazel run @rules_rust//:rustfmt -- //crates/...
+bazel run @rules_rust//:rustfmt -- //shared/... //daemon/... //apps/...
 ```
 
 Cargo manifests remain the source of truth for dependency versions and features.
@@ -571,7 +571,7 @@ Regenerate it whenever UI classes change:
 ```bash
 npm ci
 npx @tailwindcss/cli -i ./tailwind.css \
-  -o ./crates/kopuz/assets/tailwind.css
+  -o ./apps/dioxus/kopuz/assets/tailwind.css
 ```
 
 The Bazel target builds and runs the native Rust executable. Dioxus still owns
