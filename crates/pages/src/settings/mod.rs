@@ -839,25 +839,6 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                 }
                             }
                         }
-
-                        // Clears the sticky category tabs when Manage sources scrolls here.
-                        div { id: MEDIA_SERVERS_SECTION, style: "scroll-margin-top: 5rem;", onmounted: move |event| scroll_if_pending(MEDIA_SERVERS_SECTION, event.data()),
-                            SettingItem {
-                                title: i18n::t("sources").to_string(),
-                                stacked: true,
-                                control: rsx! {
-                                    SourceSettings {
-                                        sources: all_sources(),
-                                        on_add: move |_| show_add_source.set(true),
-                                        on_delete: handle_delete_saved,
-                                        on_switch: handle_switch_server,
-                                        on_login: move |_| sign_in_again(),
-                                        remote_folders: remote_folder_settings(active_server()),
-                                        host_access: host_access(),
-                                    }
-                                }
-                            }
-                        }
                     }
                     if active_category() == SettingsCategory::General {
                         SettingItem {
@@ -902,7 +883,24 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                     {theme_editor_section(settings)}
                 }
                 if active_category() == SettingsCategory::Library {
+                    // Above the sources, whose list grows with every one added.
                     div { class: "mt-6", OfflineCacheSection { settings } }
+                    // Clears the sticky category tabs when Manage sources scrolls here.
+                    div { id: MEDIA_SERVERS_SECTION, class: "mt-6", style: "scroll-margin-top: 5rem;", onmounted: move |event| scroll_if_pending(MEDIA_SERVERS_SECTION, event.data()),
+                        SettingsSection { title: i18n::t("sources").to_string(),
+                            div { class: "px-5 py-4",
+                                SourceSettings {
+                                    sources: all_sources(),
+                                    on_add: move |_| show_add_source.set(true),
+                                    on_delete: handle_delete_saved,
+                                    on_switch: handle_switch_server,
+                                    on_login: move |_| sign_in_again(),
+                                    remote_folders: remote_folder_settings(active_server()),
+                                    host_access: host_access(),
+                                }
+                            }
+                        }
+                    }
                 }
                 if active_category() == SettingsCategory::Connectivity {
                     ConnectivitySection {}
