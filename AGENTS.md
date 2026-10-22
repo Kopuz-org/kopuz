@@ -11,6 +11,8 @@ layer under `shared/`, `daemon/` and `apps/` (see Directory Structure). See
   Debug builds use a separate `kopuz-debug.db`, so this never touches real data
   (`KOPUZ_DB_PATH` overrides the location).
 - **Build (release):** `just build` (= `dx build --package kopuz --release`).
+- **GPUI frontend:** `just gpui run` builds it and `kopuzd` and starts both on
+  a dev socket; `just gpui` lists the rest. See `apps/gpui/CLAUDE.md`.
 - **Lint (gate):** `cargo clippy --workspace --all-targets -- -D warnings`. Run it
   in **both** debug and `--release` — some code is `cfg`-gated. Prefix with
   `SQLX_OFFLINE=true` if it tries to reach a live DB.
@@ -90,7 +92,7 @@ Three layers, enforced by `scripts/check_layers.nu` (CI):
 - `shared/` — the daemon ↔ frontend contract. Depends on nothing else in the repo.
 - `daemon/` — the daemon and everything behind it. Depends only on `shared/`.
 - `apps/` — the frontends. `apps/common/` (shared by frontends only) depends only
-  on `shared/`; each app (`apps/cli`, `apps/kopuz/`) on `shared/` and
+  on `shared/`; each app (`apps/cli`, `apps/kopuz/`, `apps/gpui/`) on `shared/` and
   `apps/common/`, never on `daemon/` or another app. The one exception, listed
   in the script: the Dioxus app hosts the daemon in-process and drives `player`
   on Android.
@@ -113,6 +115,9 @@ the Dioxus app); pass `--workspace` or `-p kopuz` for it.
 - `apps/kopuz/hooks` — Dioxus data hooks over the API (queries, player controller,
   artwork, sources).
 - `apps/kopuz/pages`, `apps/kopuz/components`, `apps/kopuz/kopuz_route` — UI + routing.
+- `apps/gpui/` — the native GPUI frontend: `app` (the `kopuz-gpui` binary) and
+  its feature crates, a socket-only client. `vendor/gpui-pre-linux` is its
+  patched gpui platform crate, applied through the root `[patch.crates-io]`.
 - `daemon/player` audio · `daemon/radio` · `daemon/scrobble` · `daemon/discord-presence`
   · `apps/common/i18n` · `shared/utils` (`CoverUrl`, image-URL builders; its cover
   cache is behind the `db-cache` feature, so a frontend never links SQLite).

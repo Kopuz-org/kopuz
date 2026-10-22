@@ -91,6 +91,8 @@ let
       ;
     strictDeps = true;
     doCheck = false;
+    # Only what the package ships; the default members now include the GPUI frontend.
+    cargoExtraArgs = "--locked -p kopuz -p kopuz-ctl -p kopuz-kopuzd";
 
     # On commonArgs so both the deps-only and final derivations see it.
     RUSTY_V8_ARCHIVE = librustyV8;
@@ -110,6 +112,8 @@ let
             (s + /shared)
             (s + /daemon)
             (s + /apps)
+            # Cargo resolves the workspace's [patch] even for packages that never use it.
+            (s + /vendor)
             (s + /data)
             (s + /packaging/systemd)
 
