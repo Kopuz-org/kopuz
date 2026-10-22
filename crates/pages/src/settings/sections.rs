@@ -42,8 +42,27 @@ pub(super) fn ConnectivitySection() -> Element {
         integrations.restart();
     });
     let listed = integrations.read().clone().unwrap_or_default();
+    let offline = hooks::sources::use_shared_network_status()
+        .read()
+        .offline_mode
+        .is_on();
     rsx! {
         SettingsSection { title: i18n::t("connectivity").to_string(),
+            p { class: "px-5 py-2.5 text-sm text-white/60 text-pretty",
+                "{i18n::t(\"offline_mode_description\")}"
+            }
+            SettingItem {
+                title: i18n::t("offline_mode").to_string(),
+                control: rsx! {
+                    ToggleSetting {
+                        enabled: offline,
+                        on_change: move |on: bool| {
+                            let done = i18n::t(if on { "offline_mode_on" } else { "offline_mode_off" });
+                            hooks::sources::set_offline_mode(on, done);
+                        },
+                    }
+                }
+            }
             for integration in listed.into_iter() {
                 IntegrationRows { key: "{integration.id}", integration, changed }
             }

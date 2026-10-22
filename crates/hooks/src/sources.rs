@@ -101,6 +101,31 @@ pub fn use_network_status() -> Signal<api::NetworkStatus> {
     status
 }
 
+/// The network status the app root follows, shared so every control reads the same one.
+pub fn use_shared_network_status() -> Signal<api::NetworkStatus> {
+    use_context::<NetworkStatusContext>().0
+}
+
+/// Provide [`use_network_status`] to the tree, for [`use_shared_network_status`].
+pub fn provide_network_status() -> Signal<api::NetworkStatus> {
+    let status = use_network_status();
+    use_context_provider(|| NetworkStatusContext(status));
+    status
+}
+
+#[derive(Clone, Copy)]
+struct NetworkStatusContext(Signal<api::NetworkStatus>);
+
+/// Turn offline mode on or off, toasting `done` once the daemon has.
+pub fn set_offline_mode(on: bool, done: String) {
+    spawn(async move {
+        match crate::api::consume_api().set_offline(on).await {
+            Ok(_) => crate::toast::toast(&done),
+            Err(error) => crate::toast::toast_api_error(&error),
+        }
+    });
+}
+
 /// The configured sources; `None` until the first answer arrives.
 pub fn use_sources() -> Signal<Option<Vec<api::SourceInfo>>> {
     use_context::<SourceRows>().0

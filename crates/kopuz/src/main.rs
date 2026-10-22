@@ -795,7 +795,7 @@ fn App() -> Element {
         });
     }
 
-    let _is_offline = app_lifecycle::use_offline_mode(network_banner);
+    let (is_offline, network_status) = app_lifecycle::use_offline_mode(network_banner);
 
     let favorites_for_load = favorites_service.clone();
     use_hook(move || {
@@ -1409,28 +1409,32 @@ fn App() -> Element {
                 }
             }
 
+            if *is_offline.read() {
+                app_lifecycle::OfflineModeBar { status: network_status.read().clone() }
+            }
+
             if let Some(banner) = network_banner.read().clone() {
                 div {
                     class: "flex-shrink-0",
                     div {
-                        class: if banner == app_lifecycle::NetworkBanner::Offline {
+                        class: if matches!(banner, app_lifecycle::NetworkBanner::MovedOffline { .. }) {
                             "flex items-center justify-between gap-3 px-4 py-2 bg-amber-500/15 border-b border-amber-500/20 text-amber-300 text-sm"
                         } else {
                             "flex items-center justify-between gap-3 px-4 py-2 bg-emerald-500/15 border-b border-emerald-500/20 text-emerald-300 text-sm"
                         },
                         div {
                             class: "flex items-center gap-2",
-                            i { class: if banner == app_lifecycle::NetworkBanner::Offline { "fa-solid fa-wifi-slash text-xs" } else { "fa-solid fa-wifi text-xs" } }
+                            i { class: if matches!(banner, app_lifecycle::NetworkBanner::MovedOffline { .. }) { "fa-solid fa-plane text-xs" } else { "fa-solid fa-wifi text-xs" } }
                             span { {app_lifecycle::banner_text(&banner)} }
                             match banner.clone() {
-                                app_lifecycle::NetworkBanner::Offline => rsx! {
+                                app_lifecycle::NetworkBanner::BackOnlineStillOffline => rsx! {
                                     button {
                                         class: "ml-2 text-xs underline opacity-70 hover:opacity-100 transition-opacity",
                                         onclick: move |_| {
                                             app_lifecycle::switch_back(None);
                                             network_banner.set(None);
                                         },
-                                        {i18n::t("keep_server_mode")}
+                                        {i18n::t("offline_mode_turn_off")}
                                     }
                                 },
                                 app_lifecycle::NetworkBanner::SwitchBack { source, .. } => rsx! {
@@ -1443,7 +1447,8 @@ fn App() -> Element {
                                         {i18n::t("switch_to_server")}
                                     }
                                 },
-                                app_lifecycle::NetworkBanner::BackOnline => rsx! {},
+                                app_lifecycle::NetworkBanner::BackOnline
+                                | app_lifecycle::NetworkBanner::MovedOffline { .. } => rsx! {},
                             }
                         }
                         button {
