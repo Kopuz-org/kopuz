@@ -173,6 +173,7 @@ async fn config_round_trips_with_creds_in_servers_table() {
             account: None,
             apple_music_storefront: "us".into(),
             apple_music_language: "en".into(),
+            plugin_service: None,
         },
         SavedServer {
             id: "srv-b".into(),
@@ -185,6 +186,7 @@ async fn config_round_trips_with_creds_in_servers_table() {
             account: Some("brand-7".into()),
             apple_music_storefront: "us".into(),
             apple_music_language: "en".into(),
+            plugin_service: None,
         },
     ];
     let mut cfg = Settings::default();
@@ -207,6 +209,7 @@ async fn config_round_trips_with_creds_in_servers_table() {
         account: Some("brand-7".into()),
         apple_music_storefront: "us".into(),
         apple_music_language: "en".into(),
+        plugin_service: None,
     })
     .await
     .unwrap();

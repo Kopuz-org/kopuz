@@ -1,8 +1,9 @@
 //! The unified media-source facade (issue #347, Phase 2).
 //!
 //! [`MediaSource`] is the SINGLE per-source backend: one impl per source kind
-//! (`LocalSource`, the per-remote `JellyfinSource`/`SubsonicSource`/`YtSource`,
-//! and a creds-less `OfflineServerSource`). There is no separate remote-client
+//! (`LocalSource`, the per-remote `YtSource` and its kin, a
+//! `PluginSource` for every service a plugin serves, and a creds-less
+//! `OfflineServerSource`). There is no separate remote-client
 //! trait — a per-remote impl wraps its raw HTTP client directly, so dispatch
 //! happens once in [`resolve`] and adding a service is one new impl.
 //!
@@ -34,29 +35,27 @@ use crate::sources::Sources;
 
 mod apple_music;
 pub mod capabilities;
-mod clippsly;
-mod jellyfin;
 mod local;
 mod nextcloud;
 mod offline;
+mod plugin;
 mod search;
 mod smb;
-mod soundcloud;
 mod spotify;
-mod subsonic;
 mod types;
 mod youtube_music;
 use apple_music::AppleMusicSource;
-use clippsly::ClippslySource;
-use jellyfin::JellyfinSource;
 use local::LocalSource;
 use nextcloud::NextcloudSource;
 use offline::OfflineServerSource;
 use smb::SmbSource;
-use soundcloud::SoundcloudSource;
 use spotify::SpotifySource;
-use subsonic::SubsonicSource;
 pub use types::*;
+
+/// A plugin's error as a source error.
+pub fn plugin_error(error: plugin_host::wit::SourceError) -> SourceError {
+    plugin::source_error(error)
+}
 use youtube_music::YtSource;
 
 /// The source-agnostic backend the app drives. Impls supply
@@ -980,15 +979,28 @@ pub(super) async fn mirror_created(
 
 // ============================ Resolvers ================================
 
-/// Build the per-remote source for `conn` — the ONE place service dispatch happens.
+/// Build the per-remote source for `conn` — the ONE place service dispatch
+/// happens. A plugin serving the service wins over a built-in backend.
 fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSource> {
+    let connection = crate::plugins::connection(conn);
+    if let Some(plugin) =
+        plugin::PluginSource::new(db.clone(), source.clone(), conn.service, connection)
+    {
+        return Box::new(plugin);
+    }
     match conn.service {
-        MusicService::Jellyfin => Box::new(JellyfinSource::new(db, source, conn)),
-        MusicService::Subsonic | MusicService::Custom => {
-            Box::new(SubsonicSource::new(db, source, conn))
+        MusicService::Jellyfin
+        | MusicService::Subsonic
+        | MusicService::Custom
+        | MusicService::Clippsly
+        | MusicService::SoundCloud
+        | MusicService::Plugin => {
+            // Only a plugin serves these. Without one the cached library still
+            // reads, as it does with no credentials.
+            tracing::warn!(service = %conn.service.id(), "no plugin serves this service");
+            Box::new(OfflineServerSource { db, source })
         }
         MusicService::YtMusic => Box::new(YtSource::new(db, source, conn)),
-        MusicService::SoundCloud => Box::new(SoundcloudSource::new(db, source, conn)),
         MusicService::AppleMusic => {
             // Apple Music is configured, so the Widevine CDM will be wanted.
             // Start fetching now rather than when a track is already waiting.
@@ -1005,7 +1017,6 @@ fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSour
         }
         MusicService::Spotify => Box::new(SpotifySource::new(db, source, conn)),
         MusicService::Nextcloud => Box::new(NextcloudSource::new(db, source, conn)),
-        MusicService::Clippsly => Box::new(ClippslySource::new(db, source, conn)),
         MusicService::Smb => Box::new(SmbSource::new(db, source, conn)),
     }
 }

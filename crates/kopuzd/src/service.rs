@@ -1309,6 +1309,39 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::Unit {}))
     }
 
+    async fn get_plugins(
+        &self,
+        _request: Request<proto::GetPluginsRequest>,
+    ) -> Result<Response<proto::PluginCatalog>, Status> {
+        let catalog = self.0.api.plugins().await.map_err(failed)?;
+        Ok(Response::new(convert::plugin_catalog_to_proto(&catalog)))
+    }
+
+    async fn install_plugin(
+        &self,
+        request: Request<proto::PluginId>,
+    ) -> Result<Response<proto::PluginInfo>, Status> {
+        let info = self
+            .0
+            .api
+            .install_plugin(request.into_inner().id)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::plugin_info_to_proto(&info)))
+    }
+
+    async fn uninstall_plugin(
+        &self,
+        request: Request<proto::PluginId>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        self.0
+            .api
+            .uninstall_plugin(request.into_inner().id)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
     async fn preview_equalizer(
         &self,
         request: Request<proto::EqualizerSettings>,

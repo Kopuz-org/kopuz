@@ -177,6 +177,7 @@ fn server(token: Option<&str>) -> db::StoredSources {
             account: None,
             apple_music_storefront: "jp".into(),
             apple_music_language: "en".into(),
+            plugin_service: None,
         }],
         server: Some(MusicServer {
             name: "am".into(),
@@ -191,6 +192,7 @@ fn server(token: Option<&str>) -> db::StoredSources {
             account: None,
             apple_music_storefront: "jp".into(),
             apple_music_language: "en".into(),
+            plugin_service: None,
         }),
         active: config::Source::Server("s1".into()),
         ..Default::default()

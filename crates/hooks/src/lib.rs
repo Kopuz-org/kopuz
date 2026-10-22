@@ -15,6 +15,7 @@ pub mod jobs;
 pub mod library_actions;
 pub mod lyrics;
 pub mod playlist_actions;
+pub mod plugins;
 pub mod recommendations;
 mod session_projector;
 pub mod settings;

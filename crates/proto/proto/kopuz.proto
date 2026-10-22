@@ -122,6 +122,9 @@ service Kopuz {
   rpc PreviewReplayGain(ReplayGainSettings) returns (Unit);
   rpc GetFrontendPrefs(GetFrontendPrefsRequest) returns (FrontendPrefsList);
   rpc SetFrontendPrefs(SetFrontendPrefsRequest) returns (Unit);
+  rpc GetPlugins(GetPluginsRequest) returns (PluginCatalog);
+  rpc InstallPlugin(PluginId) returns (PluginInfo);
+  rpc UninstallPlugin(PluginId) returns (Unit);
 
   rpc GetSources(GetSourcesRequest) returns (SourceList);
   rpc GetServices(GetServicesRequest) returns (ServiceList);
@@ -2066,6 +2069,42 @@ message PrefEntry {
 message SetFrontendPrefsRequest {
   string frontend = 1;
   repeated PrefEntry entries = 2;
+}
+
+// ---------------- plugins ----------------
+
+message GetPluginsRequest {}
+
+message PluginId {
+  string id = 1;
+}
+
+enum PluginOrigin {
+  PLUGIN_ORIGIN_UNSPECIFIED = 0;
+  PLUGIN_ORIGIN_OFFICIAL = 1;
+  PLUGIN_ORIGIN_COMMUNITY = 2;
+}
+
+// One plugin, as installed, as the marketplace lists it, or both.
+message PluginInfo {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string author = 4;
+  optional string homepage = 5;
+  PluginOrigin origin = 6;
+  // Unset when it is not installed.
+  optional string installed_version = 7;
+  // Unset when the marketplace lists none.
+  optional string available_version = 8;
+  repeated string services = 9;
+  repeated string network = 10;
+}
+
+message PluginCatalog {
+  repeated PluginInfo plugins = 1;
+  // Set when the marketplace could not be read.
+  optional string marketplace_error = 2;
 }
 
 

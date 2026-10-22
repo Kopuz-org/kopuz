@@ -224,6 +224,7 @@ pub fn parse_service(s: &str) -> config::MusicService {
         "Nextcloud" => config::MusicService::Nextcloud,
         "Clippsly" => config::MusicService::Clippsly,
         "Smb" => config::MusicService::Smb,
+        "Plugin" => config::MusicService::Plugin,
         _ => config::MusicService::Jellyfin,
     }
 }

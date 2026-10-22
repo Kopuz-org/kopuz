@@ -383,6 +383,7 @@ pub async fn save_server(pool: &SqlitePool, server: &SavedServer) -> Result<(), 
         server.account.as_deref(),
         &server.apple_music_storefront,
         &server.apple_music_language,
+        server.plugin_service.as_deref(),
     );
     write_server_options(&mut tx, &server.id, &options).await?;
     tx.commit().await
@@ -412,6 +413,7 @@ pub async fn save_active_server(pool: &SqlitePool, server: &MusicServer) -> Resu
         server.account.as_deref(),
         &server.apple_music_storefront,
         &server.apple_music_language,
+        server.plugin_service.as_deref(),
     );
     write_server_options(&mut tx, &id, &options).await?;
     write_server_credentials(
@@ -480,6 +482,10 @@ impl StoredServer {
         self.options.get(OPT_ACCOUNT).cloned()
     }
 
+    fn plugin_service(&self) -> Option<String> {
+        self.options.get(OPT_PLUGIN_SERVICE).cloned()
+    }
+
     fn anonymous(&self) -> bool {
         self.options
             .get(OPT_ANONYMOUS)
@@ -499,6 +505,7 @@ impl StoredServer {
             account: self.account(),
             apple_music_storefront: self.option_or(OPT_STOREFRONT, defaults.apple_music_storefront),
             apple_music_language: self.option_or(OPT_LANGUAGE, defaults.apple_music_language),
+            plugin_service: self.plugin_service(),
         }
     }
 
@@ -517,6 +524,7 @@ impl StoredServer {
             account: self.account(),
             apple_music_storefront: self.option_or(OPT_STOREFRONT, defaults.apple_music_storefront),
             apple_music_language: self.option_or(OPT_LANGUAGE, defaults.apple_music_language),
+            plugin_service: self.plugin_service(),
         }
     }
 }
@@ -527,6 +535,7 @@ const OPT_PROFILE: &str = "yt_profile";
 const OPT_ACCOUNT: &str = "account";
 const OPT_STOREFRONT: &str = "apple_music_storefront";
 const OPT_LANGUAGE: &str = "apple_music_language";
+const OPT_PLUGIN_SERVICE: &str = "plugin_service";
 
 /// Every server, or the one `id` names, with its credentials and options joined on.
 async fn stored_servers(pool: &SqlitePool, id: Option<&str>) -> Result<Vec<StoredServer>, DbError> {
@@ -577,6 +586,7 @@ pub(crate) fn server_options(
     account: Option<&str>,
     storefront: &str,
     language: &str,
+    plugin_service: Option<&str>,
 ) -> Vec<(&'static str, String)> {
     let defaults = MusicServer::default();
     let mut rows = Vec::new();
@@ -597,6 +607,9 @@ pub(crate) fn server_options(
     }
     if language != defaults.apple_music_language {
         rows.push((OPT_LANGUAGE, language.to_string()));
+    }
+    if let Some(plugin_service) = plugin_service.filter(|slug| !slug.is_empty()) {
+        rows.push((OPT_PLUGIN_SERVICE, plugin_service.to_string()));
     }
     rows
 }
@@ -734,6 +747,7 @@ fn parse_service(s: &str) -> MusicService {
         "Nextcloud" => MusicService::Nextcloud,
         "Clippsly" => MusicService::Clippsly,
         "Smb" => MusicService::Smb,
+        "Plugin" => MusicService::Plugin,
         _ => MusicService::Jellyfin,
     }
 }
@@ -750,6 +764,7 @@ fn service_str(s: MusicService) -> &'static str {
         MusicService::Nextcloud => "Nextcloud",
         MusicService::Clippsly => "Clippsly",
         MusicService::Smb => "Smb",
+        MusicService::Plugin => "Plugin",
     }
 }
 

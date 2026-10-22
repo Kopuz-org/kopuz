@@ -1,0 +1,74 @@
+/// A media source: a backend the player browses, syncs and streams from.
+///
+/// Only the remote half lives here. The host keeps the library cache, the
+/// favorites and the playlists in its own database and mirrors what a call
+/// changed, so a plugin never holds a database handle.
+interface source {
+    use types.{
+        auth-outcome, auth-session, check, connection, library-snapshot,
+        playlist-entry, playlist-meta, remote-play-queue, source-error, storage-quota,
+        search-results, stream-info, stream-quality, track, track-page, artist-listing,
+    };
+
+    /// Sign in with a username and password, before any session exists.
+    login: func(connection: connection, username: string, password: string) -> result<auth-session, source-error>;
+
+    /// One signed-in connection to the service. The host may open several at
+    /// once, so a session keeps nothing another one needs to see.
+    resource session {
+        constructor(connection: connection);
+
+        validate: func() -> auth-outcome;
+        /// Each step of reaching the service, for a connection test.
+        diagnose: func() -> result<list<check>, source-error>;
+        keepalive: func() -> result<_, source-error>;
+        /// The signed-in account's id, for a service whose sign-in hands the
+        /// host only a token. None when the session is anonymous.
+        user-id: func() -> result<option<string>, source-error>;
+
+        fetch-library: func() -> result<library-snapshot, source-error>;
+        fetch-artists: func() -> result<list<artist-listing>, source-error>;
+        fetch-album-tracks: func(album-id: string) -> result<list<track>, source-error>;
+        fetch-track: func(item-id: string) -> result<option<track>, source-error>;
+        /// Unsupported means the host searches its cached library instead.
+        search: func(query: string) -> result<search-results, source-error>;
+
+        fetch-playlists: func() -> result<list<playlist-meta>, source-error>;
+        fetch-playlist-entries: func(playlist-id: string) -> result<list<track>, source-error>;
+        fetch-playlist-page: func(playlist-id: string, cursor: option<string>) -> result<track-page, source-error>;
+        /// Returns the refs that landed.
+        add-to-playlist: func(playlist-id: string, item-refs: list<string>) -> result<list<string>, source-error>;
+        /// Returns the new playlist's id.
+        create-playlist: func(name: string, item-refs: list<string>) -> result<string, source-error>;
+        remove-from-playlist: func(playlist-id: string, entry: playlist-entry, position: u32) -> result<_, source-error>;
+        /// `ordered` is the full new membership; `moved` went to `new-index`.
+        reorder-playlist: func(playlist-id: string, ordered: list<playlist-entry>, moved: playlist-entry, new-index: u32) -> result<_, source-error>;
+        set-playlist-image: func(playlist-id: string, image: list<u8>, content-type: string) -> result<_, source-error>;
+        delete-remote-playlist: func(playlist-id: string) -> result<_, source-error>;
+
+        fetch-favorites: func() -> result<list<string>, source-error>;
+        fetch-favorites-page: func(cursor: option<string>) -> result<track-page, source-error>;
+        push-favorite: func(item-id: string, on: bool) -> result<_, source-error>;
+
+        resolve-stream: func(item-id: string, quality: stream-quality) -> result<stream-info, source-error>;
+        /// A track's bytes, for a source whose stream URL is not the file.
+        download-track: func(item-id: string) -> result<list<u8>, source-error>;
+        upload-track: func(filename: string, content: list<u8>) -> result<_, source-error>;
+        storage-quota: func() -> result<storage-quota, source-error>;
+
+        start-radio: func(seed-ref: string) -> result<track-page, source-error>;
+        start-playlist-radio: func(playlist-ref: string) -> result<track-page, source-error>;
+        more-radio: func(cursor: string) -> result<track-page, source-error>;
+
+        /// Whether the server now holds the queue of `item-ids`.
+        save-play-queue: func(item-ids: list<string>, current-index: u32, position-ms: u64) -> result<bool, source-error>;
+        get-play-queue: func() -> result<option<remote-play-queue>, source-error>;
+
+        scrobble-now-playing: func(item-id: string) -> result<_, source-error>;
+        scrobble: func(item-id: string) -> result<_, source-error>;
+        report-playback-start: func(item-id: string) -> result<_, source-error>;
+        /// Positions are in 100ns ticks.
+        report-playback-stopped: func(item-id: string, position-ticks: u64) -> result<_, source-error>;
+        report-playback-progress: func(item-id: string, position-ticks: u64, is-paused: bool) -> result<_, source-error>;
+    }
+}

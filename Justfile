@@ -23,6 +23,14 @@ daemon *FLAGS:
 ctl *ARGS:
     cargo run -p kopuz-ctl -- {{ARGS}}
 
+# Build the example community plugins into a local marketplace, then run the
+# app against it to try installing one (see docs/plugins.md).
+plugin-market:
+    nu scripts/plugin_market.nu
+
+serve-market: plugin-market tailwind
+    KOPUZ_PLUGIN_INDEX=file://{{justfile_directory()}}/target/plugin-market/index.json dx serve
+
 run-release: build
     target/dx/kopuz/release/linux/app/kopuz
 

@@ -28,6 +28,9 @@ pub const PLAYBACK_BROWSER: &str = "playback_browser";
 pub const PREFER_ACTIVE_DEVICE: &str = "prefer_active_device";
 pub const DIRECTORIES: &str = "directories";
 
+/// Clippsly is one hosted service, so its address is not asked for.
+const CLIPPSLY_URL: &str = "https://listener.clippsly.app";
+
 /// The service id of the folders the daemon scans itself.
 pub const FOLDERS: &str = "folders";
 
@@ -59,6 +62,7 @@ pub struct ServerView<'a> {
     pub anonymous: bool,
     pub storefront: &'a str,
     pub language: &'a str,
+    pub plugin_service: Option<&'a str>,
 }
 
 impl<'a> From<&'a SavedServer> for ServerView<'a> {
@@ -70,6 +74,7 @@ impl<'a> From<&'a SavedServer> for ServerView<'a> {
             anonymous: server.yt_anonymous,
             storefront: &server.apple_music_storefront,
             language: &server.apple_music_language,
+            plugin_service: server.plugin_service.as_deref(),
         }
     }
 }
@@ -83,6 +88,7 @@ impl<'a> From<&'a config::MusicServer> for ServerView<'a> {
             anonymous: server.yt_anonymous,
             storefront: &server.apple_music_storefront,
             language: &server.apple_music_language,
+            plugin_service: server.plugin_service.as_deref(),
         }
     }
 }
@@ -93,15 +99,83 @@ pub fn all() -> Vec<ServiceInfo> {
         .map(|service| ServiceInfo {
             id: service.id().to_string(),
             name: name(*service),
-            summary: Text::key(summary(*service)),
+            summary: summary(*service),
             icon: icon(*service),
             accent: accent(*service).to_string(),
             experimental: matches!(service, MusicService::Spotify),
             fields: add_fields(*service),
         })
         .collect();
+    services.extend(
+        server::plugins::own_services()
+            .iter()
+            .map(plugin_service_info),
+    );
     services.push(folders());
     services
+}
+
+/// A service a plugin adds of its own, offered like a built-in one. One an
+/// installed plugin brings is marked experimental: nobody here vouches for it.
+fn plugin_service_info(own: &server::plugins::OwnService) -> ServiceInfo {
+    let service = &own.service;
+    ServiceInfo {
+        id: service.id.clone(),
+        name: Text::literal(service.name.clone().unwrap_or_else(|| service.id.clone())),
+        summary: Text::literal(service.summary.clone().unwrap_or_default()),
+        icon: plugin_icon(service),
+        accent: service
+            .accent
+            .clone()
+            .unwrap_or_else(|| PLUGIN_ACCENT.to_string()),
+        experimental: own.origin == plugin_host::Origin::Installed,
+        fields: match service.url {
+            Some(_) => Vec::new(),
+            None => vec![url_field("server_url_placeholder")],
+        },
+    }
+}
+
+fn plugin_icon(service: &plugin_host::manifest::Service) -> Icon {
+    match &service.icon {
+        Some(path) => Icon::Svg(path.clone()),
+        None => Icon::Class(PLUGIN_ICON.into()),
+    }
+}
+
+const PLUGIN_ICON: &str = "fa-solid fa-puzzle-piece";
+const PLUGIN_ACCENT: &str = "#6366f1";
+
+/// The service a draft or a stored row names: a built-in one, or a plugin's
+/// own, which is stored as [`MusicService::Plugin`] with its slug beside it.
+pub fn resolve(slug: &str) -> Option<MusicService> {
+    MusicService::from_id(slug)
+        .or_else(|| server::plugins::own_service(slug).map(|_| MusicService::Plugin))
+}
+
+/// How a configured server's service is shown.
+pub fn server_ref(service: MusicService, plugin_service: Option<&str>) -> ServiceRef {
+    match (service, plugin_service) {
+        (MusicService::Plugin, Some(slug)) => match server::plugins::own_service(slug) {
+            Some(own) => {
+                let info = plugin_service_info(&own);
+                ServiceRef {
+                    id: info.id,
+                    name: info.name,
+                    icon: info.icon,
+                    accent: info.accent,
+                }
+            }
+            // The plugin was removed: the source stays, named by its slug.
+            None => ServiceRef {
+                id: slug.to_string(),
+                name: Text::literal(slug),
+                icon: Icon::Class(PLUGIN_ICON.into()),
+                accent: PLUGIN_ACCENT.to_string(),
+            },
+        },
+        (service, _) => service_ref(service),
+    }
 }
 
 /// The folders a daemon scans for music, offered like any other service.
@@ -191,9 +265,9 @@ fn name(service: MusicService) -> Text {
     }
 }
 
-/// The i18n key of the line a service picker shows under its name.
-fn summary(service: MusicService) -> &'static str {
-    match service {
+/// The line a service picker shows under its name.
+fn summary(service: MusicService) -> Text {
+    let key = match service {
         MusicService::Jellyfin => "service_summary_jellyfin",
         MusicService::Subsonic => "service_summary_subsonic",
         MusicService::Custom => "service_summary_custom",
@@ -204,7 +278,10 @@ fn summary(service: MusicService) -> &'static str {
         MusicService::Nextcloud => "service_summary_nextcloud",
         MusicService::Clippsly => "service_summary_clippsly",
         MusicService::Smb => "service_summary_smb",
-    }
+        // A plugin's own summary is its manifest's; see `plugin_service_info`.
+        MusicService::Plugin => return Text::default(),
+    };
+    Text::key(key)
 }
 
 fn icon(service: MusicService) -> Icon {
@@ -220,6 +297,7 @@ fn icon(service: MusicService) -> Icon {
         MusicService::Nextcloud => Icon::Svg(NEXTCLOUD_MARK.into()),
         MusicService::Clippsly => Icon::Class("fa-solid fa-cloud".into()),
         MusicService::Smb => Icon::Class("fa-solid fa-server".into()),
+        MusicService::Plugin => Icon::Class(PLUGIN_ICON.into()),
     }
 }
 
@@ -234,6 +312,7 @@ fn accent(service: MusicService) -> &'static str {
         MusicService::Nextcloud => "#0082c9",
         MusicService::Clippsly => "#8064e9",
         MusicService::Smb => "#6366f1",
+        MusicService::Plugin => PLUGIN_ACCENT,
     }
 }
 
@@ -436,6 +515,8 @@ pub fn add_fields(service: MusicService) -> Vec<FieldSpec> {
         MusicService::Subsonic | MusicService::Custom => {
             vec![url_field("subsonic_url_placeholder")]
         }
+        // A plugin's own service brings its form; see `plugin_service_info`.
+        MusicService::Plugin => Vec::new(),
     };
     #[cfg(target_os = "android")]
     let fields = webview_fields(fields);
@@ -556,12 +637,24 @@ pub fn sign_in(server: &ServerView<'_>, authenticated: bool) -> SignInKind {
     if authenticated {
         return SignInKind::None;
     }
-    draft_sign_in(server.service, server.anonymous)
+    draft_sign_in(server.service, server.plugin_service, server.anonymous)
 }
 
-fn draft_sign_in(service: MusicService, anonymous: bool) -> SignInKind {
+fn draft_sign_in(
+    service: MusicService,
+    plugin_service: Option<&str>,
+    anonymous: bool,
+) -> SignInKind {
     if anonymous {
         SignInKind::None
+    } else if service == MusicService::Plugin {
+        match plugin_service
+            .and_then(server::plugins::own_service)
+            .map(|own| own.service.sign_in)
+        {
+            Some(plugin_host::manifest::SignIn::Password) => SignInKind::Password,
+            Some(plugin_host::manifest::SignIn::None) | None => SignInKind::None,
+        }
     } else if service.uses_browser_signin() {
         SignInKind::Browser
     } else {
@@ -606,6 +699,7 @@ pub fn check(service: MusicService, draft: &SourceDraft) -> (SignInKind, Vec<For
             }
         }
         MusicService::YtMusic | MusicService::SoundCloud | MusicService::Clippsly => {}
+        MusicService::Plugin if plugin_url(&draft.service).is_some() => {}
         MusicService::Smb => {
             if server::smb::Location::parse(value(URL)).is_err() {
                 problems.push(FormProblem::on(URL, ErrorReason::InvalidSmbUrl));
@@ -617,7 +711,11 @@ pub fn check(service: MusicService, draft: &SourceDraft) -> (SignInKind, Vec<For
             }
         }
     }
-    (draft_sign_in(service, anonymous_draft(draft)), problems)
+    let plugin_service = (service == MusicService::Plugin).then_some(draft.service.as_str());
+    (
+        draft_sign_in(service, plugin_service, anonymous_draft(draft)),
+        problems,
+    )
 }
 
 /// Fold a draft's answers into the row that is stored.
@@ -630,10 +728,13 @@ pub fn apply(service: MusicService, draft: &SourceDraft, saved: &mut SavedServer
     };
     saved.service = service;
     saved.name = draft.name.trim().to_string();
+    saved.plugin_service = (service == MusicService::Plugin).then(|| draft.service.clone());
     saved.url = match service {
         // Spotify's address field holds the client id its PKCE flow needs.
         MusicService::Spotify => value(CLIENT_ID),
-        MusicService::Clippsly => server::clippsly::BASE_URL.to_string(),
+        MusicService::Clippsly => CLIPPSLY_URL.to_string(),
+        MusicService::Plugin => plugin_url(&draft.service)
+            .unwrap_or_else(|| value(URL).trim_end_matches('/').to_string()),
         _ => value(URL).trim_end_matches('/').to_string(),
     };
     saved.yt_anonymous = anonymous_draft(draft);
@@ -652,6 +753,11 @@ pub fn apply(service: MusicService, draft: &SourceDraft, saved: &mut SavedServer
             saved.apple_music_language = language;
         }
     }
+}
+
+/// The one address of a hosted plugin service, which its form does not ask for.
+fn plugin_url(slug: &str) -> Option<String> {
+    server::plugins::own_service(slug)?.service.url
 }
 
 /// Which settings keys belong to the config rather than the server row.
@@ -758,27 +864,32 @@ pub fn probe_target(draft: &SourceDraft) -> Result<ProbeTarget, api::ApiError> {
     if draft.service == FOLDERS {
         return Ok(ProbeTarget::Folders(folder_paths(&draft.values)));
     }
-    let service = MusicService::from_id(&draft.service)
-        .ok_or_else(|| api::ApiError::invalid_input("no such service"))?;
+    let service =
+        resolve(&draft.service).ok_or_else(|| api::ApiError::invalid_input("no such service"))?;
+    let asks_address = service == MusicService::Plugin && plugin_url(&draft.service).is_none();
     match service {
         MusicService::Jellyfin
         | MusicService::Subsonic
         | MusicService::Custom
-        | MusicService::Nextcloud => {
-            let url = value_of(&draft.values, URL).unwrap_or_default().trim();
-            match reqwest::Url::parse(url) {
-                Ok(parsed) if matches!(parsed.scheme(), "http" | "https") && parsed.has_host() => {
-                    Ok(ProbeTarget::Server(url.to_string()))
-                }
-                _ => Err(FormProblem::on(URL, ErrorReason::InvalidServerUrl).error()),
-            }
-        }
+        | MusicService::Nextcloud => probe_address(draft),
+        MusicService::Plugin if asks_address => probe_address(draft),
         MusicService::YtMusic
         | MusicService::SoundCloud
         | MusicService::AppleMusic
         | MusicService::Spotify
         | MusicService::Clippsly
-        | MusicService::Smb => Ok(ProbeTarget::Nothing),
+        | MusicService::Smb
+        | MusicService::Plugin => Ok(ProbeTarget::Nothing),
+    }
+}
+
+fn probe_address(draft: &SourceDraft) -> Result<ProbeTarget, api::ApiError> {
+    let url = value_of(&draft.values, URL).unwrap_or_default().trim();
+    match reqwest::Url::parse(url) {
+        Ok(parsed) if matches!(parsed.scheme(), "http" | "https") && parsed.has_host() => {
+            Ok(ProbeTarget::Server(url.to_string()))
+        }
+        _ => Err(FormProblem::on(URL, ErrorReason::InvalidServerUrl).error()),
     }
 }
 

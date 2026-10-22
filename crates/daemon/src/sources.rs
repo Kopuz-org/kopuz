@@ -369,6 +369,12 @@ impl SourceService {
             .set_active_source(Some(self.build_active(&held)));
     }
 
+    /// A plugin was installed or removed: rebuild the active source, which
+    /// may be one it serves.
+    pub async fn plugins_changed(&self) {
+        self.refresh_active().await;
+    }
+
     /// The last probe answer for `id`, if it has been probed.
     pub fn status(&self, id: &str) -> Option<SourceState> {
         let status = self.status.lock().ok()?;
@@ -493,7 +499,8 @@ impl SourceService {
                 let view = crate::services::ServerView::from(server);
                 info.name = server.name.clone();
                 info.needs_network = true;
-                info.service = crate::services::service_ref(server.service);
+                info.service =
+                    crate::services::server_ref(server.service, server.plugin_service.as_deref());
                 // An anonymous source needs no token to be usable, which is
                 // why this is not simply "has a token".
                 info.authenticated = server.access_token.is_some() || server.yt_anonymous;
@@ -731,7 +738,7 @@ impl SourceService {
     /// Which service a draft names, refused as invalid input if it is not one
     /// this daemon has.
     fn drafted_service(draft: &SourceDraft) -> Result<config::MusicService, ApiError> {
-        config::MusicService::from_id(&draft.service)
+        crate::services::resolve(&draft.service)
             .ok_or_else(|| ApiError::invalid_input("no such service"))
     }
 
@@ -1104,20 +1111,11 @@ impl SourceService {
             .await
             .map_err(db_error)?
             .ok_or_else(|| ApiError::not_found("no such server"))?;
-        let auth = if server.service == config::MusicService::Clippsly {
-            let client = server::clippsly::ClippslyClient::new(&server.url, &request.password)
-                .map_err(source_error)?;
-            let account = client.account().await.map_err(source_error)?;
-            server::provider::AuthSession {
-                access_token: request.password,
-                user_id: account.id.to_string(),
-            }
-        } else {
-            server::provider::ProviderClient::new(server.service, server.url, device_id)
-                .login(request.username.trim(), &request.password)
-                .await
-                .map_err(source_error)?
-        };
+        let auth = server::provider::ProviderClient::new(server.service, server.url, device_id)
+            .with_plugin_service(server.plugin_service)
+            .login(request.username.trim(), &request.password)
+            .await
+            .map_err(source_error)?;
         self.provision_credentials(CredentialProvision {
             server_id: request.server_id,
             secret: auth.access_token,
