@@ -1,17 +1,7 @@
 use config::MusicService;
 
-use crate::jellyfin::JellyfinClient;
 use crate::source::SourceError;
-use crate::subsonic::SubsonicClient;
 use crate::ytmusic::YouTubeMusicClient;
-
-pub fn resolve_subsonic_secret(password: &str) -> Option<String> {
-    if password.is_empty() {
-        None
-    } else {
-        Some(password.to_string())
-    }
-}
 
 pub struct AuthSession {
     pub access_token: String,
@@ -20,6 +10,8 @@ pub struct AuthSession {
 
 pub struct ProviderClient {
     service: MusicService,
+    /// The plugin's own slug, for a `MusicService::Plugin` server.
+    plugin_service: Option<String>,
     server_url: String,
     device_id: String,
 }
@@ -32,36 +24,52 @@ impl ProviderClient {
     ) -> Self {
         Self {
             service,
+            plugin_service: None,
             server_url: server_url.into(),
             device_id: device_id.into(),
         }
     }
 
+    /// Sign in to a plugin's own service rather than the built-in one.
+    pub fn with_plugin_service(mut self, slug: Option<String>) -> Self {
+        self.plugin_service = slug;
+        self
+    }
+
+    fn service_id(&self) -> &str {
+        match (self.service, self.plugin_service.as_deref()) {
+            (MusicService::Plugin, Some(slug)) => slug,
+            (service, _) => service.id(),
+        }
+    }
+
     pub async fn login(&self, username: &str, password: &str) -> Result<AuthSession, SourceError> {
+        if let Some(plugin) = crate::plugins::registry().for_service(self.service_id()) {
+            let connection = plugin_host::wit::Connection {
+                service: self.service_id().to_string(),
+                url: self.server_url.clone(),
+                token: String::new(),
+                user_id: String::new(),
+                device_id: self.device_id.clone(),
+                account: None,
+                folders: Vec::new(),
+            };
+            let session = plugin
+                .login(connection, username, password)
+                .await
+                .map_err(crate::source::plugin_error)?;
+            return Ok(AuthSession {
+                access_token: session.access_token,
+                user_id: session.user_id,
+            });
+        }
         match self.service {
-            MusicService::Jellyfin => {
-                let mut client = JellyfinClient::new(&self.server_url, None, &self.device_id, None);
-                let (access_token, user_id) = client.login(username, password).await?;
-                Ok(AuthSession {
-                    access_token,
-                    user_id,
-                })
-            }
-            MusicService::Subsonic | MusicService::Custom => {
-                let client = SubsonicClient::new(&self.server_url, username, password);
-                client.ping().await?;
-                Ok(AuthSession {
-                    access_token: password.to_string(),
-                    user_id: username.to_string(),
-                })
-            }
-            MusicService::Clippsly => {
-                let client = crate::clippsly::ClippslyClient::new(&self.server_url, password)?;
-                let account = client.account().await?;
-                Ok(AuthSession {
-                    access_token: password.to_string(),
-                    user_id: account.id.to_string(),
-                })
+            MusicService::Jellyfin
+            | MusicService::Subsonic
+            | MusicService::Custom
+            | MusicService::Clippsly
+            | MusicService::Plugin => {
+                Err(SourceError::Backend("no plugin serves this service".into()))
             }
             MusicService::Nextcloud => {
                 // The password is expected to be an app password (Settings,

@@ -15,6 +15,8 @@ pub struct ServerConn {
     pub account: Option<String>,
     /// Library roots for folder-tree backends (Nextcloud). Empty = auto-detect.
     pub folders: Vec<String>,
+    /// The plugin's own service slug, for a `MusicService::Plugin` server.
+    pub plugin_service: Option<String>,
 }
 
 impl ServerConn {
@@ -30,7 +32,9 @@ impl ServerConn {
             MusicService::YtMusic
             | MusicService::AppleMusic
             | MusicService::Spotify
-            | MusicService::Clippsly => server.user_id.clone().unwrap_or_default(),
+            | MusicService::Clippsly
+            // A plugin's service may need no account; its plugin says so on use.
+            | MusicService::Plugin => server.user_id.clone().unwrap_or_default(),
             _ => server.user_id.clone()?,
         };
         Some(Self {
@@ -47,6 +51,7 @@ impl ServerConn {
                 .as_deref()
                 .map(|id| sources.folders_for(id))
                 .unwrap_or_default(),
+            plugin_service: server.plugin_service.clone(),
         })
     }
 }

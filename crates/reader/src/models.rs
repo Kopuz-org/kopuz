@@ -145,6 +145,7 @@ fn service_prefix(s: config::MusicService) -> &'static str {
         config::MusicService::Nextcloud => "nextcloud",
         config::MusicService::Clippsly => "clippsly",
         config::MusicService::Smb => "smb",
+        config::MusicService::Plugin => "plugin",
     }
 }
 
@@ -356,9 +357,10 @@ impl CoverRef {
             // Their item identity is irrelevant to cover resolution.
             // Nextcloud too: an img tag won't send the Basic auth its previews
             // need, so the sync caches art to disk and the ref carries a path.
-            "ytmusic" | "soundcloud" | "applemusic" | "nextcloud" | "clippsly" | "smb" => {
-                value.map_or(Self::None, Self::parse)
-            }
+            // A plugin's covers are self-contained too: it cannot rely on the
+            // host knowing how to sign a URL for a service the host never saw.
+            "ytmusic" | "soundcloud" | "applemusic" | "nextcloud" | "clippsly" | "smb"
+            | "plugin" => value.map_or(Self::None, Self::parse),
             _ => Self::None,
         }
     }
@@ -395,7 +397,8 @@ impl CoverRef {
             | MusicService::Spotify
             | MusicService::Nextcloud
             | MusicService::Clippsly
-            | MusicService::Smb => cover.map_or(Self::None, Self::parse),
+            | MusicService::Smb
+            | MusicService::Plugin => cover.map_or(Self::None, Self::parse),
         }
     }
 
@@ -448,7 +451,8 @@ impl CoverRef {
             | MusicService::Spotify
             | MusicService::Nextcloud
             | MusicService::Clippsly
-            | MusicService::Smb => track.cover.as_deref().map_or(Self::None, Self::parse),
+            | MusicService::Smb
+            | MusicService::Plugin => track.cover.as_deref().map_or(Self::None, Self::parse),
         }
     }
 

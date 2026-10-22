@@ -1,0 +1,14 @@
+id = "soundcloud"
+name = "SoundCloud"
+version = "0.1.0"
+api = "0.1"
+description = "SoundCloud's catalog, and your likes and playlists when signed in."
+
+[permissions]
+# The web player's page and bundles (for its client id), its API, and the
+# CDN that stream URLs resolve on.
+network = ["soundcloud.com", "*.soundcloud.com", "*.sndcdn.com"]
+
+[[service]]
+id = "soundcloud"
+capabilities = { sync = true, favorites-sync = "paginated" }

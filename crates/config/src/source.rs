@@ -137,6 +137,9 @@ pub enum MusicService {
     Nextcloud,
     Clippsly,
     Smb,
+    /// A service a plugin declares itself, which this enum cannot name. The
+    /// server's `plugin_service` says which.
+    Plugin,
 }
 
 impl MusicService {
@@ -167,6 +170,7 @@ impl MusicService {
             Self::Nextcloud => "nextcloud",
             Self::Clippsly => "clippsly",
             Self::Smb => "smb",
+            Self::Plugin => "plugin",
         }
     }
 
@@ -186,6 +190,7 @@ impl MusicService {
             Self::Nextcloud => "Nextcloud",
             Self::Clippsly => "Clippsly",
             Self::Smb => "SMB / NAS",
+            Self::Plugin => "Plugin",
         }
     }
 
@@ -231,6 +236,16 @@ pub struct MusicServer {
     /// controlling track/album title and lyrics language.
     #[serde(default = "default_apple_music_language")]
     pub apple_music_language: String,
+    /// For `MusicService::Plugin`: the slug of the service the plugin serves.
+    #[serde(default)]
+    pub plugin_service: Option<String>,
+}
+
+fn service_id(service: MusicService, plugin_service: Option<&str>) -> &str {
+    match (service, plugin_service) {
+        (MusicService::Plugin, Some(slug)) => slug,
+        (service, _) => service.id(),
+    }
 }
 
 fn default_apple_music_storefront() -> String {
@@ -260,11 +275,18 @@ impl MusicServer {
             account: None,
             apple_music_storefront: "us".to_string(),
             apple_music_language: "en".to_string(),
+            plugin_service: None,
         }
     }
 
     pub fn yt_browser(&self) -> Option<Browser> {
         self.yt_browser
+    }
+
+    /// The slug of the service this server speaks: its plugin's own for a
+    /// plugin service, the built-in one's otherwise.
+    pub fn service_id(&self) -> &str {
+        service_id(self.service, self.plugin_service.as_deref())
     }
 
     /// An anonymous source sends no cookies even if an old sign-in's token is stored.
@@ -291,6 +313,7 @@ impl Default for MusicServer {
             account: None,
             apple_music_storefront: "us".to_string(),
             apple_music_language: "en".to_string(),
+            plugin_service: None,
         }
     }
 }
@@ -432,6 +455,9 @@ pub struct SavedServer {
     /// Persisted Apple Music language (e.g. "en", "ja", "de").
     #[serde(default = "default_apple_music_language")]
     pub apple_music_language: String,
+    /// Persisted plugin service slug, for `MusicService::Plugin`.
+    #[serde(default)]
+    pub plugin_service: Option<String>,
 }
 
 impl SavedServer {
@@ -447,7 +473,13 @@ impl SavedServer {
             account: None,
             apple_music_storefront: "us".to_string(),
             apple_music_language: "en".to_string(),
+            plugin_service: None,
         }
+    }
+
+    /// See [`MusicServer::service_id`].
+    pub fn service_id(&self) -> &str {
+        service_id(self.service, self.plugin_service.as_deref())
     }
 
     pub fn from_music_server(server: &MusicServer) -> Self {
@@ -465,6 +497,7 @@ impl SavedServer {
             account: server.account.clone(),
             apple_music_storefront: server.apple_music_storefront.clone(),
             apple_music_language: server.apple_music_language.clone(),
+            plugin_service: server.plugin_service.clone(),
         }
     }
 

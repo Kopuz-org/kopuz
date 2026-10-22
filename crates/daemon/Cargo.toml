@@ -29,6 +29,7 @@ percent-encoding = { workspace = true }
 base64 = { workspace = true }
 config = { workspace = true }
 player = { workspace = true }
+plugin-host = { workspace = true }
 radio = { workspace = true }
 reader = { workspace = true }
 server = { workspace = true }
