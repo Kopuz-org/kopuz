@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* Tailwind also scans the whole repo; the GPUI frontend and its vendored crate hold no Dioxus classes. */
+@source not "./apps/gpui";
+@source not "./vendor";
 @source "./apps/kopuz/kopuz/**/*.rs";
 @source "./apps/kopuz/components/**/*.rs";
 @source "./apps/kopuz/pages/**/*.rs";
