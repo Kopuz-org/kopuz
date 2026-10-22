@@ -89,11 +89,15 @@ impl CatalogService {
         })
     }
 
-    fn source(&self) -> server::source::ActiveSource {
-        Arc::from(server::source::active(
+    /// The active source to read the catalog from; offline mode on a source across the internet refuses every such read.
+    fn source(&self) -> Result<server::source::ActiveSource, ApiError> {
+        if self.library.offline_reads() {
+            return Err(offline_refusal());
+        }
+        Ok(Arc::from(server::source::active(
             self.db.clone(),
             &self.session.sources(),
-        ))
+        )))
     }
 
     /// The image for a tile, if one was remembered from a page this session
@@ -313,7 +317,7 @@ impl CatalogService {
     }
 
     pub async fn catalog(&self, continuation: Option<&str>) -> Result<CatalogPage, ApiError> {
-        let source = self.source();
+        let source = self.source()?;
         let home = match continuation {
             Some(token) => source.discover_continuation(token).await,
             None => source.discover_home().await,
@@ -328,8 +332,11 @@ impl CatalogService {
                 "a catalog entity is opened by its id",
             ));
         }
+        if request.kind == CatalogItemKind::Artist && self.library.offline_reads() {
+            return self.offline_artist(&request.id).await;
+        }
         let offline = self.session.offline();
-        let source = self.source();
+        let source = self.source()?;
         match request.kind {
             CatalogItemKind::Album => {
                 let album = self.remote_album(&*source, &request.id).await?;
@@ -509,7 +516,7 @@ impl CatalogService {
     }
 
     pub async fn album_tracks(&self, id: &str) -> Result<Vec<reader::Track>, ApiError> {
-        let tracks = self.remote_album(&*self.source(), id).await?.tracks;
+        let tracks = self.remote_album(&*self.source()?, id).await?.tracks;
         match tracks.is_empty() {
             true => Err(ApiError::not_found("that album has no tracks to play")),
             false => Ok(tracks),
@@ -519,7 +526,7 @@ impl CatalogService {
     /// Pages repeat rows at their seams, so a page with nothing new ends the
     /// walk even when it hands out another token.
     pub async fn playlist_tracks(&self, id: &str) -> Result<Vec<reader::Track>, ApiError> {
-        let source = self.source();
+        let source = self.source()?;
         let mut seen = std::collections::HashSet::new();
         let mut tracks = Vec::new();
         let mut cursor = None;
@@ -544,7 +551,7 @@ impl CatalogService {
 
     /// Looks up a key no listing this session served.
     pub async fn track(&self, key: &str) -> Result<Option<reader::Track>, ApiError> {
-        let source = self.source();
+        let source = self.source()?;
         let Some(mut track) = source.fetch_track(key).await.map_err(source_error)? else {
             return Ok(None);
         };
@@ -604,7 +611,7 @@ impl CatalogService {
         &self,
         request: api::SearchRequest,
     ) -> Result<api::SearchResults, ApiError> {
-        let source = self.source();
+        let source = self.source()?;
         // A continuation page is parsed as its filter's kind, so it travels with it.
         let filter = request
             .filter
@@ -627,7 +634,7 @@ impl CatalogService {
         query: &str,
     ) -> Result<Vec<api::SearchSuggestion>, ApiError> {
         use server::ytmusic::browse::search::Suggestion;
-        let source = self.source();
+        let source = self.source()?;
         let suggestions = source
             .search_suggestions(query)
             .await
@@ -692,12 +699,21 @@ impl CatalogService {
         })
     }
 
+    /// In offline mode an artist is the library's page of the songs with a copy here, and one the library does not file has none.
+    async fn offline_artist(&self, key: &str) -> Result<CatalogDetail, ApiError> {
+        let source = self.session.sources().active.clone();
+        match crate::artist_row::find(&self.db, &source, key).await? {
+            Some(row) => self.library_artist(&row.key).await,
+            None => Err(offline_refusal()),
+        }
+    }
+
     pub async fn follow(&self, artist_ref: &str, follow: bool) -> Result<(), ApiError> {
         if artist_ref.trim().is_empty() {
             return Err(ApiError::invalid_input("no artist to follow"));
         }
         // Follow state is read fresh from the source, so no table to invalidate.
-        let source = self.source();
+        let source = self.source()?;
         if !source.capabilities().library_actions.follow {
             return Err(ApiError::unsupported("following"));
         }
@@ -711,7 +727,7 @@ impl CatalogService {
         if item_ref.trim().is_empty() {
             return Err(ApiError::invalid_input("nothing to save"));
         }
-        let source = self.source();
+        let source = self.source()?;
         if !source.capabilities().library_actions.save {
             return Err(ApiError::unsupported("saving to the library"));
         }
@@ -726,7 +742,7 @@ impl CatalogService {
         if token.trim().is_empty() {
             return Err(ApiError::invalid_input("no history token"));
         }
-        let source = self.source();
+        let source = self.source()?;
         if !source.capabilities().library_actions.remove_from_history {
             return Err(ApiError::unsupported("history removal"));
         }
@@ -743,7 +759,7 @@ impl CatalogService {
     /// Sources return the seed somewhere in the list, or not at all; a caller
     /// that asked to start from this track means it should play first.
     pub async fn track_radio(&self, key: &str) -> Result<RadioPage, ApiError> {
-        let source = self.source();
+        let source = self.source()?;
         let mut page = source.start_radio(key).await.map_err(source_error)?;
         crate::wire::listed_by(source.source(), &mut page.tracks);
         self.library.register_transient(&page.tracks);
@@ -756,7 +772,7 @@ impl CatalogService {
     }
 
     pub async fn playlist_radio(&self, id: &str) -> Result<RadioPage, ApiError> {
-        let source = self.source();
+        let source = self.source()?;
         let mut page = source
             .start_playlist_radio(id)
             .await
@@ -767,7 +783,7 @@ impl CatalogService {
     }
 
     pub async fn more_radio(&self, cursor: &str) -> Result<RadioPage, ApiError> {
-        let source = self.source();
+        let source = self.source()?;
         let mut page = source.more_radio(cursor).await.map_err(source_error)?;
         crate::wire::listed_by(source.source(), &mut page.tracks);
         self.library.register_transient(&page.tracks);
@@ -800,7 +816,7 @@ impl CatalogService {
     }
 
     async fn for_you_mix(&self, fresh: bool) -> Result<ForYou, ApiError> {
-        let source = self.source();
+        let source = self.source()?;
         let track_radio = source.capabilities().radio.track;
         let likes = match track_radio {
             true => source.favorites().await.map_err(source_error)?,
@@ -846,7 +862,7 @@ impl CatalogService {
     }
 
     async fn discover(&self, fresh: bool) -> Result<DiscoverRows, ApiError> {
-        let source = self.source();
+        let source = self.source()?;
         let build = held_build(&self.discover, source.source(), fresh);
         let built = build
             .get_or_init(|| pick_discover(source.as_ref(), &self.db, unix_now()))
@@ -890,6 +906,14 @@ impl CatalogService {
         crate::wire::listed_by(source.source(), &mut page.tracks);
         Ok(page.tracks)
     }
+}
+
+fn offline_refusal() -> ApiError {
+    ApiError::new(
+        api::ErrorCode::SourceUnreachable,
+        "offline mode is on, and this needs the source across the internet",
+    )
+    .because(api::ErrorReason::OfflineMode)
 }
 
 fn for_you_unavailable(track_radio: bool, likes: &[String]) -> Option<ForYouUnavailable> {

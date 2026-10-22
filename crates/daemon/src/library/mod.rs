@@ -1200,7 +1200,8 @@ mod tests {
                 ..Default::default()
             },
         );
-        library.attach_session(session);
+        library.attach_session(session.clone());
+        let catalog = crate::CatalogService::new(library.db.clone(), session, library.clone());
         let titles = async |filter: TrackFilter| -> Vec<String> {
             let page = library.tracks(filter, Page::default()).await.expect("page");
             assert_eq!(page.total as usize, page.items.len());
@@ -1254,5 +1255,34 @@ mod tests {
             .await
             .expect("by key");
         assert_eq!(keyed.len(), 1);
+
+        let refused = catalog.catalog(None).await.expect_err("no live home");
+        assert_eq!(refused.reason, Some(api::ErrorReason::OfflineMode));
+        let request = |kind, id: &str| api::CatalogDetailRequest::new(kind, id.to_string());
+        let refused = catalog
+            .detail(request(api::CatalogItemKind::Album, "MPREalbum"))
+            .await
+            .expect_err("no live album");
+        assert_eq!(refused.reason, Some(api::ErrorReason::OfflineMode));
+        let artist = library
+            .artists(api::ArtistQuery::default(), Page::default())
+            .await
+            .expect("artists")
+            .artists
+            .into_iter()
+            .next()
+            .expect("an artist with a copy");
+        let page = catalog
+            .detail(request(api::CatalogItemKind::Artist, &artist.key))
+            .await
+            .expect("the library's artist page");
+        let mut shown: Vec<String> = page.tracks.into_iter().map(|row| row.title).collect();
+        shown.sort();
+        assert_eq!(shown, ["remote downloaded", "remote kept"]);
+        let refused = catalog
+            .detail(request(api::CatalogItemKind::Artist, "UCnowhere"))
+            .await
+            .expect_err("an artist the library does not file");
+        assert_eq!(refused.reason, Some(api::ErrorReason::OfflineMode));
     }
 }
