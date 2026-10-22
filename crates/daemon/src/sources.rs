@@ -369,6 +369,12 @@ impl SourceService {
             .set_active_source(Some(self.build_active(&held)));
     }
 
+    /// A plugin was installed or removed: rebuild the active source, which
+    /// may be one it serves.
+    pub async fn plugins_changed(&self) {
+        self.refresh_active().await;
+    }
+
     /// The last probe answer for `id`, if it has been probed.
     pub fn status(&self, id: &str) -> Option<SourceState> {
         let status = self.status.lock().ok()?;

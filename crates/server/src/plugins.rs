@@ -114,6 +114,16 @@ pub(crate) fn session(connection: wit::Connection) -> Option<Arc<Session>> {
     Some(session)
 }
 
+/// The ids of the plugins shipped inside kopuz, which the marketplace may not
+/// offer or replace.
+pub fn official_ids() -> Vec<String> {
+    bundled_plugins::all()
+        .iter()
+        .filter_map(|bundled| plugin_host::manifest::Manifest::parse(bundled.manifest).ok())
+        .map(|manifest| manifest.id)
+        .collect()
+}
+
 /// A service a plugin adds of its own, as its manifest describes it.
 #[derive(Debug, Clone)]
 pub struct OwnService {

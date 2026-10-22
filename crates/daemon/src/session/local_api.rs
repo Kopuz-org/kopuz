@@ -24,6 +24,7 @@ pub struct LocalApi {
     pub(super) downloader: Option<Arc<crate::url_download::UrlDownloadService>>,
     pub(super) spotify: Option<Arc<crate::spotify::SpotifySink>>,
     pub(super) video: Option<Arc<crate::video::VideoService>>,
+    pub(super) plugins: Arc<crate::plugins::PluginService>,
 }
 
 impl LocalApi {
@@ -74,6 +75,7 @@ impl LocalApi {
             downloader: None,
             spotify: None,
             video: None,
+            plugins: Arc::new(crate::plugins::PluginService::default()),
         }
     }
 
@@ -761,6 +763,36 @@ impl api::PrefsApi for LocalApi {
         entries: Vec<api::PrefEntry>,
     ) -> Result<(), ApiError> {
         self.prefs()?.set(&frontend, entries).await
+    }
+}
+
+#[async_trait::async_trait]
+impl api::PluginApi for LocalApi {
+    async fn plugins(&self) -> Result<api::PluginCatalog, ApiError> {
+        Ok(self.plugins.catalog().await)
+    }
+
+    async fn install_plugin(&self, id: String) -> Result<api::PluginInfo, ApiError> {
+        let info = self.plugins.install(&id).await?;
+        self.plugins_changed().await;
+        Ok(info)
+    }
+
+    async fn uninstall_plugin(&self, id: String) -> Result<(), ApiError> {
+        self.plugins.uninstall(&id).await?;
+        self.plugins_changed().await;
+        Ok(())
+    }
+}
+
+impl LocalApi {
+    /// The services offered changed, and the active source may be one a
+    /// plugin serves, so rebuild it on the plugin now loaded.
+    async fn plugins_changed(&self) {
+        if let Some(sources) = &self.sources {
+            sources.plugins_changed().await;
+        }
+        self.session.invalidate(api::Table::Servers);
     }
 }
 

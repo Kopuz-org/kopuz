@@ -17,6 +17,7 @@ mod library;
 mod mutations;
 mod player;
 mod playlists;
+mod plugins;
 mod prefs;
 mod queue;
 mod radio;
@@ -54,6 +55,7 @@ pub use playlists::{
     PlaylistCatalog, PlaylistEdit, PlaylistFolderInfo, PlaylistInfo, PlaylistPrivacy,
     PlaylistReorder,
 };
+pub use plugins::{PluginCatalog, PluginInfo, PluginOrigin};
 pub use prefs::{
     FrontendPref, MAX_PREF_ENTRIES_PER_CALL, MAX_PREF_FRONTEND_BYTES, MAX_PREF_KEY_BYTES,
     MAX_PREF_TOTAL_BYTES, MAX_PREF_VALUE_BYTES, PrefEntry,
@@ -655,6 +657,22 @@ pub trait PrefsApi: Send + Sync {
     ) -> Result<(), ApiError>;
 }
 
+/// The plugins the daemon runs, and the community marketplace.
+#[async_trait::async_trait]
+pub trait PluginApi: Send + Sync {
+    /// Installed plugins and what the marketplace offers. A marketplace that
+    /// cannot be reached leaves the installed ones listed and says why.
+    async fn plugins(&self) -> Result<PluginCatalog, ApiError>;
+
+    /// Download, verify and install the marketplace's version of a community
+    /// plugin, replacing the installed one. Its services are offered at once.
+    async fn install_plugin(&self, id: String) -> Result<PluginInfo, ApiError>;
+
+    /// Remove an installed community plugin. Sources of its services stay,
+    /// reading what they cached, until it is installed again.
+    async fn uninstall_plugin(&self, id: String) -> Result<(), ApiError>;
+}
+
 /// Subscribe to the state stream. Every subscriber gets every event from the
 /// moment of subscription; a snapshot fetch plus this stream is the complete
 /// synchronization story.
@@ -676,6 +694,7 @@ pub trait KopuzApi:
     + SourceApi
     + ConfigApi
     + PrefsApi
+    + PluginApi
     + EventApi
     + Send
     + Sync
@@ -691,6 +710,7 @@ impl<T> KopuzApi for T where
         + SourceApi
         + ConfigApi
         + PrefsApi
+        + PluginApi
         + EventApi
         + Send
         + Sync
@@ -703,7 +723,7 @@ impl<T> KopuzApi for T where
 pub mod prelude {
     pub use super::{
         ArtworkApi, ConfigApi, EventApi, JobApi, KopuzApi, LibraryApi, PlayerApi, PlaylistApi,
-        PrefsApi, SourceApi,
+        PluginApi, PrefsApi, SourceApi,
     };
 }
 

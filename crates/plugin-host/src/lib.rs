@@ -12,6 +12,7 @@
 
 mod host;
 pub mod manifest;
+pub mod market;
 mod plugin;
 mod registry;
 mod session;

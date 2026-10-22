@@ -8,7 +8,7 @@ use index::SettingsIndex;
 use navigation::{SettingsCategory, SettingsNavigation};
 use sections::{
     ConnectivitySection, DownloadsSection, EqualizerSection, MetadataSection, OfflineCacheSection,
-    PlayerSection,
+    PlayerSection, PluginsSection,
 };
 
 use components::settings_items::{
@@ -903,6 +903,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                 }
                 if active_category() == SettingsCategory::Library {
                     div { class: "mt-6", OfflineCacheSection { settings } }
+                    div { class: "mt-6", PluginsSection {} }
                 }
                 if active_category() == SettingsCategory::Connectivity {
                     ConnectivitySection {}

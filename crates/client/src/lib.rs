@@ -871,6 +871,35 @@ impl api::ConfigApi for GrpcApi {
 }
 
 #[async_trait::async_trait]
+impl api::PluginApi for GrpcApi {
+    async fn plugins(&self) -> Result<api::PluginCatalog, ApiError> {
+        let catalog = self
+            .client()
+            .get_plugins(Request::new(proto::GetPluginsRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::plugin_catalog_from_proto(catalog.get_ref()))
+    }
+
+    async fn install_plugin(&self, id: String) -> Result<api::PluginInfo, ApiError> {
+        let info = self
+            .client()
+            .install_plugin(Request::new(proto::PluginId { id }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::plugin_info_from_proto(info.get_ref()))
+    }
+
+    async fn uninstall_plugin(&self, id: String) -> Result<(), ApiError> {
+        self.client()
+            .uninstall_plugin(Request::new(proto::PluginId { id }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
 impl api::PrefsApi for GrpcApi {
     async fn frontend_prefs(&self, frontend: String) -> Result<Vec<api::FrontendPref>, ApiError> {
         let list = self
