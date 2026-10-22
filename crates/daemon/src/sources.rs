@@ -566,7 +566,7 @@ impl SourceService {
             let (target, _) = self.resolve(id).await?;
             let url = target.server.as_ref().map(|server| server.url.as_str());
             if !network::is_local(&target.active, url)
-                && self.check_network(false).await == Verdict::Down
+                && self.check_network_spaced(network::NUDGE_SPACING).await == Verdict::Down
             {
                 return Err(ApiError::new(
                     ErrorCode::SourceUnreachable,
@@ -1541,7 +1541,6 @@ impl SourceService {
         let seen = self.recovery.epoch();
         let result = once_more(attempt, auth_expired, || self.recover_active(seen)).await;
         if self.network_status().internet_down {
-            // Someone is using the app, which is a cue to see whether the internet is back.
             self.check_network_soon();
         } else if matches!(&result, Err(error) if error.code == ErrorCode::SourceUnreachable)
             && let Some(id) = self.snapshot().await.active.server_id()
@@ -1589,12 +1588,16 @@ impl SourceService {
         });
     }
 
-    fn check_network_soon(&self) {
+    /// Someone used the app while the internet is down, which is a cue to look again now rather than at the next scheduled recheck.
+    pub fn check_network_soon(&self) {
+        if !self.network_status().internet_down {
+            return;
+        }
         let Some(me) = self.me.upgrade() else {
             return;
         };
         self.runtime.spawn(async move {
-            me.check_network(false).await;
+            me.check_network_spaced(network::NUDGE_SPACING).await;
         });
     }
 
@@ -1613,6 +1616,15 @@ impl SourceService {
 
     /// One spaced, shared connectivity check and what follows from it; `fresh` skips the spacing, as a scheduled recheck does.
     async fn check_network(&self, fresh: bool) -> Verdict {
+        let spacing = match fresh {
+            true => Duration::ZERO,
+            false => network::CHECK_SPACING,
+        };
+        self.check_network_spaced(spacing).await
+    }
+
+    /// The check and what follows from it, joining one begun within `spacing`.
+    async fn check_network_spaced(&self, spacing: Duration) -> Verdict {
         let urls = self.current().await.system.connectivity_check_urls;
         if urls.is_empty() {
             self.internet_came_back();
@@ -1621,7 +1633,7 @@ impl SourceService {
         let upstream = self.upstream.clone();
         let verdict = self
             .checker
-            .run(fresh, || async move { upstream.internet(&urls).await })
+            .run(spacing, || async move { upstream.internet(&urls).await })
             .await;
         match verdict {
             Verdict::Down => self.internet_went_down().await,
@@ -2875,6 +2887,37 @@ mod tests {
                 fixture.sources.set_offline(false).offline_mode,
                 OfflineMode::Off
             );
+        }
+
+        #[tokio::test]
+        async fn someone_using_the_app_while_it_is_down_brings_the_recheck_forward() {
+            let upstream = scripted(&[Verdict::Down, Verdict::Up]);
+            let fixture = with_local_music(upstream.clone(), config::Settings::default()).await;
+            fixture.sources.check_network(false).await;
+
+            fixture.sources.check_network_soon();
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            assert_eq!(asks(&upstream), 1, "a check this recent still stands");
+
+            tokio::time::sleep(network::NUDGE_SPACING).await;
+            let mut events = fixture.sources.session.subscribe();
+            fixture.sources.check_network_soon();
+            tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    if let Ok(ApiEvent::NetworkStatus(status)) = events.recv().await
+                        && !status.internet_down
+                    {
+                        break;
+                    }
+                }
+            })
+            .await
+            .expect("the internet is back without waiting for the scheduled recheck");
+            assert_eq!(asks(&upstream), 2);
+
+            fixture.sources.check_network_soon();
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            assert_eq!(asks(&upstream), 2, "with the internet up nothing is asked");
         }
 
         #[tokio::test]

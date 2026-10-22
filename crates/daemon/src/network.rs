@@ -11,6 +11,8 @@ use tokio::time::Instant;
 
 /// A check started by a failure waits this long after the last one began; a check already running is joined instead.
 pub const CHECK_SPACING: Duration = Duration::from_secs(30);
+/// While the internet is down, someone using the app asks again at most this often.
+pub const NUDGE_SPACING: Duration = Duration::from_secs(5);
 /// How long one address may take to answer.
 pub const CHECK_TIMEOUT: Duration = Duration::from_secs(3);
 /// While the internet is down, how long to wait before each recheck; the last one repeats.
@@ -143,8 +145,8 @@ pub struct Checker {
 }
 
 impl Checker {
-    /// The verdict of the check running now, of one begun within [`CHECK_SPACING`] unless `fresh`, or of `start` run anew.
-    pub async fn run<F, Fut>(&self, fresh: bool, start: F) -> Verdict
+    /// The verdict of the check running now, of one begun within `spacing`, or of `start` run anew.
+    pub async fn run<F, Fut>(&self, spacing: Duration, start: F) -> Verdict
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = Verdict>,
@@ -152,9 +154,7 @@ impl Checker {
         let running = {
             let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
             match &*last {
-                Some((began, running))
-                    if !running.initialized() || (!fresh && began.elapsed() < CHECK_SPACING) =>
-                {
+                Some((began, running)) if !running.initialized() || began.elapsed() < spacing => {
                     running.clone()
                 }
                 _ => {
@@ -301,12 +301,12 @@ mod tests {
 
     async fn counted(
         checker: &Checker,
-        fresh: bool,
+        spacing: Duration,
         runs: &AtomicUsize,
         verdict: Verdict,
     ) -> Verdict {
         checker
-            .run(fresh, || async {
+            .run(spacing, || async {
                 runs.fetch_add(1, Ordering::SeqCst);
                 tokio::task::yield_now().await;
                 verdict
@@ -319,32 +319,49 @@ mod tests {
         let checker = Checker::default();
         let runs = AtomicUsize::new(0);
 
+        let spaced = CHECK_SPACING;
         let (a, b) = tokio::join!(
-            counted(&checker, false, &runs, Verdict::Down),
-            counted(&checker, false, &runs, Verdict::Up)
+            counted(&checker, spaced, &runs, Verdict::Down),
+            counted(&checker, spaced, &runs, Verdict::Up)
         );
         assert_eq!((a, b), (Verdict::Down, Verdict::Down), "one shared check");
         assert_eq!(runs.load(Ordering::SeqCst), 1);
 
         tokio::time::advance(CHECK_SPACING - Duration::from_secs(1)).await;
         assert_eq!(
-            counted(&checker, false, &runs, Verdict::Up).await,
+            counted(&checker, spaced, &runs, Verdict::Up).await,
             Verdict::Down
         );
         assert_eq!(runs.load(Ordering::SeqCst), 1, "too soon for another");
 
         tokio::time::advance(Duration::from_secs(1)).await;
         assert_eq!(
-            counted(&checker, false, &runs, Verdict::Up).await,
+            counted(&checker, spaced, &runs, Verdict::Up).await,
             Verdict::Up
         );
         assert_eq!(runs.load(Ordering::SeqCst), 2);
 
         assert_eq!(
-            counted(&checker, true, &runs, Verdict::Down).await,
+            counted(&checker, Duration::ZERO, &runs, Verdict::Down).await,
             Verdict::Down
         );
         assert_eq!(runs.load(Ordering::SeqCst), 3, "a recheck does not wait");
+
+        assert_eq!(
+            counted(&checker, NUDGE_SPACING, &runs, Verdict::Up).await,
+            Verdict::Down,
+            "someone acting right after a check joins it"
+        );
+        tokio::time::advance(NUDGE_SPACING).await;
+        assert_eq!(
+            counted(&checker, NUDGE_SPACING, &runs, Verdict::Up).await,
+            Verdict::Up
+        );
+        assert_eq!(
+            runs.load(Ordering::SeqCst),
+            4,
+            "and asks again a few seconds on"
+        );
     }
 
     #[test]

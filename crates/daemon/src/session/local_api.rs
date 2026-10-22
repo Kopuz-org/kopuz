@@ -202,6 +202,13 @@ impl LocalApi {
         }
     }
 
+    /// Someone is using the app: while the internet is down, see now whether it is back.
+    fn acted(&self) {
+        if let Some(sources) = &self.sources {
+            sources.check_network_soon();
+        }
+    }
+
     fn sources(&self) -> Result<&crate::sources::SourceService, ApiError> {
         self.sources
             .as_deref()
@@ -362,6 +369,7 @@ impl api::PlayerApi for LocalApi {
     }
 
     async fn player_command(&self, command: PlayerCommand) -> Result<CommandAck, ApiError> {
+        self.acted();
         self.session.player_command(command).await
     }
 
@@ -390,10 +398,12 @@ impl api::PlayerApi for LocalApi {
     }
 
     async fn set_queue(&self, request: SetQueueRequest) -> Result<CommandAck, ApiError> {
+        self.acted();
         self.session.set_queue(request).await
     }
 
     async fn queue_edit(&self, edit: QueueEdit) -> Result<CommandAck, ApiError> {
+        self.acted();
         self.session.queue_edit(edit).await
     }
 
@@ -431,6 +441,7 @@ impl api::LibraryApi for LocalApi {
         filter: api::TrackFilter,
         page: Page,
     ) -> Result<api::TrackPage, ApiError> {
+        self.acted();
         match &self.library {
             Some(library) => library.tracks(filter, page).await,
             None => Err(ApiError::unsupported(
@@ -444,6 +455,7 @@ impl api::LibraryApi for LocalApi {
     }
 
     async fn albums(&self, query: api::AlbumQuery, page: Page) -> Result<api::AlbumPage, ApiError> {
+        self.acted();
         self.library()?.albums(query, page).await
     }
 
@@ -464,6 +476,7 @@ impl api::LibraryApi for LocalApi {
         query: api::ArtistQuery,
         page: Page,
     ) -> Result<api::ArtistPage, ApiError> {
+        self.acted();
         self.library()?.artists(query, page).await
     }
 
@@ -558,6 +571,7 @@ impl api::LibraryApi for LocalApi {
     }
 
     async fn artist(&self, artist: String) -> Result<api::ArtistDetail, ApiError> {
+        self.acted();
         self.library()?.artist(&artist).await
     }
 
@@ -582,6 +596,7 @@ impl api::LibraryApi for LocalApi {
     }
 
     async fn search(&self, request: api::SearchRequest) -> Result<api::SearchResults, ApiError> {
+        self.acted();
         match (&request.filter, &request.continuation) {
             (None, None) => self.library()?.search(&request.query).await,
             _ => self.catalog()?.search(request).await,
