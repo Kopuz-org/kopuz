@@ -54,6 +54,8 @@ const SWITCHER_CSS: &str = r#"
 .ss-meta{flex:1;min-width:0}
 .ss-rname{display:block;font-size:14px;font-weight:500;letter-spacing:-.01em;color:color-mix(in oklab,var(--ss-fg) 85%,transparent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ss-rsub{display:block;font-size:11px;color:color-mix(in oklab,var(--ss-fg) 45%,transparent);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ss-row:disabled{cursor:not-allowed;opacity:.45}
+.ss-row:disabled:hover{background:none}
 .ss-row.ss-act{background:color-mix(in oklab,var(--ss-fg) 7%,transparent)}
 .ss-row.ss-act .ss-rname{color:var(--ss-fg);font-weight:600}
 .ss-check{font-size:11px;color:var(--accent)}
@@ -63,26 +65,39 @@ const SWITCHER_CSS: &str = r#"
 .ss-foot button .ar{margin-left:auto;font-size:9px}
 "#;
 
-/// One selectable source: id, label, icon, accent colour, mono subline.
-///
+/// One source row: id, label, icon, accent colour, mono subline, and whether it can be picked.
+struct Entry {
+    id: String,
+    label: String,
+    icon: api::Icon,
+    accent: String,
+    sub: String,
+    available: bool,
+}
+
 /// The rows are the daemon's list, and so are the marks: what a service is
-/// called and how it is drawn come with it.
-fn entries(sources: &[api::SourceInfo]) -> Vec<(String, String, api::Icon, String, String)> {
+/// called and how it is drawn come with it. With the internet down, a source
+/// that needs it cannot be picked, and its subline says why.
+fn entries(sources: &[api::SourceInfo], internet_down: bool) -> Vec<Entry> {
     sources
         .iter()
         .map(|source| {
-            let sub = if source.needs_network {
+            let available = source.active || !internet_down || source.works_offline;
+            let sub = if !available {
+                i18n::t("source_needs_internet").to_string()
+            } else if source.needs_network {
                 crate::forms::text(&source.service.name).to_uppercase()
             } else {
                 i18n::t("source_on_this_device").to_string()
             };
-            (
-                source.id.clone(),
-                source.name.clone(),
-                source.service.icon.clone(),
-                source.service.accent.clone(),
+            Entry {
+                id: source.id.clone(),
+                label: source.name.clone(),
+                icon: source.service.icon.clone(),
+                accent: source.service.accent.clone(),
                 sub,
-            )
+                available,
+            }
         })
         .collect()
 }
@@ -105,15 +120,24 @@ pub fn SourceSwitcher(
         .find(|source| source.active)
         .map(|source| source.id.clone())
         .unwrap_or_default();
-    let sources = entries(&rows);
+    let internet_down = hooks::sources::use_shared_network_status()
+        .read()
+        .internet_down;
+    let sources = entries(&rows, internet_down);
     let count = sources.len();
     // Follow the active theme palette in both UI styles (the chrome does too), so
     // the switcher harmonises with the theme instead of a fixed dark.
     let surface_vars = "--ss-surface:var(--color-neutral-900);--ss-fg:var(--color-white);";
     let (active_label, active_icon, active_accent) = sources
         .iter()
-        .find(|(s, ..)| *s == active)
-        .map(|(_, l, i, a, _)| (l.clone(), i.clone(), a.clone()))
+        .find(|entry| entry.id == active)
+        .map(|entry| {
+            (
+                entry.label.clone(),
+                entry.icon.clone(),
+                entry.accent.clone(),
+            )
+        })
         .unwrap_or_else(|| {
             (
                 i18n::t("sources").to_string(),
@@ -162,7 +186,7 @@ pub fn SourceSwitcher(
                         span { class: "c", "{count}" }
                     }
                     div { class: "ss-list",
-                        for (src , label , icon , accent , sub) in sources.into_iter() {
+                        for Entry { id: src, label, icon, accent, sub, available } in sources.into_iter() {
                             {
                                 let is_active = src == active;
                                 let switch = switch.clone();
@@ -171,6 +195,8 @@ pub fn SourceSwitcher(
                                         key: "{src}",
                                         class: if is_active { "ss-row ss-act" } else { "ss-row" },
                                         style: "--accent:{accent};",
+                                        disabled: !available,
+                                        title: if available { None } else { Some(i18n::t("error_network_down").to_string()) },
                                         onclick: move |_| {
                                             switch(src.clone());
                                             open.set(false);
