@@ -15,6 +15,7 @@ pub fn plugin_info_to_proto(value: &api::PluginInfo) -> PluginInfo {
         available_version: value.available_version.clone(),
         services: value.services.clone(),
         network: value.network.clone(),
+        sandboxed: value.sandboxed,
     }
 }
 
@@ -34,6 +35,7 @@ pub fn plugin_info_from_proto(value: &PluginInfo) -> api::PluginInfo {
         available_version: value.available_version.clone(),
         services: value.services.clone(),
         network: value.network.clone(),
+        sandboxed: value.sandboxed,
     }
 }
 
@@ -75,6 +77,7 @@ mod tests {
                     author: "someone".into(),
                     homepage: Some("https://example.test".into()),
                     origin: api::PluginOrigin::Community,
+                    sandboxed: true,
                     installed_version: None,
                     available_version: Some("0.2.0".into()),
                     services: vec!["bandcamp".into()],

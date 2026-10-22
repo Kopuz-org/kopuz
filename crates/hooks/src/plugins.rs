@@ -1,12 +1,11 @@
-//! The plugins the daemon runs, and installing community ones from its
-//! marketplace. The daemon fetches, verifies and installs; this only asks.
+//! Plugins and the marketplace. The daemon fetches, verifies and installs.
 
 use dioxus::prelude::*;
 
 use crate::api::{consume_api, use_api};
 use crate::toast::toast_api_error;
 
-/// Installed plugins and what the marketplace offers. Bump `changed` to ask again.
+/// Bump `changed` to ask again.
 pub fn use_plugins(changed: Signal<u64>) -> Resource<Option<api::PluginCatalog>> {
     let api = use_api();
     use_resource(move || {
@@ -21,8 +20,6 @@ pub fn use_plugins(changed: Signal<u64>) -> Resource<Option<api::PluginCatalog>>
     })
 }
 
-/// Install (or update to) the marketplace's version of a plugin. `busy` names
-/// the plugin while that runs.
 pub fn install(id: String, mut busy: Signal<Option<String>>, mut changed: Signal<u64>) {
     let api = consume_api();
     busy.set(Some(id.clone()));
@@ -36,7 +33,6 @@ pub fn install(id: String, mut busy: Signal<Option<String>>, mut changed: Signal
     });
 }
 
-/// Remove an installed community plugin.
 pub fn uninstall(id: String, mut busy: Signal<Option<String>>, mut changed: Signal<u64>) {
     let api = consume_api();
     busy.set(Some(id.clone()));

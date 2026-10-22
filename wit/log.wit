@@ -1,4 +1,3 @@
-/// Diagnostics, routed into the host's own log under the plugin's id.
 interface log {
     enum level {
         trace,

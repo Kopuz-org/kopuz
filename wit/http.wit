@@ -1,12 +1,10 @@
-/// Outgoing HTTP, the only network a plugin has. The host checks every
-/// request against the hosts the plugin's manifest declares.
+/// The only network a plugin has, checked against its manifest.
 interface http {
     record request {
         method: string,
         url: string,
         headers: list<tuple<string, string>>,
         body: option<list<u8>>,
-        /// How long the whole exchange may take; none takes the host default.
         timeout-ms: option<u32>,
     }
 
@@ -17,9 +15,7 @@ interface http {
     }
 
     variant http-error {
-        /// The manifest does not allow this host.
         denied(string),
-        /// No connection could be made.
         connect(string),
         timeout,
         other(string),

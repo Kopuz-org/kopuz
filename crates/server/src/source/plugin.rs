@@ -1,9 +1,6 @@
-//! A [`MediaSource`] whose remote half runs in a plugin.
-//!
-//! The plugin answers for the service; this side keeps everything that
-//! touches the database. Each call that changes something remote is mirrored
-//! here once the plugin reports it landed, the same as a built-in backend
-//! does, so the library view never waits on a sync to show it.
+//! A [`MediaSource`] whose remote half runs in a sandboxed plugin. The
+//! database stays here: what a call changed remotely is mirrored once the
+//! plugin reports it landed.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -30,7 +27,6 @@ pub(super) struct PluginSource {
 }
 
 impl PluginSource {
-    /// The plugin source for `service`, when a loaded plugin serves it.
     pub(super) fn new(
         db: Db,
         source: Source,
@@ -62,8 +58,6 @@ impl PluginSource {
     }
 }
 
-/// A plugin's answer as the source's: a crash is a backend failure like any
-/// other, which callers already handle.
 fn answer<T>(result: Result<Result<T, wit::SourceError>, PluginError>) -> Result<T, SourceError> {
     match result {
         Ok(Ok(value)) => Ok(value),
@@ -82,8 +76,7 @@ pub(crate) fn source_error(error: wit::SourceError) -> SourceError {
     }
 }
 
-/// `Unsupported` names its operation with a `&'static str`. A plugin's names
-/// are few and fixed, so each distinct one is leaked once and reused.
+/// `Unsupported` takes a `&'static str`; a plugin's few names leak once each.
 fn intern(operation: String) -> &'static str {
     static NAMES: OnceLock<Mutex<std::collections::HashSet<&'static str>>> = OnceLock::new();
     let mut names = NAMES
@@ -209,7 +202,6 @@ fn radio_page(page: wit::TrackPage, service: MusicService) -> RadioPage {
     }
 }
 
-/// A manifest's capabilities as the host's.
 pub(crate) fn capabilities(declared: &manifest::Capabilities) -> Capabilities {
     let seeds = |seed| declared.radio.contains(&seed);
     let action = |action| declared.library_actions.contains(&action);
@@ -244,8 +236,6 @@ pub(crate) fn capabilities(declared: &manifest::Capabilities) -> Capabilities {
             manifest::ArtistView::Library => ArtistView::Library,
             manifest::ArtistView::Remote => ArtistView::Remote,
         },
-        // The catalog album page is YouTube Music's own; a plugin's albums are
-        // the standard kind.
         albums: AlbumType::Standard,
         favorites_sync: match declared.favorites_sync {
             manifest::FavoritesSync::Instant => FavoritesSync::Instant,
@@ -340,7 +330,6 @@ impl MediaSource for PluginSource {
                 .await,
         )?;
         Ok(StreamInfo {
-            // The player's ref for a stream it has to assemble segment by segment.
             url: if stream.hls {
                 format!("__SC_HLS:{}", stream.url)
             } else {
@@ -395,8 +384,8 @@ impl MediaSource for PluginSource {
         answer(self.session.upload_track(&filename, &content).await)
     }
 
-    /// A service without favorites of its own leaves them to kopuz: its
-    /// remote set is whatever is favorited here, so a reconcile changes nothing.
+    /// Without favorites of its own, the remote set is kopuz's, so a
+    /// reconcile changes nothing.
     async fn fetch_favorites(&self) -> Result<Vec<String>, SourceError> {
         match answer(self.session.fetch_favorites().await) {
             Err(SourceError::Unsupported(_)) => self
@@ -467,8 +456,7 @@ impl MediaSource for PluginSource {
                 reader::TrackId::Server { service, item_id } if *service == self.service => {
                     ids.push(item_id.clone())
                 }
-                // The server stores ids, so a queue it cannot name every entry
-                // of would come back short to the next client that reads it.
+                // A queue the server cannot name every entry of would come back short.
                 _ => return Ok(false),
             }
         }
@@ -509,7 +497,6 @@ impl MediaSource for PluginSource {
                 self.tracks(results.tracks),
                 results.albums.into_iter().map(album_from).collect(),
             )),
-            // The plugin leaves search to the library it synced.
             Err(SourceError::Unsupported(_)) => {
                 let tracks = self.db.search_corpus(&self.source).await?;
                 let albums = self.db.albums(&self.source).await?;
@@ -630,9 +617,7 @@ impl MediaSource for PluginSource {
         )
     }
 
-    /// Hand the picture to the service when it keeps playlist artwork, then
-    /// record it locally either way: the upload is best-effort, the local
-    /// cover is what the person sees.
+    /// The upload is best-effort; the local cover is what the person sees.
     async fn set_playlist_cover(
         &self,
         playlist_id: &str,

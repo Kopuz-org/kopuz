@@ -2099,6 +2099,7 @@ message PluginInfo {
   optional string available_version = 8;
   repeated string services = 9;
   repeated string network = 10;
+  bool sandboxed = 11;
 }
 
 message PluginCatalog {

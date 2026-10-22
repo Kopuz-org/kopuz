@@ -1,10 +1,6 @@
 //! Builds every plugin under `plugins/` for `wasm32-wasip2` and writes the
-//! table that embeds them.
-//!
-//! The nested cargo shares the workspace's lockfile, so a plugin's
-//! dependencies are pinned and vendored like everyone else's, but it gets a
-//! target directory of its own: the outer build holds a lock on the default
-//! one for as long as this script runs.
+//! table that embeds them. The nested cargo shares the lockfile but gets a
+//! target directory of its own: the outer build holds the default one.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -55,7 +51,7 @@ fn main() {
             wasm.display()
         );
         table.push_str(&format!(
-            "    plugin_host::Bundled {{ manifest: include_str!({:?}), wasm: include_bytes!({:?}) }},\n",
+            "    plugin_host::Bundled {{ manifest: include_str!({:?}), wasm: Some(include_bytes!({:?})) }},\n",
             plugin.manifest.display().to_string(),
             wasm.display().to_string(),
         ));
@@ -65,8 +61,6 @@ fn main() {
     std::fs::write(&out, table).expect("write the bundled plugin table");
 }
 
-/// Every directory under `plugins/` with a `kopuz-plugin.toml`, sorted so the
-/// table does not change with directory order. The SDK has no manifest.
 fn plugin_crates(dir: &Path) -> Vec<PluginCrate> {
     let mut plugins: Vec<PluginCrate> = std::fs::read_dir(dir)
         .expect("read plugins/")
@@ -110,8 +104,7 @@ fn build(workspace: &Path, plugins: &[PluginCrate]) -> PathBuf {
     for plugin in plugins {
         command.args(["-p", &plugin.package]);
     }
-    // What the outer build was told applies to the host target, not to the
-    // plugins: its flags, its target, and a wrapper like clippy-driver.
+    // The outer build's flags, target and wrappers are for the host target.
     for (key, _) in std::env::vars_os() {
         let Some(key) = key.to_str() else { continue };
         if key.starts_with("CARGO_ENCODED_RUSTFLAGS")

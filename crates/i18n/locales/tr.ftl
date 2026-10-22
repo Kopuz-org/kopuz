@@ -1124,6 +1124,7 @@ plugins_marketplace = Pazaryeri
 plugins_marketplace_unreachable = Pazaryerine ulaşılamadı: { $error }
 plugins_marketplace_empty = Pazaryerinde henüz topluluk eklentisi yok.
 plugin_official = Resmî
+plugin_native = Kopuz'un içinde
 plugin_community = Topluluk
 plugin_by = { $author } tarafından
 plugin_reaches = Eriştiği adresler: { $hosts }

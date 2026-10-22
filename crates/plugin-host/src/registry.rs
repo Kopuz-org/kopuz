@@ -6,18 +6,16 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::manifest::Manifest;
-use crate::plugin::{Origin, Plugin};
+use crate::plugin::{Code, Origin, Plugin};
 
-/// The manifest file a plugin directory holds.
 pub const MANIFEST_FILE: &str = "kopuz-plugin.toml";
-/// The component a plugin directory holds next to its manifest.
 pub const COMPONENT_FILE: &str = "plugin.wasm";
 
-/// A plugin compiled into the binary.
+/// A plugin shipped inside kopuz: a component, or none for a native plugin.
 #[derive(Debug, Clone, Copy)]
 pub struct Bundled {
     pub manifest: &'static str,
-    pub wasm: &'static [u8],
+    pub wasm: Option<&'static [u8]>,
 }
 
 #[derive(Debug, Default)]
@@ -33,12 +31,12 @@ impl Registry {
     pub fn load(bundled: &[Bundled], dir: Option<&Path>) -> Self {
         let mut registry = Self::default();
         for plugin in bundled {
+            let code = match plugin.wasm {
+                Some(wasm) => Code::Wasm(Cow::Borrowed(wasm)),
+                None => Code::Native,
+            };
             match Manifest::parse(plugin.manifest) {
-                Ok(manifest) => registry.add(Plugin::new(
-                    manifest,
-                    Cow::Borrowed(plugin.wasm),
-                    Origin::Bundled,
-                )),
+                Ok(manifest) => registry.add(Plugin::new(manifest, code, Origin::Bundled)),
                 Err(error) => tracing::error!(%error, "a bundled plugin's manifest is invalid"),
             }
         }
@@ -108,8 +106,7 @@ fn installed(dir: &Path) -> Vec<Plugin> {
         .map(|entry| entry.path())
         .filter(|path| path.is_dir())
         .collect();
-    // Directory order is the filesystem's; sort so which of two plugins wins a
-    // service does not change between runs.
+    // Which of two plugins wins a service must not depend on directory order.
     paths.sort();
     paths
         .into_iter()
@@ -129,7 +126,11 @@ fn load_dir(dir: &Path) -> Result<Plugin, String> {
     let manifest = Manifest::parse(&manifest).map_err(|error| error.to_string())?;
     let wasm = std::fs::read(dir.join(COMPONENT_FILE))
         .map_err(|error| format!("{COMPONENT_FILE}: {error}"))?;
-    Ok(Plugin::new(manifest, Cow::Owned(wasm), Origin::Installed))
+    Ok(Plugin::new(
+        manifest,
+        Code::Wasm(Cow::Owned(wasm)),
+        Origin::Installed,
+    ))
 }
 
 #[cfg(test)]
@@ -150,7 +151,7 @@ mod tests {
         let bundled = manifest("subsonic", "0.1.0", &["subsonic", "custom"]);
         let bundled = [Bundled {
             manifest: Box::leak(bundled.into_boxed_str()),
-            wasm: b"",
+            wasm: Some(b""),
         }];
         let dir = std::env::temp_dir().join(format!("kopuz-plugins-{}", std::process::id()));
         let fork = dir.join("subsonic-fork");
@@ -185,15 +186,38 @@ mod tests {
         let bundled = [
             Bundled {
                 manifest: Box::leak(first.into_boxed_str()),
-                wasm: b"",
+                wasm: Some(b""),
             },
             Bundled {
                 manifest: Box::leak(second.into_boxed_str()),
-                wasm: b"",
+                wasm: Some(b""),
             },
         ];
         let registry = Registry::load(&bundled, None);
         assert_eq!(registry.plugins().len(), 2);
         assert_eq!(registry.for_service("jellyfin").map(|p| p.id()), Some("a"));
+    }
+
+    #[test]
+    fn a_native_plugin_has_no_component_and_a_component_can_replace_it() {
+        let native = [Bundled {
+            manifest: Box::leak(manifest("ytmusic", "1.0.0", &["ytmusic"]).into_boxed_str()),
+            wasm: None,
+        }];
+        let registry = Registry::load(&native, None);
+        assert!(registry.for_service("ytmusic").unwrap().is_native());
+
+        let dir = std::env::temp_dir().join(format!("kopuz-plugins-native-{}", std::process::id()));
+        let port = dir.join("ytmusic");
+        std::fs::create_dir_all(&port).unwrap();
+        std::fs::write(
+            port.join(MANIFEST_FILE),
+            manifest("ytmusic", "2.0.0", &["ytmusic"]),
+        )
+        .unwrap();
+        std::fs::write(port.join(COMPONENT_FILE), b"").unwrap();
+        let registry = Registry::load(&native, Some(&dir));
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(!registry.for_service("ytmusic").unwrap().is_native());
     }
 }

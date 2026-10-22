@@ -1,13 +1,8 @@
 //! Log into the host's log, tagged with the plugin's id.
-//!
-//! ```ignore
-//! kopuz_plugin_sdk::debug!("fetched {} albums", albums.len());
-//! ```
 
 pub use crate::bindings::kopuz::plugin::log::Level;
 
-/// Send one message to the host's log. Outside wasm there is no host, so the
-/// message is dropped; that keeps native unit tests of plugin code running.
+/// Outside wasm there is no host, so native unit tests drop the message.
 pub fn write(level: Level, message: &str) {
     #[cfg(target_arch = "wasm32")]
     crate::bindings::kopuz::plugin::log::log(level, message);

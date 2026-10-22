@@ -1,16 +1,13 @@
-//! The plugins this process loaded, and the sessions open on them.
-//!
-//! The registry is built once: the official plugins embedded in the binary,
-//! then whatever is installed in the plugin directory the daemon names at
-//! boot. Services a plugin serves are dispatched to it before any built-in
-//! backend is considered.
+//! The plugins this process loaded, and the sessions open on them: the native
+//! ones, the sandboxed ones embedded in the binary, then whatever is installed
+//! in the plugin directory the daemon names at boot.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use arc_swap::ArcSwap;
-use plugin_host::{Registry, Session, wit};
+use plugin_host::{Bundled, Registry, Session, wit};
 
 use crate::server_ops::ServerConn;
 
@@ -18,18 +15,17 @@ static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
 static REGISTRY: OnceLock<ArcSwap<Registry>> = OnceLock::new();
 
 /// Name the directory installed plugins are read from. Only the first call
-/// counts, and only before anything reached for the registry: plugins are
-/// loaded once per process.
+/// counts, and only before anything reached for the registry.
 pub fn init(dir: Option<PathBuf>) {
     if DIR.set(dir).is_err() {
         tracing::debug!("the plugin directory was already set");
     }
-    let registry = registry();
-    for plugin in registry.plugins() {
+    for plugin in registry().plugins() {
         tracing::info!(
             plugin = %plugin.id(),
             version = %plugin.manifest().version,
             origin = ?plugin.origin(),
+            native = plugin.is_native(),
             "plugin loaded"
         );
     }
@@ -41,17 +37,26 @@ pub fn registry() -> Arc<Registry> {
         .load_full()
 }
 
-fn load() -> Registry {
-    Registry::load(bundled_plugins::all(), dir())
+fn official() -> Vec<Bundled> {
+    crate::source::native_plugins()
+        .map(|manifest| Bundled {
+            manifest,
+            wasm: None,
+        })
+        .chain(bundled_plugins::all().iter().copied())
+        .collect()
 }
 
-/// Where installed plugins live, if the daemon named a directory.
+fn load() -> Registry {
+    Registry::load(&official(), dir())
+}
+
 pub fn dir() -> Option<&'static std::path::Path> {
     DIR.get_or_init(|| None).as_deref()
 }
 
-/// Read the plugin directory again, after a plugin was installed or removed.
-/// A source already open keeps the plugin it opened with until it is rebuilt.
+/// Read the plugin directory again. A source already open keeps the plugin it
+/// opened with until it is rebuilt.
 pub fn reload() {
     let registry = Arc::new(load());
     match REGISTRY.get() {
@@ -62,7 +67,6 @@ pub fn reload() {
     }
 }
 
-/// The plugin connection for a resolved server connection.
 pub(crate) fn connection(conn: &ServerConn) -> wit::Connection {
     let service = match (conn.service, conn.plugin_service.as_deref()) {
         (config::MusicService::Plugin, Some(slug)) => slug,
@@ -79,17 +83,13 @@ pub(crate) fn connection(conn: &ServerConn) -> wit::Connection {
     }
 }
 
-/// The session for `connection`, shared while anything holds it.
-///
-/// A source is rebuilt on every switch and credential change, and some call
-/// sites build one per operation. Sharing the session keeps their calls on
-/// one pool of warm instances instead of instantiating the plugin afresh.
+/// The session for `connection`, shared while anything holds it, so call
+/// sites that rebuild a source per operation reuse warm instances.
 pub(crate) fn session(connection: wit::Connection) -> Option<Arc<Session>> {
     static OPEN: OnceLock<Mutex<HashMap<String, Weak<Session>>>> = OnceLock::new();
     let registry = registry();
     let plugin = registry.for_service(&connection.service)?;
-    // The plugin's address is part of the key, so a reload that replaced it
-    // opens a fresh session rather than reusing one on the old code.
+    // Keyed on the plugin's address too, so a reload never reuses old code.
     let key = format!(
         "{:p}\u{0}{}\u{0}{}\u{0}{}\u{0}{}\u{0}{}\u{0}{}\u{0}{}",
         Arc::as_ptr(plugin),
@@ -114,29 +114,28 @@ pub(crate) fn session(connection: wit::Connection) -> Option<Arc<Session>> {
     Some(session)
 }
 
-/// The ids of the plugins shipped inside kopuz, which the marketplace may not
-/// offer or replace.
+/// The plugins shipped inside kopuz, which the marketplace may not offer or replace.
 pub fn official_ids() -> Vec<String> {
-    bundled_plugins::all()
+    official()
         .iter()
         .filter_map(|bundled| plugin_host::manifest::Manifest::parse(bundled.manifest).ok())
         .map(|manifest| manifest.id)
         .collect()
 }
 
-/// A service a plugin adds of its own, as its manifest describes it.
 #[derive(Debug, Clone)]
 pub struct OwnService {
     pub service: plugin_host::manifest::Service,
     pub origin: plugin_host::Origin,
 }
 
-/// Every service a loaded plugin adds that kopuz has no built-in for.
+/// Every service a sandboxed plugin adds that kopuz has no built-in for.
 pub fn own_services() -> Vec<OwnService> {
     let registry = registry();
     let mut services: Vec<OwnService> = registry
         .plugins()
         .iter()
+        .filter(|plugin| !plugin.is_native())
         .flat_map(|plugin| {
             plugin
                 .manifest()
@@ -144,7 +143,6 @@ pub fn own_services() -> Vec<OwnService> {
                 .iter()
                 .filter(|service| config::MusicService::from_id(&service.id).is_none())
                 .filter(|service| {
-                    // Only the plugin that won the slug speaks for it.
                     registry
                         .for_service(&service.id)
                         .is_some_and(|serving| Arc::ptr_eq(serving, plugin))
@@ -159,7 +157,6 @@ pub fn own_services() -> Vec<OwnService> {
     services
 }
 
-/// The plugin service `slug` names, when it is one and not a built-in.
 pub fn own_service(slug: &str) -> Option<OwnService> {
     own_services()
         .into_iter()

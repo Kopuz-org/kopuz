@@ -1136,6 +1136,7 @@ plugins_marketplace = Marktplatz
 plugins_marketplace_unreachable = Der Marktplatz war nicht erreichbar: { $error }
 plugins_marketplace_empty = Der Marktplatz bietet noch keine Community-Plugins an.
 plugin_official = Offiziell
+plugin_native = In Kopuz
 plugin_community = Community
 plugin_by = von { $author }
 plugin_reaches = Erreicht { $hosts }

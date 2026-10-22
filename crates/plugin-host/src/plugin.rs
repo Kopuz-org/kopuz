@@ -12,7 +12,6 @@ use crate::host::State;
 use crate::manifest::{Manifest, Permissions};
 use crate::{PluginError, wit};
 
-/// Where a plugin came from, which decides how much it is trusted to replace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
     /// Shipped inside kopuz.
@@ -21,14 +20,24 @@ pub enum Origin {
     Installed,
 }
 
+/// How a plugin runs.
+#[derive(Debug, Clone)]
+pub enum Code {
+    /// A component in the sandbox.
+    Wasm(Cow<'static, [u8]>),
+    /// Compiled into kopuz and run in-process, for a backend that needs what
+    /// the sandbox does not give: a JS engine, DRM, a browser, sockets or the
+    /// filesystem. Only kopuz ships these; the host supplies their code.
+    Native,
+}
+
 pub struct Plugin {
     manifest: Manifest,
     origin: Origin,
     id: Arc<str>,
     permissions: Arc<Permissions>,
-    wasm: Cow<'static, [u8]>,
-    /// Compiled on first use: compiling every plugin at startup would cost
-    /// seconds for services nobody configured.
+    code: Code,
+    // Compiled on first use, so services nobody configured cost nothing.
     component: OnceCell<Component>,
 }
 
@@ -38,11 +47,11 @@ impl std::fmt::Debug for Plugin {
             .field("id", &self.id)
             .field("version", &self.manifest.version)
             .field("origin", &self.origin)
+            .field("native", &self.is_native())
             .finish_non_exhaustive()
     }
 }
 
-/// An instance with a store of its own, ready to call into.
 pub(crate) struct Instance {
     pub(crate) store: Store<State>,
     pub(crate) bindings: SourcePlugin,
@@ -53,7 +62,6 @@ struct Runtime {
     linker: Linker<State>,
 }
 
-/// One engine for every plugin, so compiled code and its caches are shared.
 fn runtime() -> Result<&'static Runtime, PluginError> {
     static RUNTIME: OnceLock<Result<Runtime, String>> = OnceLock::new();
     RUNTIME
@@ -74,11 +82,10 @@ fn runtime() -> Result<&'static Runtime, PluginError> {
         .map_err(|error| PluginError::Runtime(error.clone()))
 }
 
-/// How often running plugin code yields to the async runtime.
 const EPOCH_TICK: std::time::Duration = std::time::Duration::from_millis(10);
 
-/// Drive the engine's epoch, so code that never calls the host still yields
-/// every tick: a plugin spinning in a loop costs CPU, not a runtime worker.
+/// Plugin code yields every tick, so one spinning in a loop costs CPU, not a
+/// runtime worker.
 fn tick(engine: &Engine) {
     let engine = engine.clone();
     let spawned = std::thread::Builder::new()
@@ -95,13 +102,13 @@ fn tick(engine: &Engine) {
 }
 
 impl Plugin {
-    pub fn new(manifest: Manifest, wasm: Cow<'static, [u8]>, origin: Origin) -> Self {
+    pub fn new(manifest: Manifest, code: Code, origin: Origin) -> Self {
         Self {
             id: Arc::from(manifest.id.as_str()),
             permissions: Arc::new(manifest.permissions.clone()),
             manifest,
             origin,
-            wasm,
+            code,
             component: OnceCell::new(),
         }
     }
@@ -118,14 +125,22 @@ impl Plugin {
         self.origin
     }
 
+    pub fn is_native(&self) -> bool {
+        matches!(self.code, Code::Native)
+    }
+
     async fn component(&self) -> Result<&Component, PluginError> {
+        let Code::Wasm(wasm) = &self.code else {
+            return Err(PluginError::Invalid(format!(
+                "{} runs in-process and has no component",
+                self.id
+            )));
+        };
         self.component
             .get_or_try_init(|| async {
                 let runtime = runtime()?;
                 let engine = runtime.engine.clone();
-                let wasm = self.wasm.clone().into_owned();
-                // Compiling is CPU-bound and can take a second; keep it off
-                // the async workers.
+                let wasm = wasm.clone().into_owned();
                 tokio::task::spawn_blocking(move || Component::new(&engine, &wasm))
                     .await
                     .map_err(|error| PluginError::Runtime(error.to_string()))?
@@ -158,7 +173,6 @@ impl Plugin {
         Ok(Instance { store, bindings })
     }
 
-    /// Sign in with a username and password through the plugin.
     pub async fn login(
         &self,
         connection: wit::Connection,

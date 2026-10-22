@@ -27,7 +27,7 @@
 
 use async_trait::async_trait;
 
-use config::{MusicService, Source};
+use config::Source;
 use db::Db;
 
 use crate::server_ops::ServerConn;
@@ -36,6 +36,7 @@ use crate::sources::Sources;
 mod apple_music;
 pub mod capabilities;
 mod local;
+mod native;
 mod nextcloud;
 mod offline;
 mod plugin;
@@ -55,6 +56,11 @@ pub use types::*;
 /// A plugin's error as a source error.
 pub fn plugin_error(error: plugin_host::wit::SourceError) -> SourceError {
     plugin::source_error(error)
+}
+
+/// The manifests of the plugins that run in-process.
+pub(crate) fn native_plugins() -> impl Iterator<Item = &'static str> {
+    native::PLUGINS.iter().map(|native| native.manifest)
 }
 use youtube_music::YtSource;
 
@@ -980,45 +986,23 @@ pub(super) async fn mirror_created(
 // ============================ Resolvers ================================
 
 /// Build the per-remote source for `conn` — the ONE place service dispatch
-/// happens. A plugin serving the service wins over a built-in backend.
+/// happens: the plugin registered for the service, native or sandboxed.
 fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSource> {
     let connection = crate::plugins::connection(conn);
-    if let Some(plugin) =
-        plugin::PluginSource::new(db.clone(), source.clone(), conn.service, connection)
-    {
-        return Box::new(plugin);
-    }
-    match conn.service {
-        MusicService::Jellyfin
-        | MusicService::Subsonic
-        | MusicService::Custom
-        | MusicService::Clippsly
-        | MusicService::SoundCloud
-        | MusicService::Plugin => {
-            // Only a plugin serves these. Without one the cached library still
-            // reads, as it does with no credentials.
-            tracing::warn!(service = %conn.service.id(), "no plugin serves this service");
-            Box::new(OfflineServerSource { db, source })
+    let registry = crate::plugins::registry();
+    let opened = match registry.for_service(&connection.service) {
+        Some(plugin) if plugin.is_native() => {
+            native::open(plugin.id(), db.clone(), source.clone(), conn)
         }
-        MusicService::YtMusic => Box::new(YtSource::new(db, source, conn)),
-        MusicService::AppleMusic => {
-            // Apple Music is configured, so the Widevine CDM will be wanted.
-            // Start fetching now rather than when a track is already waiting.
-            crate::applemusic::widevine::fetch::prefetch();
-            Box::new(AppleMusicSource::new(
-                db,
-                source,
-                crate::applemusic::AppleMusicApi::new(
-                    Some(conn.token.clone()),
-                    &conn.apple_music_storefront,
-                    &conn.apple_music_language,
-                ),
-            ))
-        }
-        MusicService::Spotify => Box::new(SpotifySource::new(db, source, conn)),
-        MusicService::Nextcloud => Box::new(NextcloudSource::new(db, source, conn)),
-        MusicService::Smb => Box::new(SmbSource::new(db, source, conn)),
-    }
+        Some(_) => plugin::PluginSource::new(db.clone(), source.clone(), conn.service, connection)
+            .map(|plugin| Box::new(plugin) as Box<dyn MediaSource>),
+        None => None,
+    };
+    opened.unwrap_or_else(|| {
+        // Without a plugin the cached library still reads, as with no credentials.
+        tracing::warn!(service = %conn.service.id(), "no plugin serves this service");
+        Box::new(OfflineServerSource { db, source })
+    })
 }
 
 /// The active [`MediaSource`], shared and reference-counted. Held once in a

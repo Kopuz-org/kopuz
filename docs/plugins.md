@@ -9,21 +9,24 @@ request and every redirect is checked against the hosts its manifest lists.
 The database stays on the daemon's side; a plugin answers for the remote
 service and the daemon caches what it returns.
 
-There are two kinds:
+Every source is a plugin, of one of three kinds:
 
-- **Official plugins** live in [`plugins/`](../plugins) and are built into
-  Kopuz. Subsonic (and custom Subsonic-compatible servers), Jellyfin, Clippsly
-  and SoundCloud are served this way. They update with Kopuz and cannot be
+- **Official sandboxed plugins** live in [`plugins/`](../plugins) and are
+  built into Kopuz: Subsonic (and custom Subsonic-compatible servers),
+  Jellyfin, Clippsly and SoundCloud. They update with Kopuz and cannot be
   removed.
+- **Official native plugins** are YouTube Music, Apple Music, Spotify,
+  Nextcloud, SMB and local folders. They need what the sandbox does not give
+  (V8 for YouTube's signatures and PoTokens, a Widevine CDM, a browser for
+  Spotify's playback, raw sockets, the filesystem), so their code is compiled
+  into Kopuz and runs in-process. They register in the same plugin registry
+  with a manifest, and a sandboxed plugin installed with one's id replaces it.
 - **Community plugins** live in their authors' repositories and are installed
   from the marketplace under **Settings → Library → Plugins** with one click.
-  They may add services of their own, which then show up in the source
-  picker, marked experimental. They may not claim a service Kopuz serves
-  itself, since that would hand them its sources' credentials.
-
-Local folders, YouTube Music, Apple Music, Spotify, Nextcloud and SMB are
-still built in: they need what a plugin cannot do yet (a JavaScript engine,
-DRM, a browser, raw sockets, a disk cache).
+  They always run sandboxed. They may add services of their own, which then
+  show up in the source picker, marked experimental. They may not claim a
+  service Kopuz serves itself, since that would hand them its sources'
+  credentials.
 
 ## Writing one
 

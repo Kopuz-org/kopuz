@@ -767,8 +767,6 @@ mod tests {
     }
 }
 
-/// Plugins: the official ones, which ship with kopuz, and community ones,
-/// which the marketplace installs with one click and removes the same way.
 #[component]
 pub(super) fn PluginsSection() -> Element {
     let changed = use_signal(|| 0u64);
@@ -808,7 +806,6 @@ pub(super) fn PluginsSection() -> Element {
     }
 }
 
-/// One plugin: what it is, what it may reach, and the one button it needs.
 #[component]
 fn PluginRow(
     plugin: api::PluginInfo,
@@ -850,6 +847,9 @@ fn PluginRow(
                 div { class: "flex items-center gap-2 flex-wrap",
                     p { class: "text-sm text-white/90 font-medium", "{plugin.name}" }
                     span { class: "text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/10 text-white/60", "{origin}" }
+                    if !plugin.sandboxed {
+                        span { class: "text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/10 text-white/60", "{i18n::t(\"plugin_native\")}" }
+                    }
                     span { class: "text-xs text-white/40", "{version}" }
                 }
                 if let Some(byline) = byline {

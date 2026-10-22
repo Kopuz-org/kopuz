@@ -1,8 +1,6 @@
-//! A signed-in connection to a plugin's service, spread over a few instances.
-//!
-//! One instance runs one call at a time, and a library sync can hold one for
-//! minutes. Resolving the next track's stream must not wait behind it, so a
-//! session keeps a small pool and opens another instance while all are busy.
+//! A signed-in connection to a plugin's service. An instance runs one call at
+//! a time and a sync can hold one for minutes, so a session keeps a small pool
+//! and the next stream never waits behind it.
 
 use std::sync::Arc;
 
@@ -12,12 +10,10 @@ use wasmtime::component::ResourceAny;
 use crate::plugin::{Instance, Plugin};
 use crate::{PluginError, wit};
 
-/// The most instances one session runs at once.
 const MAX_INSTANCES: usize = 4;
 
-/// The longest one call may run. Every request a plugin makes has a timeout
-/// of its own, so this only stops a plugin that never returns; it is long
-/// because a first sync of a large library is one call.
+/// Requests time out on their own; this stops a plugin that never returns.
+/// A first sync of a large library is one call.
 pub(crate) const CALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
 struct Live {
@@ -72,8 +68,7 @@ impl Session {
     }
 }
 
-/// Generates one method per session call: take an idle instance (or open
-/// one), call it, and put it back. An instance that trapped is dropped, since
+/// One method per session call. An instance that trapped is dropped, since
 /// its memory may be half-written.
 macro_rules! calls {
     ($(

@@ -1,14 +1,7 @@
-//! The community marketplace: an index of plugins someone else wrote, and
-//! installing one from it.
-//!
-//! The index is a JSON file in a git repository, one entry per plugin, each
-//! naming where its manifest and component are and the SHA-256 of both. The
-//! host trusts the index for nothing but those hashes: a download that does
-//! not match is refused, and the manifest that arrives is read and checked
-//! again before anything is written.
-//!
-//! Official plugins are not in the marketplace. They ship inside kopuz, and a
-//! listing may not claim one's id or any service a built-in backend serves.
+//! The community marketplace: a JSON index naming each plugin's manifest and
+//! component and the SHA-256 of both. Nothing is trusted beyond those hashes,
+//! and the manifest is checked again before anything is written. A listing
+//! may not claim an official plugin's id or a built-in service.
 
 use std::path::{Path, PathBuf};
 
@@ -18,12 +11,9 @@ use sha2::{Digest, Sha256};
 use crate::manifest::{Manifest, ManifestError};
 use crate::registry::{COMPONENT_FILE, MANIFEST_FILE};
 
-/// The index format this host reads.
 pub const INDEX_SCHEMA: u32 = 1;
 
-/// The largest component the marketplace may hand over.
 pub const MAX_COMPONENT_BYTES: usize = 64 * 1024 * 1024;
-/// The largest manifest it may hand over.
 pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -33,7 +23,6 @@ pub struct Index {
     pub plugins: Vec<Listing>,
 }
 
-/// One plugin as the index lists it.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct Listing {
     pub id: String,
@@ -46,12 +35,9 @@ pub struct Listing {
     pub author: String,
     #[serde(default)]
     pub homepage: Option<String>,
-    /// The services its manifest declares, shown before it is installed.
     #[serde(default)]
     pub services: Vec<String>,
-    /// The hosts its manifest may reach, shown before it is installed. An
-    /// install whose manifest asks for anything else is refused, so what the
-    /// person agreed to is what the plugin gets.
+    /// Shown before install; a manifest asking for anything else is refused.
     #[serde(default)]
     pub network: Vec<String>,
     pub manifest: Download,
@@ -111,7 +97,6 @@ impl Index {
     }
 }
 
-/// Whether `bytes` are what `download` promised.
 pub fn verify(download: &Download, bytes: &[u8]) -> Result<(), MarketError> {
     let digest = Sha256::digest(bytes);
     let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
@@ -122,8 +107,6 @@ pub fn verify(download: &Download, bytes: &[u8]) -> Result<(), MarketError> {
     }
 }
 
-/// What makes a listing installable here, checked before anything is fetched:
-/// community plugins may not stand in for an official one.
 pub fn check_listing(listing: &Listing, official_ids: &[String]) -> Result<(), MarketError> {
     if official_ids.contains(&listing.id) {
         return Err(MarketError::Official(listing.id.clone()));
@@ -136,9 +119,8 @@ pub fn check_listing(listing: &Listing, official_ids: &[String]) -> Result<(), M
     Ok(())
 }
 
-/// Check the downloaded manifest against its listing and against the
-/// services kopuz serves itself, which a community plugin may not claim: it
-/// would be handed the credentials of every source of that service.
+/// A community plugin claiming a built-in service would be handed that
+/// service's credentials.
 pub fn check_manifest(
     listing: &Listing,
     manifest_text: &str,
@@ -185,9 +167,7 @@ pub fn check_manifest(
     Ok(manifest)
 }
 
-/// Write a plugin into `dir/<id>/`, replacing what was there. The files land
-/// in a staging directory first, so a failure halfway leaves the old version
-/// whole, and the swap is one rename.
+/// Staged first, so a failure halfway leaves the old version whole.
 pub fn install(
     dir: &Path,
     id: &str,
@@ -207,7 +187,6 @@ pub fn install(
         std::fs::rename(&target, &retired)?;
     }
     if let Err(error) = std::fs::rename(&staging, &target) {
-        // Put the old version back rather than leave none.
         let _ = std::fs::rename(&retired, &target);
         return Err(error.into());
     }
@@ -215,7 +194,6 @@ pub fn install(
     Ok(target)
 }
 
-/// Remove an installed plugin's directory.
 pub fn uninstall(dir: &Path, id: &str) -> Result<(), MarketError> {
     let target = plugin_dir(dir, id)?;
     match std::fs::remove_dir_all(&target) {
@@ -225,8 +203,6 @@ pub fn uninstall(dir: &Path, id: &str) -> Result<(), MarketError> {
     }
 }
 
-/// The directory a plugin id lives in. An id is a directory name, so one that
-/// could step outside `dir` is refused.
 fn plugin_dir(dir: &Path, id: &str) -> Result<PathBuf, MarketError> {
     let valid = !id.is_empty()
         && id.len() <= 64

@@ -1,15 +1,7 @@
-//! SoundCloud, as a kopuz plugin, through the public `api-v2` web-player API.
-//!
-//! SoundCloud streams are not DRM'd: every publicly streamable track exposes a
-//! progressive MP3 or an AAC HLS transcoding the player reads like any other
-//! stream, so this is full-track playback, not previews.
-//!
-//! There is no registerable API key, so, like every SoundCloud client, the
-//! plugin lifts the web player's `client_id` out of its JS bundles and keeps
-//! it. The id rotates now and then; a failed call forces one re-scrape.
-//!
-//! Signing in happens in a browser the host drives; the session only ever
-//! sees the resulting OAuth token.
+//! SoundCloud through the public `api-v2` web-player API. With no
+//! registerable API key, the web player's `client_id` is lifted from its JS
+//! bundles; a failed call forces one re-scrape. Sign-in happens in a browser
+//! the host drives; the session only sees the OAuth token.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};

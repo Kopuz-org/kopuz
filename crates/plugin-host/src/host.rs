@@ -10,25 +10,19 @@ use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 use crate::bindings::kopuz::plugin::{http, log};
 use crate::manifest::Permissions;
 
-/// A request with no timeout of its own gets this long.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// A response body larger than this is refused rather than copied into the
-/// plugin's memory. A full library listing from a large server is a few
-/// megabytes; a track download is the only thing that comes near it.
 const MAX_BODY_BYTES: usize = 512 * 1024 * 1024;
 
-/// One plugin instance's memory ceiling.
 const MAX_MEMORY_BYTES: usize = 512 * 1024 * 1024;
 
-/// Per-instance state, owned by the instance's store.
 pub(crate) struct State {
     wasi: WasiCtx,
     table: ResourceTable,
     pub(crate) limits: StoreLimits,
     plugin_id: Arc<str>,
     permissions: Arc<Permissions>,
-    /// The host of the server the session is for, which `$server` names.
+    /// What `$server` names.
     server_host: Option<String>,
     client: reqwest::Client,
 }
@@ -41,8 +35,7 @@ impl State {
     ) -> Self {
         let server_host = host_of(server_url);
         let client = client_for(&permissions, server_host.clone());
-        // WASI is linked so a plugin built with `std` runs, but it gets no
-        // files, sockets or environment: the imports below are all it has.
+        // Linked so `std` runs, with no files, sockets or environment.
         let wasi = WasiCtx::builder().build();
         Self {
             wasi,
@@ -67,8 +60,8 @@ impl WasiView for State {
     }
 }
 
-/// A client that holds a redirect to the same allowlist as the request that
-/// led to it, so an allowed server cannot bounce a plugin somewhere else.
+/// Redirects are held to the same allowlist, so an allowed server cannot
+/// bounce a plugin elsewhere.
 fn client_for(permissions: &Arc<Permissions>, server_host: Option<String>) -> reqwest::Client {
     let permissions = Arc::clone(permissions);
     let policy = reqwest::redirect::Policy::custom(move |attempt| {

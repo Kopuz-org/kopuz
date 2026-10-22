@@ -1,13 +1,7 @@
-//! An example community plugin: the Internet Archive as a kopuz source.
-//!
-//! It adds a service kopuz has no built-in for. A source of it is the address
-//! of an archive.org item (one album) or collection (its most downloaded
-//! items, one album each); syncing reads their audio files through the
-//! public metadata API. No account is involved.
-//!
-//! It is not shipped with kopuz. `scripts/plugin_market.nu` builds it and
-//! writes a local marketplace index, so installing a community plugin can be
-//! tried end to end.
+//! An example community plugin adding a service kopuz has no built-in for:
+//! a source is the address of an archive.org item (one album) or collection
+//! (its most downloaded items). `scripts/plugin_market.nu` serves it from a
+//! local marketplace.
 
 use kopuz_plugin_sdk::http::Client;
 use kopuz_plugin_sdk::{

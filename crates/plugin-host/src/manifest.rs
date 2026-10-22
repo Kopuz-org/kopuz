@@ -1,17 +1,14 @@
 //! `kopuz-plugin.toml`: what a plugin is, what it may reach and what each of
-//! its services supports, readable without running any of its code.
+//! its services supports.
 
 use serde::Deserialize;
 
-/// The plugin API versions this host runs. A plugin names the one it was
-/// built against; anything else is refused at load rather than failing on
-/// its first call.
 pub const SUPPORTED_API: &[&str] = &["0.1"];
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
-    /// Stable and unique: a user plugin with a bundled plugin's id replaces it.
+    /// An installed plugin with a bundled plugin's id replaces it.
     pub id: String,
     pub name: String,
     pub version: String,
@@ -27,9 +24,8 @@ pub struct Manifest {
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Permissions {
-    /// Hosts the plugin may send requests to. `$server` stands for the host
-    /// of the server the person configured; `*.example.com` matches every
-    /// subdomain of `example.com` and the domain itself.
+    /// `$server` is the configured server's host; `*.example.com` also
+    /// matches `example.com`.
     #[serde(default)]
     pub network: Vec<String>,
 }
@@ -37,43 +33,37 @@ pub struct Permissions {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Service {
-    /// The service slug. A built-in service's slug replaces its backend; any
-    /// other adds a service of the plugin's own to the source picker.
     pub id: String,
     #[serde(default)]
     pub capabilities: Capabilities,
-    /// How a service of the plugin's own is shown. A built-in service keeps
-    /// the host's translated name, summary and icon.
+    /// How a service of the plugin's own is shown; a built-in one keeps the
+    /// host's.
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
     pub summary: Option<String>,
-    /// An SVG path drawn in a 24x24 box.
+    /// An SVG path in a 24x24 box.
     #[serde(default)]
     pub icon: Option<String>,
-    /// A CSS colour to tint its rows with.
     #[serde(default)]
     pub accent: Option<String>,
     #[serde(default)]
     pub sign_in: SignIn,
-    /// The service's one address, for a hosted service; none asks the person
-    /// for their server's address.
+    /// A hosted service's one address; none asks for one.
     #[serde(default)]
     pub url: Option<String>,
 }
 
-/// What making a source of the service usable takes.
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum SignIn {
-    /// Nothing: the service is public, or the address carries the access.
     #[default]
     None,
-    /// A username and password, which the plugin's `login` exchanges.
+    /// Exchanged by the plugin's `login`.
     Password,
 }
 
-/// Mirrors the host's source capabilities; every flag defaults to off.
+/// Every flag defaults to off.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Capabilities {
@@ -184,7 +174,6 @@ impl Manifest {
 }
 
 impl Permissions {
-    /// Whether a request to `host` is allowed, for a session on `server_host`.
     pub fn allows(&self, host: &str, server_host: Option<&str>) -> bool {
         let host = host.trim_end_matches('.').to_ascii_lowercase();
         self.network.iter().any(|pattern| {

@@ -1,31 +1,6 @@
-//! Build a kopuz plugin.
-//!
-//! A source plugin implements [`Source`] and exports it with
-//! [`export_source!`]. Built for `wasm32-wasip2`, the crate becomes a
-//! component the host loads next to its `kopuz-plugin.toml`.
-//!
-//! ```ignore
-//! use kopuz_plugin_sdk::{AuthOutcome, Connection, Source, SourceError, StreamInfo, StreamQuality};
-//!
-//! struct Echo(Connection);
-//!
-//! impl Source for Echo {
-//!     fn open(connection: Connection) -> Self {
-//!         Echo(connection)
-//!     }
-//!     fn validate(&self) -> AuthOutcome {
-//!         AuthOutcome::Valid
-//!     }
-//!     fn resolve_stream(&self, item_id: &str, _: StreamQuality) -> Result<StreamInfo, SourceError> {
-//!         Ok(StreamInfo::url(format!("{}/stream/{item_id}", self.0.url)))
-//!     }
-//! }
-//!
-//! kopuz_plugin_sdk::export_source!(Echo);
-//! ```
-//!
-//! Outside wasm the crate still builds, so a plugin's own logic can be unit
-//! tested natively; only calls that reach the host are unavailable there.
+//! Build a kopuz plugin: implement [`Source`] and export it with
+//! [`export_source!`], then build for `wasm32-wasip2`. The crate builds
+//! natively too, so a plugin's own logic can be unit tested.
 
 pub mod cover;
 pub mod http;
@@ -56,7 +31,6 @@ impl SourceError {
         SourceError::Unsupported(operation.to_string())
     }
 
-    /// A non-success status, where 401 and 403 mean the credentials were refused.
     pub fn from_status(status: u16, what: &str) -> Self {
         match status {
             401 | 403 => SourceError::Auth,
@@ -82,7 +56,6 @@ impl From<String> for SourceError {
 }
 
 impl StreamInfo {
-    /// A stream that is just a URL, with nothing else known about it.
     pub fn url(url: impl Into<String>) -> Self {
         StreamInfo {
             url: url.into(),
@@ -112,7 +85,7 @@ impl ArtistCredit {
     }
 }
 
-// The type is generated from the WIT, where no derive can be added.
+// Generated from the WIT, where no derive can be added.
 #[allow(clippy::derivable_impls)]
 impl Default for ReplayGain {
     fn default() -> Self {
@@ -125,7 +98,6 @@ impl Default for ReplayGain {
     }
 }
 
-// The type is generated from the WIT, where no derive can be added.
 #[allow(clippy::derivable_impls)]
 impl Default for Track {
     fn default() -> Self {
@@ -154,7 +126,6 @@ impl Default for Track {
 }
 
 impl TrackPage {
-    /// A page with nothing after it.
     pub fn last(tracks: Vec<Track>) -> Self {
         TrackPage { tracks, next: None }
     }
@@ -182,13 +153,9 @@ impl Check {
 }
 
 /// A media source. Every operation but opening, validating and resolving a
-/// stream has a default: the empty answer where the host's own default is
-/// empty, [`SourceError::Unsupported`] where it has none. Implement what the
-/// service does and declare it in the manifest's capabilities; the host
-/// never asks for an operation whose capability is off.
+/// stream has the host's own default; the host never asks for one whose
+/// capability the manifest leaves off.
 pub trait Source: Sized + 'static {
-    /// Sign in with a username and password. The returned session's token and
-    /// user id are what later [`Connection`]s carry.
     fn login(connection: Connection, username: &str, password: &str) -> Result<AuthSession> {
         let _ = (connection, username, password);
         Err(SourceError::unsupported("username and password sign-in"))
@@ -213,14 +180,10 @@ pub trait Source: Sized + 'static {
         Ok(())
     }
 
-    /// The signed-in account's id, for a service whose sign-in yields only a
-    /// token. The default knows none.
     fn user_id(&self) -> Result<Option<String>> {
         Ok(None)
     }
 
-    /// The whole remote library. The host persists it and drops whatever it
-    /// held that is no longer listed.
     fn fetch_library(&self) -> Result<LibrarySnapshot> {
         Ok(LibrarySnapshot {
             albums: Vec::new(),
@@ -243,8 +206,7 @@ pub trait Source: Sized + 'static {
         Ok(None)
     }
 
-    /// Search the service itself. The default leaves search to the host,
-    /// which looks through the library it synced.
+    /// Unsupported leaves search to the host's synced library.
     fn search(&self, query: &str) -> Result<SearchResults> {
         let _ = query;
         Err(SourceError::unsupported("search"))
@@ -259,7 +221,6 @@ pub trait Source: Sized + 'static {
         Ok(Vec::new())
     }
 
-    /// One page of a playlist. The default is every entry in one page.
     fn fetch_playlist_page(&self, playlist_id: &str, cursor: Option<&str>) -> Result<TrackPage> {
         let _ = cursor;
         Ok(TrackPage::last(self.fetch_playlist_entries(playlist_id)?))
@@ -311,9 +272,7 @@ pub trait Source: Sized + 'static {
         Ok(())
     }
 
-    /// Every favorited item id on the service. Leaving this and
-    /// [`push_favorite`](Self::push_favorite) unsupported keeps favorites in
-    /// kopuz alone, for a service that has none of its own.
+    /// Unsupported, with `push_favorite`, keeps favorites in kopuz alone.
     fn fetch_favorites(&self) -> Result<Vec<String>> {
         Err(SourceError::unsupported("favorites"))
     }
@@ -359,7 +318,6 @@ pub trait Source: Sized + 'static {
         Err(SourceError::unsupported("radio continuation"))
     }
 
-    /// Whether the server now holds the queue.
     fn save_play_queue(
         &self,
         item_ids: &[String],
@@ -405,8 +363,7 @@ pub trait Source: Sized + 'static {
     }
 }
 
-/// Export a [`Source`] implementation as the plugin's `source` interface.
-/// Invoke it once, at the plugin crate's root.
+/// Export a [`Source`] implementation, once, at the plugin crate's root.
 #[macro_export]
 macro_rules! export_source {
     ($source:ty) => {

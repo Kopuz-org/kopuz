@@ -1,6 +1,5 @@
 package kopuz:plugin@0.1.0;
 
-/// A plugin that provides one or more media sources.
 world source-plugin {
     import http;
     import log;

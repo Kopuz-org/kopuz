@@ -1,18 +1,10 @@
-//! Cover references in the form the host stores them.
-//!
-//! A track's or album's `cover` is not always a URL: a server whose images
-//! need credentials hands out an id, and the host signs it only when it
-//! fetches the picture, so no credential is ever stored. These helpers write
-//! each form the host reads back.
+//! Cover references in the form the host stores them. An id the host signs
+//! when it fetches the picture keeps credentials out of the database.
 
-/// The stored form of "the source reported no cover for this item".
 pub const NO_COVER: &str = "none";
 
-/// An item-scoped reference, `service:item[:value]`, which the host resolves
-/// against the server that issued it.
-///
-/// The host splits on the first two colons, so pass `None` for `value` when
-/// the item id can hold a colon itself.
+/// `service:item[:value]`. The host splits on the first two colons, so pass
+/// `None` for `value` when the item id can hold a colon.
 pub fn item_ref(service: &str, item_id: &str, value: Option<&str>) -> String {
     match value {
         Some(value) => format!("{service}:{item_id}:{value}"),
@@ -20,7 +12,6 @@ pub fn item_ref(service: &str, item_id: &str, value: Option<&str>) -> String {
     }
 }
 
-/// A picture any client can fetch as is.
 pub fn url(url: &str) -> String {
     format!("directurl:{url}")
 }

@@ -78,6 +78,7 @@ fn subsonic_component() -> &'static [u8] {
         .find(|bundled| bundled.manifest.contains("id = \"subsonic\""))
         .expect("the Subsonic plugin is bundled")
         .wasm
+        .expect("it is a component")
 }
 
 fn temp(name: &str) -> PathBuf {

@@ -1,8 +1,5 @@
 //! The plugins the daemon runs, and the community marketplace it installs
 //! more from.
-//!
-//! Installing is the daemon's job because the plugin directory, like every
-//! credential a plugin will be handed, is the daemon's: a frontend only asks.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -11,15 +8,12 @@ use api::{ApiError, PluginCatalog, PluginInfo, PluginOrigin};
 use plugin_host::market::{self, Index, Listing, MarketError};
 use tokio::sync::Mutex;
 
-/// Where the marketplace index lives unless `KOPUZ_PLUGIN_INDEX` says
-/// otherwise. A `file://` URL works too, for trying a plugin out locally.
+/// `KOPUZ_PLUGIN_INDEX` overrides it; a `file://` index works for testing.
 pub const DEFAULT_INDEX_URL: &str =
     "https://raw.githubusercontent.com/Kopuz-org/plugins/main/index.json";
 
-/// How long a fetched index is reused before it is fetched again.
 const INDEX_TTL: Duration = Duration::from_secs(10 * 60);
 
-/// The largest index this reads.
 const MAX_INDEX_BYTES: usize = 4 * 1024 * 1024;
 
 pub struct PluginService {
@@ -57,7 +51,6 @@ impl PluginService {
         }
     }
 
-    /// Fetch `url`, refusing anything larger than `limit` bytes.
     async fn fetch(&self, url: &str, limit: usize) -> Result<Vec<u8>, String> {
         if let Some(path) = url.strip_prefix("file://") {
             let bytes = tokio::fs::read(path)
@@ -69,8 +62,7 @@ impl PluginService {
             };
         }
         let parsed = reqwest::Url::parse(url).map_err(|error| format!("{url}: {error}"))?;
-        // A plugin is code; only fetch it over a connection that cannot be
-        // tampered with on the way.
+        // A plugin is code: never fetch it over a connection open to tampering.
         if parsed.scheme() != "https" {
             return Err(format!("{url} is not an https address"));
         }
@@ -97,7 +89,6 @@ impl PluginService {
         Ok(body)
     }
 
-    /// The marketplace index, from the last fetch while it is fresh.
     async fn index(&self, refresh: bool) -> Result<Arc<Index>, String> {
         let mut cached = self.index.lock().await;
         if !refresh
@@ -112,14 +103,12 @@ impl PluginService {
         Ok(index)
     }
 
-    /// Every plugin running here, then each the marketplace offers besides.
     pub async fn catalog(&self) -> PluginCatalog {
         let mut plugins = installed();
         let marketplace_error = match self.index(false).await {
             Ok(index) => {
                 let official = server::plugins::official_ids();
                 for listing in &index.plugins {
-                    // Official plugins are not the marketplace's to offer.
                     if official.contains(&listing.id) {
                         continue;
                     }
@@ -149,9 +138,8 @@ impl PluginService {
         }
     }
 
-    /// Install the marketplace's version of `id`: fetch, verify against the
-    /// index's hashes, check what the manifest claims, compile it once to be
-    /// sure it runs here, and only then write it.
+    /// Fetch, verify, check the manifest and compile it once before anything
+    /// is written.
     pub async fn install(&self, id: &str) -> Result<PluginInfo, ApiError> {
         let dir = server::plugins::dir()
             .ok_or_else(|| ApiError::unsupported("this daemon has no plugin directory"))?
@@ -187,7 +175,7 @@ impl PluginService {
 
         let candidate = plugin_host::Plugin::new(
             manifest,
-            std::borrow::Cow::Owned(component.clone()),
+            plugin_host::Code::Wasm(std::borrow::Cow::Owned(component.clone())),
             plugin_host::Origin::Installed,
         );
         candidate
@@ -211,7 +199,6 @@ impl PluginService {
         Ok(info)
     }
 
-    /// Remove an installed community plugin.
     pub async fn uninstall(&self, id: &str) -> Result<(), ApiError> {
         let registry = server::plugins::registry();
         let plugin = registry
@@ -239,7 +226,6 @@ impl PluginService {
     }
 }
 
-/// Every plugin the daemon runs.
 fn installed() -> Vec<PluginInfo> {
     let registry = server::plugins::registry();
     registry
@@ -257,6 +243,7 @@ fn installed() -> Vec<PluginInfo> {
                     plugin_host::Origin::Bundled => PluginOrigin::Official,
                     plugin_host::Origin::Installed => PluginOrigin::Community,
                 },
+                sandboxed: !plugin.is_native(),
                 installed_version: Some(manifest.version.clone()),
                 available_version: None,
                 services: manifest
@@ -270,8 +257,6 @@ fn installed() -> Vec<PluginInfo> {
         .collect()
 }
 
-/// A plugin the marketplace offers that is not installed, with the services
-/// and hosts it lists, which an install holds its manifest to.
 fn listed(listing: &Listing) -> PluginInfo {
     PluginInfo {
         id: listing.id.clone(),
@@ -280,6 +265,7 @@ fn listed(listing: &Listing) -> PluginInfo {
         author: listing.author.clone(),
         homepage: listing.homepage.clone(),
         origin: PluginOrigin::Community,
+        sandboxed: true,
         installed_version: None,
         available_version: Some(listing.version.clone()),
         services: listing.services.clone(),

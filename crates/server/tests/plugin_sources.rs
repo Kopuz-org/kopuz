@@ -291,3 +291,22 @@ async fn a_playlist_add_lands_on_the_server_and_in_the_cache() {
         .expect("playlist cached");
     assert_eq!(playlist.tracks, ["s-1", "s-2"]);
 }
+
+#[test]
+fn every_built_in_service_has_a_plugin() {
+    let registry = server::plugins::registry();
+    for service in MusicService::ALL {
+        let plugin = registry
+            .for_service(service.id())
+            .unwrap_or_else(|| panic!("no plugin serves {}", service.id()));
+        let native = matches!(
+            service,
+            MusicService::YtMusic
+                | MusicService::AppleMusic
+                | MusicService::Spotify
+                | MusicService::Nextcloud
+                | MusicService::Smb
+        );
+        assert_eq!(plugin.is_native(), native, "{}", service.id());
+    }
+}

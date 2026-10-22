@@ -115,8 +115,7 @@ pub fn all() -> Vec<ServiceInfo> {
     services
 }
 
-/// A service a plugin adds of its own, offered like a built-in one. One an
-/// installed plugin brings is marked experimental: nobody here vouches for it.
+/// One an installed plugin brings is marked experimental: nobody here vouches for it.
 fn plugin_service_info(own: &server::plugins::OwnService) -> ServiceInfo {
     let service = &own.service;
     ServiceInfo {
@@ -146,8 +145,7 @@ fn plugin_icon(service: &plugin_host::manifest::Service) -> Icon {
 const PLUGIN_ICON: &str = "fa-solid fa-puzzle-piece";
 const PLUGIN_ACCENT: &str = "#6366f1";
 
-/// The service a draft or a stored row names: a built-in one, or a plugin's
-/// own, which is stored as [`MusicService::Plugin`] with its slug beside it.
+/// A plugin's own service is stored as [`MusicService::Plugin`] with its slug beside it.
 pub fn resolve(slug: &str) -> Option<MusicService> {
     MusicService::from_id(slug)
         .or_else(|| server::plugins::own_service(slug).map(|_| MusicService::Plugin))
@@ -278,7 +276,6 @@ fn summary(service: MusicService) -> Text {
         MusicService::Nextcloud => "service_summary_nextcloud",
         MusicService::Clippsly => "service_summary_clippsly",
         MusicService::Smb => "service_summary_smb",
-        // A plugin's own summary is its manifest's; see `plugin_service_info`.
         MusicService::Plugin => return Text::default(),
     };
     Text::key(key)
@@ -515,7 +512,6 @@ pub fn add_fields(service: MusicService) -> Vec<FieldSpec> {
         MusicService::Subsonic | MusicService::Custom => {
             vec![url_field("subsonic_url_placeholder")]
         }
-        // A plugin's own service brings its form; see `plugin_service_info`.
         MusicService::Plugin => Vec::new(),
     };
     #[cfg(target_os = "android")]
@@ -755,7 +751,6 @@ pub fn apply(service: MusicService, draft: &SourceDraft, saved: &mut SavedServer
     }
 }
 
-/// The one address of a hosted plugin service, which its form does not ask for.
 fn plugin_url(slug: &str) -> Option<String> {
     server::plugins::own_service(slug)?.service.url
 }

@@ -1,8 +1,5 @@
-//! A small blocking HTTP client over the host's `http` import.
-//!
-//! The shape follows reqwest's so code moved out of the host reads the same,
-//! minus the `.await`: a plugin's calls block, and the host runs them on its
-//! own async runtime.
+//! A blocking HTTP client over the host's `http` import, shaped like reqwest
+//! without the `.await`.
 
 use std::time::Duration;
 
@@ -14,14 +11,10 @@ use crate::bindings::kopuz::plugin::http as wit;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
-    /// The plugin's manifest does not allow the host.
     Denied(String),
-    /// No connection could be made.
     Connect(String),
     Timeout,
-    /// The URL or the request could not be built.
     Request(String),
-    /// The body was not what the caller asked to decode it as.
     Decode(String),
     Other(String),
 }
@@ -42,7 +35,6 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 impl Error {
-    /// A request that got no answer, as opposed to one that was refused.
     pub fn is_connectivity(&self) -> bool {
         matches!(self, Error::Connect(_) | Error::Timeout)
     }
@@ -59,7 +51,6 @@ impl From<wit::HttpError> for Error {
     }
 }
 
-/// Headers and a timeout every request from it starts with.
 #[derive(Debug, Clone, Default)]
 pub struct Client {
     headers: Vec<(String, String)>,
@@ -119,7 +110,6 @@ pub struct RequestBuilder {
 }
 
 impl RequestBuilder {
-    /// Append query pairs, encoded.
     pub fn query<K: AsRef<str>, V: AsRef<str>>(mut self, pairs: &[(K, V)]) -> Self {
         if let Ok(url) = &mut self.url {
             let mut query = url.query_pairs_mut();
@@ -176,7 +166,6 @@ impl RequestBuilder {
         self
     }
 
-    /// The URL this request goes to, query included.
     pub fn url(&self) -> Result<&url::Url, &Error> {
         self.url.as_ref()
     }
@@ -216,7 +205,6 @@ impl Response {
         (200..300).contains(&self.status)
     }
 
-    /// The first value of a header, matched case-insensitively.
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .iter()
