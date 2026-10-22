@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", "plugins/*", "examples/plugins/*"]
 resolver = "3"
 
 [workspace.package]
@@ -121,6 +121,18 @@ time = "0.3"
 # pins deno_core ^0.331, so deno_core must stay on 0.331.x to share one V8 link.
 deno_core = "0.331"
 rustypipe-botguard = "0.1.2"
+# Plugin runtime. 48 is the newest release whose MSRV the pinned toolchain meets.
+wasmtime = { version = "48", default-features = false, features = [
+  "component-model",
+  "async",
+  "cranelift",
+  "runtime",
+  "std",
+  "parallel-compilation",
+] }
+wasmtime-wasi = { version = "48", default-features = false, features = ["p2"] }
+wit-bindgen = "0.63"
+url = "2.5"
 
 # Workspace components
 i18n = { package = "kopuz-i18n", version = "0.22.0", path = "./crates/i18n" }
@@ -143,6 +155,8 @@ kopuz_route = { package = "kopuz-route", version = "0.22.0", path = "./crates/ko
 discord-presence = { package = "kopuz-discord-presence", version = "0.22.0", path = "./crates/discord-presence" }
 scrobble = { package = "kopuz-scrobble", version = "0.22.0", path = "./crates/scrobble" }
 radio = { package = "kopuz-radio", version = "0.22.0", path = "./crates/radio" }
+plugin-host = { package = "kopuz-plugin-host", version = "0.22.0", path = "./crates/plugin-host" }
+bundled-plugins = { package = "kopuz-bundled-plugins", version = "0.22.0", path = "./crates/bundled-plugins" }
 
 # Steer code toward the tracing subscriber (see crates/kopuz/src/logging.rs).
 # Inherited per-crate via `[lints] workspace = true`. Build scripts (cargo:
@@ -161,6 +175,13 @@ panic = "unwind"
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# The official plugins, built for wasm32-wasip2 by crates/bundled-plugins.
+# Small beats fast here: they spend their time waiting on the network.
+[profile.plugin]
+inherits = "release"
+opt-level = "s"
+panic = "abort"
 
 [profile.server-dev]
 inherits = "dev"
