@@ -5453,12 +5453,10 @@ async fn offline_mode_queues_only_what_plays_offline_and_refuses_the_rest() {
 
     harness
         .api
-        .set_queue(replace(&[
-            "ytm-gone",
-            "ytm-kept",
-            "/music/file.flac",
-            "ytm-lost",
-        ]))
+        .set_queue(SetQueueRequest {
+            start_index: Some(1),
+            ..replace(&["ytm-gone", "ytm-kept", "/music/file.flac", "ytm-lost"])
+        })
         .await
         .expect("queue");
     let queued: Vec<String> = harness
@@ -5486,6 +5484,94 @@ async fn offline_mode_queues_only_what_plays_offline_and_refuses_the_rest() {
         .set_queue(replace(&["ytm-gone", "ytm-lost"]))
         .await
         .expect("online again, everything queues");
+}
+
+#[tokio::test]
+async fn offline_mode_refuses_a_jump_to_a_queued_song_without_a_copy() {
+    let (harness, offline, _dir) = cached_harness(Arc::new(Unreachable)).await;
+    harness
+        .api
+        .set_queue(replace(&["/music/first.flac", "ytm-gone"]))
+        .await
+        .expect("queued while online");
+    wait_committed(&harness.api).await;
+    offline.set_offline_mode(true);
+    let before = harness.api.queue_snapshot().await.expect("snapshot");
+
+    for edit in [
+        QueueEdit::Jump { index: 1 },
+        QueueEdit::JumpPhysical { index: 1 },
+    ] {
+        let refused = harness
+            .api
+            .queue_edit(edit.clone())
+            .await
+            .expect_err("the song has no copy");
+        assert_eq!(
+            refused.reason,
+            Some(api::ErrorReason::OfflineMode),
+            "{edit:?}"
+        );
+    }
+
+    let after = harness.api.queue_snapshot().await.expect("snapshot");
+    assert_eq!(after.position, before.position, "the pointer stays");
+    assert_eq!(harness.api.player_state().await.expect("state").error, None);
+}
+
+#[tokio::test]
+async fn offline_mode_refuses_a_chosen_song_without_a_copy_rather_than_play_another() {
+    let (harness, offline, _dir) = cached_harness(Arc::new(Unreachable)).await;
+    offline
+        .cache()
+        .store(
+            "ytm-kept",
+            "yt",
+            server::stream::stream_buffer::Captured {
+                bytes: b"audio".to_vec(),
+                content_type: Some("audio/webm".into()),
+            },
+        )
+        .await
+        .expect("cached");
+    offline.set_offline_mode(true);
+    harness
+        .api
+        .set_queue(SetQueueRequest {
+            start_index: Some(1),
+            ..replace(&["/music/first.flac", "ytm-kept"])
+        })
+        .await
+        .expect("a song with a copy plays");
+    wait_committed(&harness.api).await;
+    let before = harness.api.queue_snapshot().await.expect("snapshot");
+
+    for (keys, start) in [
+        (&["ytm-kept", "ytm-gone", "/music/next.flac"][..], 1),
+        (&["ytm-gone", "ytm-kept"][..], 0),
+        (&["ytm-kept", "ytm-gone"][..], 1),
+    ] {
+        let refused = harness
+            .api
+            .set_queue(SetQueueRequest {
+                start_index: Some(start),
+                ..replace(keys)
+            })
+            .await
+            .expect_err("the chosen song has no copy");
+        assert_eq!(
+            refused.reason,
+            Some(api::ErrorReason::OfflineMode),
+            "{keys:?}"
+        );
+    }
+
+    let after = harness.api.queue_snapshot().await.expect("snapshot");
+    let keys = |snapshot: &api::QueueSnapshot| -> Vec<String> {
+        snapshot.items.iter().map(|row| row.key.clone()).collect()
+    };
+    assert_eq!(keys(&after), keys(&before), "the queue is left as it was");
+    assert_eq!(after.position, before.position, "nothing else started");
 }
 
 #[tokio::test]

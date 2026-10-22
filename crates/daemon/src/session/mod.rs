@@ -1165,6 +1165,7 @@ impl Session {
                 if self.model.items().get(index).is_none() {
                     return Err(ApiError::invalid_input("no track at that queue position"));
                 }
+                self.admit_offline(self.model.items().get(index))?;
                 let position = self.model.jump_to(index);
                 self.start_load(position, false);
                 Ok(self.publish(state_tx, true))
@@ -1442,14 +1443,14 @@ impl Session {
         let nothing_offline = gate
             .as_ref()
             .is_some_and(|gate| !tracks.iter().any(|track| gate.admits(track)));
+        // Dropping the chosen song would start whichever one follows it in its place.
+        let chosen_offline = start
+            .and_then(|index| tracks.get(index))
+            .is_none_or(|track| gate.as_ref().is_none_or(|gate| gate.admits(track)));
         let (kept, start) =
             crate::queue_model::keep_where(tracks, start, playable(skip, gate.as_ref()));
-        if nothing_offline {
-            return Err(ApiError::new(
-                api::ErrorCode::SourceUnreachable,
-                "offline mode is on, and nothing here has a copy that plays offline",
-            )
-            .because(api::ErrorReason::OfflineMode));
+        if nothing_offline || !chosen_offline {
+            return Err(offline_refusal());
         }
         if kept.is_empty() {
             return Err(ApiError::invalid_input(
@@ -1457,6 +1458,14 @@ impl Session {
             ));
         }
         Ok((kept, start))
+    }
+
+    /// Refuse a jump to a song offline mode cannot play, before anything playing is touched.
+    fn admit_offline(&self, track: Option<&Track>) -> Result<(), ApiError> {
+        match (self.offline_gate(), track) {
+            (Some(gate), Some(track)) if !gate.admits(track) => Err(offline_refusal()),
+            _ => Ok(()),
+        }
     }
 
     /// What offline mode keeps the queue to, or `None` while it is off.
@@ -2296,6 +2305,7 @@ impl Session {
     }
 
     fn start_immediate_load(&mut self, model: QueueModel, idx: usize) -> Result<(), ApiError> {
+        self.admit_offline(model.track_at(idx))?;
         let previous = std::mem::replace(&mut self.model, model);
         if !self.start_load(idx, false) {
             self.model = previous;
@@ -2504,6 +2514,14 @@ struct ExternalState {
     track: Option<Track>,
     artwork: Option<String>,
     completed_key: Option<String>,
+}
+
+fn offline_refusal() -> ApiError {
+    ApiError::new(
+        api::ErrorCode::SourceUnreachable,
+        "offline mode is on, and what was asked for has no copy that plays offline",
+    )
+    .because(api::ErrorReason::OfflineMode)
 }
 
 /// What offline mode lets the queue play: files, songs with a copy here, and every song of a source that needs no internet.
