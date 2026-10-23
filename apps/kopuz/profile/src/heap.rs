@@ -2,11 +2,11 @@
 
 /// Reads the allocator's own figures; without jemalloc it reports zeroes rather than lying.
 pub struct Heap {
-    #[cfg(feature = "jemalloc")]
+    #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
     allocated: tikv_jemalloc_ctl::stats::allocated_mib,
-    #[cfg(feature = "jemalloc")]
+    #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
     resident: tikv_jemalloc_ctl::stats::resident_mib,
-    #[cfg(feature = "jemalloc")]
+    #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
     epoch: tikv_jemalloc_ctl::epoch_mib,
 }
 
@@ -17,7 +17,7 @@ impl Default for Heap {
 }
 
 impl Heap {
-    #[cfg(feature = "jemalloc")]
+    #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
     pub fn new() -> Self {
         Self {
             allocated: tikv_jemalloc_ctl::stats::allocated::mib()
@@ -27,13 +27,13 @@ impl Heap {
         }
     }
 
-    #[cfg(not(feature = "jemalloc"))]
+    #[cfg(not(all(feature = "jemalloc", not(target_env = "msvc"))))]
     pub fn new() -> Self {
         Self {}
     }
 
     /// `(allocated, resident)` in bytes; jemalloc caches its stats until the epoch advances.
-    #[cfg(feature = "jemalloc")]
+    #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
     pub fn read(&self) -> (u64, u64) {
         let _ = self.epoch.advance();
         (
@@ -42,7 +42,7 @@ impl Heap {
         )
     }
 
-    #[cfg(not(feature = "jemalloc"))]
+    #[cfg(not(all(feature = "jemalloc", not(target_env = "msvc"))))]
     pub fn read(&self) -> (u64, u64) {
         (0, 0)
     }

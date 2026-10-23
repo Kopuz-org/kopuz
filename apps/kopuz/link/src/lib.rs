@@ -1,7 +1,6 @@
 //! The one seam to a Kopuz daemon: a gRPC client on its own tokio runtime, supervised as a GPUI entity.
 
 mod daemon_process;
-mod socket;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -16,8 +15,8 @@ use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Global, Task
 
 pub use api;
 pub use client::Address;
+pub use client::default_socket_path;
 pub use daemon_process::spawn_daemon;
-pub use socket::default_socket_path;
 
 const RETRY_INTERVAL: Duration = Duration::from_secs(2);
 

@@ -15,6 +15,5 @@ client = { workspace = true }
 gpui-kit = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "process"] }
 futures = { workspace = true }
-directories = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }

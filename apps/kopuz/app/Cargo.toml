@@ -52,4 +52,9 @@ status = { path = "../status" }
 metadata_dialog = { path = "../metadata_dialog" }
 shortcuts = { path = "../shortcuts" }
 profile = { path = "../profile" }
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winres = { workspace = true }
