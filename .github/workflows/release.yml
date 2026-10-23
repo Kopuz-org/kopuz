@@ -39,7 +39,7 @@ jobs:
         run: npm ci
 
       - name: Build CSS
-        run: npx @tailwindcss/cli -i ./tailwind.css -o ./apps/kopuz/kopuz/assets/tailwind.css --content './apps/kopuz/kopuz/**/*.rs,./apps/kopuz/components/**/*.rs,./apps/kopuz/pages/**/*.rs,./apps/kopuz/hooks/**/*.rs,./daemon/player/**/*.rs,./daemon/reader/**/*.rs'
+        run: npx @tailwindcss/cli -i ./tailwind.css -o ./apps/legacy/kopuz/assets/tailwind.css --content './apps/legacy/kopuz/**/*.rs,./apps/legacy/components/**/*.rs,./apps/legacy/pages/**/*.rs,./apps/legacy/hooks/**/*.rs,./daemon/player/**/*.rs,./daemon/reader/**/*.rs'
 
       - name: Read and verify version
         id: version
@@ -60,7 +60,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Build Linux application
-        run: dx build --release --platform desktop --package kopuz --locked
+        run: dx build --release --platform desktop --package kopuz-legacy --locked
 
       - name: Prepare AppDir
         run: |
@@ -68,9 +68,9 @@ jobs:
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
 
-          cp target/dx/kopuz/release/linux/app/kopuz AppDir/usr/bin/kopuz
+          cp target/dx/kopuz-legacy/release/linux/app/kopuz-legacy AppDir/usr/bin/kopuz
           cp data/moe.kopuz.kopuz.desktop AppDir/usr/share/applications/
-          cp apps/kopuz/kopuz/assets/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/moe.kopuz.kopuz.png
+          cp apps/legacy/kopuz/assets/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/moe.kopuz.kopuz.png
 
       - name: Download linuxdeploy
         run: |
@@ -114,8 +114,8 @@ jobs:
 
       - name: Build DEB and RPM packages
         run: |
-          dx bundle --release --platform desktop --package kopuz --package-types deb --out-dir bundle-deb --locked
-          dx bundle --release --platform desktop --package kopuz --package-types rpm --out-dir bundle-rpm --locked
+          dx bundle --release --platform desktop --package kopuz-legacy --package-types deb --out-dir bundle-deb --locked
+          dx bundle --release --platform desktop --package kopuz-legacy --package-types rpm --out-dir bundle-rpm --locked
           mv bundle-deb/*.deb dist/
           mv bundle-rpm/*.rpm dist/
 
@@ -157,7 +157,7 @@ jobs:
         run: npm ci
 
       - name: Build CSS
-        run: npx @tailwindcss/cli -i ./tailwind.css -o ./apps/kopuz/kopuz/assets/tailwind.css --content './apps/kopuz/kopuz/**/*.rs,./apps/kopuz/components/**/*.rs,./apps/kopuz/pages/**/*.rs,./apps/kopuz/hooks/**/*.rs,./daemon/player/**/*.rs,./daemon/reader/**/*.rs'
+        run: npx @tailwindcss/cli -i ./tailwind.css -o ./apps/legacy/kopuz/assets/tailwind.css --content './apps/legacy/kopuz/**/*.rs,./apps/legacy/components/**/*.rs,./apps/legacy/pages/**/*.rs,./apps/legacy/hooks/**/*.rs,./daemon/player/**/*.rs,./daemon/reader/**/*.rs'
 
       - name: Read and verify version
         id: version
@@ -178,17 +178,17 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Bundle macOS application
-        run: dx bundle --release --platform desktop --package kopuz --package-types macos --out-dir dist --locked
+        run: dx bundle --release --platform desktop --package kopuz-legacy --package-types macos --out-dir dist --locked
 
       - name: Set bundle version and apply ad-hoc signature
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION}" dist/Kopuz.app/Contents/Info.plist
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${VERSION}" dist/Kopuz.app/Contents/Info.plist
-          codesign --force --sign - dist/Kopuz.app/Contents/MacOS/kopuz
-          codesign --force --deep --sign - dist/Kopuz.app
-          codesign --verify --deep --strict --verbose=2 dist/Kopuz.app
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION}" dist/KopuzLegacy.app/Contents/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${VERSION}" dist/KopuzLegacy.app/Contents/Info.plist
+          codesign --force --sign - dist/KopuzLegacy.app/Contents/MacOS/kopuz-legacy
+          codesign --force --deep --sign - dist/KopuzLegacy.app
+          codesign --verify --deep --strict --verbose=2 dist/KopuzLegacy.app
 
       - name: Free disk space for DMG
         run: |
@@ -204,7 +204,7 @@ jobs:
           set -euo pipefail
 
           dmg="dist/Kopuz_${VERSION}_aarch64.dmg"
-          hdiutil create -volname Kopuz -srcfolder dist/Kopuz.app -ov -format UDZO "$dmg"
+          hdiutil create -volname Kopuz -srcfolder dist/KopuzLegacy.app -ov -format UDZO "$dmg"
           hdiutil verify "$dmg"
           shasum -a 256 "$dmg" > "${dmg}.sha256"
 
@@ -246,7 +246,7 @@ jobs:
         run: npm ci
 
       - name: Build CSS
-        run: npx @tailwindcss/cli -i ./tailwind.css -o ./apps/kopuz/kopuz/assets/tailwind.css --content './apps/kopuz/kopuz/**/*.rs,./apps/kopuz/components/**/*.rs,./apps/kopuz/pages/**/*.rs,./apps/kopuz/hooks/**/*.rs,./daemon/player/**/*.rs,./daemon/reader/**/*.rs'
+        run: npx @tailwindcss/cli -i ./tailwind.css -o ./apps/legacy/kopuz/assets/tailwind.css --content './apps/legacy/kopuz/**/*.rs,./apps/legacy/components/**/*.rs,./apps/legacy/pages/**/*.rs,./apps/legacy/hooks/**/*.rs,./daemon/player/**/*.rs,./daemon/reader/**/*.rs'
 
       - name: Read and verify version
         id: version
@@ -264,8 +264,8 @@ jobs:
       - name: Build EXE and MSI installers
         shell: pwsh
         run: |
-          dx bundle --release --platform desktop --package kopuz --package-types nsis --out-dir bundle-nsis --locked
-          dx bundle --release --platform desktop --package kopuz --package-types msi --out-dir bundle-msi --locked
+          dx bundle --release --platform desktop --package kopuz-legacy --package-types nsis --out-dir bundle-nsis --locked
+          dx bundle --release --platform desktop --package kopuz-legacy --package-types msi --out-dir bundle-msi --locked
 
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           Move-Item bundle-nsis/*.exe dist/
@@ -335,7 +335,7 @@ jobs:
         run: npm ci
 
       - name: Build CSS
-        run: npx @tailwindcss/cli -i ./tailwind.css -o ./apps/kopuz/kopuz/assets/tailwind.css --content './apps/kopuz/kopuz/**/*.rs,./apps/kopuz/components/**/*.rs,./apps/kopuz/pages/**/*.rs,./apps/kopuz/hooks/**/*.rs,./daemon/player/**/*.rs,./daemon/reader/**/*.rs'
+        run: npx @tailwindcss/cli -i ./tailwind.css -o ./apps/legacy/kopuz/assets/tailwind.css --content './apps/legacy/kopuz/**/*.rs,./apps/legacy/components/**/*.rs,./apps/legacy/pages/**/*.rs,./apps/legacy/hooks/**/*.rs,./daemon/player/**/*.rs,./daemon/reader/**/*.rs'
 
       - name: Read and verify version
         id: version

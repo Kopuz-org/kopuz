@@ -1,24 +1,24 @@
 # The GPUI frontend: `just gpui run`, `just gpui check`, and the rest.
-mod gpui "apps/gpui/justfile"
+mod gpui "apps/kopuz/justfile"
 
 default:
     @just --list
 
 tailwind:
-    npx @tailwindcss/cli -i ./tailwind.css -o ./apps/kopuz/kopuz/assets/tailwind.css
+    npx @tailwindcss/cli -i ./tailwind.css -o ./apps/legacy/kopuz/assets/tailwind.css
 
 serve: tailwind
-    dx serve
+    dx serve --package kopuz-legacy
 
 build: tailwind
-    dx build --package kopuz --release
+    dx build --package kopuz-legacy --release
     @echo ""
     @echo "Build complete!"
 
 # The app, hosting the daemon core and serving it on the socket. Extra flags
 # reach cargo, so `just run --release` builds and runs it released.
 run *FLAGS: tailwind
-    cargo run {{FLAGS}} -p kopuz
+    cargo run {{FLAGS}} -p kopuz-legacy
 
 daemon *FLAGS:
     cargo run {{FLAGS}} -p kopuz-kopuzd --bin kopuzd
@@ -27,7 +27,7 @@ ctl *ARGS:
     cargo run -p kopuz-ctl -- {{ARGS}}
 
 run-release: build
-    target/dx/kopuz/release/linux/app/kopuz
+    target/dx/kopuz-legacy/release/linux/app/kopuz-legacy
 
 clean:
     cargo clean
@@ -44,15 +44,15 @@ flatpak-run:
 
 # --- Mobile -----------------------------------------------------------------
 
-android_project := "target/dx/kopuz/release/android/app"
-ios_app_path := "target/dx/kopuz/release/ios/kopuz.app"
+android_project := "target/dx/kopuz-legacy/release/android/app"
+ios_app_path := "target/dx/kopuz-legacy/release/ios/KopuzLegacy.app"
 ios_ipa_dir := "target/ipa"
 
 # Debug-signed APK for sideloading onto a dev device. The Kotlin sources,
 # manifest patches, launcher icons and R8 keep rules are all injected by
-# apps/kopuz/kopuz/build.rs during `dx build` — nothing to copy in afterwards.
+# apps/legacy/kopuz/build.rs during `dx build` — nothing to copy in afterwards.
 android-patch:
-    dx build --package kopuz --platform android --release
+    dx build --package kopuz-legacy --platform android --release
     cd {{android_project}} && ./gradlew assembleDebug
     @echo "APK: {{android_project}}/app/build/outputs/apk/debug/app-debug.apk"
 
@@ -65,10 +65,10 @@ android-install:
     adb install -r "$(ls -t target/android/*.apk {{android_project}}/app/build/outputs/apk/debug/*.apk 2>/dev/null | head -1)"
 
 ios-build-sim:
-    dx build --ios --package kopuz --release
+    dx build --ios --package kopuz-legacy --release
 
 ios-build-device:
-    dx build --ios --package kopuz --release --target aarch64-apple-ios
+    dx build --ios --package kopuz-legacy --release --target aarch64-apple-ios
 
 # Patch Info.plist for on-device install: APPL type, min OS, background audio, platform.
 ios-fix-plist:

@@ -115,8 +115,8 @@ Kopuz uses Rust 2024 and workspace lints from `Cargo.toml`.
 
 - Prefer the existing crate boundaries under `shared/`, `daemon/` and `apps/`
   over new shared layers.
-- Keep UI code in the Dioxus style already used by `apps/kopuz/components`,
-  `apps/kopuz/pages`, and `apps/kopuz/kopuz`.
+- Keep UI code in the Dioxus style already used by `apps/legacy/components`,
+  `apps/legacy/pages`, and `apps/legacy/kopuz`.
 - Keep media-source behavior behind the existing source/provider abstractions
   instead of hardcoding one service into unrelated UI.
 - Use `tracing` for diagnostics. Workspace Clippy denies `println!` and

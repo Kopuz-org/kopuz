@@ -1,8 +1,8 @@
 [workspace]
-members = ["shared/*", "daemon/*", "apps/common/*", "apps/cli", "apps/kopuz/*", "apps/gpui/*"]
-exclude = ["vendor/*", "apps/gpui/.claude", "apps/gpui/docs", "apps/gpui/scripts"]
-# A bare `cargo build` skips the Dioxus app; build it with `just build` or `-p kopuz`.
-default-members = ["shared/*", "daemon/*", "apps/common/*", "apps/cli", "apps/gpui/*"]
+members = ["shared/*", "daemon/*", "apps/common/*", "apps/cli", "apps/legacy/*", "apps/kopuz/*"]
+exclude = ["vendor/*", "apps/kopuz/.claude", "apps/kopuz/docs", "apps/kopuz/scripts"]
+# A bare `cargo build` skips the legacy Dioxus app; build it with `just build` or `-p kopuz-legacy`.
+default-members = ["shared/*", "daemon/*", "apps/common/*", "apps/cli", "apps/kopuz/*"]
 resolver = "3"
 
 [workspace.package]
@@ -129,9 +129,9 @@ rustypipe-botguard = "0.1.2"
 i18n = { package = "kopuz-i18n", version = "0.22.0", path = "./apps/common/i18n" }
 player = { package = "kopuz-player", version = "0.22.0", path = "./daemon/player" }
 reader = { package = "kopuz-reader", version = "0.22.0", path = "./daemon/reader" }
-components = { package = "kopuz-components", version = "0.22.0", path = "./apps/kopuz/components" }
-hooks = { package = "kopuz-hooks", version = "0.22.0", path = "./apps/kopuz/hooks" }
-pages = { package = "kopuz-pages", version = "0.22.0", path = "./apps/kopuz/pages" }
+components = { package = "kopuz-components", version = "0.22.0", path = "./apps/legacy/components" }
+hooks = { package = "kopuz-hooks", version = "0.22.0", path = "./apps/legacy/hooks" }
+pages = { package = "kopuz-pages", version = "0.22.0", path = "./apps/legacy/pages" }
 utils = { package = "kopuz-utils", version = "0.22.0", path = "./shared/utils" }
 config = { package = "kopuz-config", version = "0.22.0", path = "./shared/config" }
 db = { package = "kopuz-db", version = "0.22.0", path = "./daemon/db" }
@@ -140,9 +140,9 @@ proto = { package = "kopuz-proto", version = "0.22.0", path = "./shared/proto" }
 daemon = { package = "kopuz-daemon", version = "0.22.0", path = "./daemon/core" }
 kopuzd = { package = "kopuz-kopuzd", version = "0.22.0", path = "./daemon/kopuzd" }
 client = { package = "kopuz-client", version = "0.22.0", path = "./apps/common/client" }
-kopuz = { version = "0.22.0", path = "./apps/kopuz/kopuz" }
+kopuz-legacy = { version = "0.22.0", path = "./apps/legacy/kopuz" }
 server = { package = "kopuz-server", version = "0.22.0", path = "./daemon/server" }
-kopuz_route = { package = "kopuz-route", version = "0.22.0", path = "./apps/kopuz/kopuz_route" }
+kopuz_route = { package = "kopuz-route", version = "0.22.0", path = "./apps/legacy/kopuz_route" }
 discord-presence = { package = "kopuz-discord-presence", version = "0.22.0", path = "./daemon/discord-presence" }
 scrobble = { package = "kopuz-scrobble", version = "0.22.0", path = "./daemon/scrobble" }
 radio = { package = "kopuz-radio", version = "0.22.0", path = "./daemon/radio" }
@@ -151,13 +151,13 @@ radio = { package = "kopuz-radio", version = "0.22.0", path = "./daemon/radio" }
 gpui-kit = "0.6.4"
 futures = "0.3"
 anyhow = "1"
-commands = { path = "./apps/gpui/commands" }
-link = { path = "./apps/gpui/link" }
-store = { path = "./apps/gpui/store" }
-primitives = { path = "./apps/gpui/primitives" }
-theme = { path = "./apps/gpui/theme" }
+commands = { path = "./apps/kopuz/commands" }
+link = { path = "./apps/kopuz/link" }
+store = { path = "./apps/kopuz/store" }
+primitives = { path = "./apps/kopuz/primitives" }
+theme = { path = "./apps/kopuz/theme" }
 
-# Steer code toward the tracing subscriber (see apps/kopuz/kopuz/src/logging.rs).
+# Steer code toward the tracing subscriber (see apps/legacy/kopuz/src/logging.rs).
 # Inherited per-crate via `[lints] workspace = true`. Build scripts (cargo:
 # directives), examples, and test diagnostics opt out with `#[expect(...)]`.
 [workspace.lints.clippy]

@@ -12,14 +12,14 @@ const ALLOWED = {
 const EXCEPTIONS = [
   # The Dioxus app hosts the daemon core in-process and serves it on the socket.
   [from to kind target];
-  [apps/kopuz/kopuz daemon/core normal null]
-  [apps/kopuz/kopuz daemon/db normal null]
-  [apps/kopuz/kopuz daemon/server normal null]
-  [apps/kopuz/kopuz daemon/player normal null]
-  [apps/kopuz/kopuz daemon/kopuzd normal 'cfg(not(target_os = "android"))']
+  [apps/legacy/kopuz daemon/core normal null]
+  [apps/legacy/kopuz daemon/db normal null]
+  [apps/legacy/kopuz daemon/server normal null]
+  [apps/legacy/kopuz daemon/player normal null]
+  [apps/legacy/kopuz daemon/kopuzd normal 'cfg(not(target_os = "android"))']
   # On Android the Dioxus frontend drives the platform player directly.
-  [apps/kopuz/hooks daemon/player normal 'cfg(target_os = "android")']
-  [apps/kopuz/components daemon/player normal 'cfg(target_os = "android")']
+  [apps/legacy/hooks daemon/player normal 'cfg(target_os = "android")']
+  [apps/legacy/components daemon/player normal 'cfg(target_os = "android")']
   # The daemon's contract tests talk to it through the real client and CLI.
   [daemon/kopuzd apps/common/client dev null]
   [daemon/kopuzd apps/cli dev null]

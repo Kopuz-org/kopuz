@@ -135,7 +135,7 @@ jobs:
 
       - name: Bundle Windows installer (.msi)
         shell: pwsh
-        run: dx bundle --release --platform desktop --package kopuz
+        run: dx bundle --release --platform desktop --package kopuz-legacy
 
       - name: List bundle output
         if: always()
