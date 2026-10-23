@@ -503,7 +503,8 @@ impl SourceService {
                     crate::services::server_ref(server.service, server.plugin_service.as_deref());
                 // An anonymous source needs no token to be usable, which is
                 // why this is not simply "has a token".
-                info.authenticated = server.access_token.is_some() || server.yt_anonymous;
+                info.authenticated = server.access_token.is_some()
+                    || crate::services::sign_in(&view, false) == api::SignInKind::None;
                 info.sign_in = crate::services::sign_in(&view, info.authenticated);
                 // What signing in again takes, for credentials that went stale.
                 info.reauth = crate::services::sign_in(&view, false);
@@ -1603,7 +1604,10 @@ impl SourceService {
         let Ok(Some(server)) = self.db.load_server(id).await else {
             return false;
         };
-        let usable = server.access_token.is_some() || server.yt_anonymous;
+        let needs_none =
+            crate::services::sign_in(&crate::services::ServerView::from(&server), false)
+                == api::SignInKind::None;
+        let usable = server.access_token.is_some() || needs_none;
         usable && !network::is_local(&source, Some(&server.url))
     }
 

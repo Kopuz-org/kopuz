@@ -20,11 +20,13 @@ pub struct ServerConn {
 }
 
 impl ServerConn {
-    /// The active server's connection params, or `None` without a token (anonymous YouTube Music runs on none and ignores a leftover one), or without a `user_id` for a service that signs requests with one.
+    /// The active server's connection params, or `None` without a token (anonymous YouTube Music runs on none and ignores a leftover one; a plugin's service decides for itself), or without a `user_id` for a service that signs requests with one.
     pub fn resolve(sources: &crate::sources::Sources) -> Option<Self> {
         let server = sources.server.as_ref()?;
         let token = if server.service == MusicService::YtMusic && server.yt_anonymous {
             String::new()
+        } else if server.service == MusicService::Plugin {
+            server.access_token.clone().unwrap_or_default()
         } else {
             server.access_token.clone()?
         };
@@ -118,5 +120,12 @@ mod tests {
         let yt = ServerConn::resolve(&cfg("YtMusic", Some("cookie"), None)).unwrap();
         assert_eq!(yt.token, "cookie");
         assert!(yt.user_id.is_empty());
+    }
+
+    #[test]
+    fn a_plugin_service_resolves_without_credentials() {
+        let plugin = ServerConn::resolve(&cfg("Plugin", None, None)).expect("resolves");
+        assert!(plugin.token.is_empty());
+        assert!(plugin.user_id.is_empty());
     }
 }
