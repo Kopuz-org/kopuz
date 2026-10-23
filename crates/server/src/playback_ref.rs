@@ -21,9 +21,10 @@ impl<'a> PlaybackItemRef<'a> {
         let mut parts = value.split(':');
         let scheme = parts.next().unwrap_or_default();
         match scheme {
-            "smb" => Self::Server {
+            // Both take the rest whole: a path, or an id a plugin chose.
+            "smb" | "plugin" => Self::Server {
                 service: scheme,
-                item_id: value.strip_prefix("smb:").unwrap_or_default(),
+                item_id: value[scheme.len()..].strip_prefix(':').unwrap_or_default(),
                 extra: None,
             },
             "radio" => Self::Radio {
@@ -138,6 +139,18 @@ mod tests {
                 service: "ytmusic",
                 item_id: "video_id",
                 extra: Some("extra"),
+            }
+        );
+    }
+
+    #[test]
+    fn a_plugin_item_keeps_its_whole_id() {
+        assert_eq!(
+            PlaybackItemRef::parse("plugin:gd77:01 Turning.flac"),
+            PlaybackItemRef::Server {
+                service: "plugin",
+                item_id: "gd77:01 Turning.flac",
+                extra: None,
             }
         );
     }
