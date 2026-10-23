@@ -171,7 +171,10 @@ pub fn use_active_source_info() -> Memo<Option<api::SourceInfo>> {
 /// Every service this daemon can be pointed at, and the form that adds one.
 pub fn use_services() -> Resource<Vec<api::ServiceInfo>> {
     let api = use_api();
+    let gens = use_generations();
     use_resource(move || {
+        // Installing or removing a plugin changes what is offered.
+        let _ = gens.generation(Table::Servers);
         let api = api.clone();
         async move { api.services().await.unwrap_or_default() }
     })
