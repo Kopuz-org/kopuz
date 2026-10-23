@@ -27,6 +27,18 @@ pub use bindings::kopuz::plugin::types::{
 pub type Result<T, E = SourceError> = std::result::Result<T, E>;
 
 impl SourceError {
+    /// Plain text for a person; the generated `Display` is the debug form.
+    pub fn message(&self) -> String {
+        match self {
+            SourceError::Unsupported(operation) => {
+                format!("this source doesn't support {operation}")
+            }
+            SourceError::Connectivity => "the server did not answer".to_string(),
+            SourceError::Auth => "the server refused the credentials".to_string(),
+            SourceError::InvalidInput(message) | SourceError::Backend(message) => message.clone(),
+        }
+    }
+
     pub fn unsupported(operation: &str) -> Self {
         SourceError::Unsupported(operation.to_string())
     }
