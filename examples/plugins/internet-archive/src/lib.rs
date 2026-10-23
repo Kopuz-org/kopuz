@@ -5,8 +5,8 @@
 
 use kopuz_plugin_sdk::http::Client;
 use kopuz_plugin_sdk::{
-    Album, ArtistCredit, AuthOutcome, Connection, LibrarySnapshot, Result, Source, SourceError,
-    StreamInfo, StreamQuality, Track, cover,
+    Album, ArtistCredit, AuthOutcome, Check, CheckStep, Connection, LibrarySnapshot, Result,
+    Source, SourceError, StreamInfo, StreamQuality, Track, cover,
 };
 use serde::Deserialize;
 
@@ -79,6 +79,9 @@ struct File {
     track: Option<String>,
     #[serde(default)]
     length: Option<String>,
+    /// "true" for a stream-restricted file, which cannot be downloaded.
+    #[serde(default)]
+    private: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,13 +143,20 @@ fn track_number(track: &str) -> Option<u32> {
 
 /// An item's audio files, in the first preferred format it has.
 fn audio_files(files: &[File]) -> Vec<&File> {
+    let public: Vec<&File> = files
+        .iter()
+        .filter(|file| file.private.as_deref() != Some("true"))
+        .collect();
     let Some(format) = FORMATS
         .iter()
-        .find(|format| files.iter().any(|file| file.format == **format))
+        .find(|format| public.iter().any(|file| file.format == **format))
     else {
         return Vec::new();
     };
-    let mut audio: Vec<&File> = files.iter().filter(|file| file.format == *format).collect();
+    let mut audio: Vec<&File> = public
+        .into_iter()
+        .filter(|file| file.format == *format)
+        .collect();
     audio.sort_by_key(|file| {
         (
             file.track
@@ -295,6 +305,24 @@ impl Source for InternetArchive {
         }
     }
 
+    /// archive.org answers an unknown item with `{}`, which is not an outage.
+    fn diagnose(&self) -> Result<Vec<Check>> {
+        let result = self.identifier().map(str::to_string).and_then(|id| {
+            let item = self.metadata(&id)?;
+            match item.metadata.identifier.is_empty() {
+                true => Err(SourceError::InvalidInput(format!(
+                    "archive.org has no item {id}"
+                ))),
+                false => Ok(audio_files(&item.files).len()),
+            }
+        });
+        Ok(vec![Check::of(
+            CheckStep::Reach,
+            result.map_err(|error| error.message()),
+            |tracks| format!("{tracks} tracks can be played"),
+        )])
+    }
+
     fn fetch_library(&self) -> Result<LibrarySnapshot> {
         let identifier = self.identifier()?;
         let root = self.metadata(identifier)?;
@@ -375,7 +403,8 @@ mod tests {
                 { "name": "02.flac", "format": "Flac", "track": "2" },
                 { "name": "02.mp3", "format": "VBR MP3", "title": "Second", "track": "2/2", "length": "3:05" },
                 { "name": "01.mp3", "format": "VBR MP3", "title": "First", "track": "1/2", "length": "61.5" },
-                { "name": "cover.jpg", "format": "JPEG" }
+                { "name": "cover.jpg", "format": "JPEG" },
+                { "name": "03.mp3", "format": "VBR MP3", "title": "Locked", "track": "3", "private": "true" }
             ]
         }))
         .unwrap();
