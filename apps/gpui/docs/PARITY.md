@@ -462,7 +462,7 @@ Category → rows. **[H]** = hardcoded `Settings` field (applied to the local co
 - [ ] Only while a Server source is active: GET https://1.1.1.1 every 30 s (10 s while offline), offline after 2 misses; drives `is_offline` context (offline filtering on Home/Albums/Artists/Playlists) and banner
 
 ### 5.11 i18n
-- [ ] Fluent, 28 locales (`crates/i18n/locales/*.ftl`, `en.ftl` baseline ~520 keys), ~244 distinct literal keys used by these crates plus dynamic ones (`sidebar item keys`, `Text::Key` from daemon specs, radio station/stream names, sort field `label_key`s)
+- [ ] Fluent, 28 locales (`apps/common/i18n/locales/*.ftl`, `en.ftl` baseline ~520 keys), ~244 distinct literal keys used by these crates plus dynamic ones (`sidebar item keys`, `Text::Key` from daemon specs, radio station/stream names, sort field `label_key`s)
 - [ ] API: `t(key)`, `t_with(key, &[(arg, value)])`, `set_locale`, `available_languages`, `is_rtl`
 - [ ] Hardcoded English strings still in UI (port can keep or key them): "Downloading…", "Remove Download", "Download Offline", "Copied link", "Couldn't find a page for this track", "Couldn't update some favorites", "{n} selected", "Stop", "{n} failed", "Downloading d / t", "Server • N tracks", "N playlists", "Loading tracks — …", "N playlists synced", "Refresh", "Remove downloads", "Download Album", "Go to artist", "Share", "Scanning library…", offline/online banner texts, tray menu items, "Trigger crash (debug)"
 

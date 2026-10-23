@@ -2,7 +2,7 @@
 
 The Dioxus UI is Tailwind v4 classes written inline in each component. This is
 how each of them becomes a GPUI call. The source of truth is the component file
-in `../kopuz/crates/{components,pages}/src/…`; read the classes on the element
+in `apps/kopuz/{components,pages}/src/…`; read the classes on the element
 you are porting and translate them here, rather than eyeballing a screenshot.
 
 ## The colour system
@@ -181,7 +181,7 @@ course take one closure hover.
 Before finishing, check your crate:
 
 ```sh
-grep -rn "\.hover(|\|\.hover(move |" crates/<yours>/src
+grep -rn "\.hover(|\|\.hover(move |" <yours>/src
 ```
 
 and confirm each receiver is a `div`/`h_flex`/`v_flex`, not a `Button` or a

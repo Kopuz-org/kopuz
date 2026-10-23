@@ -1,3 +1,6 @@
+# The GPUI frontend: `just gpui run`, `just gpui check`, and the rest.
+mod gpui "apps/gpui/justfile"
+
 default:
     @just --list
 

@@ -9,11 +9,12 @@ frontend for that daemon, native rather than webview-based.
 
 ## Running
 
-Start a daemon, then the app:
+From the repo root, `just gpui run` builds both and starts them together. By
+hand, start a daemon, then the app:
 
 ```sh
 kopuzd --socket $XDG_RUNTIME_DIR/kopuzd.sock
-nix develop --command cargo run
+nix develop --command cargo run -p kopuz-gpui
 ```
 
 The app finds the daemon at the standard socket path. `KOPUZ_SOCKET` points it

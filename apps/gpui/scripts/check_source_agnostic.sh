@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 
 forbidden='(?i)Source::Local|LocalLibrary|local_source|local_library|music_directory|is_local\b|SourceKind|upsert_local|LocalSourceDraft|t\("local|t\("[a-z_]+_local"|local_?sources?\b|\blocal_?librar|(?-i:\bLocal\b)'
 
-found=$(grep -rnP --include='*.rs' "$forbidden" crates)
+found=$(grep -rnP --include='*.rs' "$forbidden" .)
 if [ -n "$found" ]; then
     echo "$found" >&2
     echo "local-source reference(s) in the frontend: the daemon owns what a source is" >&2

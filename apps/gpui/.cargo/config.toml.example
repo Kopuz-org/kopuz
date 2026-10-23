@@ -1,6 +1,0 @@
-# Copy to .cargo/config.toml to build against a local kopuz checkout.
-[patch."https://github.com/Kopuz-org/kopuz"]
-kopuz-api = { path = "../kopuz/crates/api" }
-kopuz-client = { path = "../kopuz/crates/client" }
-kopuz-config = { path = "../kopuz/crates/config" }
-kopuz-i18n = { path = "../kopuz/crates/i18n" }

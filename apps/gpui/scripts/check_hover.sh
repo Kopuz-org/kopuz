@@ -10,7 +10,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 found=$(
-    for file in $(grep -rl "on_hover" crates --include="*.rs" 2>/dev/null); do
+    for file in $(grep -rl "on_hover" . --include="*.rs" 2>/dev/null); do
         awk -v file="$file" '
             { line[NR] = $0 }
             END {

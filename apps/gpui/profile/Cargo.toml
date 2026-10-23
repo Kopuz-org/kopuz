@@ -1,0 +1,15 @@
+[package]
+name = "profile"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-chrome = "0.7"
+tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
+tikv-jemallocator = { version = "0.6", optional = true }
+
+[features]
+default = ["jemalloc"]
+jemalloc = ["dep:tikv-jemalloc-ctl", "dep:tikv-jemallocator"]
