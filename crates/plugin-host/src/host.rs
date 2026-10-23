@@ -100,8 +100,8 @@ impl http::Host for State {
                 url.scheme()
             )));
         }
-        let host = url.host_str().unwrap_or_default();
-        if !self.permissions.allows(host, self.server_host.as_deref()) {
+        let host = url.host_str().unwrap_or_default().to_string();
+        if !self.permissions.allows(&host, self.server_host.as_deref()) {
             tracing::warn!(plugin = %self.plugin_id, %host, "plugin request to an undeclared host refused");
             return Err(http::HttpError::Denied(format!(
                 "the plugin's manifest does not allow {host}"
@@ -120,7 +120,10 @@ impl http::Host for State {
         if let Some(body) = request.body {
             builder = builder.body(body);
         }
-        let mut response = builder.send().await.map_err(request_error)?;
+        let mut response = builder.send().await.map_err(|error| {
+            tracing::debug!(plugin = %self.plugin_id, %host, error = %format!("{error:#}"), "plugin request failed");
+            request_error(error)
+        })?;
 
         let status = response.status().as_u16();
         let headers = response
