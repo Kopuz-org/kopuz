@@ -7,9 +7,9 @@ kopuz_rust_library(
     name = "components",
     extra_deps = [
         "//shared/config",
-        "//apps/dioxus/hooks",
+        "//apps/kopuz/hooks",
         "//apps/common/i18n",
-        "//apps/dioxus/kopuz_route",
+        "//apps/kopuz/kopuz_route",
         "//daemon/player",
         "//daemon/reader",
         "//daemon/scrobble",

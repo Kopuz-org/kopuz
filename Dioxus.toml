@@ -3,7 +3,7 @@ name = "kopuz"
 default_platform = "desktop"
 
 [application.assets]
-base_path = "apps/dioxus/kopuz/assets"
+base_path = "apps/kopuz/kopuz/assets"
 
 [bundle]
 identifier = "moe.kopuz.kopuz"

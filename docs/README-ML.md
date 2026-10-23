@@ -1,6 +1,6 @@
 <!--markdownlint-disable MD013 MD033 MD041 -->
 <div align="center">
-  <img src="../apps/dioxus/kopuz/assets/banner.png" alt="Kopuz ലോഗോ" height="300"/>
+  <img src="../apps/kopuz/kopuz/assets/banner.png" alt="Kopuz ലോഗോ" height="300"/>
   <h1>Kopuz</h1>
   <p>
     Rust ഉം Dioxus ഫ്രെയിംവർക്കും ഉപയോഗിച്ച് നിർമ്മിച്ച ആധുനികവും ഭാരം കുറഞ്ഞതുമായ

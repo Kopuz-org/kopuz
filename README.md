@@ -1,6 +1,6 @@
 <!--markdownlint-disable MD013 MD033 MD041 -->
 <div align="center">
-  <img src="apps/dioxus/kopuz/assets/banner.png" alt="Kopuz Logo" height="300"/>
+  <img src="apps/kopuz/kopuz/assets/banner.png" alt="Kopuz Logo" height="300"/>
   <h1>Kopuz</h1>
   <p>
     Kopuz is a modern, lightweight, music player application built with Rust
@@ -523,7 +523,7 @@ bazel build --config=release //:kopuz
 
 The first Bazel invocation downloads the pinned Bazel and Rust toolchains plus
 the third-party crates recorded in `Cargo.lock` and `Cargo.Bazel.lock`. The
-built binary is available through the stable `bazel-bin/apps/dioxus/kopuz/kopuz`
+built binary is available through the stable `bazel-bin/apps/kopuz/kopuz/kopuz`
 symlink.
 
 Test one crate or the complete workspace:
@@ -571,7 +571,7 @@ Regenerate it whenever UI classes change:
 ```bash
 npm ci
 npx @tailwindcss/cli -i ./tailwind.css \
-  -o ./apps/dioxus/kopuz/assets/tailwind.css
+  -o ./apps/kopuz/kopuz/assets/tailwind.css
 ```
 
 The Bazel target builds and runs the native Rust executable. Dioxus still owns

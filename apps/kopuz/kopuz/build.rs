@@ -294,7 +294,7 @@ fn main() {
         Err(_) => return,
     };
 
-    // android-src lives at the repo root (apps/dioxus/kopuz/../../../android-src).
+    // android-src lives at the repo root (apps/kopuz/kopuz/../../../android-src).
     let android_src = crate_dir
         .join("..")
         .join("..")

@@ -2,16 +2,16 @@
 module.exports = {
   mode: "all",
   content: [
-    "./apps/dioxus/kopuz/**/*.{rs,html,css}",
-    "./apps/dioxus/components/**/*.{rs,html,css}",
-    "./apps/dioxus/pages/**/*.{rs,html,css}",
-    "./apps/dioxus/hooks/**/*.{rs,html,css}",
+    "./apps/kopuz/kopuz/**/*.{rs,html,css}",
+    "./apps/kopuz/components/**/*.{rs,html,css}",
+    "./apps/kopuz/pages/**/*.{rs,html,css}",
+    "./apps/kopuz/hooks/**/*.{rs,html,css}",
     "./daemon/player/**/*.{rs,html,css}",
     "./daemon/reader/**/*.{rs,html,css}",
     "./daemon/server/**/*.{rs,html,css}",
     "./shared/utils/**/*.{rs,html,css}",
     "./shared/config/**/*.{rs,html,css}",
-    "./apps/dioxus/kopuz_route/**/*.{rs,html,css}",
+    "./apps/kopuz/kopuz_route/**/*.{rs,html,css}",
   ],
   theme: {
     extend: {

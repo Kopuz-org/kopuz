@@ -6,11 +6,11 @@ exports_files(["Cargo.toml"])
 kopuz_rust_library(
     name = "pages",
     extra_deps = [
-        "//apps/dioxus/components",
+        "//apps/kopuz/components",
         "//shared/config",
-        "//apps/dioxus/hooks",
+        "//apps/kopuz/hooks",
         "//apps/common/i18n",
-        "//apps/dioxus/kopuz_route",
+        "//apps/kopuz/kopuz_route",
         "//daemon/player",
         "//daemon/radio",
         "//daemon/reader",

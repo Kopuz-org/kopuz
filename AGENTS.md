@@ -90,7 +90,7 @@ Three layers, enforced by `scripts/check_layers.nu` (CI):
 - `shared/` — the daemon ↔ frontend contract. Depends on nothing else in the repo.
 - `daemon/` — the daemon and everything behind it. Depends only on `shared/`.
 - `apps/` — the frontends. `apps/common/` (shared by frontends only) depends only
-  on `shared/`; each app (`apps/ctl`, `apps/dioxus/`) on `shared/` and
+  on `shared/`; each app (`apps/cli`, `apps/kopuz/`) on `shared/` and
   `apps/common/`, never on `daemon/` or another app. The one exception, listed
   in the script: the Dioxus app hosts the daemon in-process and drives `player`
   on Android.
@@ -98,7 +98,7 @@ Three layers, enforced by `scripts/check_layers.nu` (CI):
 A bare `cargo build` / `cargo test` covers the default members (everything but
 the Dioxus app); pass `--workspace` or `-p kopuz` for it.
 
-- `apps/dioxus/kopuz` — app binary (Dioxus entry `main.rs`, `build.rs` font/asset
+- `apps/kopuz/kopuz` — app binary (Dioxus entry `main.rs`, `build.rs` font/asset
   embedding + Android packaging). Hosts the daemon core in-process.
 - `shared/api` — the client-facing trait and its wire types; `shared/proto` —
   the gRPC schema; `apps/common/client` — the same trait over a socket.
@@ -110,9 +110,9 @@ the Dioxus app); pass `--workspace` or `-p kopuz` for it.
   IO. Daemon-side: what crosses to a frontend is `api::TrackInfo`.
 - `daemon/db` — SQLite backend, `ReadStore` / `Storage`, migrations.
 - `daemon/server` — `MediaSource` backends, sync, cover resolution.
-- `apps/dioxus/hooks` — Dioxus data hooks over the API (queries, player controller,
+- `apps/kopuz/hooks` — Dioxus data hooks over the API (queries, player controller,
   artwork, sources).
-- `apps/dioxus/pages`, `apps/dioxus/components`, `apps/dioxus/kopuz_route` — UI + routing.
+- `apps/kopuz/pages`, `apps/kopuz/components`, `apps/kopuz/kopuz_route` — UI + routing.
 - `daemon/player` audio · `daemon/radio` · `daemon/scrobble` · `daemon/discord-presence`
   · `apps/common/i18n` · `shared/utils` (`CoverUrl`, image-URL builders; its cover
   cache is behind the `db-cache` feature, so a frontend never links SQLite).

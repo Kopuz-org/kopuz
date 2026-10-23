@@ -44,7 +44,7 @@ windows = { workspace = true, features = ["Win32_UI_Shell"] }
 windows-registry = { workspace = true }
 
 [dev-dependencies]
-ctl = { package = "kopuz-ctl", path = "../../apps/ctl" }
+ctl = { package = "kopuz-ctl", path = "../../apps/cli" }
 client = { workspace = true }
 tempfile = { workspace = true }
 async-trait = { workspace = true }
