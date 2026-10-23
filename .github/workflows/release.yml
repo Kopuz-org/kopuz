@@ -9,8 +9,10 @@ on:
 permissions:
   contents: read
 
+# Kopuz (GPUI, with kopuzd) ships as Kopuz_<ver>_*, Kopuz Legacy as Kopuz-Legacy-<ver>-*; pre-split updaters match only the first.
+
 jobs:
-  linux:
+  linux-legacy:
     runs-on: ubuntu-22.04
 
     steps:
@@ -49,7 +51,7 @@ jobs:
 
           version="$(
             cargo metadata --no-deps --format-version 1 |
-              jq -r '.packages[] | select(.name == "kopuz") | .version'
+              jq -r '.packages[] | select(.name == "kopuz-legacy") | .version'
           )"
 
           if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
@@ -68,9 +70,9 @@ jobs:
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
 
-          cp target/dx/kopuz-legacy/release/linux/app/kopuz-legacy AppDir/usr/bin/kopuz
-          cp data/moe.kopuz.kopuz.desktop AppDir/usr/share/applications/
-          cp apps/legacy/kopuz/assets/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/moe.kopuz.kopuz.png
+          cp target/dx/kopuz-legacy/release/linux/app/kopuz-legacy AppDir/usr/bin/kopuz-legacy
+          cp data/moe.kopuz.legacy.desktop AppDir/usr/share/applications/
+          cp apps/legacy/kopuz/assets/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/moe.kopuz.legacy.png
 
       - name: Download linuxdeploy
         run: |
@@ -110,7 +112,7 @@ jobs:
           fi
 
           mkdir -p dist
-          mv "$appimage" "dist/Kopuz_${VERSION}_x86_64.AppImage"
+          mv "$appimage" "dist/Kopuz-Legacy-${VERSION}-x86_64.AppImage"
 
       - name: Build DEB and RPM packages
         run: |
@@ -131,11 +133,116 @@ jobs:
       - name: Upload Linux packages
         uses: actions/upload-artifact@v4
         with:
+          name: kopuz-release-linux-legacy-${{ steps.version.outputs.version }}
+          path: dist/*
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake pkg-config \
+            libopus-dev libasound2-dev libssl-dev \
+            libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libvulkan-dev \
+            libfontconfig1-dev libfreetype-dev \
+            libfuse2 rpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Install cargo-packager and nfpm
+        run: |
+          cargo install cargo-packager@0.11.8 --locked
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Read and verify version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(
+            cargo metadata --no-deps --format-version 1 |
+              jq -r '.packages[] | select(.name == "kopuz") | .version'
+          )"
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match Cargo version ${version}"
+            exit 1
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Build the app, daemon and command-line client
+        run: cargo build --release --locked -p kopuz -p kopuz-kopuzd -p kopuz-ctl
+
+      - name: Build DEB and RPM packages
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p dist
+          nfpm package -f packaging/kopuz/nfpm.yaml -p deb -t dist/
+          nfpm package -f packaging/kopuz/nfpm.yaml -p rpm -t dist/
+
+      - name: Build AppImage
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          set -euo pipefail
+
+          cargo packager -p kopuz --release -f appimage --out-dir "$PWD/bundle-appimage"
+          shopt -s nullglob
+          appimages=(bundle-appimage/*.AppImage)
+          if [[ ${#appimages[@]} -ne 1 ]]; then
+            echo "Expected exactly one AppImage, found ${#appimages[@]}"
+            exit 1
+          fi
+          mv "${appimages[0]}" "dist/Kopuz_${VERSION}_x86_64.AppImage"
+
+      - name: Check every package carries the daemon
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for deb in dist/*.deb; do
+            dpkg-deb -c "$deb" | grep -q './usr/bin/kopuzd$'
+          done
+          for rpm in dist/*.rpm; do
+            rpm -qlp "$rpm" | grep -qx /usr/bin/kopuzd
+          done
+
+      - name: Create Linux checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for package in dist/*.AppImage dist/*.deb dist/*.rpm; do
+            sha256sum "$package" > "${package}.sha256"
+          done
+
+      - name: Upload Linux packages
+        uses: actions/upload-artifact@v4
+        with:
           name: kopuz-release-linux-${{ steps.version.outputs.version }}
           path: dist/*
           if-no-files-found: error
 
-  macos:
+  macos-legacy:
     runs-on: macos-15
 
     steps:
@@ -167,7 +274,7 @@ jobs:
 
           version="$(
             cargo metadata --no-deps --format-version 1 |
-              jq -r '.packages[] | select(.name == "kopuz") | .version'
+              jq -r '.packages[] | select(.name == "kopuz-legacy") | .version'
           )"
 
           if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
@@ -203,8 +310,81 @@ jobs:
         run: |
           set -euo pipefail
 
+          dmg="dist/Kopuz-Legacy-${VERSION}-aarch64.dmg"
+          hdiutil create -volname "Kopuz Legacy" -srcfolder dist/KopuzLegacy.app -ov -format UDZO "$dmg"
+          hdiutil verify "$dmg"
+          shasum -a 256 "$dmg" > "${dmg}.sha256"
+
+      - name: Upload macOS packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: kopuz-release-macos-legacy-${{ steps.version.outputs.version }}
+          path: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager@0.11.8 --locked
+
+      - name: Read and verify version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(
+            cargo metadata --no-deps --format-version 1 |
+              jq -r '.packages[] | select(.name == "kopuz") | .version'
+          )"
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match Cargo version ${version}"
+            exit 1
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Build the app, daemon and command-line client
+        run: cargo build --release --locked -p kopuz -p kopuz-kopuzd -p kopuz-ctl
+
+      - name: Bundle macOS application
+        run: cargo packager -p kopuz --release -f app --out-dir "$PWD/dist"
+
+      # Inside-out: the helpers first, then the bundle that seals them, never --deep.
+      - name: Apply ad-hoc signature
+        run: |
+          test -x dist/Kopuz.app/Contents/MacOS/kopuzd
+          codesign --force --sign - dist/Kopuz.app/Contents/MacOS/kopuzd
+          codesign --force --sign - dist/Kopuz.app/Contents/MacOS/kopuzctl
+          codesign --force --sign - dist/Kopuz.app/Contents/MacOS/kopuz
+          codesign --force --sign - dist/Kopuz.app
+          codesign --verify --deep --strict --verbose=2 dist/Kopuz.app
+
+      - name: Free disk space for DMG
+        run: |
+          cargo clean
+          df -h /
+
+      - name: Create DMG and checksum
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
           dmg="dist/Kopuz_${VERSION}_aarch64.dmg"
-          hdiutil create -volname Kopuz -srcfolder dist/KopuzLegacy.app -ov -format UDZO "$dmg"
+          hdiutil create -volname Kopuz -srcfolder dist/Kopuz.app -ov -format UDZO "$dmg"
           hdiutil verify "$dmg"
           shasum -a 256 "$dmg" > "${dmg}.sha256"
 
@@ -217,7 +397,7 @@ jobs:
             dist/*.dmg.sha256
           if-no-files-found: error
 
-  windows:
+  windows-legacy:
     runs-on: windows-latest
 
     steps:
@@ -253,7 +433,7 @@ jobs:
         shell: pwsh
         run: |
           $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
-          $version = ($metadata.packages | Where-Object name -eq "kopuz").version
+          $version = ($metadata.packages | Where-Object name -eq "kopuz-legacy").version
 
           if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$version") {
             throw "Tag $env:GITHUB_REF_NAME does not match Cargo version $version"
@@ -263,24 +443,89 @@ jobs:
 
       - name: Build EXE and MSI installers
         shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           dx bundle --release --platform desktop --package kopuz-legacy --package-types nsis --out-dir bundle-nsis --locked
           dx bundle --release --platform desktop --package kopuz-legacy --package-types msi --out-dir bundle-msi --locked
 
           New-Item -ItemType Directory -Path dist -Force | Out-Null
-          Move-Item bundle-nsis/*.exe dist/
-          Move-Item bundle-msi/*.msi dist/
+          $exe = @(Get-ChildItem bundle-nsis -Filter *.exe)
+          $msi = @(Get-ChildItem bundle-msi -Filter *.msi)
+          if ($exe.Count -ne 1 -or $msi.Count -ne 1) {
+            throw "Expected one EXE and one MSI installer, found $($exe.Count) and $($msi.Count)"
+          }
+          Move-Item $exe[0].FullName "dist/Kopuz-Legacy-$env:VERSION-x64-setup.exe"
+          Move-Item $msi[0].FullName "dist/Kopuz-Legacy-$env:VERSION-x64.msi"
 
       - name: Create Windows checksums
         shell: pwsh
         run: |
-          $packages = Get-ChildItem dist -File | Where-Object { $_.Extension -in ".exe", ".msi" }
-
-          if ($packages.Count -ne 2) {
-            throw "Expected one EXE and one MSI installer, found $($packages.Count)"
+          Get-ChildItem dist -File | Where-Object { $_.Extension -in ".exe", ".msi" } | ForEach-Object {
+            $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)" | Out-File -FilePath "$($_.FullName).sha256" -Encoding ascii
           }
 
-          $packages | ForEach-Object {
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: kopuz-release-windows-legacy-${{ steps.version.outputs.version }}
+          path: |
+            dist/*.exe
+            dist/*.exe.sha256
+            dist/*.msi
+            dist/*.msi.sha256
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager@0.11.8 --locked
+
+      - name: Read and verify version
+        id: version
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          $version = ($metadata.packages | Where-Object name -eq "kopuz").version
+
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match Cargo version $version"
+          }
+
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Build the app, daemon and command-line client
+        run: cargo build --release --locked -p kopuz -p kopuz-kopuzd -p kopuz-ctl
+
+      - name: Build EXE and MSI installers
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cargo packager -p kopuz --release -f nsis,wix --out-dir "$PWD\bundle"
+
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          $exe = @(Get-ChildItem bundle -Filter *-setup.exe)
+          $msi = @(Get-ChildItem bundle -Filter *.msi)
+          if ($exe.Count -ne 1 -or $msi.Count -ne 1) {
+            throw "Expected one EXE and one MSI installer, found $($exe.Count) and $($msi.Count)"
+          }
+          Move-Item $exe[0].FullName "dist/Kopuz_$($env:VERSION)_x64-setup.exe"
+          Move-Item $msi[0].FullName "dist/Kopuz_$($env:VERSION)_x64.msi"
+
+      - name: Create Windows checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -File | Where-Object { $_.Extension -in ".exe", ".msi" } | ForEach-Object {
             $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
             "$hash  $($_.Name)" | Out-File -FilePath "$($_.FullName).sha256" -Encoding ascii
           }
@@ -345,7 +590,7 @@ jobs:
 
           version="$(
             cargo metadata --no-deps --format-version 1 |
-              jq -r '.packages[] | select(.name == "kopuz") | .version'
+              jq -r '.packages[] | select(.name == "kopuz-legacy") | .version'
           )"
 
           if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
@@ -427,7 +672,7 @@ jobs:
 
   publish:
     if: github.ref_type == 'tag'
-    needs: [linux, macos, windows, android]
+    needs: [linux, linux-legacy, macos, macos-legacy, windows, windows-legacy, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -472,14 +717,14 @@ jobs:
           repository: Kopuz-org/homebrew-tap
           persist-credentials: false
 
-      - name: Download macOS package
+      - name: Download macOS packages
         uses: actions/download-artifact@v4
         with:
           pattern: kopuz-release-macos-*
           path: dist
           merge-multiple: true
 
-      - name: Update cask
+      - name: Update casks
         shell: bash
         env:
           TAG: ${{ github.ref_name }}
@@ -487,22 +732,34 @@ jobs:
           set -euo pipefail
 
           version="${TAG#v}"
-          dmg="dist/Kopuz_${version}_aarch64.dmg"
 
-          if [[ ! -f "$dmg" ]]; then
-            echo "expected $dmg in the release artifacts"
-            exit 1
+          bump() {
+            local cask="$1" dmg="$2"
+
+            if [[ ! -f "$dmg" ]]; then
+              echo "expected $dmg in the release artifacts"
+              exit 1
+            fi
+
+            local sha
+            sha="$(sha256sum "$dmg" | cut -d' ' -f1)"
+
+            sed -i \
+              -e "s/^  version \".*\"$/  version \"${version}\"/" \
+              -e "s/^  sha256 \".*\"$/  sha256 \"${sha}\"/" \
+              "$cask"
+
+            grep -q "version \"${version}\"" "$cask"
+            grep -q "sha256 \"${sha}\"" "$cask"
+          }
+
+          bump Casks/kopuz.rb "dist/Kopuz_${version}_aarch64.dmg"
+
+          if [[ -f Casks/kopuz-legacy.rb ]]; then
+            bump Casks/kopuz-legacy.rb "dist/Kopuz-Legacy-${version}-aarch64.dmg"
+          else
+            echo "::warning::Casks/kopuz-legacy.rb is not in the tap yet; Kopuz Legacy has no cask to bump"
           fi
-
-          sha="$(sha256sum "$dmg" | cut -d' ' -f1)"
-
-          sed -i \
-            -e "s/^  version \".*\"$/  version \"${version}\"/" \
-            -e "s/^  sha256 \".*\"$/  sha256 \"${sha}\"/" \
-            Casks/kopuz.rb
-
-          grep -q "version \"${version}\"" Casks/kopuz.rb
-          grep -q "sha256 \"${sha}\"" Casks/kopuz.rb
 
       - name: Commit changes
         env:
@@ -511,7 +768,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
 
-          git add Casks/kopuz.rb
+          git add Casks/
 
           if git diff --cached --quiet; then
             echo "No changes"

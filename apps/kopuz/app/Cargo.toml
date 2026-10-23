@@ -16,6 +16,29 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+# Bundles the release kopuz, kopuzd and kopuzctl already built in the target dir.
+[package.metadata.packager]
+product-name = "Kopuz"
+identifier = "moe.kopuz.kopuz"
+publisher = "temidaradev"
+authors = ["temidaradev"]
+category = "Music"
+license-file = "../../../LICENSE"
+icons = ["../../legacy/kopuz/assets/logo.png", "../../legacy/kopuz/assets/app.ico"]
+# The app spawns kopuzd from its own directory, so both land side by side in every format.
+binaries = [
+  { path = "kopuz", main = true },
+  { path = "kopuzd" },
+  { path = "kopuzctl" },
+]
+
+[package.metadata.packager.macos]
+minimum-system-version = "11.0"
+info-plist-path = "../../../packaging/kopuz/Info.plist"
+
+[package.metadata.packager.nsis]
+installer-icon = "../../legacy/kopuz/assets/app.ico"
+
 [dependencies]
 api = { workspace = true }
 config = { workspace = true }
