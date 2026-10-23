@@ -1,0 +1,115 @@
+# Everything runs inside the flake: a bare binary dies on NoWaylandLib.
+nix := "nix develop --command"
+# The daemon is built from whatever checkout the client is built from. Two sources
+# is how `dont_recommend` ended up at field 16 on one side and 17 on the other,
+# and the only sign was a button quietly missing. `.cargo/config.toml` is
+# gitignored, so it is read rather than assumed; with no patch, the sibling.
+daemon_dir := env_var_or_default("KOPUZ_DAEMON_DIR", `
+    patch=$(sed -n 's|^kopuz-api = { path = "\(.*\)/crates/api".*|\1|p' .cargo/config.toml 2>/dev/null | head -1)
+    if [ -n "$patch" ]; then (cd "$patch" && pwd); else echo "$PWD/../kopuz"; fi
+`)
+socket := env_var_or_default("KOPUZ_SOCKET", env_var("XDG_RUNTIME_DIR") / "kopuzd-dev.sock")
+# Where kopuzd listens by default, so `app` finds a daemon started anywhere else.
+shared_socket := env_var_or_default("KOPUZ_SOCKET", env_var("XDG_RUNTIME_DIR") / "kopuz" / "kopuzd.sock")
+
+_default:
+    @just --list
+
+# Which checkout both halves are built from, and what it has checked out.
+@source:
+    echo "{{ daemon_dir }}  ($(git -C {{ daemon_dir }} rev-parse --short HEAD 2>/dev/null || echo unknown))"
+
+# Build the frontend, and the daemon beside it.
+build profile="debug":
+    {{ nix }} cargo build {{ if profile == "release" { "--release" } else { "" } }}
+    cd {{ daemon_dir }} && {{ nix }} cargo build -p kopuz-kopuzd {{ if profile == "release" { "--release" } else { "" } }}
+
+# Run the app against its own daemon; neither outlives the other.
+run profile="debug" *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build {{ profile }}
+    export KOPUZ_SOCKET={{ socket }}
+    rm -f "$KOPUZ_SOCKET"
+
+    # One process group, so a kill reaches the whole tree rather than the wrapper
+    # `nix develop` leaves in front of each binary.
+    set -m
+    {{ nix }} {{ daemon_dir }}/target/{{ profile }}/kopuzd --socket "$KOPUZ_SOCKET" &
+    daemon=$!
+
+    # The socket is the daemon saying it is ready; starting the app before it exists
+    # just shows the connection screen for a second.
+    for _ in $(seq 1 100); do
+        [ -S "$KOPUZ_SOCKET" ] && break
+        kill -0 $daemon 2>/dev/null || { echo "the daemon exited before it listened"; exit 1; }
+        sleep 0.2
+    done
+
+    {{ nix }} ./target/{{ profile }}/kopuz-gpui {{ args }} &
+    app=$!
+
+    # Whichever goes first takes the other with it: a frontend with no daemon can only
+    # show a disconnect, and a daemon with no frontend is a process nobody asked for.
+    stop() { kill -- -$daemon -$app 2>/dev/null || true; }
+    trap stop EXIT INT TERM
+    wait -n $daemon $app
+    stop
+    wait 2>/dev/null || true
+
+# Run it and bring the frontend back if it dies while the daemon is still healthy.
+watch profile="debug" *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build {{ profile }}
+    export KOPUZ_SOCKET={{ socket }}
+    rm -f "$KOPUZ_SOCKET"
+    set -m
+    {{ nix }} {{ daemon_dir }}/target/{{ profile }}/kopuzd --socket "$KOPUZ_SOCKET" &
+    daemon=$!
+    trap 'kill -- -$daemon 2>/dev/null || true' EXIT INT TERM
+    for _ in $(seq 1 100); do
+        [ -S "$KOPUZ_SOCKET" ] && break
+        kill -0 $daemon 2>/dev/null || { echo "the daemon exited before it listened"; exit 1; }
+        sleep 0.2
+    done
+    # A crash loop is worth seeing rather than hiding, so a fast second death stops here.
+    while kill -0 $daemon 2>/dev/null; do
+        started=$SECONDS
+        {{ nix }} ./target/{{ profile }}/kopuz-gpui {{ args }} || true
+        kill -0 $daemon 2>/dev/null || break
+        if [ $(( SECONDS - started )) -lt 5 ]; then
+            echo "the frontend died within five seconds; not restarting it again"
+            break
+        fi
+        echo "the frontend exited; bringing it back"
+    done
+
+# The daemon on its own, for a frontend that is going to be rebuilt and restarted beside it.
+daemon profile="debug":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{ daemon_dir }} && {{ nix }} cargo build -p kopuz-kopuzd {{ if profile == "release" { "--release" } else { "" } }}
+    # kopuzd reclaims a stale socket itself and refuses a live one, so nothing is removed here.
+    exec {{ nix }} {{ daemon_dir }}/target/{{ profile }}/kopuzd --socket "{{ shared_socket }}"
+
+# The frontend on its own, against a daemon already listening: this repo's `just daemon`, kopuz's, or a service.
+app profile="debug" *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ nix }} cargo build {{ if profile == "release" { "--release" } else { "" } }}
+    export KOPUZ_SOCKET={{ shared_socket }}
+    # Uncoupled on purpose, so this only ever reports a daemon it did not start rather than starting one.
+    [ -S "$KOPUZ_SOCKET" ] || { echo "nothing listening on $KOPUZ_SOCKET; start one with 'just daemon'"; exit 1; }
+    exec {{ nix }} ./target/{{ profile }}/kopuz-gpui {{ args }}
+
+# Everything CI checks, in the order that fails fastest.
+check:
+    ./scripts/check_hover.sh
+    ./scripts/check_source_agnostic.sh
+    {{ nix }} cargo fmt --all -- --check
+    {{ nix }} cargo clippy --workspace --all-targets -j 4 -- -D warnings
+    {{ nix }} cargo test --workspace -j 4
+
+fmt:
+    {{ nix }} cargo fmt --all

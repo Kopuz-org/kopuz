@@ -1,0 +1,54 @@
+[workspace]
+members = ["crates/*"]
+exclude = ["vendor/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95.0"
+license = "EUPL-1.2"
+publish = false
+
+[workspace.dependencies]
+api = { package = "kopuz-api", git = "https://github.com/Kopuz-org/kopuz", branch = "master" }
+client = { package = "kopuz-client", git = "https://github.com/Kopuz-org/kopuz", branch = "master" }
+config = { package = "kopuz-config", git = "https://github.com/Kopuz-org/kopuz", branch = "master" }
+i18n = { package = "kopuz-i18n", git = "https://github.com/Kopuz-org/kopuz", branch = "master" }
+
+gpui-kit = "0.6.4"
+
+commands = { path = "crates/commands" }
+link = { path = "crates/link" }
+store = { path = "crates/store" }
+components = { path = "crates/components" }
+primitives = { path = "crates/primitives" }
+theme = { path = "crates/theme" }
+
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "process"] }
+futures = "0.3"
+fluent-bundle = "0.16"
+directories = "6.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[workspace.lints.clippy]
+print_stdout = "deny"
+print_stderr = "deny"
+
+[profile.dev]
+debug = "limited"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+strip = "symbols"
+lto = "thin"
+codegen-units = 1
+
+[patch.crates-io]
+gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
