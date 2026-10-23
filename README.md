@@ -173,6 +173,15 @@ script.
 
 ## Installation
 
+Every desktop release has two apps. **Kopuz** is the native GPUI app; its
+packages also install `kopuzd`, the music daemon it starts and talks to, and
+`kopuzctl`. **Kopuz Legacy** is the previous Dioxus interface with the daemon
+built in. Both read the same library and settings. On the
+[releases page](https://github.com/Kopuz-org/kopuz/releases) Kopuz is
+`Kopuz_<version>_…` / `kopuz_<version>-1_amd64.deb`, and Kopuz Legacy is
+`Kopuz-Legacy-<version>-…` / `kopuz-legacy_<version>_amd64.deb`. Android ships
+the Dioxus app, still named Kopuz.
+
 ### Cargo (crates.io)
 
 Install directly with Cargo:
@@ -188,6 +197,9 @@ cargo install --locked kopuz
 ```bash
 nix run github:temidaradev/kopuz
 ```
+
+On Linux that is Kopuz with `kopuzd`; `github:temidaradev/kopuz#kopuz-legacy` is
+Kopuz Legacy, which is also the default on macOS.
 
 **Install to your profile:**
 
@@ -311,6 +323,8 @@ yay -S kopuz-bin
 paru -S kopuz-bin
 ```
 
+`kopuz-bin` is Kopuz with `kopuzd`; `kopuz-legacy` builds Kopuz Legacy from source.
+
 ### Flatpak (Recommended)
 
 Kopuz is on Flathub. You can also install it from our own Flatpak repository, or
@@ -358,7 +372,7 @@ Discover.
 ### AppImage
 
 > [!IMPORTANT]
-> The AppImage requires `webkit2gtk-4.1` and `gtk3` installed on your system.
+> The Kopuz Legacy AppImage requires `webkit2gtk-4.1` and `gtk3` installed on your system.
 > Those dependencies are **not** bundled. The system tray icon additionally
 > needs the **appindicator** library (e.g. `libayatana-appindicator`); without
 > it Kopuz runs fine but shows no tray icon.
@@ -370,7 +384,7 @@ On Arch-based distros, if the AppImage crashes with a `WebKitNetworkProcess`
 error, either run it with:
 
 ```bash
-LD_LIBRARY_PATH=/usr/lib ./kopuz_*.AppImage
+LD_LIBRARY_PATH=/usr/lib ./Kopuz-Legacy-*.AppImage
 ```
 
 Or create symlinks once (requires sudo):
