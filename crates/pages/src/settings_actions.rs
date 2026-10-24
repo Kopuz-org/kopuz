@@ -153,7 +153,7 @@ async fn activate(
 /// The draft as the form currently stands.
 pub fn draft(
     name: Signal<String>,
-    service: Signal<String>,
+    service: Memo<String>,
     values: Signal<Vec<api::FieldValue>>,
     secrets: Signal<Vec<api::FieldValue>>,
 ) -> api::SourceDraft {

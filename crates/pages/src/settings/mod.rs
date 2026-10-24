@@ -97,6 +97,21 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
     let draft_values = use_signal(Vec::<api::FieldValue>::new);
     let draft_secrets = use_signal(Vec::<api::FieldValue>::new);
     let draft_check = use_signal(|| Option::<api::DraftCheck>::None);
+
+    let chosen_service = use_memo(move || {
+        let svc = source_service();
+
+        if svc.is_empty() {
+            services()
+                .unwrap_or_default()
+                .first()
+                .map(|s| s.id.clone())
+                .unwrap_or_default()
+        } else {
+            svc
+        }
+    });
+
     let sessions_for = use_memo(move || {
         if !show_add_source() {
             return None;
@@ -251,7 +266,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
     use_effect(move || {
         let draft = crate::settings_actions::draft(
             source_name,
-            source_service,
+            chosen_service,
             draft_values,
             draft_secrets,
         );
@@ -262,7 +277,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
         crate::settings_actions::add_source(
             crate::settings_actions::draft(
                 source_name,
-                source_service,
+                chosen_service,
                 draft_values,
                 draft_secrets,
             ),
@@ -280,7 +295,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
         crate::settings_actions::add_source_from_session(
             crate::settings_actions::draft(
                 source_name,
-                source_service,
+                chosen_service,
                 draft_values,
                 draft_secrets,
             ),
