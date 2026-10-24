@@ -31,12 +31,12 @@ Builds:
       - $$rustup$$/rustup target add aarch64-linux-android
       - $$rustup$$/cargo install dioxus-cli@0.7.9 --locked
       - npm ci
-      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/kopuz/kopuz/assets/tailwind.css
-    output: target/dx/kopuz/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
+      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/legacy/kopuz/assets/tailwind.css
+    output: target/dx/kopuz-legacy/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
     build:
       - export SQLX_OFFLINE=true
-      - dx build --package kopuz --platform android --release --locked
-      - cd target/dx/kopuz/release/android/app && ./gradlew assembleRelease
+      - dx build --package kopuz-legacy --platform android --release --locked
+      - cd target/dx/kopuz-legacy/release/android/app && ./gradlew assembleRelease
 
   - versionName: 0.16.0
     versionCode: 1600
@@ -51,14 +51,14 @@ Builds:
       - $$rustup$$/rustup target add aarch64-linux-android
       - $$rustup$$/cargo install dioxus-cli@0.7.9 --locked
       - npm ci
-      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/kopuz/kopuz/assets/tailwind.css
-    output: target/dx/kopuz/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
+      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/legacy/kopuz/assets/tailwind.css
+    output: target/dx/kopuz-legacy/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
     build:
       - export SQLX_OFFLINE=true
       - export ANDROID_NDK_HOME=$$NDK$$
-      - dx build --package kopuz --platform android --release --locked --target
+      - dx build --package kopuz-legacy --platform android --release --locked --target
         aarch64-linux-android
-      - cd target/dx/kopuz/release/android/app && ./gradlew assembleRelease
+      - cd target/dx/kopuz-legacy/release/android/app && ./gradlew assembleRelease
 
   - versionName: 0.16.1
     versionCode: 1601
@@ -73,14 +73,14 @@ Builds:
       - $$rustup$$/rustup target add aarch64-linux-android
       - $$rustup$$/cargo install dioxus-cli@0.7.9 --locked
       - npm ci
-      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/kopuz/kopuz/assets/tailwind.css
-    output: target/dx/kopuz/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
+      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/legacy/kopuz/assets/tailwind.css
+    output: target/dx/kopuz-legacy/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
     build:
       - export SQLX_OFFLINE=true
       - export ANDROID_NDK_HOME=$$NDK$$
-      - dx build --package kopuz --platform android --release --locked --target
+      - dx build --package kopuz-legacy --platform android --release --locked --target
         aarch64-linux-android
-      - cd target/dx/kopuz/release/android/app && ./gradlew assembleRelease
+      - cd target/dx/kopuz-legacy/release/android/app && ./gradlew assembleRelease
 
   - versionName: 0.16.2
     versionCode: 1602
@@ -95,14 +95,14 @@ Builds:
       - $$rustup$$/rustup target add aarch64-linux-android
       - $$rustup$$/cargo install dioxus-cli@0.7.9 --locked
       - npm ci
-      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/kopuz/kopuz/assets/tailwind.css
-    output: target/dx/kopuz/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
+      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/legacy/kopuz/assets/tailwind.css
+    output: target/dx/kopuz-legacy/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
     build:
       - export SQLX_OFFLINE=true
       - export ANDROID_NDK_HOME=$$NDK$$
-      - dx build --package kopuz --platform android --release --locked --target
+      - dx build --package kopuz-legacy --platform android --release --locked --target
         aarch64-linux-android
-      - cd target/dx/kopuz/release/android/app && ./gradlew assembleRelease
+      - cd target/dx/kopuz-legacy/release/android/app && ./gradlew assembleRelease
 
   - versionName: 0.17.0
     versionCode: 1700
@@ -117,14 +117,14 @@ Builds:
       - $$rustup$$/rustup target add aarch64-linux-android
       - $$rustup$$/cargo install dioxus-cli@0.7.9 --locked
       - npm ci
-      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/kopuz/kopuz/assets/tailwind.css
-    output: target/dx/kopuz/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
+      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/legacy/kopuz/assets/tailwind.css
+    output: target/dx/kopuz-legacy/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
     build:
       - export SQLX_OFFLINE=true
       - export ANDROID_NDK_HOME=$$NDK$$
-      - dx build --package kopuz --platform android --release --locked --target
+      - dx build --package kopuz-legacy --platform android --release --locked --target
         aarch64-linux-android
-      - cd target/dx/kopuz/release/android/app && ./gradlew assembleRelease
+      - cd target/dx/kopuz-legacy/release/android/app && ./gradlew assembleRelease
 
   - versionName: 0.18.0
     versionCode: 1800
@@ -139,14 +139,14 @@ Builds:
       - $$rustup$$/rustup target add aarch64-linux-android
       - $$rustup$$/cargo install dioxus-cli@0.7.9 --locked
       - npm ci
-      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/kopuz/kopuz/assets/tailwind.css
-    output: target/dx/kopuz/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
+      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/legacy/kopuz/assets/tailwind.css
+    output: target/dx/kopuz-legacy/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
     build:
       - export SQLX_OFFLINE=true
       - export ANDROID_NDK_HOME=$$NDK$$
-      - dx build --package kopuz --platform android --release --locked --target
+      - dx build --package kopuz-legacy --platform android --release --locked --target
         aarch64-linux-android
-      - cd target/dx/kopuz/release/android/app && ./gradlew assembleRelease
+      - cd target/dx/kopuz-legacy/release/android/app && ./gradlew assembleRelease
 
   - versionName: 0.19.0
     versionCode: 1900
@@ -161,14 +161,14 @@ Builds:
       - $$rustup$$/rustup target add aarch64-linux-android
       - $$rustup$$/cargo install dioxus-cli@0.7.9 --locked
       - npm ci
-      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/kopuz/kopuz/assets/tailwind.css
-    output: target/dx/kopuz/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
+      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/legacy/kopuz/assets/tailwind.css
+    output: target/dx/kopuz-legacy/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
     build:
       - export SQLX_OFFLINE=true
       - export ANDROID_NDK_HOME=$$NDK$$
-      - dx build --package kopuz --platform android --release --locked --target
+      - dx build --package kopuz-legacy --platform android --release --locked --target
         aarch64-linux-android
-      - cd target/dx/kopuz/release/android/app && ./gradlew assembleRelease
+      - cd target/dx/kopuz-legacy/release/android/app && ./gradlew assembleRelease
 
   - versionName: 0.20.0
     versionCode: 2000
@@ -183,14 +183,14 @@ Builds:
       - $$rustup$$/rustup target add aarch64-linux-android
       - $$rustup$$/cargo install dioxus-cli@0.7.9 --locked
       - npm ci
-      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/kopuz/kopuz/assets/tailwind.css
-    output: target/dx/kopuz/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
+      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/legacy/kopuz/assets/tailwind.css
+    output: target/dx/kopuz-legacy/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
     build:
       - export SQLX_OFFLINE=true
       - export ANDROID_NDK_HOME=$$NDK$$
-      - dx build --package kopuz --platform android --release --locked --target
+      - dx build --package kopuz-legacy --platform android --release --locked --target
         aarch64-linux-android
-      - cd target/dx/kopuz/release/android/app && ./gradlew assembleRelease
+      - cd target/dx/kopuz-legacy/release/android/app && ./gradlew assembleRelease
 
   - versionName: 0.21.0
     versionCode: 2100
@@ -205,14 +205,14 @@ Builds:
       - $$rustup$$/rustup target add aarch64-linux-android
       - $$rustup$$/cargo install dioxus-cli@0.7.9 --locked
       - npm ci
-      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/kopuz/kopuz/assets/tailwind.css
-    output: target/dx/kopuz/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
+      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/legacy/kopuz/assets/tailwind.css
+    output: target/dx/kopuz-legacy/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
     build:
       - export SQLX_OFFLINE=true
       - export ANDROID_NDK_HOME=$$NDK$$
-      - dx build --package kopuz --platform android --release --locked --target
+      - dx build --package kopuz-legacy --platform android --release --locked --target
         aarch64-linux-android
-      - cd target/dx/kopuz/release/android/app && ./gradlew assembleRelease
+      - cd target/dx/kopuz-legacy/release/android/app && ./gradlew assembleRelease
 
   - versionName: 0.22.0
     versionCode: 2200
@@ -227,14 +227,14 @@ Builds:
       - $$rustup$$/rustup target add aarch64-linux-android
       - $$rustup$$/cargo install dioxus-cli@0.7.9 --locked
       - npm ci
-      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/kopuz/kopuz/assets/tailwind.css
-    output: target/dx/kopuz/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
+      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/legacy/kopuz/assets/tailwind.css
+    output: target/dx/kopuz-legacy/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
     build:
       - export SQLX_OFFLINE=true
       - export ANDROID_NDK_HOME=$$NDK$$
-      - dx build --package kopuz --platform android --release --locked --target
+      - dx build --package kopuz-legacy --platform android --release --locked --target
         aarch64-linux-android
-      - cd target/dx/kopuz/release/android/app && ./gradlew assembleRelease
+      - cd target/dx/kopuz-legacy/release/android/app && ./gradlew assembleRelease
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9.]+$

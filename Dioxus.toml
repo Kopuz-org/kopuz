@@ -1,9 +1,9 @@
 [application]
-name = "kopuz"
+name = "Kopuz Legacy"
 default_platform = "desktop"
 
 [application.assets]
-base_path = "apps/kopuz/kopuz/assets"
+base_path = "apps/legacy/kopuz/assets"
 
 [bundle]
 identifier = "moe.kopuz.kopuz"
@@ -14,3 +14,13 @@ targets = ["macos", "dmg", "nsis", "msi"]
 
 [bundle.macos]
 info_plist_path = "Info.plist"
+
+# The desktop builds make room for the GPUI app as moe.kopuz.kopuz; Android keeps it.
+[macos]
+identifier = "moe.kopuz.legacy"
+
+[windows]
+identifier = "moe.kopuz.legacy"
+
+[linux]
+identifier = "moe.kopuz.legacy"

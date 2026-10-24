@@ -11,13 +11,13 @@ exports_files([
 
 alias(
     name = "kopuz",
-    actual = "//apps/kopuz/kopuz:kopuz",
+    actual = "//apps/legacy/kopuz:kopuz",
 )
 
 test_suite(
     name = "tests",
     tests = [
-        "//apps/kopuz/components:components_test",
+        "//apps/legacy/components:components_test",
         "//shared/config:config_test",
         "//daemon/db:config_integration_test",
         "//daemon/db:db_test",
@@ -29,10 +29,10 @@ test_suite(
         "//daemon/db:typed_queries_integration_test",
         "//daemon/db:writes_integration_test",
         "//daemon/discord-presence:discord_presence_test",
-        "//apps/kopuz/hooks:hooks_test",
+        "//apps/legacy/hooks:hooks_test",
         "//apps/common/i18n:i18n_test",
-        "//apps/kopuz/kopuz_route:kopuz_route_test",
-        "//apps/kopuz/pages:pages_test",
+        "//apps/legacy/kopuz_route:kopuz_route_test",
+        "//apps/legacy/pages:pages_test",
         "//daemon/player:player_test",
         "//daemon/radio:radio_test",
         "//daemon/reader:reader_test",

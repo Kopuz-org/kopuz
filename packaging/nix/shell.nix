@@ -16,9 +16,27 @@
   glib,
   gtk3,
   libayatana-appindicator,
+  wayland,
+  vulkan-loader,
+  vulkan-headers,
+  libxcb,
+  libxkbcommon,
+  libx11,
+  fontconfig,
+  freetype,
 }:
 let
   kopuzPkg = self.packages.${stdenv.hostPlatform.system}.kopuz;
+  # What the GPUI frontend links and dlopens.
+  gpuiLibs = [
+    wayland
+    vulkan-loader
+    libxcb
+    libxkbcommon
+    libx11
+    fontconfig
+    freetype
+  ];
   nixTarget = lib.replaceStrings [ "-" ] [ "_" ] stdenv.hostPlatform.config;
   bazel = writeShellScriptBin "bazel" ''
     case "$1" in
@@ -43,6 +61,7 @@ in
 mkShell {
   name = "kopuz-dev";
   inputsFrom = [ kopuzPkg ];
+  buildInputs = lib.optionals stdenv.hostPlatform.isLinux (gpuiLibs ++ [ vulkan-headers ]);
 
   nativeBuildInputs = [
     # Dev
@@ -62,7 +81,7 @@ mkShell {
   env = lib.optionalAttrs stdenv.hostPlatform.isLinux {
     GIO_MODULE_DIR = "${glib-networking}/lib/gio/modules/";
     GSETTINGS_SCHEMA_DIR = "${glib.getSchemaPath gtk3}";
-    LD_LIBRARY_PATH = "${lib.makeLibraryPath kopuzPkg.buildInputs}:${libayatana-appindicator}/lib:$LD_LIBRARY_PATH";
+    LD_LIBRARY_PATH = "${lib.makeLibraryPath (kopuzPkg.buildInputs ++ gpuiLibs)}:${libayatana-appindicator}/lib:$LD_LIBRARY_PATH";
     WEBKIT_DISABLE_COMPOSITING_MODE = "1";
     RUSTFLAGS = "-C link-arg=-fuse-ld=lld";
   };

@@ -1,0 +1,55 @@
+[package]
+name = "kopuz"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "A modern, lightweight music player built with Rust and GPUI."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[[bin]]
+name = "kopuz"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+api = { workspace = true }
+config = { workspace = true }
+i18n = { workspace = true }
+link = { workspace = true }
+commands = { workspace = true }
+store = { workspace = true }
+theme = { workspace = true }
+components = { path = "../components" }
+gpui-kit = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+futures = { workspace = true }
+
+library = { path = "../library" }
+discover = { path = "../discover" }
+page_home = { path = "../page_home" }
+page_albums = { path = "../page_albums" }
+page_artists = { path = "../page_artists" }
+page_playlists = { path = "../page_playlists" }
+onboarding = { path = "../onboarding" }
+debug_overlay = { path = "../debug_overlay" }
+page_radio = { path = "../page_radio" }
+page_settings = { path = "../page_settings" }
+settings_sources = { path = "../settings_sources" }
+settings_interface = { path = "../settings_interface" }
+topbar = { path = "../topbar" }
+playlists_panel = { path = "../playlists_panel" }
+now_playing = { path = "../now_playing" }
+palette = { path = "../palette" }
+overlays = { path = "../overlays" }
+status = { path = "../status" }
+metadata_dialog = { path = "../metadata_dialog" }
+shortcuts = { path = "../shortcuts" }
+profile = { path = "../profile" }
+tikv-jemallocator = "0.6"

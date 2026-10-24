@@ -1,14 +1,17 @@
 @import "tailwindcss";
-@source "./apps/kopuz/kopuz/**/*.rs";
-@source "./apps/kopuz/components/**/*.rs";
-@source "./apps/kopuz/pages/**/*.rs";
-@source "./apps/kopuz/hooks/**/*.rs";
+/* Tailwind also scans the whole repo; the GPUI frontend and its vendored crate hold no Dioxus classes. */
+@source not "./apps/kopuz";
+@source not "./vendor";
+@source "./apps/legacy/kopuz/**/*.rs";
+@source "./apps/legacy/components/**/*.rs";
+@source "./apps/legacy/pages/**/*.rs";
+@source "./apps/legacy/hooks/**/*.rs";
 @source "./daemon/player/**/*.rs";
 @source "./daemon/reader/**/*.rs";
 @source "./daemon/server/**/*.rs";
 @source "./shared/utils/**/*.rs";
 @source "./shared/config/**/*.rs";
-@source "./apps/kopuz/kopuz_route/**/*.rs";
+@source "./apps/legacy/kopuz_route/**/*.rs";
 /* Invisible range inputs overlaid on custom seek/volume tracks. The native
    thumb (~17px) makes the browser inset its click-to-value mapping by half a
    thumb on each side, so clicks land offset from the cursor. A zero-width
