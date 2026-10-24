@@ -8,7 +8,9 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'rust-toolchain.toml'
-      - 'crates/**'
+      - 'apps/**'
+      - 'shared/**'
+      - 'daemon/**'
   pull_request:
     paths:
       - 'README.md'
@@ -16,7 +18,9 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'rust-toolchain.toml'
-      - 'crates/**'
+      - 'apps/**'
+      - 'shared/**'
+      - 'daemon/**'
 
 jobs:
   deno-fmt:

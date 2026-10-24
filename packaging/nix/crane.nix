@@ -107,7 +107,9 @@ let
             (s + /.cargo)
             # build.rs embeds Android configuration even for desktop builds.
             (s + /android-src)
-            (s + /crates)
+            (s + /shared)
+            (s + /daemon)
+            (s + /apps)
             (s + /data)
             (s + /packaging/systemd)
 
@@ -136,7 +138,7 @@ craneLib.mkCargoDerivation (
     dontWrapGApps = true;
 
     buildPhaseCargoCommand = ''
-      tailwindcss -i tailwind.css -o crates/kopuz/assets/tailwind.css --minify
+      tailwindcss -i tailwind.css -o apps/kopuz/kopuz/assets/tailwind.css --minify
 
       ${lib.optionalString stdenv.isDarwin ''
               mkdir -p "$TMPDIR/fake-bin"
@@ -176,7 +178,7 @@ craneLib.mkCargoDerivation (
             install -Dm644 data/moe.kopuz.kopuz.metainfo.xml \
               $out/share/metainfo/moe.kopuz.kopuz.metainfo.xml
 
-            install -Dm644 crates/kopuz/assets/logo.png \
+            install -Dm644 apps/kopuz/kopuz/assets/logo.png \
               $out/share/icons/hicolor/256x256/apps/moe.kopuz.kopuz.png
           ''
         else

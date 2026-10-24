@@ -23,6 +23,9 @@ jobs:
       - name: Check frontend crates know no local source
         run: nix shell nixpkgs#nushell --command nu scripts/check_frontend_sources.nu
 
+      - name: Check the shared, daemon and apps layer boundaries
+        run: nix shell nixpkgs#nushell --command nu scripts/check_layers.nu
+
       # The comparison needs a master to read; a shallow checkout carries none.
       - name: Fetch master for the wire comparison
         run: git fetch --depth=1 origin master

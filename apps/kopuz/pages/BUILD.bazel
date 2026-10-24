@@ -1,0 +1,20 @@
+load("//build_defs:kopuz_rust.bzl", "kopuz_rust_library")
+
+package(default_visibility = ["//visibility:public"])
+exports_files(["Cargo.toml"])
+
+kopuz_rust_library(
+    name = "pages",
+    extra_deps = [
+        "//apps/kopuz/components",
+        "//shared/config",
+        "//apps/kopuz/hooks",
+        "//apps/common/i18n",
+        "//apps/kopuz/kopuz_route",
+        "//daemon/player",
+        "//daemon/radio",
+        "//daemon/reader",
+        "//daemon/server",
+        "//shared/utils",
+    ],
+)

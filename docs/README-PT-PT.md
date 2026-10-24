@@ -1,6 +1,6 @@
 <!--markdownlint-disable MD013 MD033 MD041 -->
 <div align="center">
-  <img src="../crates/kopuz/assets/banner.png" alt="Logótipo do Kopuz" height="300"/>
+  <img src="../apps/kopuz/kopuz/assets/banner.png" alt="Logótipo do Kopuz" height="300"/>
   <h1>Kopuz</h1>
   <p>
     Kopuz é uma aplicação moderna e leve de reprodução de música construída em Rust

@@ -1,14 +1,14 @@
 @import "tailwindcss";
-@source "./crates/kopuz/**/*.rs";
-@source "./crates/components/**/*.rs";
-@source "./crates/pages/**/*.rs";
-@source "./crates/hooks/**/*.rs";
-@source "./crates/player/**/*.rs";
-@source "./crates/reader/**/*.rs";
-@source "./crates/server/**/*.rs";
-@source "./crates/utils/**/*.rs";
-@source "./crates/config/**/*.rs";
-@source "./crates/kopuz_route/**/*.rs";
+@source "./apps/kopuz/kopuz/**/*.rs";
+@source "./apps/kopuz/components/**/*.rs";
+@source "./apps/kopuz/pages/**/*.rs";
+@source "./apps/kopuz/hooks/**/*.rs";
+@source "./daemon/player/**/*.rs";
+@source "./daemon/reader/**/*.rs";
+@source "./daemon/server/**/*.rs";
+@source "./shared/utils/**/*.rs";
+@source "./shared/config/**/*.rs";
+@source "./apps/kopuz/kopuz_route/**/*.rs";
 /* Invisible range inputs overlaid on custom seek/volume tracks. The native
    thumb (~17px) makes the browser inset its click-to-value mapping by half a
    thumb on each side, so clicks land offset from the cursor. A zero-width

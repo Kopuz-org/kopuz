@@ -1,0 +1,50 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps", "crate_edition")
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load("@rules_rust//rust:defs.bzl", "rust_binary")
+
+package(default_visibility = ["//visibility:public"])
+exports_files(["Cargo.toml"])
+
+cargo_build_script(
+    name = "kopuz_build_script",
+    aliases = aliases(build = True, build_proc_macro = True),
+    build_script_env = {
+        "KOPUZ_ASSET_FILE": "$(execpath assets/main.css)",
+    },
+    data = glob(["assets/**"]),
+    deps = all_crate_deps(build = True),
+    edition = crate_edition(),
+    pkg_name = "kopuz",
+    proc_macro_deps = all_crate_deps(build_proc_macro = True),
+    srcs = ["build.rs"],
+    version = "0.11.0",
+)
+
+rust_binary(
+    name = "kopuz",
+    aliases = aliases(normal = True, proc_macro = True),
+    compile_data = glob(["assets/**"]),
+    crate_name = "kopuz",
+    data = glob(["assets/**"]),
+    deps = all_crate_deps(normal = True) + [
+        ":kopuz_build_script",
+        "//apps/kopuz/components",
+        "//shared/config",
+        "//daemon/db",
+        "//daemon/discord-presence:discord_presence",
+        "//apps/kopuz/hooks",
+        "//apps/common/i18n",
+        "//apps/kopuz/kopuz_route",
+        "//apps/kopuz/pages",
+        "//daemon/player",
+        "//daemon/radio",
+        "//daemon/reader",
+        "//daemon/server",
+        "//shared/utils",
+    ],
+    edition = crate_edition(),
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    rustc_env = {"CARGO_PKG_VERSION": "0.11.0"},
+    srcs = glob(["src/**/*.rs"]),
+    version = "0.11.0",
+)
