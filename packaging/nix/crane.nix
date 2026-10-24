@@ -3,7 +3,7 @@
   stdenv,
   craneLib,
   gitRev ? null,
-  fetchurl,
+  callPackage,
   pkg-config,
   cmake,
   git,
@@ -28,27 +28,10 @@
   libopus,
 }:
 let
-  pname = "kopuz";
+  pname = "kopuz-legacy";
   version = "0.22.0";
 
-  # `deno_core` pulls in the `v8` crate, whose build script fetches a prebuilt
-  # librusty_v8 archive — impossible in the network-less Nix sandbox. Fetch it as
-  # a fixed-output derivation and pass it via RUSTY_V8_ARCHIVE (build.rs
-  # decompresses the .gz itself). Keep rustyV8Version in sync with Cargo.lock.
-  rustyV8Version = "130.0.7";
-  rustyV8Target = stdenv.hostPlatform.rust.rustcTarget;
-  rustyV8Hashes = {
-    "aarch64-apple-darwin" = "1sh0y3dq0llz6hfx8qgx13sc6vjbw1xzzwfrl236wx8f9w7x1nzn";
-    "x86_64-apple-darwin" = "1h0j3qw5ad2c83mh36pr18s1vp598rscj3zzxpl7vynzj6q321s3";
-    "aarch64-unknown-linux-gnu" = "0nli54vqcrfh9nkz7ma7230k0xmhcrk0jmfbyxcp3rxybarygvxy";
-    "x86_64-unknown-linux-gnu" = "0pdp6h7vbjvq5l9lh25qilmp6xrxg7mj8m263h44f0lv9swnqix6";
-  };
-  librustyV8 = fetchurl {
-    url = "https://github.com/denoland/rusty_v8/releases/download/v${rustyV8Version}/librusty_v8_release_${rustyV8Target}.a.gz";
-    sha256 =
-      rustyV8Hashes.${rustyV8Target}
-        or (throw "no prebuilt librusty_v8 hash for target ${rustyV8Target}");
-  };
+  librustyV8 = callPackage ./rusty-v8.nix { };
 
   nativeBuildInputs = [
     pkg-config
@@ -91,8 +74,8 @@ let
       ;
     strictDeps = true;
     doCheck = false;
-    # Only what the package ships; the default members now include the GPUI frontend.
-    cargoExtraArgs = "--locked -p kopuz-legacy -p kopuz-ctl -p kopuz-kopuzd";
+    # Only what the package ships; the GPUI app and kopuzd are packaging/nix/kopuz.nix.
+    cargoExtraArgs = "--locked -p kopuz-legacy";
 
     # On commonArgs so both the deps-only and final derivations see it.
     RUSTY_V8_ARCHIVE = librustyV8;
@@ -155,40 +138,30 @@ craneLib.mkCargoDerivation (
       ''}
 
       dx build --release --platform desktop -p kopuz-legacy --offline --frozen
-      cargo build --release --offline --frozen -p kopuz-ctl -p kopuz-kopuzd
     '';
 
     installPhase = ''
       runHook preInstall
 
       mkdir -p $out/bin
-      install -m755 target/release/kopuzctl target/release/kopuzd $out/bin/
 
       ${
         if stdenv.isLinux then
           ''
             cp -r target/dx/kopuz-legacy/release/linux/app/* $out/bin/
 
-            install -Dm644 packaging/systemd/kopuzd.service \
-              $out/share/systemd/user/kopuzd.service
-            substituteInPlace $out/share/systemd/user/kopuzd.service \
-              --replace-fail "ExecStart=kopuzd" "ExecStart=$out/bin/kopuzd"
-
-            install -Dm644 data/moe.kopuz.kopuz.desktop \
-              $out/share/applications/moe.kopuz.kopuz.desktop
-            substituteInPlace $out/share/applications/moe.kopuz.kopuz.desktop \
-              --replace-fail "Exec=kopuz" "Exec=$out/bin/kopuz-legacy"
-
-            install -Dm644 data/moe.kopuz.kopuz.metainfo.xml \
-              $out/share/metainfo/moe.kopuz.kopuz.metainfo.xml
+            install -Dm644 data/moe.kopuz.legacy.desktop \
+              $out/share/applications/moe.kopuz.legacy.desktop
+            substituteInPlace $out/share/applications/moe.kopuz.legacy.desktop \
+              --replace-fail "Exec=kopuz-legacy" "Exec=$out/bin/kopuz-legacy"
 
             install -Dm644 apps/legacy/kopuz/assets/logo.png \
-              $out/share/icons/hicolor/256x256/apps/moe.kopuz.kopuz.png
+              $out/share/icons/hicolor/256x256/apps/moe.kopuz.legacy.png
           ''
         else
           ''
-            cp -r target/dx/kopuz-legacy/release/macos/KopuzLegacy.app $out/bin/kopuz.app
-            macBin=$(find $out/bin/kopuz.app/Contents/MacOS -maxdepth 1 -type f | head -1)
+            cp -r target/dx/kopuz-legacy/release/macos/KopuzLegacy.app $out/bin/kopuz-legacy.app
+            macBin=$(find $out/bin/kopuz-legacy.app/Contents/MacOS -maxdepth 1 -type f | head -1)
             ln -s "$macBin" $out/bin/kopuz-legacy
           ''
       }
@@ -202,14 +175,11 @@ craneLib.mkCargoDerivation (
         --chdir $out/bin \
         --prefix PATH : ${lib.makeBinPath [ ffmpeg ]} \
         --prefix LD_LIBRARY_PATH : ${libayatana-appindicator}/lib
-      wrapProgram $out/bin/kopuzd \
-        --prefix PATH : ${lib.makeBinPath [ ffmpeg ]} \
-        --prefix LD_LIBRARY_PATH : ${libayatana-appindicator}/lib
     '';
 
     meta = {
-      description = "Fast, modern music player with Jellyfin and local library support";
-      homepage = "https://github.com/temidaradev/kopuz";
+      description = "The legacy Dioxus interface of the Kopuz music player, with the daemon built in";
+      homepage = "https://github.com/Kopuz-org/kopuz";
       license = lib.licenses.eupl12;
       maintainers = with lib.maintainers; [
         temidaradev

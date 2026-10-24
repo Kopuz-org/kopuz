@@ -139,6 +139,9 @@ pub async fn fetch_available() -> Option<AvailableUpdate> {
     })
 }
 
+/// Releases also carry the GPUI app as `Kopuz_<version>_…`, which this app must never install over itself.
+const ASSET_PREFIX: &str = "Kopuz-Legacy-";
+
 /// No published checksum, no self-update.
 fn select_asset(kind: InstallKind, arch: &str, assets: &[GithubAsset]) -> Option<InstallPlan> {
     let windows_arch = match arch {
@@ -147,12 +150,14 @@ fn select_asset(kind: InstallKind, arch: &str, assets: &[GithubAsset]) -> Option
         other => other,
     };
     let suffix = match &kind {
-        InstallKind::Nsis { .. } => format!("_{windows_arch}-setup.exe"),
-        InstallKind::Msi { .. } => format!("_{windows_arch}.msi"),
-        InstallKind::AppImage { .. } => format!("_{arch}.AppImage"),
-        InstallKind::MacApp { .. } => format!("_{arch}.dmg"),
+        InstallKind::Nsis { .. } => format!("-{windows_arch}-setup.exe"),
+        InstallKind::Msi { .. } => format!("-{windows_arch}.msi"),
+        InstallKind::AppImage { .. } => format!("-{arch}.AppImage"),
+        InstallKind::MacApp { .. } => format!("-{arch}.dmg"),
     };
-    let asset = assets.iter().find(|asset| asset.name.ends_with(&suffix))?;
+    let asset = assets
+        .iter()
+        .find(|asset| asset.name.starts_with(ASSET_PREFIX) && asset.name.ends_with(&suffix))?;
     let checksum_name = format!("{}.sha256", asset.name);
     let checksum = assets.iter().find(|asset| asset.name == checksum_name)?;
     Some(InstallPlan {
@@ -565,6 +570,14 @@ mod tests {
             "Kopuz_0.19.0_x64.msi.sha256",
             "Kopuz_0.19.0_x86_64.AppImage",
             "Kopuz_0.19.0_x86_64.AppImage.sha256",
+            "Kopuz-Legacy-0.19.0-aarch64.dmg",
+            "Kopuz-Legacy-0.19.0-aarch64.dmg.sha256",
+            "Kopuz-Legacy-0.19.0-x64-setup.exe",
+            "Kopuz-Legacy-0.19.0-x64-setup.exe.sha256",
+            "Kopuz-Legacy-0.19.0-x64.msi",
+            "Kopuz-Legacy-0.19.0-x64.msi.sha256",
+            "Kopuz-Legacy-0.19.0-x86_64.AppImage",
+            "Kopuz-Legacy-0.19.0-x86_64.AppImage.sha256",
         ]
         .into_iter()
         .map(asset)
@@ -602,25 +615,25 @@ mod tests {
         let pick = |kind, arch| select_asset(kind, arch, &assets).map(|plan| plan.asset_name);
         assert_eq!(
             pick(nsis(), "x86_64").as_deref(),
-            Some("Kopuz_0.19.0_x64-setup.exe")
+            Some("Kopuz-Legacy-0.19.0-x64-setup.exe")
         );
         assert_eq!(
             pick(msi(), "x86_64").as_deref(),
-            Some("Kopuz_0.19.0_x64.msi")
+            Some("Kopuz-Legacy-0.19.0-x64.msi")
         );
         let appimage = InstallKind::AppImage {
             path: PathBuf::from("/home/k/Kopuz.AppImage"),
         };
         assert_eq!(
             pick(appimage, "x86_64").as_deref(),
-            Some("Kopuz_0.19.0_x86_64.AppImage")
+            Some("Kopuz-Legacy-0.19.0-x86_64.AppImage")
         );
         let mac = InstallKind::MacApp {
             bundle: PathBuf::from("/Applications/Kopuz.app"),
         };
         assert_eq!(
             pick(mac.clone(), "aarch64").as_deref(),
-            Some("Kopuz_0.19.0_aarch64.dmg")
+            Some("Kopuz-Legacy-0.19.0-aarch64.dmg")
         );
         assert_eq!(pick(mac, "x86_64"), None);
         assert_eq!(pick(nsis(), "aarch64"), None);
@@ -631,7 +644,7 @@ mod tests {
         let plan = select_asset(msi(), "x86_64", &release_assets()).expect("msi plan");
         assert_eq!(
             plan.checksum_url,
-            "https://example.invalid/Kopuz_0.19.0_x64.msi.sha256"
+            "https://example.invalid/Kopuz-Legacy-0.19.0-x64.msi.sha256"
         );
     }
 
@@ -639,7 +652,7 @@ mod tests {
     fn an_asset_without_a_checksum_is_not_installed() {
         let assets: Vec<_> = release_assets()
             .into_iter()
-            .filter(|asset| asset.name != "Kopuz_0.19.0_x64-setup.exe.sha256")
+            .filter(|asset| asset.name != "Kopuz-Legacy-0.19.0-x64-setup.exe.sha256")
             .collect();
         assert_eq!(select_asset(nsis(), "x86_64", &assets), None);
     }
@@ -647,7 +660,7 @@ mod tests {
     #[test]
     fn checksum_accepts_the_published_digest() {
         let digest = Sha256::digest(b"kopuz installer");
-        let published = format!("{}  Kopuz_0.19.0_x64.msi\r\n", hex::encode(digest));
+        let published = format!("{}  Kopuz-Legacy-0.19.0-x64.msi\r\n", hex::encode(digest));
         assert!(checksum_matches(&digest, &published));
         assert!(checksum_matches(
             &digest,
@@ -658,7 +671,7 @@ mod tests {
     #[test]
     fn checksum_rejects_a_different_file() {
         let published = format!(
-            "{}  Kopuz_0.19.0_x64.msi",
+            "{}  Kopuz-Legacy-0.19.0-x64.msi",
             hex::encode(Sha256::digest(b"kopuz installer"))
         );
         assert!(!checksum_matches(
@@ -714,7 +727,7 @@ mod tests {
 
     #[test]
     fn windows_script_runs_each_installer_silently() {
-        let installer = Path::new(r"C:\Temp\kopuz-update\Kopuz_0.19.0_x64-setup.exe");
+        let installer = Path::new(r"C:\Temp\kopuz-update\Kopuz-Legacy-0.19.0-x64-setup.exe");
         let nsis_script = windows_apply_script(&nsis(), installer, 42).expect("nsis script");
         assert!(nsis_script.contains("Wait-Process -Id 42"));
         assert!(nsis_script.contains(r"'/S /D=C:\Users\kyan\AppData\Roaming\Kopuz'"));

@@ -7,6 +7,9 @@ edition.workspace = true
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-chrome = "0.7"
+
+# jemalloc does not build for MSVC, so a Windows build reports zeroes instead.
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemalloc-ctl = { version = "0.6", features = ["stats"], optional = true }
 tikv-jemallocator = { version = "0.6", optional = true }
 
