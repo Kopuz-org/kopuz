@@ -144,11 +144,21 @@ impl YouTubeMusicClient {
         }
     }
 
-    fn account<F: std::future::Future>(
-        &self,
-        call: F,
-    ) -> impl std::future::Future<Output = F::Output> {
-        innertube::as_account(self.page_id.clone(), call)
+    async fn account<F: std::future::Future>(&self, call: F) -> F::Output {
+        if let (Some(cookies), Some(page_id)) = (self.cookies.as_deref(), self.page_id.as_deref())
+            && innertube::manager(cookies, page_id).is_none()
+        {
+            match accounts::list(cookies).await {
+                Ok(_) if innertube::manager(cookies, page_id).is_none() => {
+                    innertube::remember_manager(cookies, page_id, None);
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!(%error, "no Google account found behind the brand account");
+                }
+            }
+        }
+        innertube::as_account(self.page_id.clone(), call).await
     }
 
     /// The channels this session can act as. Anonymous has none.
@@ -457,7 +467,7 @@ impl YouTubeMusicClient {
 
     #[cfg(test)]
     pub(crate) async fn acting_as(&self) -> Option<String> {
-        self.account(async { innertube::page_id() }).await
+        innertube::as_account(self.page_id.clone(), async { innertube::page_id() }).await
     }
 
     /// Whether this client has cookies — i.e. the user is signed in rather than

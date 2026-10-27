@@ -11,6 +11,9 @@ use super::innertube;
 pub struct YtAccount {
     /// `None` for the Google account itself, else the brand account's page id.
     pub page_id: Option<String>,
+    /// For a brand account, the Google account managing it, which every
+    /// request acting as the brand account is bound to.
+    pub user_session_id: Option<String>,
     pub name: String,
     pub handle: Option<String>,
 }
@@ -23,7 +26,13 @@ pub async fn list(cookies: &str) -> Result<Vec<YtAccount>, String> {
         innertube::post(WEB_REMIX, "account/accounts_list", json!({}), Some(cookies)),
     )
     .await?;
-    parse(&json)
+    let listed = parse(&json)?;
+    for account in &listed {
+        if let (Some(page_id), Some(user)) = (&account.page_id, &account.user_session_id) {
+            innertube::remember_manager(cookies, page_id, Some(user));
+        }
+    }
+    Ok(listed)
 }
 
 /// Items without a page id, other than the selected one, are other Google sessions
@@ -64,18 +73,28 @@ fn collect<'a>(v: &'a Value, out: &mut Vec<&'a Value>) {
 }
 
 fn account(item: &Value) -> Option<(bool, YtAccount)> {
-    let page_id = item["serviceEndpoint"]["selectActiveIdentityEndpoint"]["supportedTokens"]
+    let tokens = item["serviceEndpoint"]["selectActiveIdentityEndpoint"]["supportedTokens"]
         .as_array()
-        .into_iter()
-        .flatten()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let page_id = tokens
+        .iter()
         .find_map(|token| token["pageIdToken"]["pageId"].as_str())
         .map(str::to_owned);
+    // `<brand>||<manager>` for a brand account, `<self>||` for the Google account.
+    let user_session_id = tokens
+        .iter()
+        .find_map(|token| token["datasyncIdToken"]["datasyncIdToken"].as_str())
+        .and_then(|id| id.split_once("||"))
+        .map(|(_, user)| user.to_owned())
+        .filter(|user| page_id.is_some() && !user.is_empty());
     let handle = text(&item["channelHandle"])
         .or_else(|| text(&item["accountByline"]).filter(|byline| byline.starts_with('@')));
     Some((
         item["isSelected"].as_bool().unwrap_or(false),
         YtAccount {
             page_id,
+            user_session_id,
             name: text(&item["accountName"])?,
             handle,
         },
@@ -110,11 +129,13 @@ mod tests {
             vec![
                 YtAccount {
                     page_id: None,
+                    user_session_id: None,
                     name: "Ada Example".into(),
                     handle: Some("@adaexample".into()),
                 },
                 YtAccount {
                     page_id: Some("112233445566778899000".into()),
+                    user_session_id: Some("100000000000000000001".into()),
                     name: "Ada Records".into(),
                     handle: Some("@adarecords".into()),
                 },

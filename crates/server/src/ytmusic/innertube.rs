@@ -1,7 +1,8 @@
 //! Raw InnerTube HTTP transport — one function per endpoint, returns
 //! parsed JSON.
 
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
@@ -17,17 +18,72 @@ pub fn http_client() -> &'static reqwest::Client {
     CLIENT.get_or_init(utils::http::client)
 }
 
-/// Builds the `Authorization: SAPISIDHASH <ts>_<sha1(ts " " SAPISID " " origin)>` header.
+/// Builds the `Authorization` header a browser sends: a
+/// `<scheme> <ts>_<sha1(ts " " sid " " origin)>` for each SAPISID cookie held.
+/// `None` without SAPISID (or its `__Secure-3PAPISID` stand-in).
 pub fn sapisid_hash(cookies: &str, origin: &str) -> Option<String> {
-    let sapisid =
-        cookie_value(cookies, "SAPISID").or_else(|| cookie_value(cookies, "__Secure-3PAPISID"))?;
     let ts = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
-    let mut hasher = Sha1::new();
-    hasher.update(format!("{ts} {sapisid} {origin}").as_bytes());
-    Some(format!(
-        "SAPISIDHASH {ts}_{}",
-        hex::encode(hasher.finalize())
-    ))
+    let user = page_id().and_then(|page| manager(cookies, &page)).flatten();
+    sid_authorization(cookies, origin, ts, user.as_deref())
+}
+
+/// A brand account's hashes are bound to the Google account managing it
+/// (`<ts>_<sha1(user " " ts " " sid " " origin)>_u`). Its requests with
+/// unbound hashes are refused with HTTP 401, as if no cookie were sent.
+fn sid_authorization(cookies: &str, origin: &str, ts: u64, user: Option<&str>) -> Option<String> {
+    let third = cookie_value(cookies, "__Secure-3PAPISID");
+    let sapisid = cookie_value(cookies, "SAPISID").or_else(|| third.clone())?;
+    let schemes = [
+        ("SAPISIDHASH", Some(sapisid)),
+        ("SAPISID1PHASH", cookie_value(cookies, "__Secure-1PAPISID")),
+        ("SAPISID3PHASH", third),
+    ];
+    let hashes: Vec<String> = schemes
+        .into_iter()
+        .filter_map(|(scheme, sid)| {
+            let sid = sid?;
+            let mut hasher = Sha1::new();
+            match user {
+                Some(user) => hasher.update(format!("{user} {ts} {sid} {origin}").as_bytes()),
+                None => hasher.update(format!("{ts} {sid} {origin}").as_bytes()),
+            }
+            let hash = hex::encode(hasher.finalize());
+            Some(match user {
+                Some(_) => format!("{scheme} {ts}_{hash}_u"),
+                None => format!("{scheme} {ts}_{hash}"),
+            })
+        })
+        .collect();
+    Some(hashes.join(" "))
+}
+
+/// The Google account (its user session id) managing each brand account, by
+/// login and page id. `None` once the accounts list was asked and named no
+/// manager, so a stale choice is not listed again on every call.
+type Managers = HashMap<(String, String), Option<String>>;
+
+fn managers() -> &'static Mutex<Managers> {
+    static MANAGERS: OnceLock<Mutex<Managers>> = OnceLock::new();
+    MANAGERS.get_or_init(Mutex::default)
+}
+
+pub(super) fn remember_manager(cookies: &str, page_id: &str, user_session_id: Option<&str>) {
+    if let (Some(login), Ok(mut managers)) = (super::derive_user_id(cookies), managers().lock()) {
+        managers.insert(
+            (login, page_id.to_owned()),
+            user_session_id.map(str::to_owned),
+        );
+    }
+}
+
+/// `None` until the accounts list has been asked about this login and page id.
+pub(super) fn manager(cookies: &str, page_id: &str) -> Option<Option<String>> {
+    let login = super::derive_user_id(cookies)?;
+    managers()
+        .lock()
+        .ok()?
+        .get(&(login, page_id.to_owned()))
+        .cloned()
 }
 
 tokio::task_local! {
@@ -48,7 +104,8 @@ pub(super) fn page_id() -> Option<String> {
 }
 
 /// A brand account needs both `X-Goog-PageId` and `context.user.onBehalfOfUser`;
-/// YouTube ignores either one alone.
+/// YouTube ignores either one alone. `X-Goog-AuthUser` picks the cookie jar's
+/// session the delegation hangs off, as the web client sends it.
 pub(super) fn signed(
     mut req: reqwest::RequestBuilder,
     body: &mut Value,
@@ -57,7 +114,9 @@ pub(super) fn signed(
 ) -> reqwest::RequestBuilder {
     req = req.header("Cookie", cookies).header("Authorization", auth);
     if let Some(page_id) = page_id() {
-        req = req.header("X-Goog-PageId", page_id.as_str());
+        req = req
+            .header("X-Goog-PageId", page_id.as_str())
+            .header("X-Goog-AuthUser", "0");
         if let Some(context) = body.get_mut("context").and_then(Value::as_object_mut) {
             let user = context.entry("user").or_insert_with(|| json!({}));
             if let Some(user) = user.as_object_mut() {
@@ -497,6 +556,7 @@ mod tests {
             json!({ "context": { "client": {}, "user": { "lockedSafetyMode": false } } });
         let req = as_account(Some("4242".into()), async { sign(&mut body) }).await;
         assert_eq!(req.headers()["X-Goog-PageId"], "4242");
+        assert_eq!(req.headers()["X-Goog-AuthUser"], "0");
         assert_eq!(req.headers()["Cookie"], "SAPISID=abc");
         assert_eq!(body["context"]["user"]["onBehalfOfUser"], "4242");
         assert_eq!(body["context"]["user"]["lockedSafetyMode"], false);
@@ -516,9 +576,59 @@ mod tests {
                 sign(&mut body)
             };
             assert!(req.headers().get("X-Goog-PageId").is_none());
+            assert!(req.headers().get("X-Goog-AuthUser").is_none());
             assert!(body["context"]["user"].get("onBehalfOfUser").is_none());
             assert_eq!(req.headers()["Authorization"], "SAPISIDHASH 1_x");
         }
+    }
+
+    // Expected hashes are sha1 of the documented inputs, computed outside this code.
+    #[test]
+    fn the_google_account_signs_with_an_unbound_hash() {
+        assert_eq!(
+            sid_authorization("SAPISID=abc", ORIGIN_YOUTUBE_MUSIC, 1_700_000_000, None).unwrap(),
+            "SAPISIDHASH 1700000000_2f3ec011e870f3fbd0238c090c2062c208cead32"
+        );
+        assert!(sid_authorization("SID=x", ORIGIN_YOUTUBE_MUSIC, 1, None).is_none());
+    }
+
+    #[test]
+    fn a_brand_account_binds_every_hash_to_its_manager() {
+        let cookies = "SAPISID=abc; __Secure-1PAPISID=one; __Secure-3PAPISID=three";
+        let auth = sid_authorization(
+            cookies,
+            ORIGIN_YOUTUBE_MUSIC,
+            1_700_000_000,
+            Some("100000000000000000001"),
+        )
+        .unwrap();
+        assert_eq!(
+            auth,
+            "SAPISIDHASH 1700000000_f0bd48bef376b84351fca7f94655ff60bed5cd04_u \
+             SAPISID1PHASH 1700000000_c2a67dc6e6fb9173caa977f080ffbc131da2d4dc_u \
+             SAPISID3PHASH 1700000000_25ea2be4f2475e0d972330fc15f33fd4e7a88680_u"
+        );
+    }
+
+    #[tokio::test]
+    async fn only_the_known_brand_account_of_this_login_gets_a_bound_hash() {
+        let cookies = "SAPISID=bound-test";
+        remember_manager(cookies, "777", Some("100000000000000000001"));
+        remember_manager(cookies, "779", None);
+        let hash = |page: Option<&str>, cookies: &'static str| {
+            as_account(page.map(str::to_owned), async move {
+                sapisid_hash(cookies, ORIGIN_YOUTUBE_MUSIC).unwrap()
+            })
+        };
+        assert!(hash(Some("777"), cookies).await.ends_with("_u"));
+        assert!(!hash(None, cookies).await.ends_with("_u"));
+        assert!(!hash(Some("778"), cookies).await.ends_with("_u"));
+        assert!(!hash(Some("779"), cookies).await.ends_with("_u"));
+        assert!(
+            !hash(Some("777"), "SAPISID=other-login")
+                .await
+                .ends_with("_u")
+        );
     }
 
     #[test]
