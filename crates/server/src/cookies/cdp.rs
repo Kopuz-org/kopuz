@@ -217,16 +217,6 @@ fn reply_to(message: &[u8], id: u64, method: &str) -> Option<io::Result<Value>> 
         .unwrap_or_default()))
 }
 
-fn stalled_page(targets: &Value, url: &str) -> Option<Value> {
-    targets["targetInfos"]
-        .as_array()?
-        .iter()
-        .find(|t| {
-            t["type"] == "page" && t["url"] == url && t["title"].as_str().is_none_or(str::is_empty)
-        })
-        .map(|t| t["targetId"].clone())
-}
-
 pub(crate) fn cookies_in(reply: &Value, domain: &str) -> Vec<Cookie> {
     reply["cookies"]
         .as_array()
@@ -282,31 +272,6 @@ impl Cdp {
     pub(crate) async fn cookies(&mut self, domain: &str) -> io::Result<Vec<Cookie>> {
         let reply = self.call("Storage.getCookies", json!({})).await?;
         Ok(cookies_in(&reply, domain))
-    }
-
-    /// A fresh Helium profile can hold the first navigation for half a minute while
-    /// its content blocker starts; navigating again once it is up loads at once.
-    pub(crate) async fn renavigate_if_stalled(&mut self, url: &str) {
-        let Ok(targets) = self.call("Target.getTargets", json!({})).await else {
-            return;
-        };
-        let Some(target) = stalled_page(&targets, url) else {
-            return;
-        };
-        let attach = json!({ "targetId": target, "flatten": true });
-        let Ok(attached) = self.call("Target.attachToTarget", attach).await else {
-            return;
-        };
-        let Some(session) = attached["sessionId"].as_str().map(str::to_owned) else {
-            return;
-        };
-        tracing::debug!("sign-in page stalled, navigating again");
-        let _ = self
-            .call_in(Some(&session), "Page.navigate", json!({ "url": url }))
-            .await;
-        let _ = self
-            .call("Target.detachFromTarget", json!({ "sessionId": session }))
-            .await;
     }
 
     /// Quitting also writes the cookies to disk.
@@ -378,21 +343,6 @@ mod tests {
             encode(2, Some("S1"), "Page.navigate", json!({ "url": "u" })).expect("encodes");
         let body: Value = serde_json::from_slice(&message[..message.len() - 1]).expect("json");
         assert_eq!(body["sessionId"], "S1");
-    }
-
-    #[test]
-    fn a_blank_sign_in_page_reads_as_stalled() {
-        // Recorded over the pipe from a fresh Helium profile.
-        let targets: Value = serde_json::from_str(r#"{"targetInfos":[{"targetId":"62B2C833E15146693CFA283FF748C2E9","type":"page","title":"","url":"https://music.youtube.com/","attached":false,"canAccessOpener":false,"browserContextId":"953690EE282AFC4733AC4ECE044BEB81"},{"targetId":"5330CF045CBEDB8DAD1E5CAE805B3A1A","type":"background_page","title":"uBlock Origin","url":"chrome-extension://blockjmkbacgjkknlgpkjjiijinjdanf/background.html","attached":false,"canAccessOpener":false,"browserContextId":"953690EE282AFC4733AC4ECE044BEB81"}]}"#).expect("json");
-        assert_eq!(
-            stalled_page(&targets, "https://music.youtube.com/"),
-            Some(json!("62B2C833E15146693CFA283FF748C2E9"))
-        );
-        assert_eq!(stalled_page(&targets, "https://example.test/"), None);
-        let loaded = json!({ "targetInfos": [
-            { "targetId": "A", "type": "page", "title": "YouTube Music", "url": "https://music.youtube.com/" }
-        ]});
-        assert_eq!(stalled_page(&loaded, "https://music.youtube.com/"), None);
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use config::{Browser, BrowserEngine};
 use tokio::process::Command;
@@ -354,10 +355,29 @@ pub(crate) fn signin_command(
 
     #[cfg(target_os = "windows")]
     cmd.creation_flags(0x0100_0000);
+    // Own process group, so stop_browser can reach what a wrapper script launched.
+    #[cfg(unix)]
+    cmd.process_group(0);
     cmd.stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
     cmd
+}
+
+/// Close the browser and everything it spawned; killing only `child` orphans the window behind a wrapper script.
+pub(crate) async fn stop_browser(child: &mut tokio::process::Child) {
+    #[cfg(unix)]
+    if let Some(pid) = child.id().and_then(|pid| i32::try_from(pid).ok()) {
+        // SAFETY: killpg only signals the group this module created with process_group(0).
+        unsafe { libc::killpg(pid, libc::SIGTERM) };
+        if tokio::time::timeout(Duration::from_secs(3), child.wait())
+            .await
+            .is_err()
+        {
+            unsafe { libc::killpg(pid, libc::SIGKILL) };
+        }
+    }
+    let _ = child.kill().await;
 }
 
 /// On Windows it asks to leave kopuz's job; a job that forbids that refuses the
@@ -611,5 +631,29 @@ mod tests {
         );
         assert_eq!(browser_from_handler("MSEdgeHTM"), Some(Browser::Edge));
         assert_eq!(browser_from_handler("com.apple.safari"), None);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stopping_a_wrapper_takes_what_it_launched_with_it() {
+        let marker = std::env::temp_dir().join(format!("kopuz-stop-{}", std::process::id()));
+        let script = format!("sleep 60 & echo $! > {}; wait", marker.display());
+        let mut command = Command::new("bash");
+        command.args(["-c", &script]).process_group(0);
+        let mut child = command.spawn().expect("spawn");
+        let pid = loop {
+            if let Some(pid) = std::fs::read_to_string(&marker)
+                .ok()
+                .and_then(|s| s.trim().parse::<i32>().ok())
+            {
+                break pid;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        stop_browser(&mut child).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let _ = std::fs::remove_file(&marker);
+        // SAFETY: signal 0 only probes whether the pid still exists.
+        assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "the grandchild survived");
     }
 }

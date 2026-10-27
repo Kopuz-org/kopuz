@@ -1,21 +1,19 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use config::{Browser, BrowserEngine};
+use config::Browser;
 use tokio::process::Child;
 
 use super::browser::{
     BrowserBin, browser_candidates, find_browser_bin, in_flatpak, prepare_profile, signin_command,
-    spawn_browser,
+    spawn_browser, stop_browser,
 };
-use super::cdp::{self, Cdp};
 use super::profile::profile_dir;
 use super::store::{Cookie, read_cookies};
 
 /// Wipe the `<prefix>-<server_id>` profile, launch `browser` at `signin_url`,
 /// then hand the profile's `domain` cookies to `extract` until it yields the
-/// signed-in result, over the DevTools pipe while it holds and from disk after.
-/// The browser is always stopped before returning.
+/// signed-in result. The browser is always stopped before returning.
 pub(crate) async fn launch_signin_and_extract<F>(
     browser: Browser,
     server_id: &str,
@@ -69,53 +67,20 @@ where
             .ok_or(error)?
     };
     tracing::info!(%bin, profile = %profile.display(), "launching sign-in browser");
+    // No DevTools pipe here: it sets navigator.webdriver, and Google refuses to sign in an automated browser.
     let mut command = signin_command(browser, &bin, &profile, signin_url);
-    let pipe = if browser.engine() == BrowserEngine::Chromium && cdp::pipe_reaches(&bin) {
-        match cdp::pipes() {
-            Ok((devtools, ends)) => {
-                ends.attach(&mut command);
-                Some((devtools, ends))
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "no DevTools pipe; reading the cookie store from disk");
-                None
-            }
-        }
-    } else {
-        None
-    };
     let mut child = spawn_browser(&mut command).map_err(|e| format!("spawn {bin}: {e}"))?;
-    let mut devtools = pipe.map(|(devtools, ends)| {
-        drop(ends);
-        devtools
-    });
-    tracing::debug!(%bin, pid = ?child.id(), devtools = devtools.is_some(), "browser spawned, waiting for sign-in");
+    tracing::debug!(%bin, pid = ?child.id(), "browser spawned, waiting for sign-in");
 
     let wait = SigninWait {
         browser,
         profile: &profile,
         bin: &bin,
-        url: signin_url,
         domain,
         timeout: signin_timeout,
     };
-    let outcome = wait_for_signin(&wait, &mut child, &mut devtools, &extract).await;
-
-    match devtools.as_mut() {
-        // Quitting writes the cookies out, which a later resume from this profile reads.
-        Some(devtools) => {
-            devtools.close().await;
-            if tokio::time::timeout(Duration::from_secs(3), child.wait())
-                .await
-                .is_err()
-            {
-                let _ = child.kill().await;
-            }
-        }
-        None => {
-            let _ = child.kill().await;
-        }
-    }
+    let outcome = wait_for_signin(&wait, &mut child, &extract).await;
+    stop_browser(&mut child).await;
     outcome
 }
 
@@ -124,7 +89,6 @@ struct SigninWait<'a> {
     browser: Browser,
     profile: &'a Path,
     bin: &'a BrowserBin,
-    url: &'a str,
     domain: &'a str,
     timeout: Duration,
 }
@@ -152,12 +116,11 @@ fn store_held_open(_profile: &Path) -> bool {
     false
 }
 
-/// Without the pipe the store is only written on close, so polling waits until the
-/// browser has opened and released it: a fresh empty profile is not "already closed".
+/// Where the store is only written on close, polling waits until the browser has
+/// opened and released it: a fresh empty profile is not "already closed".
 async fn wait_for_signin<F>(
     w: &SigninWait<'_>,
     child: &mut Child,
-    devtools: &mut Option<Cdp>,
     extract: &F,
 ) -> Result<String, String>
 where
@@ -167,10 +130,6 @@ where
     let deadline = started + w.timeout;
     let gated = waits_for_close(w.browser);
     let mut saw_browser = false;
-    let mut answered = false;
-    let mut nudges = [Duration::from_secs(5), Duration::from_secs(15)]
-        .into_iter()
-        .peekable();
     let mut last_extract_err: Option<String> = None;
 
     let mut child_exited_at: Option<Instant> = None;
@@ -188,7 +147,7 @@ where
                 saw_browser,
                 "sign-in timed out"
             );
-            if gated && devtools.is_none() {
+            if gated {
                 return Err(format!(
                     "Sign-in not detected within {}s — finish signing in, then close the browser window{detail}",
                     w.timeout.as_secs()
@@ -201,48 +160,6 @@ where
                 "Sign-in not detected within {}s{exited_note}{detail}",
                 w.timeout.as_secs()
             ));
-        }
-        if let Some(pipe) = devtools.as_mut() {
-            if nudges
-                .next_if(|after| started.elapsed() >= *after)
-                .is_some()
-            {
-                pipe.renavigate_if_stalled(w.url).await;
-            }
-            match pipe.cookies(w.domain).await {
-                Ok(cookies) => {
-                    saw_browser = true;
-                    answered = true;
-                    if let Some(value) = extract(&cookies) {
-                        tracing::info!(
-                            bin = %w.bin,
-                            elapsed_ms = started.elapsed().as_millis(),
-                            "sign-in detected over DevTools"
-                        );
-                        return Ok(value);
-                    }
-                    continue;
-                }
-                // Cookies were read over the pipe a moment ago; disk holds no more.
-                Err(e)
-                    if answered
-                        && matches!(
-                            e.kind(),
-                            std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::BrokenPipe
-                        ) =>
-                {
-                    tracing::info!(bin = %w.bin, "sign-in browser closed before signing in");
-                    return Err(format!(
-                        "{} closed before sign-in finished. Try again.",
-                        w.browser.label()
-                    ));
-                }
-                // The browser took no pipe or is stuck; whatever it wrote is on disk.
-                Err(e) => {
-                    tracing::debug!(error = %e, "DevTools pipe unusable; reading the cookie store from disk");
-                    *devtools = None;
-                }
-            }
         }
         if gated {
             if store_held_open(w.profile) {
@@ -285,11 +202,12 @@ mod live {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::cookies::cdp;
 
     #[tokio::test]
     #[ignore = "opens a real browser"]
     #[allow(clippy::print_stderr)]
-    async fn visitor_cookies_come_back_over_the_pipe() {
+    async fn visitor_cookies_come_back_from_the_profile() {
         let id = std::env::var("KOPUZ_LIVE_BROWSER").unwrap_or_else(|_| "helium".to_string());
         let browser = Browser::from_id(&id).expect("a browser kopuz knows");
         let profile = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -303,20 +221,15 @@ mod live {
         assert!(cdp::pipe_reaches(&bin));
 
         let mut command = signin_command(browser, &bin, &profile, "https://music.youtube.com/");
-        let (devtools, ends) = cdp::pipes().expect("pipes");
-        ends.attach(&mut command);
         let mut child = spawn_browser(&mut command).expect("spawn");
-        drop(ends);
-        let mut devtools = Some(devtools);
         let wait = SigninWait {
             browser,
             profile: &profile,
             bin: &bin,
-            url: "https://music.youtube.com/",
             domain: "youtube.com",
             timeout: Duration::from_secs(60),
         };
-        let found = wait_for_signin(&wait, &mut child, &mut devtools, &|cookies: &[Cookie]| {
+        let found = wait_for_signin(&wait, &mut child, &|cookies: &[Cookie]| {
             cookies
                 .iter()
                 .any(|c| c.name == "VISITOR_INFO1_LIVE" || c.name == "YSC")
@@ -329,15 +242,12 @@ mod live {
                 })
         })
         .await;
-        let read_over_pipe = devtools.is_some();
-        if let Some(devtools) = devtools.as_mut() {
-            devtools.close().await;
-        }
-        let _ = tokio::time::timeout(Duration::from_secs(3), child.wait()).await;
         let _ = child.kill().await;
         let names = found.expect("visitor cookies");
-        eprintln!("live: {} cookies over the pipe: {names}", browser.label());
-        assert!(read_over_pipe, "fell back to the disk store");
+        eprintln!(
+            "live: {} cookies from the profile: {names}",
+            browser.label()
+        );
 
         let args = ["--password-store=basic".to_string()];
         let stored = cdp::read_headless(&bin, &profile, &args, "youtube.com")
