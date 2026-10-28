@@ -1882,13 +1882,18 @@ impl Session {
             return;
         };
         external.device = report.device;
-        let changed = report.track.as_ref().map(|track| track.id.uid())
+        // The tab reports only what its SDK knows (no album id, sometimes no art); when it is the track kopuz queued, show the library's row.
+        let reported = report.track.map(|track| match self.model.current_track() {
+            Some(queued) if queued.id.uid() == track.id.uid() => queued.clone(),
+            _ => track,
+        });
+        let changed = reported.as_ref().map(|track| track.id.uid())
             != external.track.as_ref().map(|track| track.id.uid());
         let mut committed = None;
         if changed {
             external.completed_key = None;
             external.artwork = None;
-            external.track = report.track;
+            external.track = reported;
             self.last_recent_key = None;
             match self.external.as_ref().and_then(|it| it.track.clone()) {
                 Some(track) => {
