@@ -395,7 +395,9 @@ impl Palette {
             Act::Play(at) => {
                 let keys = self.keys.clone();
                 self.close(cx);
-                store::actions::play_tracks(keys, Some(at as u32), cx);
+                if let Some(key) = keys.get(at).cloned() {
+                    store::actions::play_in_library(key, keys, at as u32, cx);
+                }
             }
             Act::Go(route) => {
                 self.close(cx);
