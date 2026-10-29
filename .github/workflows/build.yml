@@ -53,6 +53,12 @@ jobs:
 
       - uses: DeterminateSystems/nix-installer-action@main
 
+      # Read-only: pulls the deps master pushed, and works for forks, which get no secrets.
+      - uses: cachix/cachix-action@v14
+        with:
+          name: kopuz
+          skipPush: true
+
       - name: Run Nix checks
         run: nix build .#checks.${{ matrix.system }}.default
 

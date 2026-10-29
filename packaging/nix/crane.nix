@@ -113,9 +113,6 @@ let
           ]
         );
       };
-  }
-  // lib.optionalAttrs (gitRev != null) {
-    KOPUZ_GIT_COMMIT = gitRev;
   };
 
   # Pre-build all external deps, this derivation is cached across source changes
@@ -123,6 +120,10 @@ let
 in
 craneLib.mkCargoDerivation (
   commonArgs
+  # Only on the final build, so the deps build keeps one hash across commits and Cachix can serve it.
+  // lib.optionalAttrs (gitRev != null) {
+    KOPUZ_GIT_COMMIT = gitRev;
+  }
   // {
     inherit cargoArtifacts;
     dontWrapGApps = true;

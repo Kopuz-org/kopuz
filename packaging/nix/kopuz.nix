@@ -80,9 +80,6 @@ let
           ]
         );
       };
-  }
-  // lib.optionalAttrs (gitRev != null) {
-    KOPUZ_GIT_COMMIT = gitRev;
   };
 
   # crane stubs every crate in src for the deps build, but the patched gpui platform crate is a dependency.
@@ -90,14 +87,17 @@ let
     inherit (commonArgs) src;
     extraDummyScript = ''
       rm -rf $out/vendor/gpui-pre-linux
-      cp -r ${commonArgs.src}/vendor/gpui-pre-linux $out/vendor/gpui-pre-linux
-    '';
+      cp -r ${lib.cleanSource ../../vendor/gpui-pre-linux} $out/vendor/gpui-pre-linux    '';
   };
 
   cargoArtifacts = craneLib.buildDepsOnly (commonArgs // { inherit dummySrc; });
 in
 craneLib.buildPackage (
   commonArgs
+  # Only on the final build, so the deps build keeps one hash across commits and Cachix can serve it.
+  // lib.optionalAttrs (gitRev != null) {
+    KOPUZ_GIT_COMMIT = gitRev;
+  }
   // {
     inherit cargoArtifacts;
 
