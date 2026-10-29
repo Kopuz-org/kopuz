@@ -7,7 +7,9 @@ use gpui_kit::{
     App, AppContext as _, Context, IntoElement, ParentElement as _, Render, Styled, Window,
 };
 use store::LayoutModel;
-use store::layout::{Backdrop, HeroSize, PlayerSize, Section as Group, SheetTab, Side, TileSize};
+use store::layout::{
+    Backdrop, HeroSize, PlayerSize, QueueStyle, Section as Group, SheetTab, Side, TileSize,
+};
 
 /// Contribute both sections; call once at startup, after `settings_interface::init`.
 pub fn register(cx: &mut App) {
@@ -181,6 +183,22 @@ impl Render for SheetSettings {
                                 ],
                                 |value, cx| {
                                     LayoutModel::edit(cx, |layout| layout.sheet.side = value)
+                                },
+                            ))
+                            .shown(cx),
+                    )
+                    .children(
+                        SettingRow::new(t("interface_queue_style"))
+                            .description(t("interface_queue_style_description"))
+                            .control(choice(
+                                "sheet-queue",
+                                &sheet.queue,
+                                vec![
+                                    (QueueStyle::Sections, t("interface_queue_style_sections")),
+                                    (QueueStyle::Classic, t("interface_queue_style_classic")),
+                                ],
+                                |value, cx| {
+                                    LayoutModel::edit(cx, |layout| layout.sheet.queue = value)
                                 },
                             ))
                             .shown(cx),

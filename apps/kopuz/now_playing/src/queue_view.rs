@@ -13,7 +13,8 @@ use gpui_kit::{
     Pixels, Render, ScrollStrategy, SharedString, Stateful, StatefulInteractiveElement as _,
     Styled, Subscription, UniformListScrollHandle, Window, div, px, uniform_list,
 };
-use store::{ConfigModel, PlaylistsModel, QueueModel, Target};
+use store::layout::QueueStyle;
+use store::{ConfigModel, LayoutModel, PlaylistsModel, QueueModel, Target};
 
 // Above this point in a row a drop lands before it, below it after.
 const DROP_SPLIT: Pixels = px(23.);
@@ -65,6 +66,7 @@ fn insert_at(at: u32, keys: Vec<String>, cx: &mut App) {
 pub struct QueueView {
     scroll: UniformListScrollHandle,
     lines: Vec<Line>,
+    style: QueueStyle,
     auto_follow: bool,
     history_open: bool,
     followed: Option<u32>,
@@ -86,10 +88,20 @@ impl QueueView {
             }),
             cx.observe(&store::PlayerModel::global(cx), |_, _, cx| cx.notify()),
             cx.observe(&ConfigModel::global(cx), |_, _, cx| cx.notify()),
+            cx.observe(&LayoutModel::global(cx), |this, _, cx| {
+                let style = store::layout(cx).sheet.queue;
+                if style != this.style {
+                    this.style = style;
+                    this.rebuild(cx);
+                    this.follow();
+                    cx.notify();
+                }
+            }),
         ];
         let mut this = Self {
             scroll: UniformListScrollHandle::new(),
             lines: Vec::new(),
+            style: store::layout(cx).sheet.queue,
             auto_follow: true,
             history_open: false,
             followed: None,
@@ -106,6 +118,7 @@ impl QueueView {
         let count = queue.len();
         let current = queue.position().map(|at| at as usize);
         self.lines.clear();
+        let current = current.filter(|_| self.style == QueueStyle::Sections);
         let Some(current) = current else {
             self.lines.extend((0..count).map(Line::Track));
             return;
@@ -130,13 +143,17 @@ impl QueueView {
         if !self.auto_follow {
             return;
         }
-        if let Some(line) = self
-            .lines
-            .iter()
-            .position(|line| *line == Line::Track(index as usize))
-        {
-            self.scroll
-                .scroll_to_item_strict(line, ScrollStrategy::Center);
+        let (target, strategy) = match self.style {
+            QueueStyle::Classic => (Line::Track(index as usize), ScrollStrategy::Center),
+            // With history folded its heading is the top; opened, the top is the oldest song, so stop at "Now".
+            QueueStyle::Sections if !self.history_open => {
+                self.scroll.scroll_to_item_strict(0, ScrollStrategy::Top);
+                return;
+            }
+            QueueStyle::Sections => (Line::Now, ScrollStrategy::Top),
+        };
+        if let Some(line) = self.lines.iter().position(|line| *line == target) {
+            self.scroll.scroll_to_item_strict(line, strategy);
         }
     }
 
@@ -240,6 +257,7 @@ impl QueueView {
         };
         let count = queue.len() as u32;
         let at = index as u32;
+        let view = cx.entity().downgrade();
         let title = SharedString::from(track.title.clone());
         let zones = ReorderDropZones::new(("queue-drop", index), style::media_row(), index)
             .split(DROP_SPLIT)
@@ -271,7 +289,11 @@ impl QueueView {
             index: at,
             key: SharedString::from(track.key.clone()),
         })
-        .on_jump(move |_, cx| QueueModel::global(cx).update(cx, |queue, cx| queue.jump(at, cx)))
+        .on_jump(move |_, cx| {
+            // A song picked by hand is followed even out of a list scrolled away from the old one.
+            view.update(cx, |this, _| this.auto_follow = true).ok();
+            QueueModel::global(cx).update(cx, |queue, cx| queue.jump(at, cx));
+        })
         .on_move_up(move |_, cx| {
             QueueModel::global(cx).update(cx, |queue, cx| {
                 queue.move_item(at, at.saturating_sub(1), cx)
