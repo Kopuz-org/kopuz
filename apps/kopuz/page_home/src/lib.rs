@@ -28,8 +28,19 @@ use store::{DownloadsModel, ForYouModel, PlaylistsModel, Query, SourcesModel};
 
 use data::{RECENT_TRACKS_WINDOW, RECENTLY_ADDED_WINDOW, Shelf};
 
+/// A source's feed for Home, and its chips, which Home draws over its first row rather than in the feed.
+#[derive(Clone)]
+pub struct CatalogViews {
+    pub chips: AnyView,
+    pub feed: AnyView,
+    /// Whether For you wears the feed's opening line, or the feed keeps it.
+    pub strapline_to_host: HandStrapline,
+}
+
+pub type HandStrapline = Rc<dyn Fn(bool, &mut App)>;
+
 type BuildCatalog =
-    Rc<dyn Fn(Option<SharedString>, ScrollHandle, &mut Window, &mut App) -> AnyView>;
+    Rc<dyn Fn(Option<SharedString>, ScrollHandle, &mut Window, &mut App) -> CatalogViews>;
 
 struct CatalogBuilder(BuildCatalog);
 
@@ -37,7 +48,7 @@ impl Global for CatalogBuilder {}
 
 /// Register what draws a source's own feed as Home's catalog section: its first page by id, or its plain feed with none.
 pub fn register_catalog(
-    build: impl Fn(Option<SharedString>, ScrollHandle, &mut Window, &mut App) -> AnyView + 'static,
+    build: impl Fn(Option<SharedString>, ScrollHandle, &mut Window, &mut App) -> CatalogViews + 'static,
     cx: &mut App,
 ) {
     cx.set_global(CatalogBuilder(Rc::new(build)));
@@ -52,12 +63,27 @@ pub(crate) struct Shared {
     offline: bool,
     catalog: bool,
     settled: bool,
+    // The feed's opening line, which For you wears instead.
+    pub(crate) strapline: Option<SharedString>,
 }
 
 impl Shared {
     fn read(home: &Home, cx: &App) -> Self {
         let sources = SourcesModel::global(cx).read(cx);
+        let strapline = sources
+            .has_catalog()
+            .then(|| {
+                let first = sources
+                    .capabilities()
+                    .pages
+                    .first()
+                    .map(|page| page.id.clone());
+                store::CatalogCache::strapline(&first.unwrap_or_default(), cx)
+            })
+            .flatten()
+            .map(SharedString::from);
         Self {
+            strapline,
             resume: resume::Resume::read(cx),
             now: cards::Now::read(cx),
             for_you: for_you::Status::read(cx),
@@ -88,7 +114,9 @@ pub struct Home {
     scroll: HashMap<&'static str, ScrollHandle>,
     page: ScrollHandle,
     // The catalog section, and the source and page it was built for.
-    catalog: Option<(String, AnyView)>,
+    catalog: Option<(String, CatalogViews)>,
+    // The feed the strapline was last handed over for, and whether it was.
+    handed: Option<(gpui_kit::EntityId, bool)>,
     seed: u64,
     // The For you row's fade over its placeholder, kept here so a revisit finds it already in.
     for_you: components::motion::Fade,
@@ -200,6 +228,7 @@ impl Home {
                 .collect(),
             page: ScrollHandle::default(),
             catalog: None,
+            handed: None,
             seed: seed(),
             for_you: components::motion::Fade::hidden(),
             for_you_last: Rc::from([]),
@@ -279,9 +308,9 @@ impl Home {
     }
 
     /// The source's own feed, built once per source and first page.
-    fn catalog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyView> {
+    fn catalog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<CatalogViews> {
         if self.frozen {
-            return self.catalog.as_ref().map(|(_, view)| view.clone());
+            return self.catalog.as_ref().map(|(_, views)| views.clone());
         }
         let build = cx.try_global::<CatalogBuilder>()?.0.clone();
         let sources = SourcesModel::global(cx).read(cx);
@@ -292,14 +321,14 @@ impl Home {
             .first()
             .map(|page| SharedString::from(page.id.clone()));
         let key = format!("{source}\u{0}{}", first.as_deref().unwrap_or_default());
-        if let Some((held, view)) = &self.catalog
+        if let Some((held, views)) = &self.catalog
             && *held == key
         {
-            return Some(view.clone());
+            return Some(views.clone());
         }
-        let view = build(first, self.page.clone(), window, cx);
-        self.catalog = Some((key, view.clone()));
-        Some(view)
+        let views = build(first, self.page.clone(), window, cx);
+        self.catalog = Some((key, views.clone()));
+        Some(views)
     }
 }
 
@@ -316,12 +345,30 @@ impl Render for Home {
         let asks = drawn.iter().any(
             |drawn| matches!(drawn, Drawn::Shelf(index) if self.shelves[*index].name == "for_you"),
         );
+        let catalog = match drawn.iter().any(|drawn| matches!(drawn, Drawn::Catalog)) {
+            true => self.catalog(window, cx),
+            false => None,
+        };
+        if let Some(views) = &catalog {
+            let handed = (views.feed.entity_id(), asks);
+            if self.handed != Some(handed) {
+                self.handed = Some(handed);
+                let hand = views.strapline_to_host.clone();
+                cx.defer(move |cx| hand(asks, cx));
+            }
+        }
         let mut rows: Vec<AnyElement> = Vec::with_capacity(drawn.len());
+        // The chips head For you, or the feed where For you is not shown, whichever comes first.
+        let mut chips = catalog.as_ref().map(|views| views.chips.clone());
+        let headed = |chips: &mut Option<AnyView>, row: AnyElement| match chips.take() {
+            Some(chips) => v_flex().child(chips).child(row).into_any_element(),
+            None => row,
+        };
         for drawn in drawn {
             let index = match drawn {
                 Drawn::Catalog => {
-                    if let Some(view) = self.catalog(window, cx) {
-                        rows.push(view.into_any_element());
+                    if let Some(views) = &catalog {
+                        rows.push(headed(&mut chips, views.feed.clone().into_any_element()));
                     }
                     continue;
                 }
@@ -334,14 +381,17 @@ impl Render for Home {
             // A ranking is a list and a shelf is a row; `Form` is what says which a name gets.
             rows.push(match shelf.form {
                 data::Form::Ranked => ranked::ranked(shelf, cx),
-                _ if shelf.name == "for_you" => for_you::row(
-                    shelf,
-                    &shared,
-                    &self.for_you_last,
-                    &handle,
-                    &mut self.for_you,
-                    window,
-                    cx,
+                _ if shelf.name == "for_you" => headed(
+                    &mut chips,
+                    for_you::row(
+                        shelf,
+                        &shared,
+                        &self.for_you_last,
+                        &handle,
+                        &mut self.for_you,
+                        window,
+                        cx,
+                    ),
                 ),
                 _ => shelf::shelf(shelf, &handle, &shared.now),
             });

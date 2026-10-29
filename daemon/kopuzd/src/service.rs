@@ -51,9 +51,15 @@ pub struct GrpcState {
     pub session: SessionHandle,
     pub started: Instant,
     pub clients: Clients,
+    /// `None` makes the update RPCs answer unsupported.
+    pub updater: Option<Arc<crate::updates::Updater>>,
 }
 
 pub struct KopuzGrpc(Arc<GrpcState>);
+
+fn no_updater() -> Status {
+    failed(ApiError::unsupported("updates"))
+}
 
 fn failed(error: ApiError) -> Status {
     proto::status::to_status(error)
@@ -74,6 +80,10 @@ fn resync_message() -> proto::EventEnvelope {
 }
 
 impl KopuzGrpc {
+    fn updater(&self) -> Option<&Arc<crate::updates::Updater>> {
+        self.0.updater.as_ref()
+    }
+
     async fn player_mutation(
         &self,
         command: api::PlayerCommand,
@@ -227,6 +237,38 @@ impl Kopuz for KopuzGrpc {
             uptime_secs: self.0.started.elapsed().as_secs(),
             proto_revision: proto::WIRE_REVISION,
         }))
+    }
+
+    async fn get_update_status(
+        &self,
+        _request: Request<proto::GetUpdateStatusRequest>,
+    ) -> Result<Response<proto::UpdateStatus>, Status> {
+        let status = self.updater().ok_or_else(no_updater)?.status();
+        Ok(Response::new(convert::update_status_to_proto(&status)))
+    }
+
+    async fn check_for_update(
+        &self,
+        _request: Request<proto::CheckForUpdateRequest>,
+    ) -> Result<Response<proto::UpdateStatus>, Status> {
+        let status = self
+            .updater()
+            .ok_or_else(no_updater)?
+            .check()
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::update_status_to_proto(&status)))
+    }
+
+    async fn install_update(
+        &self,
+        request: Request<proto::InstallUpdateRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        self.updater()
+            .ok_or_else(no_updater)?
+            .install(request.get_ref().app_pid)
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
     }
 
     async fn get_player_state(

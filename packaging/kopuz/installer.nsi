@@ -469,9 +469,11 @@ SectionEnd
         Abort "$(appRunning)"
   ${EndIf}
   app_check_done:
-  ; The daemon outlives the window while music plays; it holds kopuzd.exe open, so it goes without asking.
-  nsis_tauri_utils::KillProcess "kopuzd.exe"
+  ; The daemon outlives the window while music plays and holds its exe open, so the bundled binaries go without asking.
+  {{#each binaries}}
+  nsis_tauri_utils::KillProcess "{{this}}"
   Pop $R0
+  {{/each}}
   ; Windows lets go of a killed process's exe a moment after it dies, and the files are written or deleted next.
   Sleep 1000
 !macroend

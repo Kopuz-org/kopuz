@@ -34,6 +34,66 @@ fn offline_mode_from_proto(value: i32) -> api::OfflineMode {
     }
 }
 
+pub fn update_status_to_proto(value: &api::UpdateStatus) -> UpdateStatus {
+    let state = match value {
+        api::UpdateStatus::Current => update_status::State::Current(Unit {}),
+        api::UpdateStatus::Available(update) => {
+            update_status::State::Available(available_update_to_proto(update))
+        }
+        api::UpdateStatus::Downloading {
+            version,
+            done,
+            total,
+        } => update_status::State::Downloading(UpdateDownload {
+            version: version.clone(),
+            done: *done,
+            total: *total,
+        }),
+        api::UpdateStatus::Ready { version } => update_status::State::Ready(version.clone()),
+        api::UpdateStatus::Failed(update) => {
+            update_status::State::Failed(available_update_to_proto(update))
+        }
+    };
+    UpdateStatus { state: Some(state) }
+}
+
+/// A state this build does not know says nothing it could act on.
+pub fn update_status_from_proto(value: &UpdateStatus) -> api::UpdateStatus {
+    match &value.state {
+        None | Some(update_status::State::Current(_)) => api::UpdateStatus::Current,
+        Some(update_status::State::Available(update)) => {
+            api::UpdateStatus::Available(available_update_from_proto(update))
+        }
+        Some(update_status::State::Downloading(download)) => api::UpdateStatus::Downloading {
+            version: download.version.clone(),
+            done: download.done,
+            total: download.total,
+        },
+        Some(update_status::State::Ready(version)) => api::UpdateStatus::Ready {
+            version: version.clone(),
+        },
+        Some(update_status::State::Failed(update)) => {
+            api::UpdateStatus::Failed(available_update_from_proto(update))
+        }
+    }
+}
+
+fn available_update_to_proto(value: &api::AvailableUpdate) -> AvailableUpdate {
+    AvailableUpdate {
+        version: value.version.clone(),
+        release_url: value.release_url.clone(),
+        installable: value.installable,
+    }
+}
+
+fn available_update_from_proto(value: &AvailableUpdate) -> api::AvailableUpdate {
+    api::AvailableUpdate {
+        version: value.version.clone(),
+        release_url: value.release_url.clone(),
+        installable: value.installable,
+    }
+}
+
 pub fn offline_cache_status_to_proto(value: &api::OfflineCacheStatus) -> OfflineCacheStatus {
     OfflineCacheStatus {
         enabled: value.enabled,
@@ -122,6 +182,7 @@ pub fn event_to_proto(value: &api::ApiEvent) -> Event {
         api::ApiEvent::NetworkStatus(status) => {
             event::Kind::NetworkStatus(network_status_to_proto(status))
         }
+        api::ApiEvent::Update(status) => event::Kind::Update(update_status_to_proto(status)),
         api::ApiEvent::Notice {
             level,
             code,
@@ -189,6 +250,7 @@ pub fn event_from_proto(value: &Event) -> Option<api::ApiEvent> {
         event::Kind::NetworkStatus(status) => {
             api::ApiEvent::NetworkStatus(network_status_from_proto(status))
         }
+        event::Kind::Update(status) => api::ApiEvent::Update(update_status_from_proto(status)),
         event::Kind::Notice(notice) => api::ApiEvent::Notice {
             level: notice_level_from_proto(notice.level),
             code: notice.code.clone(),
@@ -285,6 +347,21 @@ mod tests {
                 code: "c".into(),
                 message: None,
             },
+            api::ApiEvent::Update(api::UpdateStatus::Current),
+            api::ApiEvent::Update(api::UpdateStatus::Available(api::AvailableUpdate {
+                version: "1.0.0".into(),
+                release_url: "https://example.invalid/v1.0.0".into(),
+                installable: true,
+            })),
+            api::ApiEvent::Update(api::UpdateStatus::Downloading {
+                version: "1.0.0".into(),
+                done: 5,
+                total: None,
+            }),
+            api::ApiEvent::Update(api::UpdateStatus::Ready {
+                version: "1.0.0".into(),
+            }),
+            api::ApiEvent::Update(api::UpdateStatus::Failed(api::AvailableUpdate::default())),
             api::ApiEvent::Resync,
         ];
         for event in events {

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
+config = { workspace = true }
 directories = { workspace = true }
 tracing-appender = { workspace = true }
 utils = { workspace = true }

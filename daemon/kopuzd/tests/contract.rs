@@ -246,6 +246,7 @@ async fn spawn_pair() -> Pair {
         session: session.clone(),
         started: Instant::now(),
         clients: Default::default(),
+        updater: None,
     });
     let socket = dir.path().join("kopuzd.sock");
     let listener = kopuzd::bind_socket(&socket).expect("bind socket");

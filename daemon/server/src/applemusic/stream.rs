@@ -843,7 +843,7 @@ fn decrypted_cache_path(adam_id: &str) -> std::path::PathBuf {
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
         .collect();
-    directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+    config::flavor::project_dirs()
         .map(|dirs| dirs.cache_dir().join("applemusic"))
         .unwrap_or_else(|| std::env::temp_dir().join("kopuz-applemusic"))
         .join(format!("{safe}.m4a"))

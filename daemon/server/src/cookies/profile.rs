@@ -14,7 +14,7 @@ pub fn profile_dir(prefix: &str, server_id: &str) -> PathBuf {
     } else {
         format!("{prefix}-{safe}")
     };
-    directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+    config::flavor::project_dirs()
         .map(|d| {
             #[cfg(target_os = "windows")]
             let base = d.data_local_dir();

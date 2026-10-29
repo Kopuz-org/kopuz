@@ -905,6 +905,21 @@ pub async fn init(db_path: &std::path::Path) -> Result<Db, DbError> {
     Ok(Db(Arc::new(native)))
 }
 
+/// A consistent copy of the database at `from` written to `to`, safe while another process has `from` open.
+pub async fn snapshot(from: &std::path::Path, to: &std::path::Path) -> Result<(), DbError> {
+    use sqlx::ConnectOptions as _;
+    let mut connection = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(from)
+        .read_only(true)
+        .connect()
+        .await?;
+    sqlx::query("VACUUM INTO ?")
+        .bind(to.to_string_lossy().into_owned())
+        .execute(&mut connection)
+        .await?;
+    Ok(())
+}
+
 /// The on-disk database path: `KOPUZ_DB_PATH` override, else `<config_dir>/kopuz.db`
 /// (release) or `kopuz-debug.db` (debug builds, so `dx run` never touches real data).
 pub fn default_db_path() -> std::path::PathBuf {
@@ -931,7 +946,7 @@ pub fn config_dir() -> std::path::PathBuf {
     if let Some(dir) = android_files_dir() {
         return dir;
     }
-    directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+    config::flavor::project_dirs()
         .map(|d| d.config_dir().to_path_buf())
         .unwrap_or_else(|| std::path::PathBuf::from("./config"))
 }

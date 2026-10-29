@@ -1,0 +1,36 @@
+# Kopuz Nightly's Flatpak, wrapping the binaries the nightly release job built; CI unpacks its .deb into payload/ first.
+id: moe.kopuz.kopuz.nightly
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+command: kopuz-nightly
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri
+  - --filesystem=xdg-music
+  - --filesystem=xdg-download:ro
+  - --filesystem=xdg-run/discord-ipc-0
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.freedesktop.secrets
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --own-name=org.mpris.MediaPlayer2.kopuz
+  - --own-name=org.mpris.MediaPlayer2.kopuz.*
+  # Every copy of the app shares this folder, and the host sees it, so the app, its daemon and kopuzctl find one socket.
+  - --env=KOPUZ_RUNTIME_DIR=app/moe.kopuz.kopuz.nightly
+  # Flatpak delivers the updates, so Kopuz's own check would only point at downloads that do not apply.
+  - --env=KOPUZ_CONFIG_AUTO_CHECK_UPDATES=false
+modules:
+  - name: kopuz-nightly
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 -t ${FLATPAK_DEST}/bin usr/bin/kopuz-nightly usr/bin/kopuzd-nightly usr/bin/kopuzctl-nightly
+      - install -Dm644 -t ${FLATPAK_DEST}/share/applications usr/share/applications/${FLATPAK_ID}.desktop
+      - install -Dm644 -t ${FLATPAK_DEST}/share/icons/hicolor/256x256/apps usr/share/icons/hicolor/256x256/apps/${FLATPAK_ID}.png
+      - install -Dm644 -t ${FLATPAK_DEST}/share/metainfo usr/share/metainfo/${FLATPAK_ID}.metainfo.xml
+    sources:
+      - type: dir
+        path: payload

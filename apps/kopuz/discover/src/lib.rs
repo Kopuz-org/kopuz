@@ -32,7 +32,7 @@ use store::Playing;
 
 pub use detail::{CatalogArtist, CatalogPlaylist};
 pub use genres::Genre;
-pub use page::CatalogPage;
+pub use page::{CatalogChips, CatalogPage};
 
 /// Results that answer the previous query stay up at this opacity rather than blanking.
 const FADED: f32 = 0.55;

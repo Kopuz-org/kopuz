@@ -31,6 +31,9 @@ service Kopuz {
   rpc SetVersion(SetVersion) returns (MutationResult);
 
   rpc GetStatus(GetStatusRequest) returns (DaemonStatus);
+  rpc GetUpdateStatus(GetUpdateStatusRequest) returns (UpdateStatus);
+  rpc CheckForUpdate(CheckForUpdateRequest) returns (UpdateStatus);
+  rpc InstallUpdate(InstallUpdateRequest) returns (Unit);
   rpc GetPlayerState(GetPlayerStateRequest) returns (PlayerState);
   rpc GetQueue(Page) returns (QueueWindow);
   rpc GetQueueSnapshot(GetQueueSnapshotRequest) returns (QueueSnapshot);
@@ -252,6 +255,7 @@ message Event {
     Unit resync = 12;
     FrontendPrefsChanged frontend_prefs_changed = 13;
     NetworkStatus network_status = 14;
+    UpdateStatus update = 15;
   }
 }
 
@@ -334,6 +338,39 @@ enum OfflineMode {
 }
 
 message GetNetworkStatusRequest {}
+
+// Where the daemon stands on a newer Kopuz release, as its last check found.
+message UpdateStatus {
+  oneof state {
+    // No check has found a newer release, or checks are off.
+    Unit current = 1;
+    AvailableUpdate available = 2;
+    UpdateDownload downloading = 3;
+    // Staged: the daemon exits, and the update applies once the app that asked has quit too.
+    string ready = 4;
+    AvailableUpdate failed = 5;
+  }
+}
+
+message AvailableUpdate {
+  string version = 1;
+  string release_url = 2;
+  // The daemon can replace this install itself; otherwise its package manager owns it.
+  bool installable = 3;
+}
+
+message UpdateDownload {
+  string version = 1;
+  uint64 done = 2;
+  optional uint64 total = 3;
+}
+
+message GetUpdateStatusRequest {}
+message CheckForUpdateRequest {}
+message InstallUpdateRequest {
+  // The app to wait for and start again once the update is applied.
+  optional uint32 app_pid = 1;
+}
 
 message SetOfflineRequest {
   bool offline = 1;

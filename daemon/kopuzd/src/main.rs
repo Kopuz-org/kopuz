@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use config::flavor::Flavor;
 use kopuzd::ServeArgs;
 use kopuzd::identity::{AppIdentity, validate_app_id};
 
@@ -88,9 +89,18 @@ fn parse_args(
         None if app_name.is_some() || app_icon.is_some() => {
             return Err("--app-name and --app-icon need an app id".to_string());
         }
-        None => None,
+        None => flavor_identity(Flavor::current()),
     };
     Ok(args)
+}
+
+/// Kopuz Nightly names itself; the stable daemon keeps the identity it has always had.
+fn flavor_identity(flavor: Flavor) -> Option<AppIdentity> {
+    (flavor == Flavor::Nightly).then(|| AppIdentity {
+        id: flavor.app_id().to_string(),
+        name: Some(flavor.display_name().to_string()),
+        icon: None,
+    })
 }
 
 fn main() -> ExitCode {
@@ -124,9 +134,18 @@ mod tests {
     }
 
     #[test]
-    fn no_app_id_sets_none() {
-        assert_eq!(parse(&[], None).unwrap().identity, None);
-        assert_eq!(parse(&[], Some("")).unwrap().identity, None);
+    fn no_app_id_falls_back_to_the_flavour_identity() {
+        let own = flavor_identity(Flavor::current());
+        assert_eq!(parse(&[], None).unwrap().identity, own);
+        assert_eq!(parse(&[], Some("")).unwrap().identity, own);
+    }
+
+    #[test]
+    fn only_kopuz_nightly_names_itself_by_default() {
+        assert_eq!(flavor_identity(Flavor::Stable), None);
+        let nightly = flavor_identity(Flavor::Nightly).unwrap();
+        assert_eq!(nightly.id, "moe.kopuz.kopuz.nightly");
+        assert_eq!(nightly.name.as_deref(), Some("Kopuz Nightly"));
     }
 
     #[test]

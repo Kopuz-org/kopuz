@@ -10,6 +10,7 @@ mod network;
 mod settings;
 mod startup;
 mod toasts;
+mod update;
 mod url_download;
 
 use components::format::t;
@@ -30,6 +31,7 @@ pub use network::NetworkBanner;
 pub use settings::register as register_settings;
 pub use startup::StartupError;
 pub use toasts::Toasts;
+pub use update::UpdateBanner;
 pub use url_download::register as register_url_download;
 
 /// Lucide names this crate needs that `components::icons` does not carry.

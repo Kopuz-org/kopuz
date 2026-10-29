@@ -92,6 +92,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         for line in db::legacy::migrate_identity() {
             tracing::info!("{line}");
         }
+        crate::nightly_seed::seed_from_stable().await;
         db::legacy::migrate_locations();
     }
     let db_path = args
@@ -135,7 +136,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         settings.clone(),
     ));
     let station_registry = Arc::new(radio::registry::StationRegistry::default());
-    let cover_cache = directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+    let cover_cache = config::flavor::project_dirs()
         .map(|dirs| dirs.cache_dir().join("covers"))
         .unwrap_or_else(|| std::env::temp_dir().join("kopuz-covers"));
     let _ = std::fs::create_dir_all(&cover_cache);
@@ -194,7 +195,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let downloads = crate::DownloadsService::new(
         database.clone(),
         session.clone(),
-        directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+        config::flavor::project_dirs()
             .map(|dirs| dirs.cache_dir().join("offline_tracks"))
             .unwrap_or_else(|| std::env::temp_dir().join("kopuz-offline")),
     );
@@ -266,7 +267,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let artwork = crate::ArtworkService::new(
         database.clone(),
         session.clone(),
-        directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+        config::flavor::project_dirs()
             .map(|dirs| dirs.cache_dir().join("artwork"))
             .unwrap_or_else(|| std::env::temp_dir().join("kopuz-artwork")),
     );
@@ -274,7 +275,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let mutations = crate::MutationService::new(
         database.clone(),
         session.clone(),
-        directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+        config::flavor::project_dirs()
             .map(|dirs| dirs.data_dir().join("artwork-uploads"))
             .unwrap_or_else(|| std::env::temp_dir().join("kopuz-artwork-uploads")),
     );

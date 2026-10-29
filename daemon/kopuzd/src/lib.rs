@@ -26,6 +26,7 @@ use daemon::boot::{Core, CoreArgs};
 
 pub mod identity;
 pub mod service;
+pub mod updates;
 
 pub use service::{GrpcState, bind_socket, serve, serve_tcp};
 
@@ -54,11 +55,17 @@ impl ServeArgs {
 
 pub use proto::default_socket_path;
 
-fn state(core: &Core, clients: &service::Clients) -> Arc<GrpcState> {
+/// Only the kopuzd binary updates itself: a frontend that hosts the core ships its own updater.
+fn state(
+    core: &Core,
+    updater: Option<&Arc<updates::Updater>>,
+    clients: &service::Clients,
+) -> Arc<GrpcState> {
     Arc::new(GrpcState {
         api: core.api.clone(),
         artwork: Some(core.artwork.clone()),
         session: core.session.clone(),
+        updater: updater.cloned(),
         started: Instant::now(),
         clients: clients.clone(),
     })
@@ -73,7 +80,10 @@ pub fn listen(
 ) -> std::io::Result<impl std::future::Future<Output = std::io::Result<()>> + use<>> {
     let listener = bind_socket(socket)?;
     tracing::info!(path = %socket.display(), "kopuzd listening");
-    Ok(serve(listener, state(core, &service::Clients::default())))
+    Ok(serve(
+        listener,
+        state(core, None, &service::Clients::default()),
+    ))
 }
 
 async fn bind_tcp(address: std::net::SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
@@ -162,14 +172,16 @@ pub async fn run(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     let listener = bind_socket(&socket)?;
     let clients = service::Clients::default();
+    let updater = updates::Updater::new(core.session.clone());
+    updater.spawn_checks(core.config_service.clone());
     tracing::info!(path = %socket.display(), "kopuzd listening");
     let tcp = match args.listen {
         Some(address) => Some(bind_tcp(address).await?),
         None => None,
     };
     let result = tokio::select! {
-        served = serve(listener, state(&core, &clients)) => served.map_err(Into::into),
-        served = serve_tcp_if(tcp, state(&core, &clients)) => served.map_err(Into::into),
+        served = serve(listener, state(&core, Some(&updater), &clients)) => served.map_err(Into::into),
+        served = serve_tcp_if(tcp, state(&core, Some(&updater), &clients)) => served.map_err(Into::into),
         signal = tokio::signal::ctrl_c() => {
             signal?;
             tracing::info!("shutting down");
@@ -177,6 +189,10 @@ pub async fn run(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
         }
         () = apps_gone(args.exit_with_app, &core, &clients) => {
             tracing::info!("no app left and nothing playing; shutting down");
+            Ok(())
+        }
+        () = updater.exit_requested() => {
+            tracing::info!("shutting down to apply an update");
             Ok(())
         }
         () = terminate_signal() => {
@@ -236,7 +252,12 @@ pub fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
 }
 
 fn log_dir() -> Option<PathBuf> {
-    Some(directories::BaseDirs::new()?.cache_dir().join("kopuz/logs"))
+    Some(
+        directories::BaseDirs::new()?
+            .cache_dir()
+            .join(config::flavor::Flavor::current().name())
+            .join("logs"),
+    )
 }
 
 /// Build a runtime and run the daemon to completion.

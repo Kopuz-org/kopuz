@@ -9,6 +9,7 @@ license=('EUPL-1.2')
 provides=('kopuz' 'kopuzd' 'kopuzctl')
 conflicts=('kopuz')
 depends=(
+    'ca-certificates'
     'alsa-lib'
     'openssl'
     'gcc-libs'

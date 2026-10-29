@@ -22,6 +22,7 @@ pub mod jobs;
 pub mod library;
 pub mod mutations;
 mod network;
+mod nightly_seed;
 pub mod offline;
 pub mod offline_cache;
 pub mod os_media;

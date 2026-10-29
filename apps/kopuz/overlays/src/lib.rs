@@ -14,10 +14,8 @@ use gpui_kit::{
 };
 mod hint;
 
-use status::{ConnectionBanner, NetworkBanner, Toasts};
+use status::{ConnectionBanner, NetworkBanner, Toasts, UpdateBanner};
 use store::{JobsModel, PlayerModel};
-
-// TODO(parity): the update banner needs GitHub, which is outside the daemon seam (§3.1).
 
 const SCAN_BAR: Pixels = px(2.);
 const SCAN_ROW_PY: Pixels = px(3.);
@@ -41,6 +39,7 @@ pub struct Overlays {
     dismissed_error: Option<String>,
     banner: Entity<ConnectionBanner>,
     network: Entity<NetworkBanner>,
+    update: Entity<UpdateBanner>,
     // The dimmed page and the reconnect strip come and go together, fading rather than cutting.
     offline_fade: motion::Fade,
     // Held, not drawn: toasts must keep arriving in compact mode, where nothing here renders.
@@ -54,11 +53,13 @@ impl Overlays {
         let player = PlayerModel::global(cx);
         let banner = cx.new(|cx| ConnectionBanner::new(window, cx));
         let network = cx.new(|cx| NetworkBanner::new(window, cx));
+        let update = cx.new(|cx| UpdateBanner::new(window, cx));
         let subscriptions = vec![
             cx.observe(&jobs, |_, _, cx| cx.notify()),
             cx.observe(&player, |_, _, cx| cx.notify()),
             cx.observe(&banner, |_, _, cx| cx.notify()),
             cx.observe(&network, |_, _, cx| cx.notify()),
+            cx.observe(&update, |_, _, cx| cx.notify()),
             cx.observe(&store::SetupModel::global(cx), |_, _, cx| cx.notify()),
             cx.observe(&store::LayoutModel::global(cx), |_, _, cx| cx.notify()),
         ];
@@ -66,6 +67,7 @@ impl Overlays {
             dismissed_error: None,
             banner,
             network,
+            update,
             offline_fade: motion::Fade::hidden(),
             _toasts: cx.new(|cx| Toasts::new(window, cx)),
             _subscriptions: subscriptions,
@@ -216,11 +218,12 @@ impl Render for Overlays {
         let dimmed = self.offline_fade.sample(lost, motion::MEDIUM, window, cx);
         let offline = dimmed > 0.;
         let network = !lost && self.network.read(cx).is_showing(cx);
+        let update = !lost && self.update.read(cx).is_showing(cx);
         let tips = match lost {
             true => None,
             false => hint::card(window, cx),
         };
-        if scan.is_none() && error.is_none() && !offline && !network && tips.is_none() {
+        if scan.is_none() && error.is_none() && !offline && !network && !update && tips.is_none() {
             return div().into_any_element();
         }
 
@@ -231,6 +234,12 @@ impl Render for Overlays {
                 .w_full()
                 .opacity(appear("network-banner", window, cx))
                 .child(self.network.clone())
+        });
+        let update = update.then(|| {
+            div()
+                .w_full()
+                .opacity(appear("update-banner", window, cx))
+                .child(self.update.clone())
         });
         v_flex()
             .absolute()
@@ -251,6 +260,7 @@ impl Render for Overlays {
                     .when(offline, |column| {
                         column.child(div().w_full().opacity(dimmed).child(self.banner.clone()))
                     })
+                    .children(update)
                     .children(network)
                     .children(scan)
                     .children(error),

@@ -22,6 +22,7 @@ mod queue;
 mod radio;
 pub mod schema;
 mod sources;
+mod updates;
 
 pub use sources::{MAX_MUSIC_UPLOAD_BYTES, StorageQuota, TrackUpload};
 
@@ -73,6 +74,8 @@ pub use sources::{
     ServiceInfo, ServiceRef, SignInKind, SourceAccount, SourceCapabilities, SourceDraft,
     SourceFolderEntry, SourceInfo, SourceLoginRequest,
 };
+
+pub use updates::{AvailableUpdate, UpdateStatus};
 
 pub use config::store::{LockSource, SettingLock};
 pub use config::{SettingKey, SettingsEdit};
@@ -624,6 +627,21 @@ pub trait ConfigApi: Send + Sync {
 
     /// What this daemon is, including the wire contract it speaks.
     async fn daemon_status(&self) -> Result<DaemonStatus, ApiError>;
+
+    /// What the last release check found; changes arrive as `Update` events.
+    async fn update_status(&self) -> Result<UpdateStatus, ApiError> {
+        Err(ApiError::unsupported("updates"))
+    }
+
+    /// Ask GitHub for the newest release now, whatever `auto_check_updates` says.
+    async fn check_for_update(&self) -> Result<UpdateStatus, ApiError> {
+        Err(ApiError::unsupported("updates"))
+    }
+
+    /// Download and stage an installable update. The helper that applies it waits for this daemon and for `app_pid`, then starts the app again.
+    async fn install_update(&self, _app_pid: Option<u32>) -> Result<(), ApiError> {
+        Err(ApiError::unsupported("updates"))
+    }
 
     /// Run on every connect: nothing else may be read from a daemon on another wire revision.
     async fn handshake(&self) -> Result<Handshake, ApiError> {

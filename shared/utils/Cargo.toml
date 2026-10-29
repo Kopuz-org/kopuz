@@ -20,6 +20,7 @@ workspace = true
 http = ["dep:reqwest", "tokio/net"]
 
 [dependencies]
+config = { workspace = true }
 percent-encoding = { workspace = true }
 directories = { workspace = true }
 tokio = { workspace = true }

@@ -851,6 +851,32 @@ impl api::ConfigApi for GrpcApi {
             .map_err(wire_error)?;
         Ok(convert::daemon_status_from_proto(status.get_ref()))
     }
+
+    async fn update_status(&self) -> Result<api::UpdateStatus, ApiError> {
+        let status = self
+            .client()
+            .get_update_status(Request::new(proto::GetUpdateStatusRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::update_status_from_proto(status.get_ref()))
+    }
+
+    async fn check_for_update(&self) -> Result<api::UpdateStatus, ApiError> {
+        let status = self
+            .client()
+            .check_for_update(Request::new(proto::CheckForUpdateRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::update_status_from_proto(status.get_ref()))
+    }
+
+    async fn install_update(&self, app_pid: Option<u32>) -> Result<(), ApiError> {
+        self.client()
+            .install_update(Request::new(proto::InstallUpdateRequest { app_pid }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]

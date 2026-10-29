@@ -1,0 +1,70 @@
+# Kopuz Nightly's .deb and .rpm, from the repo root after CI has copied the release binaries to their -nightly names.
+name: kopuz-nightly
+arch: amd64
+platform: linux
+version: ${VERSION}
+release: 1
+section: sound
+priority: optional
+maintainer: temidaradev <temidaradev@proton.me>
+description: A modern, lightweight music player, with the kopuzd daemon it runs on, built from the latest development code.
+vendor: Kopuz
+homepage: https://github.com/Kopuz-org/kopuz
+license: EUPL-1.2
+
+contents:
+  - src: target/release/kopuz-nightly
+    dst: /usr/bin/kopuz-nightly
+    file_info:
+      mode: 0755
+  - src: target/release/kopuzd-nightly
+    dst: /usr/bin/kopuzd-nightly
+    file_info:
+      mode: 0755
+  - src: target/release/kopuzctl-nightly
+    dst: /usr/bin/kopuzctl-nightly
+    file_info:
+      mode: 0755
+  - src: data/moe.kopuz.kopuz.nightly.desktop
+    dst: /usr/share/applications/moe.kopuz.kopuz.nightly.desktop
+  - src: packaging/kopuz-nightly/logo.png
+    dst: /usr/share/icons/hicolor/256x256/apps/moe.kopuz.kopuz.nightly.png
+  - src: data/moe.kopuz.kopuz.nightly.metainfo.xml
+    dst: /usr/share/metainfo/moe.kopuz.kopuz.nightly.metainfo.xml
+  - src: packaging/systemd/kopuzd-nightly.service
+    dst: /usr/lib/systemd/user/kopuzd-nightly.service
+  - src: LICENSE
+    dst: /usr/share/licenses/kopuz-nightly/LICENSE
+
+# kopuz links xcb/xkbcommon and dlopens wayland, vulkan and fontconfig; kopuzd links ALSA and OpenSSL and won't start without CA certs.
+overrides:
+  deb:
+    depends:
+      - ca-certificates
+      - libasound2
+      - libssl3
+      - libstdc++6
+      - libxcb1
+      - libxkbcommon0
+      - libxkbcommon-x11-0
+      - libwayland-client0
+      - libvulkan1
+      - libfontconfig1
+      - libfreetype6
+    recommends:
+      - ffmpeg
+  rpm:
+    depends:
+      - ca-certificates
+      - alsa-lib
+      - openssl-libs
+      - libstdc++
+      - libxcb
+      - libxkbcommon
+      - libxkbcommon-x11
+      - libwayland-client
+      - vulkan-loader
+      - fontconfig
+      - freetype
+    recommends:
+      - ffmpeg

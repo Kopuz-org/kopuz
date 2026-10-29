@@ -66,7 +66,7 @@ pub fn resolve_path(configured: &str) -> PathBuf {
 /// following the running window manager, so the desktop config dir is the only
 /// place it can be; the database's copy of this answer is not needed here.
 fn kopuz_config_dir() -> PathBuf {
-    directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+    config::flavor::project_dirs()
         .map(|dirs| dirs.config_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from("./config"))
 }

@@ -47,6 +47,13 @@ impl CatalogCache {
         })
     }
 
+    /// The line over a held page's first shelf, such as the signed-in name over YouTube's feed.
+    pub fn strapline(id: &str, cx: &App) -> Option<String> {
+        let key = Self::key(id, cx);
+        let entry = cx.try_global::<Self>()?.pages.get(&key)?;
+        entry.detail.shelves.first()?.strapline.clone()
+    }
+
     pub fn put(id: &str, detail: CatalogDetail, cx: &mut App) {
         let key = Self::key(id, cx);
         let pages = &mut cx.default_global::<Self>().pages;

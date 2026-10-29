@@ -9,10 +9,12 @@ on:
 permissions:
   contents: read
 
-# Kopuz (GPUI, with kopuzd) ships as Kopuz_<ver>_*, Kopuz Legacy as Kopuz-Legacy-<ver>-*; pre-split updaters match only the first.
+# Kopuz ships as Kopuz_<ver>_*, Kopuz Legacy as Kopuz-Legacy-<ver>-*, a v<ver>-nightly.YYYYMMDD tag as the Kopuz-Nightly_<ver>_* pre-release.
 
 jobs:
   linux-legacy:
+    # Kopuz Nightly is the GPUI app alone; Legacy and Android ship only with releases.
+    if: ${{ !(github.ref_type == 'tag' && contains(github.ref_name, '-nightly.')) }}
     runs-on: ubuntu-22.04
 
     steps:
@@ -178,52 +180,108 @@ jobs:
             cargo metadata --no-deps --format-version 1 |
               jq -r '.packages[] | select(.name == "kopuz") | .version'
           )"
+          base="$version"
 
-          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match Cargo version ${version}"
-            exit 1
+          nightly=false
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME#v}"
+            if [[ "$tag" =~ ^${base//./\\.}-nightly\.[0-9]{8}(\.[0-9]+)?$ ]]; then
+              nightly=true
+              version="$tag"
+            elif [[ "$tag" != "$base" ]]; then
+              echo "Tag ${GITHUB_REF_NAME} is neither v${base} nor a v${base}-nightly.YYYYMMDD"
+              exit 1
+            fi
           fi
 
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          # A nightly carries its tag's version in this build only; nothing is committed.
+          if [[ "$nightly" == true ]]; then
+            sed -i "s/\"${base}\"/\"${version}\"/g" Cargo.toml
+            cargo update -w
+          fi
+
+          {
+            echo "version=${version}"
+            echo "nightly=${nightly}"
+            if [[ "$nightly" == true ]]; then
+              echo "flavor=nightly"
+              echo "package=kopuz-nightly"
+              echo "suffix=-nightly"
+              echo "asset=Kopuz-Nightly"
+            else
+              echo "flavor=stable"
+              echo "package=kopuz"
+              echo "suffix="
+              echo "asset=Kopuz"
+            fi
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build the app, daemon and command-line client
+        env:
+          KOPUZ_FLAVOR: ${{ steps.version.outputs.flavor }}
         run: cargo build --release --locked -p kopuz -p kopuz-kopuzd -p kopuz-ctl
 
+      - name: Name the binaries for Kopuz Nightly
+        if: steps.version.outputs.nightly == 'true'
+        run: |
+          for binary in kopuz kopuzd kopuzctl; do
+            cp "target/release/${binary}" "target/release/${binary}-nightly"
+          done
+
       - name: Build DEB and RPM packages
+        shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          PACKAGE: ${{ steps.version.outputs.package }}
         run: |
+          set -euo pipefail
+
           mkdir -p dist
-          nfpm package -f packaging/kopuz/nfpm.yaml -p deb -t dist/
-          nfpm package -f packaging/kopuz/nfpm.yaml -p rpm -t dist/
+          nfpm package -f "packaging/${PACKAGE}/nfpm.yaml" -p deb -t dist/
+          nfpm package -f "packaging/${PACKAGE}/nfpm.yaml" -p rpm -t dist/
+          # nfpm spells a pre-release its own way per format; the AUR package and the docs expect these names.
+          if [[ "$PACKAGE" == kopuz-nightly ]]; then
+            mv dist/kopuz-nightly*.deb "dist/kopuz-nightly_${VERSION}_amd64.deb"
+            mv dist/kopuz-nightly*.rpm "dist/kopuz-nightly-${VERSION}.x86_64.rpm"
+          fi
 
       - name: Build AppImage
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          NIGHTLY: ${{ steps.version.outputs.nightly }}
+          ASSET: ${{ steps.version.outputs.asset }}
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
           set -euo pipefail
 
-          cargo packager -p kopuz --release -f appimage --out-dir "$PWD/bundle-appimage"
+          if [[ "$NIGHTLY" == true ]]; then
+            config=packaging/kopuz-nightly/kopuz-nightly.ci.toml
+            sed "s/@VERSION@/${VERSION}/" packaging/kopuz-nightly/kopuz-nightly.toml > "$config"
+            cargo packager --config "$config" --release -f appimage --out-dir "$PWD/bundle-appimage"
+          else
+            cargo packager -p kopuz --release -f appimage --out-dir "$PWD/bundle-appimage"
+          fi
           shopt -s nullglob
           appimages=(bundle-appimage/*.AppImage)
           if [[ ${#appimages[@]} -ne 1 ]]; then
             echo "Expected exactly one AppImage, found ${#appimages[@]}"
             exit 1
           fi
-          mv "${appimages[0]}" "dist/Kopuz_${VERSION}_x86_64.AppImage"
+          mv "${appimages[0]}" "dist/${ASSET}_${VERSION}_x86_64.AppImage"
 
       - name: Check every package carries the daemon
         shell: bash
+        env:
+          DAEMON: /usr/bin/kopuzd${{ steps.version.outputs.suffix }}
         run: |
           set -euo pipefail
 
           for deb in dist/*.deb; do
-            grep -q '\./usr/bin/kopuzd$' <<<"$(dpkg-deb -c "$deb")"
+            grep -q "\.${DAEMON}\$" <<<"$(dpkg-deb -c "$deb")"
           done
           for rpm in dist/*.rpm; do
-            grep -qx /usr/bin/kopuzd <<<"$(rpm -qlp "$rpm")"
+            grep -qx "$DAEMON" <<<"$(rpm -qlp "$rpm")"
           done
 
       - name: Create Linux checksums
@@ -238,11 +296,13 @@ jobs:
       - name: Upload Linux packages
         uses: actions/upload-artifact@v4
         with:
-          name: kopuz-release-linux-${{ steps.version.outputs.version }}
+          # A nightly's artifacts keep their own prefix, so its release never takes in another job's packages.
+          name: ${{ steps.version.outputs.nightly == 'true' && 'kopuz-nightly-linux' || format('kopuz-release-linux-{0}', steps.version.outputs.version) }}
           path: dist/*
           if-no-files-found: error
 
   macos-legacy:
+    if: ${{ !(github.ref_type == 'tag' && contains(github.ref_name, '-nightly.')) }}
     runs-on: macos-15
 
     steps:
@@ -325,6 +385,7 @@ jobs:
           if-no-files-found: error
 
   macos:
+    if: ${{ !(github.ref_type == 'tag' && contains(github.ref_name, '-nightly.')) }}
     runs-on: macos-15
 
     steps:
@@ -398,6 +459,8 @@ jobs:
           if-no-files-found: error
 
   windows-legacy:
+    # Kopuz Nightly is the GPUI app alone; Legacy and Android ship only with releases.
+    if: ${{ !(github.ref_type == 'tag' && contains(github.ref_name, '-nightly.')) }}
     runs-on: windows-latest
 
     steps:
@@ -501,32 +564,77 @@ jobs:
         shell: pwsh
         run: |
           $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
-          $version = ($metadata.packages | Where-Object name -eq "kopuz").version
+          $base = ($metadata.packages | Where-Object name -eq "kopuz").version
+          $version = $base
+          $nightly = $false
 
-          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$version") {
-            throw "Tag $env:GITHUB_REF_NAME does not match Cargo version $version"
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $tag = $env:GITHUB_REF_NAME -replace '^v', ''
+            if ($tag -match ('^' + [regex]::Escape($base) + '-nightly\.[0-9]{8}(\.[0-9]+)?$')) {
+              $nightly = $true
+              $version = $tag
+            } elseif ($tag -ne $base) {
+              throw "Tag $env:GITHUB_REF_NAME is neither v$base nor a v$base-nightly.YYYYMMDD"
+            }
+          }
+
+          # A nightly carries its tag's version in this build only; nothing is committed.
+          if ($nightly) {
+            (Get-Content Cargo.toml -Raw).Replace("`"$base`"", "`"$version`"") | Set-Content Cargo.toml -NoNewline
+            cargo update -w
+            if ($LASTEXITCODE -ne 0) { throw "cargo update failed" }
           }
 
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "nightly=$($nightly.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "flavor=$(if ($nightly) { 'nightly' } else { 'stable' })" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "asset=$(if ($nightly) { 'Kopuz-Nightly' } else { 'Kopuz' })" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Build the app, daemon and command-line client
+        env:
+          KOPUZ_FLAVOR: ${{ steps.version.outputs.flavor }}
         run: cargo build --release --locked -p kopuz -p kopuz-kopuzd -p kopuz-ctl
 
-      - name: Build EXE and MSI installers
+      - name: Name the binaries for Kopuz Nightly
+        if: steps.version.outputs.nightly == 'true'
+        shell: pwsh
+        run: |
+          foreach ($binary in 'kopuz', 'kopuzd', 'kopuzctl') {
+            Copy-Item "target/release/$binary.exe" "target/release/$binary-nightly.exe"
+          }
+
+      - name: Build installers
         shell: pwsh
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          NIGHTLY: ${{ steps.version.outputs.nightly }}
+          ASSET: ${{ steps.version.outputs.asset }}
         run: |
-          cargo packager -p kopuz --release -f nsis,wix --out-dir "$PWD\bundle"
-
           New-Item -ItemType Directory -Path dist -Force | Out-Null
-          $exe = @(Get-ChildItem bundle -Filter *-setup.exe)
-          $msi = @(Get-ChildItem bundle -Filter *.msi)
-          if ($exe.Count -ne 1 -or $msi.Count -ne 1) {
-            throw "Expected one EXE and one MSI installer, found $($exe.Count) and $($msi.Count)"
+
+          # WiX takes only numeric versions, so a nightly ships the NSIS installer alone.
+          if ($env:NIGHTLY -eq 'true') {
+            $config = 'packaging/kopuz-nightly/kopuz-nightly.ci.toml'
+            (Get-Content packaging/kopuz-nightly/kopuz-nightly.toml -Raw).Replace('@VERSION@', $env:VERSION) | Set-Content $config -NoNewline
+            cargo packager --config $config --release -f nsis --out-dir "$PWD\bundle"
+          } else {
+            cargo packager -p kopuz --release -f nsis,wix --out-dir "$PWD\bundle"
           }
-          Move-Item $exe[0].FullName "dist/Kopuz_$($env:VERSION)_x64-setup.exe"
-          Move-Item $msi[0].FullName "dist/Kopuz_$($env:VERSION)_x64.msi"
+          if ($LASTEXITCODE -ne 0) { throw "cargo packager failed" }
+
+          $exe = @(Get-ChildItem bundle -Filter *-setup.exe)
+          if ($exe.Count -ne 1) {
+            throw "Expected one EXE installer, found $($exe.Count)"
+          }
+          Move-Item $exe[0].FullName "dist/$($env:ASSET)_$($env:VERSION)_x64-setup.exe"
+
+          if ($env:NIGHTLY -ne 'true') {
+            $msi = @(Get-ChildItem bundle -Filter *.msi)
+            if ($msi.Count -ne 1) {
+              throw "Expected one MSI installer, found $($msi.Count)"
+            }
+            Move-Item $msi[0].FullName "dist/$($env:ASSET)_$($env:VERSION)_x64.msi"
+          }
 
       - name: Create Windows checksums
         shell: pwsh
@@ -539,7 +647,7 @@ jobs:
       - name: Upload Windows packages
         uses: actions/upload-artifact@v4
         with:
-          name: kopuz-release-windows-${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.nightly == 'true' && 'kopuz-nightly-windows' || format('kopuz-release-windows-{0}', steps.version.outputs.version) }}
           path: |
             dist/*.exe
             dist/*.exe.sha256
@@ -548,6 +656,8 @@ jobs:
           if-no-files-found: error
 
   android:
+    # Kopuz Nightly is the GPUI app alone; Legacy and Android ship only with releases.
+    if: ${{ !(github.ref_type == 'tag' && contains(github.ref_name, '-nightly.')) }}
     # 24.04, not 22.04: the binstall'd dx is built against glibc 2.39, and an
     # APK has no host-glibc compatibility concerns (unlike the Linux job).
     runs-on: ubuntu-24.04
@@ -677,7 +787,14 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: github.ref_type == 'tag'
+    # A release needs every job; a nightly only the GPUI Linux and Windows builds, whatever the others did.
+    if: >-
+      ${{ github.ref_type == 'tag' && !cancelled()
+      && needs.linux.result == 'success' && needs.windows.result == 'success'
+      && (contains(github.ref_name, '-nightly.')
+        || (needs.linux-legacy.result == 'success' && needs.macos.result == 'success'
+          && needs.macos-legacy.result == 'success' && needs.windows-legacy.result == 'success'
+          && needs.android.result == 'success')) }}
     needs: [linux, linux-legacy, macos, macos-legacy, windows, windows-legacy, android]
     runs-on: ubuntu-latest
     permissions:
@@ -687,11 +804,29 @@ jobs:
       - name: Download packages
         uses: actions/download-artifact@v4
         with:
-          pattern: kopuz-release-*
+          pattern: ${{ contains(github.ref_name, '-nightly.') && 'kopuz-nightly-*' || 'kopuz-release-*' }}
           path: dist
           merge-multiple: true
 
+      - name: Upload Kopuz Nightly as a pre-release
+        if: contains(github.ref_name, '-nightly.')
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.AppImage
+            dist/*.AppImage.sha256
+            dist/*.deb
+            dist/*.deb.sha256
+            dist/*.rpm
+            dist/*.rpm.sha256
+            dist/*.exe
+            dist/*.exe.sha256
+
       - name: Upload packages to GitHub release
+        if: ${{ !contains(github.ref_name, '-nightly.') }}
         uses: softprops/action-gh-release@v2
         with:
           fail_on_unmatched_files: true
@@ -712,7 +847,8 @@ jobs:
             dist/*.apk.sha256
 
   aur:
-    if: github.ref_type == 'tag'
+    # A bare condition would also wait on publish's own needs, so a nightly's macOS failure would skip this.
+    if: ${{ github.ref_type == 'tag' && !cancelled() && needs.publish.result == 'success' }}
     needs: publish
     runs-on: ubuntu-latest
     container: archlinux:base-devel
@@ -726,11 +862,12 @@ jobs:
       - name: Download Linux packages
         uses: actions/download-artifact@v4
         with:
-          pattern: kopuz-release-linux-*
+          pattern: ${{ contains(github.ref_name, '-nightly.') && 'kopuz-nightly-linux' || 'kopuz-release-linux-*' }}
           path: dist
           merge-multiple: true
 
       - name: Fetch the tag's source tarball
+        if: ${{ !contains(github.ref_name, '-nightly.') }}
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -738,8 +875,8 @@ jobs:
           curl -fsSL -o "dist/kopuz-${TAG#v}.tar.gz" \
             "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz"
 
-      # makepkg refuses root, so both packages are rendered and pushed by an unprivileged builder.
-      - name: Publish kopuz-bin and kopuz-legacy
+      # makepkg refuses root, so the packages are rendered and pushed by an unprivileged builder.
+      - name: Publish the AUR packages
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           TAG: ${{ github.ref_name }}
@@ -762,12 +899,118 @@ jobs:
               bash scripts/publish-aur.sh
           }
 
+          if [[ "$TAG" == *-nightly.* ]]; then
+            publish kopuz-nightly-bin "$PWD/dist/kopuz-nightly_${version}_amd64.deb" build
+            exit 0
+          fi
           publish kopuz-bin "$PWD/dist/kopuz_${version}-1_amd64.deb" build
           # A full source build of the legacy app takes most of an hour; the checksum is what can drift.
           publish kopuz-legacy "$PWD/dist/kopuz-${version}.tar.gz" source
 
+  flatpak:
+    # Kopuz Nightly's Flatpak wraps the published .deb and is served from R2 at flatpak.kopuz.moe.
+    if: >-
+      ${{ github.ref_type == 'tag' && contains(github.ref_name, '-nightly.')
+      && !cancelled() && needs.publish.result == 'success' }}
+    needs: publish
+    runs-on: ubuntu-24.04
+    # Each run rewrites the repo's index, so two at once would lose one's commit.
+    concurrency:
+      group: flatpak-repo
+      cancel-in-progress: false
+    env:
+      MANIFEST_DIR: packaging/kopuz-nightly/flatpak
+      AWS_DEFAULT_REGION: auto
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the Linux packages
+        uses: actions/download-artifact@v4
+        with:
+          name: kopuz-nightly-linux
+          path: dist
+
+      - name: Read the R2 secrets and the signing key
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          # A pasted secret often ends in a newline, which breaks the request signature.
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY R2_ENDPOINT R2_BUCKET; do
+            value=$(printf '%s' "${!name}" | tr -d '[:space:]')
+            if [[ -z "$value" ]]; then
+              echo "::error::$name is empty; check the R2_* secrets"
+              exit 1
+            fi
+            echo "::add-mask::$value"
+            echo "$name=$value" >> "$GITHUB_ENV"
+          done
+          if [[ -z "$GPG_PRIVATE_KEY" ]]; then
+            echo "::error::GPG_PRIVATE_KEY is not set; copy the key kopuz-flatpak signs with"
+            exit 1
+          fi
+          printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          fingerprint=$(gpg --list-secret-keys --with-colons | awk -F: '$1 == "fpr" { print $10; exit }')
+          echo "GPG_KEY=$fingerprint" >> "$GITHUB_ENV"
+
+      - name: Install Flatpak tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder appstream
+          flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install -y --noninteractive flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+
+      - name: Build onto the published repo
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          dpkg-deb -x "dist/kopuz-nightly_${version}_amd64.deb" "$MANIFEST_DIR/payload"
+          # The repo's history lives in R2, so this commit lands on top of the nightlies already there.
+          aws s3 sync "s3://$R2_BUCKET/repo" repo --endpoint-url "$R2_ENDPOINT" --only-show-errors
+          flatpak-builder --user --force-clean --disable-rofiles-fuse \
+            --default-branch=stable --gpg-sign="$GPG_KEY" --repo=repo \
+            --subject="Kopuz Nightly $version" \
+            build "$MANIFEST_DIR/moe.kopuz.kopuz.nightly.yml"
+          flatpak build-update-repo --gpg-sign="$GPG_KEY" --title=Kopuz --default-branch=stable \
+            --generate-static-deltas --prune --prune-depth=10 repo
+
+      - name: Upload to R2
+        run: |
+          set -euo pipefail
+          s3() { aws s3 "$@" --endpoint-url "$R2_ENDPOINT" --only-show-errors; }
+          key=$(gpg --export "$GPG_KEY" | base64 -w0)
+          sed "s|@GPGKEY@|$key|" "$MANIFEST_DIR/moe.kopuz.kopuz.nightly.flatpakref.in" > moe.kopuz.kopuz.nightly.flatpakref
+          sed "s|@GPGKEY@|$key|" "$MANIFEST_DIR/kopuz.flatpakrepo.in" > kopuz.flatpakrepo
+          # Objects first and the index last, so nobody updating mid-upload sees a commit whose objects are missing.
+          for dir in objects deltas; do
+            if [[ -d "repo/$dir" ]]; then
+              s3 sync "repo/$dir" "s3://$R2_BUCKET/repo/$dir" --cache-control "public, max-age=31536000, immutable"
+            fi
+          done
+          s3 sync repo "s3://$R2_BUCKET/repo" --exclude 'objects/*' --exclude 'deltas/*' --exclude 'tmp/*' \
+            --cache-control no-cache --delete
+          s3 cp moe.kopuz.kopuz.nightly.flatpakref "s3://$R2_BUCKET/moe.kopuz.kopuz.nightly.flatpakref" \
+            --cache-control no-cache --content-type application/vnd.flatpak.ref
+          s3 cp kopuz.flatpakrepo "s3://$R2_BUCKET/kopuz.flatpakrepo" \
+            --cache-control no-cache --content-type application/vnd.flatpak.repo
+          # What pruning dropped goes only once the new index no longer names it.
+          for dir in objects deltas; do
+            if [[ -d "repo/$dir" ]]; then
+              s3 sync "repo/$dir" "s3://$R2_BUCKET/repo/$dir" --delete
+            fi
+          done
+
   homebrew:
-    if: github.ref_type == 'tag'
+    # Kopuz Nightly has no macOS build of its own yet, so the casks follow releases only.
+    if: github.ref_type == 'tag' && !contains(github.ref_name, '-nightly.')
     needs: publish
     runs-on: ubuntu-latest
 

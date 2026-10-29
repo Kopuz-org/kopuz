@@ -10,6 +10,7 @@ publish = false
 workspace = true
 
 [dependencies]
+config = { workspace = true }
 api = { workspace = true }
 client = { workspace = true }
 gpui-kit = { workspace = true }

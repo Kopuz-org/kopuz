@@ -42,6 +42,8 @@ pub struct CatalogPage {
     id: String,
     // Drawn inside Home, which owns the scroll, the edge and the title.
     embedded: bool,
+    // Whether the host wears the first shelf's strapline itself, as Home's For you does.
+    strapline_to_host: bool,
     /// What is on screen: the page, or the chip picked over it.
     showing: String,
     // The source can keep marking a chip after it was cleared, so the local pick wins.
@@ -89,6 +91,7 @@ impl CatalogPage {
             showing: id.clone(),
             id,
             embedded,
+            strapline_to_host: embedded,
             picked: None,
             detail: None,
             tracks_first: false,
@@ -172,8 +175,26 @@ impl CatalogPage {
             held.push(tracks_shelf(&detail.tracks));
         }
         held.extend(detail.shelves.iter().cloned());
+        // Home moves the feed's opening line up to its own first row.
+        if self.strapline_to_host
+            && let Some(first) = held.first_mut()
+        {
+            first.strapline = None;
+        }
         self.shelves.update(cx, |shelves, cx| shelves.set(held, cx));
         self.detail = Some(detail);
+    }
+
+    /// Whether the host draws the first shelf's strapline; off, the feed keeps it, as when Home hides For you.
+    pub fn hand_strapline_to_host(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.strapline_to_host == on {
+            return;
+        }
+        self.strapline_to_host = on;
+        if let Some(detail) = self.detail.clone() {
+            self.show(detail, cx);
+        }
+        cx.notify();
     }
 
     /// The chip's page, or back to the page itself when the chip on is pressed again.
@@ -410,18 +431,18 @@ impl CatalogPage {
             .into_any_element()
     }
 
-    fn chips(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn chips(&self, page: &Entity<Self>) -> Option<AnyElement> {
         let chips = &self.detail.as_ref()?.chips;
         if chips.is_empty() {
             return None;
         }
         let row = chips.iter().enumerate().map(|(at, chip)| {
-            let picked = chip.clone();
+            let (picked, page) = (chip.clone(), page.clone());
             Chip::new(("catalog-chip", at))
                 .label(chip.label.clone())
                 .size(ChipSize::Medium)
                 .selected(self.chip_on(chip))
-                .on_click(cx.listener(move |this, _, _, cx| this.pick(picked.clone(), cx)))
+                .on_click(move |_, _, cx| page.update(cx, |this, cx| this.pick(picked.clone(), cx)))
         });
         Some(
             div()
@@ -437,7 +458,11 @@ impl CatalogPage {
 impl Render for CatalogPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _timing = profile::render("catalog-page");
-        let chips = self.chips(cx);
+        // Embedded, the host draws the chips through `CatalogChips`.
+        let chips = match self.embedded {
+            true => None,
+            false => self.chips(&cx.entity()),
+        };
         let held = self.detail.as_ref();
         let empty =
             held.is_some_and(|detail| detail.tracks.is_empty() && detail.shelves.is_empty());
@@ -504,6 +529,32 @@ impl Render for CatalogPage {
                     .child(content),
             )
             .into_any_element()
+    }
+}
+
+/// An embedded page's chips, for a host that draws them apart from the feed they switch.
+pub struct CatalogChips {
+    page: Entity<CatalogPage>,
+    _observe: Subscription,
+}
+
+impl CatalogChips {
+    pub fn new(page: Entity<CatalogPage>, cx: &mut Context<Self>) -> Self {
+        let observe = cx.observe(&page, |_, _, cx| cx.notify());
+        Self {
+            page,
+            _observe: observe,
+        }
+    }
+}
+
+impl Render for CatalogChips {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Its own space below, so a source without chips leaves no gap over the row it heads.
+        let row = self.page.read(cx).chips(&self.page);
+        div()
+            .w_full()
+            .when_some(row, |this, row| this.pb_6().child(row))
     }
 }
 

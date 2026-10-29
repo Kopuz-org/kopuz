@@ -56,12 +56,15 @@ pub(crate) fn row(
 ) -> AnyElement {
     let title = t(crate::shelf::title(shelf.name));
     let (status, now) = (&shared.for_you, &shared.now);
+    let strapline = shared.strapline.clone();
     let filled = status.filled;
     let shown = fade.sample(filled, motion::MEDIUM, window, cx);
     if filled {
-        let content = crate::shelf::carousel(shelf, handle, now).action(refresh(cx));
+        let content = crate::shelf::carousel(shelf, handle, now)
+            .strapline(strapline.clone())
+            .action(refresh(cx));
         // The pulsing row stays under the mix while it fades in, so the row never empties.
-        let placeholder = (shown < 1.).then(|| placeholder(title.clone(), false, cx));
+        let placeholder = (shown < 1.).then(|| placeholder(title.clone(), strapline, false, cx));
         return skeleton::reveal(content, placeholder, shown);
     }
     if shown > 0. && status.failed.is_none() && !last.is_empty() {
@@ -71,14 +74,19 @@ pub(crate) fn row(
             tiles: last.clone(),
             form: shelf.form,
         };
-        let content = crate::shelf::carousel(&leaving, handle, now);
-        return skeleton::reveal(content, Some(placeholder(title, true, cx)), shown);
+        let content = crate::shelf::carousel(&leaving, handle, now).strapline(strapline.clone());
+        let placeholder = placeholder(title, strapline, true, cx);
+        return skeleton::reveal(content, Some(placeholder), shown);
     }
     match &status.failed {
         Some(error) => v_flex()
             .w_full()
             .gap_4()
-            .child(SectionHeading::new(title).trailing(refresh(cx)))
+            .child(
+                SectionHeading::new(title)
+                    .strapline(strapline)
+                    .trailing(refresh(cx)),
+            )
             .child(
                 div()
                     .text_sm()
@@ -86,12 +94,17 @@ pub(crate) fn row(
                     .child(store::human(error)),
             )
             .into_any_element(),
-        None => placeholder(title, true, cx),
+        None => placeholder(title, strapline, true, cx),
     }
 }
 
 /// The pulsing row; the copy under a fading mix leaves the refresh button to the mix.
-fn placeholder(title: SharedString, with_refresh: bool, cx: &App) -> AnyElement {
+fn placeholder(
+    title: SharedString,
+    strapline: Option<SharedString>,
+    with_refresh: bool,
+    cx: &App,
+) -> AnyElement {
     let row = Carousel::new(
         "for_you_loading",
         title,
@@ -99,7 +112,8 @@ fn placeholder(title: SharedString, with_refresh: bool, cx: &App) -> AnyElement 
         TILE,
         |slot, _, cx| pulsing(slot, cx),
     )
-    .gap(px(GAP));
+    .gap(px(GAP))
+    .strapline(strapline);
     match with_refresh {
         true => row.action(refresh(cx)).into_any_element(),
         false => row.into_any_element(),

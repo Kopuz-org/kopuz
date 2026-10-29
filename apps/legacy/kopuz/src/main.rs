@@ -171,7 +171,7 @@ fn main() -> std::process::ExitCode {
 
     #[cfg(not(target_os = "android"))]
     {
-        let log_dir = directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+        let log_dir = config::flavor::project_dirs()
             .map(|dirs| dirs.cache_dir().join("logs"))
             .unwrap_or_else(|| std::path::PathBuf::from("logs"));
         let _ = std::fs::create_dir_all(&log_dir);
@@ -220,7 +220,7 @@ fn main() -> std::process::ExitCode {
             window = window.with_decorations(initial_titlebar_mode == config::TitlebarMode::System);
         }
 
-        let webview_data_dir = directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+        let webview_data_dir = config::flavor::project_dirs()
             .map(|dirs| dirs.cache_dir().join("webview"))
             .unwrap_or_else(|| std::path::PathBuf::from("./cache/webview"));
         let _ = std::fs::create_dir_all(&webview_data_dir);
@@ -420,7 +420,7 @@ fn App() -> Element {
         }
         #[cfg(not(target_os = "android"))]
         {
-            let path = directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+            let path = config::flavor::project_dirs()
                 .map(|dirs| dirs.cache_dir().to_path_buf())
                 .unwrap_or_else(|| std::path::Path::new("./cache").to_path_buf());
             let _ = std::fs::create_dir_all(&path);

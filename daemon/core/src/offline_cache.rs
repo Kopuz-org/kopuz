@@ -28,7 +28,7 @@ pub fn default_dir() -> PathBuf {
     }
     #[cfg(not(target_os = "android"))]
     {
-        directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+        config::flavor::project_dirs()
             .map(|dirs| dirs.data_dir().join(name))
             .unwrap_or_else(|| std::env::temp_dir().join(format!("kopuz-{name}")))
     }

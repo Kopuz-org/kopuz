@@ -152,6 +152,7 @@ pub enum ApiEvent {
     },
     /// The internet went down or came back, or the source offered back changed.
     NetworkStatus(NetworkStatus),
+    Update(crate::UpdateStatus),
     Notice {
         level: NoticeLevel,
         code: String,

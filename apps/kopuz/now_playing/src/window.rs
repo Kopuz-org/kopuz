@@ -64,9 +64,9 @@ fn options(kind: WindowKind, bounds: Bounds<Pixels>) -> WindowOptions {
         window_background: WindowBackgroundAppearance::Opaque,
         window_decorations: Some(WindowDecorations::Client),
         window_min_size: Some(dimensions()),
-        app_id: Some("kopuz".into()),
+        app_id: Some(config::flavor::Flavor::current().name().into()),
         titlebar: Some(TitlebarOptions {
-            title: Some("Kopuz".into()),
+            title: Some(config::flavor::Flavor::current().display_name().into()),
             ..Default::default()
         }),
         is_resizable: false,

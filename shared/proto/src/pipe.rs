@@ -64,7 +64,10 @@ pub fn name(path: &Path) -> OsString {
 /// two users on one machine from contending for a single name.
 pub fn default_name() -> io::Result<OsString> {
     let sid = UserSid::current()?.to_string_sid()?;
-    Ok(OsString::from(format!("{PIPE_PREFIX}kopuz-{sid}")))
+    Ok(OsString::from(format!(
+        "{PIPE_PREFIX}{}-{sid}",
+        config::flavor::Flavor::current().name()
+    )))
 }
 
 /// A pipe the daemon serves on, yielding one connection per client.

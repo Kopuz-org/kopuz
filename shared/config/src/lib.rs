@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 mod edit;
+pub mod flavor;
 mod source;
 pub mod store;
 mod ui_prefs;
