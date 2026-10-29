@@ -17,8 +17,8 @@ mod window;
 
 use gpui_kit::base::slider::{SliderEvent, SliderState};
 use gpui_kit::{
-    App, AppContext as _, Bounds, Context, Entity, Global, IntoElement, Pixels, Render,
-    Subscription, Task, Window,
+    App, AppContext as _, Bounds, Context, Entity, FocusHandle, Global, IntoElement, Pixels,
+    Render, Subscription, Task, Window,
 };
 use store::layout::SheetTab;
 use store::{Chrome, ConfigModel, FavoritesModel, PlayerModel, QueueModel, SourcesModel};
@@ -93,6 +93,8 @@ pub struct NowPlaying {
     queue: Option<Entity<QueueView>>,
     lyrics: Option<Entity<LyricsView>>,
     sheet_bar: Option<Entity<NowPlaying>>,
+    // Around the mini restore button, so keyboard focus shows it as hover does.
+    restore_focus: FocusHandle,
     _devices_fetch: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -200,6 +202,7 @@ impl NowPlaying {
             lyrics: holds_tabs.then(|| cx.new(|cx| LyricsView::new(window, cx))),
             sheet_bar: (presentation == Presentation::Sheet)
                 .then(|| cx.new(|cx| Self::new(Presentation::SheetBar, window, cx))),
+            restore_focus: cx.focus_handle(),
             _devices_fetch: None,
             _subscriptions: subscriptions,
         }
