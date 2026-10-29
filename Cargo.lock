@@ -6769,6 +6769,7 @@ dependencies = [
  "base64 0.22.1",
  "block2 0.6.2",
  "cpal",
+ "futures-util",
  "jni 0.21.1",
  "kopuz-config",
  "kopuz-utils",

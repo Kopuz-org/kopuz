@@ -1,3 +1,4 @@
+use futures_util::StreamExt as _;
 use mpris_server::{
     LoopStatus, Metadata, PlaybackStatus, PlayerInterface, Property, RootInterface, Server, Time,
     zbus::fdo,
@@ -292,11 +293,11 @@ pub fn update_modes(shuffle: bool, repeat: RepeatMode) {
 async fn register(
     st: &Arc<Mutex<MprisState>>,
     events: &UnboundedSender<SystemEvent>,
-) -> Option<Server<P>> {
+) -> Option<(Server<P>, String)> {
     let taken = match Server::new("kopuz", P(st.clone(), events.clone())).await {
         Ok(server) => {
             tracing::info!(name = "kopuz", "MPRIS registered");
-            return Some(server);
+            return Some((server, format!("{BUS_PREFIX}kopuz")));
         }
         Err(error) => error,
     };
@@ -304,7 +305,7 @@ async fn register(
     match Server::new(&instance, P(st.clone(), events.clone())).await {
         Ok(server) => {
             tracing::info!(name = %instance, "MPRIS registered");
-            Some(server)
+            Some((server, format!("{BUS_PREFIX}{instance}")))
         }
         Err(error) => {
             tracing::warn!(
@@ -314,6 +315,43 @@ async fn register(
             );
             None
         }
+    }
+}
+
+const BUS_PREFIX: &str = "org.mpris.MediaPlayer2.";
+
+/// Each time `name` is left without an owner, as when a process that took it from us exits.
+async fn owner_changes(
+    conn: &mpris_server::zbus::Connection,
+    name: &str,
+) -> Option<fdo::NameOwnerChangedStream> {
+    let dbus = fdo::DBusProxy::new(conn).await.ok()?;
+    dbus.receive_name_owner_changed_with_args(&[(0, name), (2, "")])
+        .await
+        .ok()
+}
+
+/// Waits for the next time the name is freed; without a stream it never resolves.
+async fn name_freed(owners: &mut Option<fdo::NameOwnerChangedStream>) -> bool {
+    let Some(stream) = owners.as_mut() else {
+        return std::future::pending().await;
+    };
+    let freed = stream.next().await.is_some();
+    if !freed {
+        *owners = None;
+    }
+    freed
+}
+
+/// Only ever takes a free name, since two players each taking it back from the other would never settle.
+async fn reclaim(conn: &mpris_server::zbus::Connection, name: &str) {
+    let flags = fdo::RequestNameFlags::AllowReplacement | fdo::RequestNameFlags::DoNotQueue;
+    match conn.request_name_with_flags(name, flags).await {
+        Ok(fdo::RequestNameReply::PrimaryOwner | fdo::RequestNameReply::AlreadyOwner) => {
+            tracing::info!(%name, "MPRIS name taken back");
+        }
+        Ok(reply) => tracing::debug!(%name, ?reply, "MPRIS name went to another player first"),
+        Err(error) => tracing::warn!(%name, %error, "could not take the MPRIS name back"),
     }
 }
 
@@ -331,10 +369,23 @@ fn setup() {
                 .build()
                 .unwrap()
                 .block_on(async {
-                    let Some(srv) = register(&st, &events).await else {
+                    let Some((srv, name)) = register(&st, &events).await else {
                         return;
                     };
-                    while let Some(seeked) = nrx.recv().await {
+                    let mut owners = owner_changes(srv.connection(), &name).await;
+                    loop {
+                        let seeked = tokio::select! {
+                            seeked = nrx.recv() => match seeked {
+                                Some(seeked) => seeked,
+                                None => break,
+                            },
+                            freed = name_freed(&mut owners) => {
+                                if freed {
+                                    reclaim(srv.connection(), &name).await;
+                                }
+                                continue;
+                            }
+                        };
                         if seeked {
                             let (metadata, status, position, shuffle, repeat) = match st.lock() {
                                 Ok(s) => (
