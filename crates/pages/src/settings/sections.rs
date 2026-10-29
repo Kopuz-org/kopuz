@@ -795,10 +795,7 @@ pub(super) fn PluginsSection() -> Element {
             &[("error", error.into())],
         )
     });
-    let (installed, available): (Vec<_>, Vec<_>) = catalog
-        .plugins
-        .into_iter()
-        .partition(|plugin| plugin.installed_version.is_some());
+    let (installed, available): (Vec<_>, Vec<_>) = catalog.plugins.into_iter().partition(on_disk);
 
     rsx! {
         SettingsSection { title: i18n::t("plugins").to_string(),
@@ -820,6 +817,13 @@ pub(super) fn PluginsSection() -> Element {
             }
         }
     }
+}
+
+/// An update is only ever a build in the plugin directory or a newer listing
+/// of an installed plugin, so a plugin with one is on disk even when an
+/// update that waited across a restart left nothing of it loaded.
+fn on_disk(plugin: &api::PluginInfo) -> bool {
+    plugin.installed_version.is_some() || plugin.update.is_some()
 }
 
 #[component]
@@ -869,7 +873,7 @@ fn PluginRow(
         });
     let install_network = plugin.network.clone();
     let update = plugin.update.clone();
-    let removable = community && plugin.installed_version.is_some();
+    let removable = community && on_disk(&plugin);
     let byline = (!plugin.author.is_empty())
         .then(|| i18n::t_with("plugin_by", &[("author", plugin.author.clone().into())]));
     let install_id = plugin.id.clone();
