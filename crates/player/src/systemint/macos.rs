@@ -42,7 +42,6 @@ unsafe extern "C" {
 
 type IOPMAssertionID = u32;
 #[link(name = "IOKit", kind = "framework")]
-
 unsafe extern "C" {
     fn IOPMAssertionCreateWithName(
         assertion_type: *const std::ffi::c_void,
