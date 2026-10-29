@@ -300,9 +300,9 @@ fn file_stamps(settings_path: &Path) -> Vec<FileStamp> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use config::{
-        BackgroundEdit, LibraryEdit, PlaybackEdit, PlaybackKey, SpotifyEdit, UiEdit, UiKey,
-    };
+    #[cfg(unix)]
+    use config::{BackgroundEdit, LibraryEdit, SpotifyEdit};
+    use config::{PlaybackEdit, PlaybackKey, UiEdit, UiKey};
 
     async fn service(dir: &tempfile::TempDir) -> ConfigService {
         let database = db::init(&dir.path().join("cfg.db")).await.expect("db");

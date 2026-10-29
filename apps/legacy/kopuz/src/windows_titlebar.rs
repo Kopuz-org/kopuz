@@ -48,7 +48,8 @@ pub fn install(hwnd: HWND) {
         }
     }
 
-    let prev = unsafe { SetWindowLongPtrW(hwnd, GWLP_WNDPROC, titlebar_wndproc as usize as isize) };
+    let prev =
+        unsafe { SetWindowLongPtrW(hwnd, GWLP_WNDPROC, titlebar_wndproc as *const () as isize) };
 
     if prev != 0 {
         state.hwnd = Some(hwnd.0 as isize);

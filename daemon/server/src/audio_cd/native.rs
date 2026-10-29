@@ -436,10 +436,11 @@ impl Drive {
             self.paranoia = Some(paranoia);
             // Bound retries; a skipped sector is reported as an error by our callback.
             (self.api.mode)(paranoia.as_ptr(), 0xff ^ 0x20);
+            // c_long is 64-bit on Linux and 32-bit on Windows, so `into` is redundant on one of them.
             (self.api.range)(
                 paranoia.as_ptr(),
-                track.start.into(),
-                (track.end - 1).into(),
+                track.start as c_long,
+                (track.end - 1) as c_long,
             );
             self.next_sector = None;
             (self.api.media_changed)(self.cdio.as_ptr());
