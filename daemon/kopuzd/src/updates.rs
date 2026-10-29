@@ -519,7 +519,7 @@ fn stage(kind: &InstallKind, download: &Path, pids: &[u32]) -> Result<(), String
     );
     std::fs::rename(download, &installer)
         .map_err(|error| format!("{}: {error}", installer.display()))?;
-    let Some(script) = windows_apply_script(kind, &installer, pids) else {
+    let Some(script) = windows_apply_script(Flavor::current(), kind, &installer, pids) else {
         let _ = std::fs::remove_file(&installer);
         return Err("not a Windows install".into());
     };
@@ -550,12 +550,20 @@ fn stage(kind: &InstallKind, download: &Path, pids: &[u32]) -> Result<(), String
 
 /// A failed or cancelled install still starts the old copy again.
 #[cfg(any(target_os = "windows", test))]
-fn windows_apply_script(kind: &InstallKind, installer: &Path, pids: &[u32]) -> Option<String> {
+fn windows_apply_script(
+    flavor: Flavor,
+    kind: &InstallKind,
+    installer: &Path,
+    pids: &[u32],
+) -> Option<String> {
     let quote = |text: &str| format!("'{}'", text.replace('\'', "''"));
     let (InstallKind::Nsis { dir } | InstallKind::Msi { dir }) = kind else {
         return None;
     };
-    let app = dir.join("kopuz.exe").display().to_string();
+    let app = dir
+        .join(format!("{}.exe", flavor.binary("kopuz")))
+        .display()
+        .to_string();
     let dir = dir.display().to_string();
     let installer = installer.display().to_string();
     let pids = pids
@@ -932,7 +940,8 @@ mod tests {
     #[test]
     fn windows_script_waits_for_both_and_starts_the_app() {
         let installer = Path::new(r"C:\Temp\kopuz-update\Kopuz_1.0.0_x64-setup.exe");
-        let nsis_script = windows_apply_script(&nsis(), installer, &[42, 7]).expect("nsis script");
+        let nsis_script = windows_apply_script(Flavor::Stable, &nsis(), installer, &[42, 7])
+            .expect("nsis script");
         assert!(nsis_script.contains("Wait-Process -Id 42,7"));
         assert!(nsis_script.contains(r"'/S /D=C:\Users\kyan\AppData\Local\Kopuz'"));
         // The host's separator joins `kopuz.exe` on, so only Windows itself writes a backslash there.
@@ -943,13 +952,26 @@ mod tests {
         assert!(relaunch.ends_with("kopuz.exe'"));
 
         let msi_script =
-            windows_apply_script(&msi(), Path::new(r"C:\Temp\it's.msi"), &[1]).expect("msi script");
+            windows_apply_script(Flavor::Stable, &msi(), Path::new(r"C:\Temp\it's.msi"), &[1])
+                .expect("msi script");
         assert!(msi_script.contains(
             r#"'/i "C:\Temp\it''s.msi" /passive /norestart INSTALLDIR="C:\Program Files\Kopuz"'"#
         ));
         let appimage = InstallKind::AppImage {
             path: PathBuf::from("/tmp/Kopuz.AppImage"),
         };
-        assert_eq!(windows_apply_script(&appimage, installer, &[1]), None);
+        assert_eq!(
+            windows_apply_script(Flavor::Stable, &appimage, installer, &[1]),
+            None
+        );
+    }
+
+    #[test]
+    fn windows_script_starts_nightly_by_its_own_binary() {
+        let installer = Path::new(r"C:\Temp\kopuz-update\Kopuz-Nightly_1.0.0_x64-setup.exe");
+        let script =
+            windows_apply_script(Flavor::Nightly, &nsis(), installer, &[1]).expect("nsis script");
+        let relaunch = script.lines().last().expect("a relaunch line");
+        assert!(relaunch.ends_with("kopuz-nightly.exe'"), "{relaunch}");
     }
 }
