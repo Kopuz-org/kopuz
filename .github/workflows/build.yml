@@ -5,6 +5,11 @@ on:
     branches: [main, master]
   pull_request:
 
+# A new push to a pull request makes its running checks moot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   locale-parity:
     runs-on: ubuntu-latest
@@ -36,31 +41,53 @@ jobs:
       - name: Check no proto number changed meaning
         run: nix shell nixpkgs#nushell --command nu scripts/check_proto_numbers.nu
 
-  pr-build:
+  # Pull requests only check; master pushes and nightlies do the builds, linking and packaging.
+  pr-nix-eval:
     if: github.event_name == 'pull_request'
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            system: x86_64-linux
-          - os: macos-latest
-            system: aarch64-darwin
-
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: DeterminateSystems/nix-installer-action@main
 
-      # Read-only: pulls the deps master pushed, and works for forks, which get no secrets.
-      - uses: cachix/cachix-action@v14
-        with:
-          name: kopuz
-          skipPush: true
+      # Evaluation alone catches a broken flake or a file missing from a package's source.
+      - name: Evaluate the Nix packages and dev shells
+        run: |
+          for system in x86_64-linux aarch64-darwin; do
+            for output in checks devShells; do
+              nix eval --raw ".#$output.$system.default.drvPath"
+              echo
+            done
+          done
 
-      - name: Run Nix checks
-        run: nix build .#checks.${{ matrix.system }}.default
+  pr-clippy:
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+        mode: [debug, release]
+
+    name: clippy (${{ matrix.os }}, ${{ matrix.mode }})
+    runs-on: ${{ matrix.os }}
+    env:
+      SQLX_OFFLINE: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: clippy-${{ matrix.mode }}
+
+      - name: Run Clippy
+        shell: bash
+        run: cargo clippy --workspace --all-targets ${{ matrix.mode == 'release' && '--release' || '' }} -- -D warnings
 
   push-build:
     if: github.event_name == 'push'
@@ -92,6 +119,7 @@ jobs:
         run: cachix push kopuz result
 
   windows-build:
+    if: github.event_name == 'push'
     runs-on: windows-latest
 
     steps:

@@ -1,7 +1,9 @@
 name: lint
 
 on:
+  # A branch with a pull request is linted by pull_request already, so push covers master alone.
   push:
+    branches: [main, master]
     paths:
       - 'README.md'
       - '.github/workflows/lint.yml'
@@ -22,6 +24,11 @@ on:
       - 'shared/**'
       - 'daemon/**'
 
+# A new push to a pull request makes its running checks moot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   deno-fmt:
     runs-on: ubuntu-latest
@@ -41,6 +48,18 @@ jobs:
     env:
       SQLX_OFFLINE: true
     runs-on: ubuntu-22.04
+    # Three builds that share nothing, so they run side by side instead of one after another.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - check: clippy
+            run: cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings
+          - check: clippy-release
+            run: cargo clippy --workspace --all-targets --release -- -D warnings
+          - check: test
+            run: cargo test --workspace --locked
+    name: rust-lint (${{ matrix.check }})
     steps:
       - uses: actions/checkout@v4
         with:
@@ -64,16 +83,14 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # Matrix jobs share a job id, so each needs its own key or they overwrite one cache.
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.check }}
 
-      - name: Check Rust formatting
-        run: cargo fmt --all --check
+      # Linking the test binaries is most of what mold speeds up.
+      - uses: rui314/setup-mold@v1
+        if: matrix.check == 'test'
 
-      - name: Run Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Run Clippy in release mode
-        run: cargo clippy --workspace --all-targets --release -- -D warnings
-
-      - name: Run Rust tests
-        run: cargo test --workspace --locked
+      - name: Run ${{ matrix.check }}
+        run: ${{ matrix.run }}
