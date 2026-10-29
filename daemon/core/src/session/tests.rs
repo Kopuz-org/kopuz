@@ -3647,6 +3647,37 @@ async fn queue_keys(api: &LocalApi) -> Vec<String> {
 }
 
 #[tokio::test]
+async fn a_radio_from_the_playing_song_keeps_playing_it() {
+    let harness = radio_harness(Arc::new(RadioLibrary::default()));
+    harness.api.set_queue(replace(&["seed"])).await.unwrap();
+    let before = wait_committed(&harness.api).await;
+
+    harness.api.set_queue(track_radio("seed")).await.unwrap();
+    let after = harness.api.player_state().await.expect("player state");
+    assert_eq!(after.intent, before.intent, "the song was not loaded again");
+    assert_eq!(after.queue.index, Some(0));
+    assert_eq!(after.queue.length, 6);
+    assert_eq!(
+        queue_keys(&harness.api).await,
+        ["seed", "r1", "r2", "r3", "r4", "r5"]
+    );
+}
+
+#[tokio::test]
+async fn a_radio_from_another_song_starts_its_seed() {
+    let harness = radio_harness(Arc::new(RadioLibrary::default()));
+    harness.api.set_queue(replace(&["other"])).await.unwrap();
+    let before = wait_committed(&harness.api).await;
+
+    harness.api.set_queue(track_radio("seed")).await.unwrap();
+    let after = wait_state(&harness.api, "the seed committed", |state| {
+        matches!(state.intent, Intent::Committed { .. }) && state.intent != before.intent
+    })
+    .await;
+    assert_eq!(after.track.map(|track| track.key).as_deref(), Some("seed"));
+}
+
+#[tokio::test]
 async fn a_radio_tops_up_after_a_gapless_switch() {
     let library = Arc::new(RadioLibrary::default());
     let harness = radio_harness(library.clone());

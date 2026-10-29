@@ -1393,7 +1393,12 @@ impl Session {
                         }
                     });
                     let idx = candidate.jump_to(start.min(len - 1));
-                    self.start_immediate_load(candidate, idx)?;
+                    if self.radio_keeps_playing(&request.context, &candidate, idx) {
+                        self.model = candidate;
+                        self.prefetch_next();
+                    } else {
+                        self.start_immediate_load(candidate, idx)?;
+                    }
                     self.set_radio_feed(more);
                     self.origin = origin.clone();
                 } else {
@@ -1424,6 +1429,25 @@ impl Session {
             self.origin = origin;
         }
         Ok(self.publish(state_tx, true))
+    }
+
+    /// A radio seeded from the song already playing grows around it instead of starting it over.
+    fn radio_keeps_playing(
+        &self,
+        context: &QueueContext,
+        candidate: &QueueModel,
+        idx: usize,
+    ) -> bool {
+        matches!(
+            context,
+            QueueContext::TrackRadio { .. } | QueueContext::PlaylistRadio { .. }
+        ) && self.pending_transition.is_none()
+            && matches!(self.intent, PlaybackIntent::Committed { .. })
+            && self
+                .model
+                .current_track()
+                .zip(candidate.track_at(idx))
+                .is_some_and(|(playing, first)| playing.id.uid() == first.id.uid())
     }
 
     fn play_next(
