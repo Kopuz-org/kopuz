@@ -256,6 +256,7 @@ impl RenderOnce for FollowButton {
             .glyph(px(20.))
             .tone(IconTone::Scrim)
             .shadow(true)
+            .stop_propagation(true)
             .tooltip(crate::format::t("jump_to_current_song"));
         button.click = self.click;
         div().absolute().bottom_4().right_4().child(button)
