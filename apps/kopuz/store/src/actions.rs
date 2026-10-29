@@ -43,6 +43,27 @@ pub fn play_tracks(keys: Vec<String>, start: Option<u32>, cx: &mut App) {
     );
 }
 
+/// Start at `key` with the whole library queued around it, or over `fallback` from `at` when the library lacks it.
+pub fn play_in_library(key: String, fallback: Vec<String>, at: u32, cx: &mut App) {
+    let filter = api::TrackFilter::default();
+    let listing = filter.clone();
+    let call = Link::global(cx).call(move |api| async move {
+        let page = api.tracks(listing, crate::all()).await?;
+        Ok(page.items.iter().position(|track| track.key == key))
+    });
+    cx.spawn(async move |cx| {
+        let found = call.await;
+        cx.update(|cx| match found {
+            Ok(Some(index)) => {
+                play_context(QueueContext::Filter { filter }, Some(index as u32), cx)
+            }
+            Ok(None) => play_tracks(fallback, Some(at), cx),
+            Err(error) => Notices::failed(&error, cx),
+        });
+    })
+    .detach();
+}
+
 /// Play a whole listing: from a random row while shuffle is on, from the top otherwise.
 pub fn play_all(keys: Vec<String>, cx: &mut App) {
     let shuffled = PlayerModel::global(cx).read(cx).shuffle();
