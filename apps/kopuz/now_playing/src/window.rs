@@ -18,6 +18,7 @@ use crate::NowPlaying;
 const WIDTH: Pixels = px(380.);
 const HEIGHT: Pixels = px(148.);
 // How far the overlay sits from the corner it is anchored to.
+#[cfg(target_os = "linux")]
 const MARGIN: Pixels = px(24.);
 
 /// The handle to the second window, while there is one.
