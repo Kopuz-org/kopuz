@@ -49,7 +49,9 @@ block2 = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-mpris-server = { workspace = true }
+futures-util = { workspace = true }
+# `unstable` only exposes the server's connection, to take the bus name back.
+mpris-server = { workspace = true, features = ["unstable"] }
 tokio = { workspace = true, features = ["full"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
