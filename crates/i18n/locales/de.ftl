@@ -1146,6 +1146,7 @@ plugin_native = In Kopuz
 plugin_community = Community
 plugin_by = von { $author }
 plugin_reaches = Erreicht { $hosts }
+plugin_update_reaches = Das Update erreicht zusätzlich { $hosts }
 plugin_your_server = deinen Server
 plugin_install = Installieren
 plugin_update = Aktualisieren

@@ -22,9 +22,10 @@ pub(super) struct PluginSource {
     db: Db,
     source: Source,
     service: MusicService,
+    /// The plugin under it can be swapped, so what it declares is read per call.
     session: Arc<Session>,
-    capabilities: Capabilities,
-    artwork: crate::plugins::Reach,
+    slug: String,
+    server_url: String,
 }
 
 impl PluginSource {
@@ -37,29 +38,28 @@ impl PluginSource {
         let slug = connection.service.clone();
         let server_url = connection.url.clone();
         let session = crate::plugins::session(connection)?;
-        let capabilities = session
-            .plugin()
-            .manifest()
-            .service(&slug)
-            .map(|declared| capabilities(&declared.capabilities))?;
-        let artwork = crate::plugins::Reach::new(session.plugin(), &server_url);
+        session.plugin().manifest().service(&slug)?;
         Some(Self {
             db,
             source,
             service,
             session,
-            capabilities,
-            artwork,
+            slug,
+            server_url,
         })
     }
 
+    fn artwork(&self) -> crate::plugins::Reach {
+        crate::plugins::Reach::new(&self.session.plugin(), &self.server_url)
+    }
+
     fn track(&self, mut track: wit::Track) -> reader::Track {
-        track.cover = self.artwork.cover(track.cover);
+        track.cover = self.artwork().cover(track.cover);
         track_from(self.service, track)
     }
 
     fn album(&self, mut album: wit::Album) -> reader::Album {
-        album.cover = self.artwork.cover(album.cover);
+        album.cover = self.artwork().cover(album.cover);
         album_from(album)
     }
 
@@ -68,7 +68,7 @@ impl PluginSource {
     }
 
     fn listing(&self, mut listing: wit::ArtistListing) -> (reader::ArtistCredit, Option<String>) {
-        listing.photo = self.artwork.cover(listing.photo);
+        listing.photo = self.artwork().cover(listing.photo);
         listing_from(listing)
     }
 
@@ -80,7 +80,14 @@ impl PluginSource {
     }
 
     fn tracks(&self, tracks: Vec<wit::Track>) -> Vec<reader::Track> {
-        tracks.into_iter().map(|track| self.track(track)).collect()
+        let artwork = self.artwork();
+        tracks
+            .into_iter()
+            .map(|mut track| {
+                track.cover = artwork.cover(track.cover);
+                track_from(self.service, track)
+            })
+            .collect()
     }
 }
 
@@ -295,7 +302,14 @@ impl MediaSource for PluginSource {
     }
 
     fn capabilities(&self) -> Capabilities {
-        self.capabilities
+        self.session
+            .plugin()
+            .manifest()
+            .service(&self.slug)
+            .map_or_else(
+                || capabilities(&manifest::Capabilities::default()),
+                |declared| capabilities(&declared.capabilities),
+            )
     }
 
     async fn add_to_playlist(
@@ -567,7 +581,7 @@ impl MediaSource for PluginSource {
             .map(|playlist| PlaylistMeta {
                 id: playlist.id,
                 name: playlist.name,
-                image_tag: self.artwork.cover(playlist.image_tag),
+                image_tag: self.artwork().cover(playlist.image_tag),
             })
             .collect())
     }

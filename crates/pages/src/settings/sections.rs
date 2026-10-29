@@ -841,16 +841,35 @@ fn PluginRow(
     } else {
         i18n::t("plugin_official")
     };
-    let hosts: Vec<String> = plugin
-        .network
-        .iter()
-        .map(|host| match host.as_str() {
-            "$server" => i18n::t("plugin_your_server"),
-            other => other.to_string(),
-        })
-        .collect();
-    let reaches = (!hosts.is_empty())
-        .then(|| i18n::t_with("plugin_reaches", &[("hosts", hosts.join(", ").into())]));
+    let shown = |network: &[String]| -> String {
+        network
+            .iter()
+            .map(|host| match host.as_str() {
+                "$server" => i18n::t("plugin_your_server"),
+                other => other.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let reaches = (!plugin.network.is_empty()).then(|| {
+        i18n::t_with(
+            "plugin_reaches",
+            &[("hosts", shown(&plugin.network).into())],
+        )
+    });
+    let update_reaches = plugin
+        .update
+        .as_ref()
+        .filter(|update| !update.added_hosts.is_empty())
+        .map(|update| {
+            i18n::t_with(
+                "plugin_update_reaches",
+                &[("hosts", shown(&update.added_hosts).into())],
+            )
+        });
+    let install_network = plugin.network.clone();
+    let update = plugin.update.clone();
+    let removable = community && plugin.installed_version.is_some();
     let byline = (!plugin.author.is_empty())
         .then(|| i18n::t_with("plugin_by", &[("author", plugin.author.clone().into())]));
     let install_id = plugin.id.clone();
@@ -880,27 +899,53 @@ fn PluginRow(
                         "{reaches}"
                     }
                 }
+                if let Some(update_reaches) = update_reaches {
+                    p { class: "text-xs text-white/60 break-all",
+                        i { class: "fa-solid fa-triangle-exclamation mr-1" }
+                        "{update_reaches}"
+                    }
+                }
             }
-            if community {
+            // An update waiting for its hosts can replace an official plugin
+            // too, so it is approved whatever the origin; only removal is
+            // limited to community plugins.
+            if community || update.is_some() {
                 div { class: "flex items-center gap-2 shrink-0",
                     if working {
                         span { class: "text-sm text-white/60", "{i18n::t(\"plugin_working\")}" }
+                    } else if let Some(update) = update {
+                        button {
+                            class: "{button}",
+                            disabled: !idle,
+                            onclick: move |_| hooks::plugins::install(
+                                install_id.clone(),
+                                update.network.clone(),
+                                busy,
+                                changed,
+                            ),
+                            "{i18n::t(\"plugin_update\")}"
+                        }
+                        if removable {
+                            button {
+                                class: "{button}",
+                                disabled: !idle,
+                                onclick: move |_| hooks::plugins::uninstall(remove_id.clone(), busy, changed),
+                                "{i18n::t(\"plugin_remove\")}"
+                            }
+                        }
                     } else if plugin.installed_version.is_none() {
                         button {
                             class: "{button}",
                             disabled: !idle,
-                            onclick: move |_| hooks::plugins::install(install_id.clone(), busy, changed),
+                            onclick: move |_| hooks::plugins::install(
+                                install_id.clone(),
+                                install_network.clone(),
+                                busy,
+                                changed,
+                            ),
                             "{i18n::t(\"plugin_install\")}"
                         }
                     } else {
-                        if plugin.update_available() {
-                            button {
-                                class: "{button}",
-                                disabled: !idle,
-                                onclick: move |_| hooks::plugins::install(install_id.clone(), busy, changed),
-                                "{i18n::t(\"plugin_update\")}"
-                            }
-                        }
                         button {
                             class: "{button}",
                             disabled: !idle,

@@ -81,6 +81,10 @@ fn subsonic_component() -> &'static [u8] {
         .expect("it is a component")
 }
 
+fn shown() -> Vec<String> {
+    vec!["$server".into()]
+}
+
 fn temp(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("kopuz-market-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -91,7 +95,7 @@ fn temp(name: &str) -> PathBuf {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
     let plugins = temp("installed");
-    server::plugins::init(Some(plugins.clone()));
+    server::plugins::init(Some(plugins.clone())).await;
 
     // A tampered component is refused before anything is written.
     let tampered = PluginService::new(marketplace(
@@ -101,7 +105,10 @@ async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
         subsonic_component(),
         Some(&"0".repeat(64)),
     ));
-    let refused = tampered.install("echo").await.expect_err("hash mismatch");
+    let refused = tampered
+        .install("echo", &shown())
+        .await
+        .expect_err("hash mismatch");
     assert_eq!(refused.code, ErrorCode::InvalidInput);
     assert!(!plugins.join("echo").exists());
 
@@ -113,7 +120,7 @@ async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
         subsonic_component(),
         None,
     ));
-    assert!(impostor.install("subsonic").await.is_err());
+    assert!(impostor.install("subsonic", &shown()).await.is_err());
 
     // The real thing.
     let market = PluginService::new(marketplace(
@@ -138,7 +145,15 @@ async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
             .all(|plugin| plugin.id != "echo" || plugin.origin == api::PluginOrigin::Community)
     );
 
-    let installed = market.install("echo").await.expect("installed");
+    // Hosts other than the ones shown are refused.
+    let other_hosts = market
+        .install("echo", &["evil.test".into()])
+        .await
+        .expect_err("the hosts changed");
+    assert_eq!(other_hosts.code, ErrorCode::InvalidInput);
+    assert!(!plugins.join("echo").exists());
+
+    let installed = market.install("echo", &shown()).await.expect("installed");
     assert_eq!(installed.installed_version.as_deref(), Some("1.0.0"));
     assert_eq!(installed.origin, api::PluginOrigin::Community);
     assert!(plugins.join("echo").join("plugin.wasm").is_file());
@@ -164,6 +179,25 @@ async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
             .iter()
             .all(|service| service.id != "echo-service")
     );
+    assert_eq!(daemon::services::resolve("echo-service"), None);
+
+    // A copy dropped in by hand under another name loads, and removing the
+    // plugin removes that directory.
+    let by_hand = plugins.join("my-echo");
+    std::fs::create_dir_all(&by_hand).unwrap();
+    std::fs::write(by_hand.join(plugin_host::MANIFEST_FILE), MANIFEST).unwrap();
+    std::fs::write(
+        by_hand.join(plugin_host::COMPONENT_FILE),
+        subsonic_component(),
+    )
+    .unwrap();
+    assert!(server::plugins::rescan().await);
+    assert_eq!(
+        daemon::services::resolve("echo-service"),
+        Some(config::MusicService::Plugin)
+    );
+    market.uninstall("echo").await.expect("removed");
+    assert!(!by_hand.exists());
     assert_eq!(daemon::services::resolve("echo-service"), None);
 
     std::fs::remove_dir_all(&plugins).ok();

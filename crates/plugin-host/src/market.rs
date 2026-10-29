@@ -97,10 +97,15 @@ impl Index {
     }
 }
 
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 pub fn verify(download: &Download, bytes: &[u8]) -> Result<(), MarketError> {
-    let digest = Sha256::digest(bytes);
-    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
-    if hex.eq_ignore_ascii_case(download.sha256.trim()) {
+    if sha256_hex(bytes).eq_ignore_ascii_case(download.sha256.trim()) {
         Ok(())
     } else {
         Err(MarketError::HashMismatch)
@@ -194,9 +199,17 @@ pub fn install(
     Ok(target)
 }
 
-pub fn uninstall(dir: &Path, id: &str) -> Result<(), MarketError> {
-    let target = plugin_dir(dir, id)?;
-    match std::fs::remove_dir_all(&target) {
+/// Remove the plugin directory `target`, which must sit directly under `dir`;
+/// its name need not be the plugin's id.
+pub fn uninstall(dir: &Path, target: &Path) -> Result<(), MarketError> {
+    if target.parent() != Some(dir) || target.file_name().is_none() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("`{}` is not in the plugin directory", target.display()),
+        )
+        .into());
+    }
+    match std::fs::remove_dir_all(target) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
@@ -223,10 +236,7 @@ mod tests {
     use super::*;
 
     fn sha(bytes: &[u8]) -> String {
-        Sha256::digest(bytes)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
+        sha256_hex(bytes)
     }
 
     const MANIFEST: &str = r#"
@@ -361,9 +371,11 @@ mod tests {
             "no staging directory is left behind"
         );
 
-        uninstall(&dir, "bandcamp").unwrap();
+        uninstall(&dir, &dir.join("bandcamp")).unwrap();
         assert!(!installed.exists());
-        uninstall(&dir, "bandcamp").expect("removing what is gone is not an error");
+        uninstall(&dir, &dir.join("bandcamp")).expect("removing what is gone is not an error");
+        assert!(uninstall(&dir, &dir.join("a").join("b")).is_err());
+        assert!(uninstall(&dir, dir.parent().unwrap()).is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 

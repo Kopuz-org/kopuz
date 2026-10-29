@@ -1134,6 +1134,7 @@ plugin_native = Kopuz'un içinde
 plugin_community = Topluluk
 plugin_by = { $author } tarafından
 plugin_reaches = Eriştiği adresler: { $hosts }
+plugin_update_reaches = Güncelleme ayrıca şunlara erişir: { $hosts }
 plugin_your_server = sunucunuz
 plugin_install = Kur
 plugin_update = Güncelle

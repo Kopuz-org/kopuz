@@ -864,10 +864,14 @@ impl api::PluginApi for GrpcApi {
         Ok(convert::plugin_catalog_from_proto(catalog.get_ref()))
     }
 
-    async fn install_plugin(&self, id: String) -> Result<api::PluginInfo, ApiError> {
+    async fn install_plugin(
+        &self,
+        id: String,
+        network: Vec<String>,
+    ) -> Result<api::PluginInfo, ApiError> {
         let info = self
             .client()
-            .install_plugin(Request::new(proto::PluginId { id }))
+            .install_plugin(Request::new(proto::InstallPluginRequest { id, network }))
             .await
             .map_err(wire_error)?;
         Ok(convert::plugin_info_from_proto(info.get_ref()))

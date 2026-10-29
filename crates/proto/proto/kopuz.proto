@@ -123,7 +123,7 @@ service Kopuz {
   rpc GetFrontendPrefs(GetFrontendPrefsRequest) returns (FrontendPrefsList);
   rpc SetFrontendPrefs(SetFrontendPrefsRequest) returns (Unit);
   rpc GetPlugins(GetPluginsRequest) returns (PluginCatalog);
-  rpc InstallPlugin(PluginId) returns (PluginInfo);
+  rpc InstallPlugin(InstallPluginRequest) returns (PluginInfo);
   rpc UninstallPlugin(PluginId) returns (Unit);
 
   rpc GetSources(GetSourcesRequest) returns (SourceList);
@@ -2081,6 +2081,23 @@ message PluginId {
   string id = 1;
 }
 
+message InstallPluginRequest {
+  string id = 1;
+  // The hosts the user was shown and agreed to; a plugin reaching any other
+  // set is refused.
+  repeated string network = 2;
+}
+
+// A newer version of an installed plugin, from the marketplace or dropped
+// into the plugin directory.
+message PluginUpdate {
+  string version = 1;
+  // Everything it reaches; installing it agrees to these.
+  repeated string network = 2;
+  // What it reaches that the installed version does not.
+  repeated string added_hosts = 3;
+}
+
 enum PluginOrigin {
   PLUGIN_ORIGIN_UNSPECIFIED = 0;
   PLUGIN_ORIGIN_OFFICIAL = 1;
@@ -2102,6 +2119,7 @@ message PluginInfo {
   repeated string services = 9;
   repeated string network = 10;
   bool sandboxed = 11;
+  optional PluginUpdate update = 12;
 }
 
 message PluginCatalog {
@@ -2540,6 +2558,7 @@ enum Table {
   TABLE_RECENTS = 7;
   TABLE_STATIONS = 8;
   TABLE_ARTISTS = 9;
+  TABLE_PLUGINS = 10;
 }
 
 enum JobKind {
