@@ -409,6 +409,18 @@ pub struct Sheet {
     pub side: Side,
     pub backdrop: Backdrop,
     pub cover: HeroSize,
+    pub queue: QueueStyle,
+}
+
+/// How the queue lists its rows, in the sheet and the docked column alike.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueStyle {
+    /// History folded away above what plays now and what is next; a new song takes the list back to the top.
+    #[default]
+    Sections,
+    /// One flat list, the playing row kept in view, the way the Dioxus rightbar drew it.
+    Classic,
 }
 
 /// How large the now-playing sheet draws its cover.
