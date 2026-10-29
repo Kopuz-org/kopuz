@@ -975,6 +975,10 @@ jobs:
           dpkg-deb -x "dist/kopuz-nightly_${version}_amd64.deb" "$MANIFEST_DIR/payload"
           # The repo's history lives in R2, so this commit lands on top of the nightlies already there.
           aws s3 sync "s3://$R2_BUCKET/repo" repo --endpoint-url "$R2_ENDPOINT" --only-show-errors
+          # R2 keeps no empty directories, and ostree will not open a repo missing these.
+          if [[ -f repo/config ]]; then
+            mkdir -p repo/refs/{heads,mirrors,remotes} repo/objects repo/state repo/tmp/cache repo/extensions
+          fi
           flatpak-builder --user --force-clean --disable-rofiles-fuse \
             --default-branch=stable --gpg-sign="$GPG_KEY" --repo=repo \
             --subject="Kopuz Nightly $version" \
