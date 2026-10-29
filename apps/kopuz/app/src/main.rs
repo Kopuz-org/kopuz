@@ -4,6 +4,8 @@
 mod args;
 mod backdrop;
 mod handover;
+#[cfg(target_os = "macos")]
+mod menus;
 mod router;
 mod shell;
 mod system_ease;
@@ -166,6 +168,8 @@ fn main() -> anyhow::Result<()> {
             commands::init(cx);
             theme::apply_named("default", None, cx);
             keymap(cx);
+            #[cfg(target_os = "macos")]
+            menus::init(cx);
             let ready = store::LayoutModel::global(cx).update(cx, |layout, _| layout.take_ready());
             cx.spawn(async move |cx| {
                 let timer = cx.background_executor().timer(PREFS_WAIT);
