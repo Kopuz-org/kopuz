@@ -11,7 +11,7 @@ mod registry;
 mod session;
 
 pub use plugin::{Code, Origin, Plugin};
-pub use registry::{Bundled, COMPONENT_FILE, MANIFEST_FILE, Registry};
+pub use registry::{Bundled, COMPONENT_FILE, MANIFEST_FILE, Registry, plugin_dirs};
 pub use session::Session;
 
 mod bindings {

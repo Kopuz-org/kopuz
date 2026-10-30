@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::manifest::Manifest;
@@ -93,6 +93,22 @@ impl Registry {
 /// Each `<dir>/<name>/` holding a manifest and a component. One that fails to
 /// load is logged and skipped, so a broken plugin never stops the rest.
 fn installed(dir: &Path) -> Vec<Plugin> {
+    plugin_dirs(dir)
+        .into_iter()
+        .filter_map(|path| match load_dir(&path) {
+            Ok(plugin) => Some(plugin),
+            Err(error) => {
+                tracing::warn!(plugin = %path.display(), %error, "plugin not loaded");
+                None
+            }
+        })
+        .collect()
+}
+
+/// Each `<dir>/<name>/`, sorted, so which of two plugins wins a service does
+/// not depend on directory order. A dot directory is an install or removal in
+/// progress, or one a crash left behind.
+pub fn plugin_dirs(dir: &Path) -> Vec<PathBuf> {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
@@ -103,21 +119,12 @@ fn installed(dir: &Path) -> Vec<Plugin> {
     };
     let mut paths: Vec<_> = entries
         .filter_map(Result::ok)
+        .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
         .map(|entry| entry.path())
         .filter(|path| path.is_dir())
         .collect();
-    // Which of two plugins wins a service must not depend on directory order.
     paths.sort();
     paths
-        .into_iter()
-        .filter_map(|path| match load_dir(&path) {
-            Ok(plugin) => Some(plugin),
-            Err(error) => {
-                tracing::warn!(plugin = %path.display(), %error, "plugin not loaded");
-                None
-            }
-        })
-        .collect()
 }
 
 fn load_dir(dir: &Path) -> Result<Plugin, String> {
@@ -219,5 +226,24 @@ mod tests {
         let registry = Registry::load(&native, Some(&dir));
         std::fs::remove_dir_all(&dir).ok();
         assert!(!registry.for_service("ytmusic").unwrap().is_native());
+    }
+
+    #[test]
+    fn a_staging_directory_is_not_a_second_copy() {
+        let dir =
+            std::env::temp_dir().join(format!("kopuz-plugins-staging-{}", std::process::id()));
+        for name in ["radio", ".radio.installing", ".radio.removing"] {
+            let path = dir.join(name);
+            std::fs::create_dir_all(&path).unwrap();
+            std::fs::write(
+                path.join(MANIFEST_FILE),
+                manifest("radio", "1.0.0", &["radio"]),
+            )
+            .unwrap();
+            std::fs::write(path.join(COMPONENT_FILE), b"").unwrap();
+        }
+        let registry = Registry::load(&[], Some(&dir));
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(registry.plugins().len(), 1);
     }
 }
