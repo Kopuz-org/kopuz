@@ -1,9 +1,9 @@
 [application]
-name = "kopuz"
+name = "Kopuz Legacy"
 default_platform = "desktop"
 
 [application.assets]
-base_path = "crates/kopuz/assets"
+base_path = "apps/legacy/kopuz/assets"
 
 [bundle]
 identifier = "moe.kopuz.kopuz"
@@ -14,3 +14,17 @@ targets = ["macos", "dmg", "nsis", "msi"]
 
 [bundle.macos]
 info_plist_path = "Info.plist"
+
+# dx writes these as both the .deb's Depends and the .rpm's Requires, so only names both share.
+[bundle.deb]
+depends = ["ca-certificates"]
+
+# The desktop builds make room for the GPUI app as moe.kopuz.kopuz; Android keeps it.
+[macos]
+identifier = "moe.kopuz.legacy"
+
+[windows]
+identifier = "moe.kopuz.legacy"
+
+[linux]
+identifier = "moe.kopuz.legacy"

@@ -4,7 +4,7 @@ set -e
 echo "=== Kopuz Flatpak Builder ==="
 echo "[0/2] Cleaning up previous builds..."
 rm -rf .flatpak-builder build-dir dist
-rm -f target/dx/kopuz/release/linux/app/kopuz
+rm -f target/dx/kopuz-legacy/release/linux/app/kopuz-legacy
 
 flatpak uninstall --user -y moe.kopuz.kopuz || true
 flatpak uninstall --system -y moe.kopuz.kopuz || true

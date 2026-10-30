@@ -1,0 +1,1215 @@
+language-name = தமிழ்
+is_rtl = false
+
+settings = அமைப்புகள்
+settings_layout = அமைப்புகள் வழிசெலுத்தல்
+settings_layout_cd = CD
+settings_layout_topbar = மேல் பட்டை
+theme_editor = தீம் எடிட்டர்
+appearance = தோற்றம்
+language = மொழி
+library = நூலகம்
+playlists = பிளேலிஸ்ட்கள்
+album = ஆல்பம்
+release_single = Single
+release_ep = EP
+release_audiobook = Audiobook
+artist = கலைஞர்
+home = முகப்பு
+search = தேடல்
+favorites = பிடித்தவை
+radio = வானொலி
+discover = கண்டறி
+logs = பதிவுகள்
+activity = செயல்பாடு
+general = பொது
+folder_required = குறைந்தது ஒரு கோப்புறையைத் தேர்ந்தெடுக்கவும்
+service = சேவை: { $name }
+connected = ● இணைக்கப்பட்டது
+disconnected = ● துண்டிக்கப்பட்டது
+connecting = ● இணைக்கிறது…
+reconnect = மீண்டும் இணை
+remove = அகற்று
+add = சேர்
+add_folder = கோப்புறை சேர்
+no_music_folders = இசை கோப்புறைகள் எதுவும் கட்டமைக்கப்படவில்லை
+remote_music_folders = இசை கோப்புறைகள்
+source_account = கணக்கு
+source_account_help = ஒவ்வொரு கணக்கிற்கும் தனி நூலகம் உள்ளது. மாற்றினால் அது மீண்டும் ஒத்திசைக்கப்படும்.
+source_accounts_failed = கணக்குகளை ஏற்ற முடியவில்லை: { $error }
+parent_folder = மேலே
+use_this_folder = இந்த கோப்புறையைச் சேர்
+no_subfolders = துணைக் கோப்புறைகள் இல்லை
+loading_folders = கோப்புறைகள் ஏற்றப்படுகின்றன…
+folder_browse_failed = கோப்புறைகளைப் பட்டியலிட முடியவில்லை: { $error }
+add_source = மூலத்தைச் சேர்
+connect_to_lastfm = Last.fm உடன் இணை
+lastfm_connected = Last.fm இணைக்கப்பட்டது
+connect_to_librefm = Libre.fm உடன் இணை
+librefm_connected = Libre.fm இணைக்கப்பட்டது
+server_details = சேவையக விவரங்கள்
+source_name = பெயர்
+server_url = சேவையக URL
+choose_service = சேவையைத் தேர்ந்தெடு
+cancel = ரத்து செய்
+login = உள்நுழை
+logging_in = உள்நுழைகிறது...
+login_to_service = { $service } இல் உள்நுழை
+username = பயனர்பெயர்
+password = கடவுச்சொல்
+sign_in_method = How to sign in
+sign_in_with_browser = Sign in with a browser
+sign_in_anonymously = Continue without signing in
+sign_in_browser = Browser
+sign_in_browser_auto = கணினி இயல்புநிலை
+yt_anonymous_help = Anonymous mode browses and plays public music, but has no library, no liked songs and no Discover.
+soundcloud_sign_in_help = Signing in opens a browser window; kopuz keeps only the session it produces.
+player_settings = பிளேயர் அமைப்புகள்
+crossfade = கிராஸ்ஃபேட்
+crossfade_off = ஆஃப்
+volume_scroll_step = ஒலி அளவு ஸ்க்ரோல் படி
+channel_mode = சேனல் முறை
+channel_mode_stereo = ஸ்டீரியோ
+channel_mode_mono = மோனோ
+channel_mode_left_only = இடது மட்டும்
+channel_mode_right_only = வலது மட்டும்
+channel_mode_swap_left_right = இடது/வலது மாற்று
+device_change_behavior = On output device change
+device_change_resume = Keep playing
+device_change_pause = Pause
+sample_rate_mode = வெளியீட்டு மாதிரி வீதம்
+sample_rate_mode_system = கணினியைப் பின்பற்று
+sample_rate_mode_source = தடத்திற்குப் பொருத்து
+settings_group_streaming = ஸ்ட்ரீமிங்
+stream_quality = ஸ்ட்ரீமிங் தரம்
+stream_quality_low = குறைவு
+stream_quality_normal = இயல்பு
+stream_quality_high = உயர்
+autoplay_radio = வரிசை முடிந்ததும் ஒரு வானொலியை இயக்கு
+skip_explicit = வெளிப்படையான பாடல்களைத் தவிர்
+pause_watch_history = பார்வை வரலாற்றை இடைநிறுத்து
+discord_presence = Discord இருப்பு
+connectivity = இணைப்புத்தன்மை
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
+integration_connecting = Connecting…
+integration_browser_title = Use a signed-in browser
+integration_browser_profile = { $name } ({ $browser })
+integration_browser_none = No browser profiles found. Paste your token above instead.
+discord_presence_paused = இடைநிறுத்தப்பட்ட Discord நிலையைக் காட்டு
+discord_presence_source = Discord நிலையில் மீடியா மூலத்தைக் காட்டு
+reduce_animations = அனிமேஷன்களைக் குறை
+fullscreen_use_player_bar = Use player bar as fullscreen controls
+cover_art_background = Cover Art Background
+cover_art_darkening = Cover Art Darkening
+cover_art_blur = Cover Art Blur
+custom_background = Custom Background
+choose_image = Choose Image
+custom_font = தனிப்பயன் எழுத்துரு
+choose_font = எழுத்துருவைத் தேர்ந்தெடுக்கவும்
+live_theme = Matugen / Pywal (நேரலை)
+live_theme_file = வண்ணத்தட்டு கோப்பு
+choose_palette = வண்ணத்தட்டைத் தேர்ந்தெடுக்கவும்
+jump_to_current_song = Jump to current song
+hide_side_panel = Hide side panel
+show_side_panel = Show side panel
+auto_check_updates = புதுப்பிப்புகளைத் தானாகச் சரிபார்
+minimize_to_tray = கணினி தட்டுக்குச் சிறிதாக்கு
+show_source_toggle = மூல மாற்றியைக் காட்டு
+show_row_images = Show Row Images
+titlebar_mode = தலைப்புப்பட்டை
+titlebar_custom = தனிப்பயன் (ஆப் வரைந்தது)
+titlebar_system = கணினி அலங்காரங்கள்
+titlebar_off = தலைப்புப்பட்டை இல்லை
+volume = ஒலி அளவு
+server = சேவையகம்
+source = மூலம்
+sources = மூலங்கள்
+manage_sources = மூலங்களை நிர்வகி
+source_on_this_device = இந்த சாதனத்தில்
+downloader = பதிவிறக்கங்கள்
+downloader_title = பதிவிறக்கங்கள்
+downloader_subtitle = YouTube · YouTube Music
+downloader_options = விருப்பங்கள்
+downloader_url_placeholder = பாடல் பெயர், கலைஞர் அல்லது ஆல்பம், அல்லது ஒரு இணைப்பை ஒட்டவும்…
+downloader_download = பதிவிறக்கு
+downloader_output_dir_placeholder = வெளியீட்டு கோப்புறை (இயல்பாக இசை கோப்புறை)
+downloader_pick_folder = கோப்புறையைத் தேர்ந்தெடு
+downloader_clear_history = வரலாற்றை அழி
+downloader_empty_state = தொடங்க ஒரு பாடலைத் தேடுங்கள், அல்லது ஒரு YouTube இணைப்பை ஒட்டுங்கள்
+downloader_section_embed = கோப்பில் உட்பொதி
+downloader_section_write = தனி கோப்புகளை எழுது
+downloader_section_behavior = நடத்தை
+downloader_embed_metadata = மெட்டாடேட்டாவை உட்பொதி
+downloader_embed_thumbnail = சிறுபடத்தை உட்பொதி
+downloader_write_thumbnail = சிறுபடத்தை எழுது
+downloader_organize_by_album = ஆல்பம் வாரியாக ஒழுங்குபடுத்து
+downloader_overwrite_existing = இருக்கும் கோப்புகளை மேலெழுது
+downloader_format_best_audio = சிறந்த ஆடியோ
+downloader_format_mp3 = MP3
+downloader_format_flac = FLAC
+downloader_format_opus = OPUS
+downloader_format_wav = WAV
+downloader_needs_ffmpeg = ffmpeg தேவை
+downloader_status_downloading = { $percent }%
+downloader_status_processing = செயலாக்குகிறது…
+downloader_status_completed = முடிந்தது
+downloader_status_failed = Failed
+downloader_status_waiting = காத்திருக்கிறது…
+update_available = புதுப்பிப்பு கிடைக்கிறது
+update_banner_message = Kopuz { $version } கிடைக்கிறது.
+view_release = வெளியீட்டைக் காண்
+update_install = புதுப்பித்து மறுதொடக்கம் செய்
+update_downloading = Kopuz { $version } பதிவிறக்கப்படுகிறது…
+update_restarting = புதுப்பிப்பை முடிக்க மறுதொடக்கம் செய்யப்படுகிறது…
+update_failed = Kopuz { $version } ஐ நிறுவ முடியவில்லை.
+update_retry = மீண்டும் முயல்க
+
+# UI Actions & Buttons
+add_to_favorites = பிடித்தவைக்குச் சேர்
+remove_from_favorites = பிடித்தவையிலிருந்து அகற்று
+dont_recommend = பரிந்துரைக்க வேண்டாம்
+add_to_queue = வரிசையில் சேர்
+play_next = அடுத்ததை இயக்கு
+add_to_playlist = பிளேலிஸ்ட்டில் சேர்
+remove_from_playlist = பிளேலிஸ்ட்டிலிருந்து அகற்று
+start_radio = வானொலியைத் தொடங்கு
+radio_starting = வானொலி தொடங்குகிறது…
+radio_empty = ஒத்த பாடல்கள் எதுவும் இல்லை
+radio_failed = வானொலியைத் தொடங்க முடியவில்லை
+remove_from_queue = வரிசையிலிருந்து அகற்று
+downloading = பதிவிறக்குகிறது…
+downloading_progress = Downloading { $done } / { $total }
+more_actions_for = { $name } க்கான மேலும் செயல்கள்
+share_musicbrainz = பகிர் (MusicBrainz)
+share_link_copied = MusicBrainz இணைப்பு நகலெடுக்கப்பட்டது
+delete = நீக்கு
+delete_from_device = சாதனத்திலிருந்து நீக்கு
+delete_song = பாடலை நீக்கு
+delete_album = ஆல்பத்தை நீக்கு
+delete_playlist = பிளேலிஸ்ட்டை நீக்கு
+delete_folder = கோப்புறையை நீக்கு
+rename_playlist = பிளேலிஸ்ட்டை மறுபெயரிடு
+rename_folder = கோப்புறையை மறுபெயரிடு
+add_all_to_queue = அனைத்தையும் வரிசையில் சேர்
+add_all_to_playlist = அனைத்தையும் பிளேலிஸ்ட்டில் சேர்
+select_all = அனைத்தையும் தேர்ந்தெடு
+select_all_tracks = அனைத்து தடங்களையும் தேர்ந்தெடு
+deselect_all_tracks = Deselect all tracks
+remove_from_cache = கேஷிலிருந்து அகற்று
+create = உருவாக்கு
+save = சேமி
+minimize = சிறிதாக்கு
+maximize = பெரிதாக்கு
+close = மூடு
+mini_player = மினி பிளேயர்
+restore_full_player = முழு பிளேயரை மீட்டமை
+enabled = இயக்கப்பட்டது
+disabled = முடக்கப்பட்டது
+play = இயக்கு
+shuffle = கலை
+
+# Navigation & Headers
+tracks = தடங்கள்
+albums = ஆல்பங்கள்
+artists = கலைஞர்கள்
+all_albums = அனைத்து ஆல்பங்கள்
+your_library = உங்கள் நூலகம்
+listening_logs = கேட்கும் பதிவுகள்
+browse_genres = வகைகளை உலாவு
+top_artists = சிறந்த கலைஞர்கள்
+new_releases = புதிய வெளியீடுகள்
+
+# Navigation Buttons
+up_next = அடுத்தது
+lyrics = வரிகள்
+track_version = பதிப்பு
+track_version_song = பாடல்
+track_version_video = வீடியோ
+music_video = இசை வீடியோ
+
+# Player/Media
+loading_lyrics = வரிகள் ஏற்றப்படுகிறது...
+lyrics_not_found = வரிகள் கண்டுபிடிக்கப்படவில்லை
+instrumental_break = இசைப் பகுதி
+no_previous_songs = முந்தைய பாடல்கள் இல்லை
+playlist_track_count =
+    { $count ->
+        [one] { $count } தடம்
+       *[other] { $count } தடங்கள்
+    }
+playlist_folder_count =
+    { $count ->
+        [one] { $count } playlist
+       *[other] { $count } playlists
+    }
+playlists_synced_count =
+    { $count ->
+        [one] { $count } playlist synced
+       *[other] { $count } playlists synced
+    }
+playlists_loading_tracks =
+    { $count ->
+        [one] Loading tracks — { $done } / { $count } playlist ({ $remaining } left)
+       *[other] Loading tracks — { $done } / { $count } playlists ({ $remaining } left)
+    }
+music_playlist_count =
+    { $count ->
+        [one] இசை • { $count } தடம்
+       *[other] இசை • { $count } தடங்கள்
+    }
+showcase_song_count =
+    { $count ->
+        [one] { $count } பாடல்
+       *[other] { $count } பாடல்கள்
+    }
+
+# Modal Titles
+add_playlist = பிளேலிஸ்ட் சேர்
+create_new_playlist = புதிய பிளேலிஸ்ட் உருவாக்கு
+playlist_name_placeholder = பிளேலிஸ்ட் பெயர்
+playlist_name_input = பிளேலிஸ்ட் பெயர்
+browser_sign_in_needs_host = உலாவி உள்நுழைவுக்கு ஹோஸ்டை அணுகும் அனுமதி தேவை. கீழே உள்ள கட்டளையை இயக்கி kopuz-ஐ மீண்டும் தொடங்கவும்.
+browser_playback_needs_host = இயக்கம் ஹோஸ்டில் உள்ள உலாவியில் நடைபெறுகிறது, அதை இந்த Flatpak இன்னும் அணுக முடியாது. கீழே உள்ள கட்டளையை இயக்கி kopuz-ஐ மீண்டும் தொடங்கவும்.
+experimental = experimental
+copy = Copy
+media_server = மீடியா சேவையகம்
+saved_servers = சேமிக்கப்பட்ட சேவையகங்கள்
+switch_to_server = மாறு
+active_server = செயலில்
+no_saved_servers = சேமிக்கப்பட்ட சேவையகங்கள் இல்லை
+jellyfin = Jellyfin
+subsonic = Subsonic
+custom_manual = தனிப்பயன் (கைமுறை API)
+server_name_optional = சேவையக பெயர் (விருப்பத்தேர்வு)
+server_url_placeholder = http://localhost:8096
+subsonic_url_placeholder = http://localhost:4533
+nextcloud_url_placeholder = https://cloud.example.com
+nextcloud_help = Point this at your Nextcloud, then sign in with an app password. Your music folders are picked after it connects.
+apple_music_storefront = Storefront
+apple_music_language = Language
+apple_music_paste_token = Paste a media-user-token instead
+apple_music_token = Media user token
+spotify_client_id = Client ID
+spotify_client_id_help = Create an app at developer.spotify.com, add http://127.0.0.1:8898/callback as its redirect URI, and paste its Client ID here. Playback needs a Premium account.
+change = மாற்று
+heart_track_to_add = இயங்கும்போது ஒரு தடத்தை இதயமிட்டு இங்கே சேர்க்கவும்.
+heart_track_to_add_server = இயங்கும்போது ஒரு தடத்தை இதயமிட்டு இங்கே சேர்த்து உங்கள் சேவையகத்துடன் ஒத்திசைக்கவும்.
+
+# Search & Placeholders
+search_placeholder = கலைஞர்கள், ஆல்பங்கள் அல்லது தடங்களைத் தேடு...
+quick_search_placeholder = தேட தட்டச்சு செய்யவும், இயக்க Enter…
+no_results_found = "{ $query }" க்கு முடிவுகள் எதுவும் கண்டுபிடிக்கப்படவில்லை
+listenbrainz_token_placeholder = உங்கள் ListenBrainz டோக்கனை உள்ளிடவும்
+lastfm_api_key_placeholder = உங்கள் Last.fm API விசையை உள்ளிடவும்
+lastfm_api_key_label = API key
+lastfm_api_secret_placeholder = உங்கள் Last.fm API சீக்ரெட்டை உள்ளிடவும்
+lastfm_api_secret_label = API secret
+
+# Empty States
+album_not_found = ஆல்பம் கண்டுபிடிக்கப்படவில்லை
+artist_not_found = Artist not found
+artist_load_failed = Couldn't load this artist: { $error }
+playlist_not_found = பிளேலிஸ்ட் கண்டுபிடிக்கப்படவில்லை
+no_playlists_found = பிளேலிஸ்ட்கள் எதுவும் கண்டுபிடிக்கப்படவில்லை
+no_playlists_yet = இன்னும் பிளேலிஸ்ட்கள் இல்லை. உங்கள் நூலகத்திலிருந்து பாடல்களைச் சேர்க்கவும்!
+add_music_to_get_started = தொடங்க இசையைச் சேர்
+
+# Data Labels
+title = தலைப்பு
+time = நேரம்
+genre = வகை
+plays = இயக்கங்கள்
+track_count =
+    { $count ->
+        [one] { $count } தடம்
+       *[other] { $count } தடங்கள்
+    }
+songs = பாடல்கள்
+min = நிமி
+
+# Error Messages
+invalid_server_url = தவறான சேவையக URL
+server_name_required = சேவையக பெயர் தேவை
+username_and_password_required = பயனர்பெயரும் கடவுச்சொல்லும் தேவை
+login_failed = உள்நுழைவு தோல்வியடைந்தது: { $error }
+apple_music_storefront_required = Apple Music storefront ID-ஐ உள்ளிடவும்.
+apple_music_token_required = Apple Music-இன் media-user-token-ஐ உள்ளிடவும், அல்லது உலாவியில் உள்நுழையவும்.
+spotify_client_id_required = உங்கள் Spotify செயலியின் Client ID-ஐ உள்ளிடவும் (developer.spotify.com இல் உருவாக்கலாம்).
+signin_failed = உள்நுழைவு தோல்வியடைந்தது: { $error }
+error_server_not_configured = சேவையகம் கட்டமைக்கப்படவில்லை அல்லது சான்றுகள் இல்லை
+error_fetch_songs = '{ $album_id }' ஆல்பத்திற்கான பாடல்களைப் பெற முடியவில்லை: { $error }
+unsupported_provider = { $service } கட்டமைக்கப்பட்டுள்ளது, ஆனால் இந்த பக்கம் அந்த வழங்குநருக்கு இன்னும் கிடைக்கவில்லை
+unsupported_provider_desc = { $service } க்கான வழங்குநர் சார்ந்த உலாவல் புதிய சேவையக சுருக்கம் மூலம் சேர்க்கப்படும்
+
+# Additional Keys
+no_genres_found = உங்கள் நூலகத்தில் வகைகள் எதுவும் கண்டுபிடிக்கப்படவில்லை.
+jump_back_in = மீண்டும் தொடரு
+by_artist = எழுதியவர்
+by_artist_full = { $artist } எழுதியது
+start_listening = கேட்கத் தொடங்கு
+listen_now = இப்போது கேள்
+no_albums_found = உங்கள் நூலகத்தில் ஆல்பங்கள் எதுவும் கண்டுபிடிக்கப்படவில்லை.
+no_favorites = இன்னும் பிடித்தவை இல்லை.
+no_tracks_found = தடங்கள் எதுவும் கண்டுபிடிக்கப்படவில்லை.
+unknown_artist = தெரியாத கலைஞர்
+unknown_album = தெரியாத ஆல்பம்
+unknown_title = தெரியாத தலைப்பு
+unknown_genre = தெரியாதது
+no_tracks_in_library = உங்கள் நூலகத்தில் தடங்கள் எதுவும் கண்டுபிடிக்கப்படவில்லை.
+no_songs_here = இங்கே பாடல்கள் இல்லை.
+syncing_with_server = சேவையகத்துடன் ஒத்திசைக்கிறது...
+yt_syncing_progress =
+    { $count ->
+        [one] ஒத்திசைக்கிறது — இதுவரை { $count } தடம் ஏற்றப்பட்டது
+       *[other] ஒத்திசைக்கிறது — இதுவரை { $count } தடங்கள் ஏற்றப்பட்டன
+    }
+yt_synced_total =
+    { $count ->
+        [one] { $count } விரும்பிய தடம் ஒத்திசைக்கப்பட்டது
+       *[other] { $count } விரும்பிய தடங்கள் ஒத்திசைக்கப்பட்டன
+    }
+refresh = புதுப்பி
+discover = கண்டறி
+discover_more_loading = மேலும் ஏற்றுகிறது…
+discover_failed = கண்டறிதலை ஏற்ற முடியவில்லை: { $error }
+discover_show_all = அனைத்தையும் காட்டு
+catalog_page_explore = ஆராய்
+catalog_page_charts = தரவரிசைகள்
+catalog_page_moods = மனநிலைகள் & வகைகள்
+catalog_page_podcasts = பாட்காஸ்ட்கள்
+catalog_page_library_songs = உங்கள் பாடல்கள்
+catalog_page_library_albums = உங்கள் ஆல்பங்கள்
+catalog_page_library_artists = உங்கள் கலைஞர்கள்
+catalog_page_subscriptions = சந்தாக்கள்
+catalog_page_library_podcasts = உங்கள் பாட்காஸ்ட்கள்
+catalog_page_uploads = பதிவேற்றங்கள்
+catalog_page_history = வரலாறு
+search_filter_all = அனைத்தும்
+search_filter_songs = பாடல்கள்
+search_filter_videos = வீடியோக்கள்
+search_filter_community_playlists = சமூகப் பிளேலிஸ்ட்கள்
+search_filter_featured_playlists = சிறப்புப் பிளேலிஸ்ட்கள்
+search_filter_episodes = எபிசோடுகள்
+search_filter_profiles = சுயவிவரங்கள்
+discover_show_more = மேலும் காட்டு
+discover_scroll_back = பின்னோக்கி உருட்டு
+discover_scroll_forward = முன்னோக்கி உருட்டு
+catalog_page_empty = இங்கு இன்னும் எதுவும் இல்லை
+search_prompt = பாடல்கள், ஆல்பங்கள், கலைஞர்கள் மற்றும் பலவற்றைத் தேடுங்கள்
+search_showing_results_for = “{ $query }” க்கான முடிவுகள்
+catalog_like = விருப்பம்
+catalog_unlike = விருப்பத்தை நீக்கு
+catalog_dislike = விருப்பமில்லை
+catalog_undislike = விருப்பமின்மையை நீக்கு
+catalog_save = நூலகத்தில் சேமி
+catalog_unsave = நூலகத்திலிருந்து நீக்கு
+catalog_follow = பின்தொடர்
+catalog_unfollow = பின்தொடர்வதை நிறுத்து
+catalog_following = பின்தொடர்கிறீர்கள்
+catalog_remove_history = வரலாற்றிலிருந்து நீக்கு
+playlist_edit_details = விவரங்களைத் திருத்து
+playlist_description = விளக்கம்
+playlist_privacy = யார் பார்க்கலாம்
+playlist_privacy_public = பொது
+playlist_privacy_unlisted = பட்டியலிடப்படாதது
+playlist_privacy_private = தனிப்பட்டது
+playlist_delete_title = இந்த பிளேலிஸ்டை நீக்கவா?
+playlist_delete_body = “{ $name }” { $service }-இலிருந்து நிரந்தரமாக நீக்கப்படும்.
+playlist_unsave_title = உங்கள் நூலகத்திலிருந்து நீக்கவா?
+playlist_unsave_body = “{ $name }” உங்கள் { $service } நூலகத்திலிருந்து நீங்கும். பிளேலிஸ்ட் { $service }-இல் இருக்கும்.
+source_anon_playlists = உங்கள் நூலக பிளேலிஸ்ட்களைக் காண YouTube Music இல் உள்நுழையவும்.
+source_anon_favorites = உங்கள் விரும்பிய பாடல்களைக் காண YouTube Music இல் உள்நுழையவும்.
+source_anon_discover = கண்டறி பகுதியை உலாவ YouTube Music இல் உள்நுழையவும்.
+artist_none_selected = கலைஞர் தேர்ந்தெடுக்கப்படவில்லை
+most_played_tracks = நீங்கள் அதிகம் இயக்கிய தடங்கள்.
+no_more_songs = வரிசையில் மேலும் பாடல்கள் இல்லை
+server_playlist = சேவையக பிளேலிஸ்ட்
+folder_playlists = கோப்புறை பிளேலிஸ்ட்கள்
+folder_playlist = கோப்புறை
+featured_album = சிறப்பு ஆல்பம்
+continue_listening = கேட்பதைத் தொடர்
+music = இசை
+made_for_you = உங்களுக்காக உருவாக்கப்பட்டது
+recently_added = சமீபத்தில் சேர்க்கப்பட்டது
+customize_home = முகப்பைத் தனிப்பயனாக்கு
+done_editing = முடிந்தது
+reset_home = மீட்டமை
+hide_section = மறை
+show_section = காட்டு
+move_up = மேலே நகர்த்து
+move_down = கீழே நகர்த்து
+home_section_catalog = பரிந்துரைகள்
+home_section_hero = ஹீரோ
+home_section_continue_listening = கேட்பதைத் தொடர்
+home_section_listen_now = இப்போது கேள்
+home_section_top_artists = சிறந்த கலைஞர்கள்
+home_section_new_releases = புதிய வெளியீடுகள்
+home_section_made_for_you = உங்களுக்காக உருவாக்கப்பட்டது
+home_section_recently_added = சமீபத்தில் சேர்க்கப்பட்டது
+home_section_playlists = பிளேலிஸ்ட்கள்
+layout_cards = கார்டுகள்
+layout_list = பட்டியல்
+listen_now_layout = தளவமைப்பு
+ui_style = UI பாணி
+ui_normal = சாதாரண
+ui_vaxry = Vaxry
+ui_material3 = Material 3
+system_colors = கணினி நிறங்கள்
+player_bar_position = பிளேயர் பட்டை நிலை
+position_bottom = கீழே
+position_top = மேலே
+shuffle_on = கலை: ஆன்
+shuffle_off = கலை: ஆஃப்
+repeat_off = மீண்டும்: ஆஃப்
+repeat_queue = மீண்டும்: வரிசை
+repeat_track = மீண்டும்: தடம்
+rescan_library = நூலகத்தை மீண்டும் ஸ்கேன் செய்
+refresh_music_library = இசை நூலகத்தைப் புதுப்பி
+listenbrainz = ListenBrainz
+lastfm = Last.fm
+enable_tracing = செயல்திறன் ட்ரேசிங்கை இயக்கு
+tracing_warning = ரன்டைம் மேல்நிலையைச் சேர்க்கிறது மற்றும் ட்ரேஸ் கோப்பு வளர்கிறது; மறுதொடக்கத்திற்குப் பிறகு நடைமுறைக்கு வரும்.
+export_logs = பதிவுகளை ஏற்றுமதி செய்
+open_logs_folder = பதிவு கோப்புறையைத் திற
+librefm = Libre.fm
+album_art_gradient = ஆல்பம் கலை சாய்வு
+default_theme = இயல்புநிலை
+gruvbox_material = Gruvbox Material
+gruvbox_classic = Gruvbox Classic
+gruvbox_dark_soft = Gruvbox Dark Soft
+dracula = Dracula
+nord = Nord
+catppuccin_mocha = Catppuccin Mocha
+ef_night = Ef Night
+ayu_dark = Ayu Dark
+ayu_mirage = Ayu Mirage
+vague = Vague
+one_dark_pro = One Dark Pro
+osmium = Osmium
+kanagawa_dragon = Kanagawa Dragon
+everforest = Everforest
+rosepine = Rosé Pine
+default_light = இயல்புநிலை ஒளி
+amoled_black = AMOLED கருப்பு
+catppuccin_latte = Catppuccin Latte
+rosepine_dawn = Rosé Pine Dawn
+everforest_light = Everforest Light
+ayu_light = Ayu Light
+one_light = One Light
+gruvbox_light_soft = Gruvbox Light Soft
+
+# Theme Editor
+new_theme = புதிய தீம்
+theme_name = தீம் பெயர்
+my_custom_theme = எனது தனிப்பயன் தீம்
+theme_group_dynamic = டைனமிக்
+theme_group_dark = இருண்ட
+theme_group_light = ஒளி
+theme_group_custom = தனிப்பயன்
+colors = நிறங்கள்
+preview = முன்னோட்டம்
+save_theme = தீமைச் சேமி
+track_title = தட தலைப்பு
+
+# Color Labels
+bg = பின்னணி
+raised = உயர்த்தப்பட்ட மேற்பரப்பு
+surface = மேற்பரப்பு
+text = உரை
+text-muted = மங்கிய உரை
+accent = அழுத்தம்
+accent-soft = மென் அழுத்தம்
+accent-alt = மாற்று அழுத்தம்
+accent-deep = ஆழ்ந்த அழுத்தம்
+highlight = சிறப்பம்சம்
+highlight-dark = இருண்ட சிறப்பம்சம்
+progress = முன்னேற்றம்
+danger = ஆபத்து
+equalizer = ஈக்வலைசர்
+eq_preset = முன்னமைவு
+eq_preamp = ப்ரீஆம்ப்
+eq_preamp_desc = EQ வளைவுக்கு முன் ஹெட்ரூம்
+eq_graph_hint = ஒரு பட்டையை சரிசெய்வது முன்னமைவை தனிப்பயனாக மாற்றுகிறது.
+eq_preset_flat = தட்டை
+eq_preset_bass_boost = பாஸ் பூஸ்ட்
+eq_preset_treble_boost = ட்ரெபிள் பூஸ்ட்
+eq_preset_vocal_boost = குரல் பூஸ்ட்
+eq_preset_loudness = ஒலி அளவு
+eq_preset_custom = தனிப்பயன்
+replay_gain = ஒலியளவு சீரமைப்பு
+replay_gain_mode_off = அணைக்கப்பட்டது
+replay_gain_mode_track = தடம்
+replay_gain_mode_album = ஆல்பம்
+replay_gain_mode_auto = தானியங்கி
+replay_gain_prevent_clipping = ஒலிச் சிதைவைத் தடு
+replay_gain_preamp = முன் பெருக்கம்
+replay_gain_fallback = இயல்புநிலைப் பெருக்கம்
+replay_gain_youtube_loudness = YouTube Music ஒலியளவைச் சீரமை
+move_to_folder = கோப்புறைக்கு நகர்த்து
+no_folders_yet = இன்னும் கோப்புறைகள் இல்லை.
+folder_name = கோப்புறை பெயர்...
+new_folder = புதிய கோப்புறை
+remove_from_folder = கோப்புறையிலிருந்து அகற்று
+back_behavior = பின் பொத்தான் நடத்தை
+back_behavior_rewind = ரிவைண்ட் → முந்தைய
+back_behavior_always_prev = எப்போதும் முந்தைய
+
+metadata = மெட்டாடேட்டா
+auto_fetch_covers = ஆல்பம் கவர்களைத் தானாகப் பெறு
+prefer_local_lyrics = உள்ளூர் வரிகளை விரும்பு (.lrc / உட்பொதிந்த, ஆன்லைன் மாற்று இல்லை)
+enable_musixmatch_lyrics = Musixmatch வரிகள் மாற்றைப் பயன்படுத்து
+lyrics_depth_blur = செயலில் உள்ள வரியிலிருந்து உள்ள தூரத்திற்கு ஏற்ப பாடல் வரிகளை மங்கலாக்கு
+lyrics_depth_blur_strength = பாடல் வரிகள் மங்கல் அளவு
+lyrics_offset = பாடல் வரிகள் நேர மாற்றம்
+lyrics_offset_auto = பாடல் வரிகள் நேர மாற்றத்தை தானாகக் கண்டறி
+cover_fetch_strategy = கவர் பெறும் உத்தி
+musicbrainz_first = MusicBrainz முதலில்
+lastfm_first = Last.fm முதலில்
+musicbrainz_only = MusicBrainz மட்டும்
+lastfm_only = Last.fm மட்டும்
+remove_cover = கவரை அகற்று
+
+# Radio Page
+radio_filter_stations = நிலையங்களை வடிகட்டு…
+radio_search_stations = நிலையங்களைத் தேடு…
+radio_selected = தேர்ந்தெடுக்கப்பட்டவை
+radio_top_stations = பிரபலமான நிலையங்கள்
+radio_search_results = தேடல் முடிவுகள்
+radio_powered_by = radio-browser.info மூலம் இயங்குகிறது
+radio_loading_stations = நிலையங்கள் ஏற்றப்படுகின்றன…
+radio_search_failed = radio-browser.info-ஐ அணுக முடியவில்லை
+radio_subtitle = நேரடி இணைய வானொலி ஸ்ட்ரீம்களைக் கேள்
+radio_no_stations_match = உங்கள் தேடலுடன் பொருந்தும் நிலையங்கள் இல்லை
+radio_station_col = நிலையம்
+radio_description_col = விளக்கம்
+radio_streams_col = ஸ்ட்ரீம்கள்
+radio_listen_moe_desc = அனிமே மற்றும் கொரிய பாப் இசை, 24/7.
+radio_j1_desc = ஜப்பானிலிருந்து தற்போதைய சார்ட் ஹிட்கள் மற்றும் கிளாசிக் பாடல்கள்.
+radio_doujinstyle_desc = Doujin இசை, வீடியோ கேம் ஒலித்தடங்கள், மேலும் பல.
+radio_vocaloid_desc = ஜப்பானிலிருந்து Vocaloid ஹிட்கள். நாங்கள் அனைத்தையும் இயக்குகிறோம்!
+radio_asiadreamradio_desc = J-Pop இசையின் இதயம் - J-Pop, J-Rock, J-HipHop, J-Jazz, கிளாசிக்ஸ்.
+radio_live_stream = நேரடி ஸ்ட்ரீம்
+
+# Radio Registries
+radio_registry_url_placeholder = index.json க்கான URL அல்லது உள்ளூர் பாதை
+add_radio_registry = வானொலி பதிவகத்தைச் சேர்
+radio_default_registry = இயல்புநிலை பதிவகம்
+
+radio_registry_empty_path = பதிவக பாதை காலியாக இருக்க முடியாது
+radio_registry_exists = பதிவகம் ஏற்கனவே உள்ளது
+radio_registry_import_failed = பதிவகத்தை இறக்குமதி செய்ய முடியவில்லை: { $error }
+radio_registry_enable_failed = பதிவகத்தை இயக்க முடியவில்லை: { $error }
+radio_registries_active = { $enabled_count }/{ $total } செயலில்
+radio_registries_empty = பதிவகங்கள் எதுவும் கட்டமைக்கப்படவில்லை
+offline_downloads = ஆஃப்லைன் பதிவிறக்கங்கள்
+download_quality = பதிவிறக்க தரம்
+saving = சேமிக்கிறது...
+
+# Metadata Viewer / Editor
+view_metadata = மெட்டாடேட்டாவைக் காண்
+edit_metadata = மெட்டாடேட்டாவைத் திருத்து
+edit = திருத்து
+track_number = தடம் #
+disc_number = வட்டு #
+disc_heading = வட்டு { $number }
+duration = கால அளவு
+sample_rate = மாதிரி விகிதம்
+bitrate = பிட்ரேட்
+musicbrainz_release = MusicBrainz வெளியீடு
+musicbrainz_recording = MusicBrainz பதிவு
+musicbrainz_track = MusicBrainz தடம்
+path = பாதை
+add_photo = புகைப்படத்தைச் சேர்
+change_photo = புகைப்படத்தை மாற்று
+remove_photo = புகைப்படத்தை அகற்று
+metadata_edit_warning = காலியான புலங்கள் அந்த குறிச்சொல்லை அகற்றும். நேரடியாக கோப்பில் எழுதப்படுகிறது — செயல்தவிர்ப்பு இல்லை.
+
+sort_by = வரிசைப்படுத்து
+sort_then = பிறகு
+sort_none = வரிசை இல்லை
+sort_add_criterion = அளவுகோலைச் சேர்
+sort_remove = அகற்று
+sort_ascending = ஏறுவரிசை
+sort_descending = இறங்குவரிசை
+sort_field_title = தலைப்பு
+sort_field_artist = கலைஞர்
+sort_field_year = ஆண்டு
+sort_field_genre = வகை
+sort_field_album = ஆல்பம்
+sort_field_duration = கால அளவு
+sort_field_date_added = சேர்க்கப்பட்ட தேதி
+sort_field_name = பெயர்
+sort_field_tracks = தடங்கள்
+sort_field_albums = ஆல்பங்கள்
+view_grid = கட்டக் காட்சி
+view_list = பட்டியல் காட்சி
+playback_browser = Spotify பிளேபேக் உலாவி
+playback_browser_auto = தானியங்கி
+spotify_connect_device = Spotify இயக்க சாதனம்
+spotify_connect_device_other = வேறு சாதனம்
+spotify_connect_device_this = இந்த ஆப்
+external_play_on = இதில் இயக்கு
+external_this_app = kopuz (இந்த ஆப்)
+prefer_active_device = Playback device
+prefer_active_device_help = When another device is already playing, take it over instead of starting playback here.
+settings_managed_notice = Some settings are set by a settings file the app can't write (read-only, or managed by Nix/hjem) and can't be changed here.
+setting_managed_by_system = கணினி உள்ளமைவால் நிர்வகிக்கப்படுகிறது
+settings_dropin_notice = Some settings are set by drop-in files and can't be changed here.
+settings_env_notice = Some settings are set by KOPUZ_CONFIG_* environment variables and can't be changed here.
+setting_locked_by_file = Set by { $path }
+setting_locked_by_dropin = Set by a drop-in, { $path }
+setting_locked_by_env = Set by { $var }
+
+settings_interface = Interface
+interface_general = General
+interface_motion = Motion
+interface_motion_description = How much the interface animates.
+interface_motion_full = Full
+interface_motion_reduced = Reduced
+interface_motion_off = Off
+interface_accent = Accent from artwork
+interface_accent_description = Tint the player with colour taken from the current cover.
+interface_accent_on = Everywhere
+interface_accent_sheet = Now playing only
+interface_accent_off = Off
+interface_scale = Interface size
+interface_scale_description = Scales text and controls across the whole app.
+
+choose = Choose
+daemon_unreachable = Can't reach the kopuz daemon
+download_offline = ஆஃப்லைனில் பதிவிறக்கு
+go_to_album = ஆல்பத்திற்குச் செல்
+go_to_artist = கலைஞருக்குச் செல்
+new_playlist_name = New playlist name
+playlist_name_required = Playlist name is required
+remove_download = பதிவிறக்கத்தை அகற்று
+settings_connectivity = Connectivity
+settings_customization = Appearance
+settings_general = General
+settings_library = Library
+settings_metadata = Metadata
+settings_offline = Offline Downloads
+settings_player = Player
+settings_tools = Tools
+share = Share
+share_copied = Copied link
+share_no_page = Couldn't find a page for this track
+explicit = Explicit
+
+first_run_title = Welcome to Kopuz
+first_run_subtitle = Point Kopuz at your music and it takes care of the rest.
+first_run_step_source = Source
+first_run_step_connect = Connect
+first_run_step_scan = Scan
+first_run_server = Media server
+first_run_server_detail = Jellyfin, Subsonic, Navidrome or Nextcloud
+first_run_streaming = Streaming service
+first_run_streaming_detail = YouTube Music, SoundCloud, Apple Music or Spotify
+first_run_scan = Scan my library
+first_run_server_title = Choose a media server
+first_run_server_hint = Pick a service and Kopuz will ask for what it needs.
+first_run_streaming_title = Choose a streaming service
+first_run_streaming_hint = Signing in opens your browser; Kopuz never sees your password.
+first_run_no_services = No services available
+first_run_sync_title = Building your library
+first_run_sync_hint = This runs in the background. Tracks appear as they are found.
+first_run_waiting_sign_in = Waiting for you to finish signing in…
+first_run_progress = { $current } of { $total }
+first_run_go_to_library = Go to library
+first_run_back = Back
+first_run_skip = Skip for now
+
+play_pause = Play/Pause
+next_track = Next Track
+previous_track = Previous Track
+seek_forward = Seek Forward
+seek_backward = Seek Backward
+volume_up = Volume Up
+volume_down = Volume Down
+toggle_mute = Mute
+toggle_fullscreen = Fullscreen Player
+command_palette = Command Palette
+filter_view = Filter
+go_back = பின்செல்
+go_forward = Forward
+keyboard_shortcuts = Keyboard Shortcuts
+
+settings_search = Search settings
+settings_unavailable = Settings aren't available
+settings_unavailable_hint = Kopuz hasn't read the daemon's configuration yet.
+setting_saved = Saved
+secret_saved = saved ••••
+waiting_for_browser = Waiting for your browser…
+signed_in = Signed in
+metadata_number_invalid = Enter a number, or leave it empty to clear the tag.
+metadata_batch_keep = Leave unchanged
+metadata_batch_count =
+    { $count ->
+        [one] Editing { $count } track
+       *[other] Editing { $count } tracks
+    }
+interface_font = Interface font
+interface_font_description = The font family to draw the interface with.
+interface_font_placeholder = Theme default
+theme_description = The colour palette the whole app is drawn with.
+auto_check_updates_description = Look for a new Kopuz release on startup.
+minimize_to_tray_description = Closing the window keeps Kopuz running in the tray.
+back_behavior_description = What the back button does partway through a track.
+cover_art_background_description = Use the current cover as the window background.
+cover_art_background_off = Off
+cover_art_background_cover = Cover
+cover_art_background_blurred = Blurred
+custom_background_description = An image to use instead of the cover art background.
+custom_font_description = A font file to load and draw the interface with.
+reduce_animations_description = Cut transitions and motion across the app.
+show_source_toggle_description = Put the source switcher in the chrome.
+show_row_images_description = Draw cover thumbnails in track and album lists.
+download_quality_description = The bitrate downloads are saved at, where the source offers a choice.
+prefer_local_lyrics_description = Use .lrc files and embedded lyrics only; never ask a lyrics service.
+enable_musixmatch_lyrics_description = Fall back to Musixmatch when a track has no local lyrics.
+lyrics_offset_description = Shift the lyrics against the audio, in milliseconds.
+lyrics_offset_auto_description = Shift by the engine's measured output latency, currently { $latency } ms.
+crossfade_description = Overlap the end of one track with the start of the next.
+volume_scroll_step_description = How far one scroll over the volume control moves it.
+channel_mode_description = Remap the output channels, for one speaker or a broken headphone.
+device_change_behavior_description = What playback does when the audio output device changes.
+sample_rate_mode_description = Resample to the system rate, or follow each track's own.
+equalizer_description = A gain curve applied to everything that plays.
+enable_tracing_description = Write a performance trace for diagnosing slowness.
+
+interface_nav = Navigation
+interface_nav_position = Navigation bar
+interface_nav_position_description = Where the destinations sit.
+interface_nav_position_top = Across the top
+interface_nav_position_left = Down the left
+interface_nav_start = Opens on
+interface_nav_start_description = The destination the app shows when it starts.
+interface_panel = Playlists panel
+interface_panel_shown = Show the panel
+interface_panel_shown_description = A column of your playlists and folders, left of the content.
+interface_panel_width = Panel width
+interface_panel_width_description = How wide the panel opens; dragging its edge also sets this.
+toggle_playlists_panel = Playlists panel
+
+palette_placeholder = Search, or type > for commands
+palette_mode_commands = Commands
+palette_mode_artists = Artists
+palette_mode_albums = Albums
+palette_mode_playlists = Playlists
+palette_current_track = Current track · { $title }
+palette_recent_commands = Recent
+palette_recent_searches = Recent searches
+palette_commands = Commands
+palette_navigate = Go to
+palette_empty = Type to search, or > @ # : to narrow
+palette_hint_move = Move
+palette_hint_open = Open
+palette_hint_actions = Actions
+palette_hint_close = Close
+interface_palette = Command palette
+palette_history = Remember recent commands and searches
+palette_history_description = An empty palette offers what was used last.
+palette_recents = How many to remember
+palette_recents_description = Beyond this, the oldest is forgotten.
+palette_recents_count = { $count }
+palette_current_track_first = Current track actions first
+palette_current_track_first_description = While something is playing, its own verbs lead the list.
+
+downloads = Downloads
+notifications = Notifications
+activity_idle = Nothing running
+downloads_idle = No downloads yet
+notifications_empty = No notifications yet
+stop = Stop
+stopping = Stopping…
+starting = Starting…
+clear = Clear
+retry_failed = Retry failed
+retry_now = Retry now
+view = View
+undo = Undo
+quit = Quit
+menu_hide = Hide { $app }
+menu_hide_others = Hide Others
+menu_show_all = Show All
+menu_services = Services
+menu_quit = Quit { $app }
+menu_window = Window
+menu_zoom = Zoom
+menu_toggle_full_screen = Toggle Full Screen
+redo = Redo
+cut = Cut
+paste = Paste
+scanning_library = Scanning library…
+network_offline_banner = No internet connection — switched to offline mode
+network_online_banner = Back online — switched to server mode
+keep_server_mode = Keep server mode
+tray_show_hide = Show / Hide Kopuz
+tray_quit = Quit Kopuz
+tray_unavailable_title = Tray icon unavailable
+tray_unavailable_message = System tray unavailable: appindicator library not found. Install libayatana-appindicator (Debian/Ubuntu/Arch) or libappindicator-gtk3 (Fedora). Closing the window will quit the app instead of minimizing to tray.
+reconnecting_attempt = Reconnecting… (attempt { $attempt })
+downloads_summary = { $done } downloaded, { $failed } failed
+job_scan = Library scan
+job_library_sync = Library sync
+job_favorites_sync = Favorites sync
+job_playlist_sync = Playlist sync
+job_download = Downloading tracks
+job_url_download = URL download
+job_audio_rip = Disc rip
+job = Background job
+job_finished = { $job } finished
+job_failed = { $job } failed
+job_done = Finished
+job_stopped = Stopped
+removed_from_queue = Removed "{ $title }" from the queue
+unfavorited_count = Removed { $count } from Favorites
+track_removed_from_playlist = Removed from the playlist
+interface_notifications = Notifications
+interface_notifications_errors = Error toasts
+interface_notifications_errors_description = Errors interrupt with a toast. They always land in the notification centre.
+interface_notifications_job_description = Toast when this finishes, or only list it in the notification centre.
+
+now_playing = Now playing
+pause = Pause
+playing_from = Playing from
+queue_history = History
+queue_now = Now playing
+queue_next_up = Next up
+clear_upcoming = Clear what's next
+cleared_upcoming = Cleared { $count } from the queue
+shuffle_upcoming = Shuffle what's next
+save_queue_as_playlist = Save queue as a playlist
+related = Related
+related_soon = Related tracks are not here yet
+playback_extras = Playback
+sleep_timer = Sleep timer
+playback_speed = Playback speed
+interface_player = Player bar
+interface_player_cover = Cover size
+interface_player_cover_description = How large the cover is drawn in the bar.
+interface_player_cover_small = Small
+interface_player_cover_medium = Medium
+interface_player_cover_large = Large
+interface_player_shuffle = Show shuffle
+interface_player_repeat = Show repeat
+interface_player_volume = Show volume
+interface_player_queue = Show the queue button
+interface_player_lyrics = Show the lyrics button
+interface_player_favorite = Show the favourite button
+interface_sheet = Now playing
+interface_sheet_tab = Opens on
+interface_sheet_tab_description = The tab the now-playing sheet shows first.
+interface_sheet_side = Panel side
+interface_sheet_side_description = Which side of the sheet the queue and lyrics sit on.
+interface_sheet_side_left = Left
+interface_sheet_side_right = Right
+interface_queue_style = Queue style
+interface_queue_style_description = Sections folds away what has played and jumps back to the top on a new song. Classic is one list that keeps the playing song in view, like the old right bar.
+interface_queue_style_sections = Sections
+interface_queue_style_classic = Classic
+interface_sheet_backdrop = Backdrop
+interface_sheet_backdrop_description = What is behind the sheet.
+interface_sheet_backdrop_artwork = The cover
+interface_sheet_backdrop_palette = Colour from the cover
+interface_sheet_backdrop_solid = Nothing
+
+discover_search_hint = Search everything
+discover_clear_search = Clear search
+discover_results_for = Results for "{ $query }"
+discover_no_results_hint = Try fewer words, or switch source and look again.
+discover_show_less = Show less
+discover_genre_count =
+    { $count ->
+        [one] { $count } genre
+       *[other] { $count } genres
+    }
+discover_read_failed = Couldn't load your library: { $error }
+palette_all_results = All results for "{ $query }" in Discover
+
+library_count =
+    { $count ->
+        [one] { $count } item
+       *[other] { $count } items
+    }
+library_filter_placeholder = Filter the library…
+library_chip_downloaded = Downloaded
+library_chip_years = Years
+library_chip_folder = Folder
+library_chip_any = Any
+library_group_by = Group by
+library_group_none = None
+library_group_unknown = Unknown
+library_columns = Columns
+library_column_plays = Plays
+library_column_format = Format
+library_density = Row height
+library_density_description = How much room each row is given.
+library_density_compact = Compact
+library_density_comfortable = Comfortable
+library_tile_size = Tile size
+library_tile_size_description = How big the tiles in a grid are drawn.
+library_tile_small = Small
+library_tile_medium = Medium
+library_tile_large = Large
+library_default_view = Grids open as
+library_default_view_description = Whether albums, artists and playlists start as tiles or as rows.
+library_artist_tracks =
+    { $count ->
+        [one] { $count } track
+       *[other] { $count } tracks
+    }
+library_selected = { $count } selected
+library_whole_selection = Everything that matches
+library_read_failed = Could not read the library
+library_no_matches = Nothing matches those filters
+library_no_matches_detail = Take a chip off, or change what you typed.
+library_empty_signed_out = Sign in to see this library
+library_sign_in = Sign in
+library_empty_no_folder = No music folder yet
+library_empty_no_folder_detail = Point Kopuz at a folder and it will scan what is in it.
+library_add_folder = Add a music folder
+library_empty_not_synced = Nothing here yet
+library_empty_not_synced_detail = Pull the library from the server to fill it.
+interface_library = Library
+playlist_empty = This playlist is empty
+playlist_empty_detail = Add tracks to it from anywhere in the library.
+
+home_continue = Continue
+home_queue_left = { $count } left
+recently_played = Recently played
+
+shortcuts_playback = Playback
+shortcuts_queue = Queue
+shortcuts_app = App
+shortcuts_editor_hint = Choose a shortcut to change it, then press the keys you want. Escape cancels.
+shortcuts_recording = Press a key…
+shortcuts_unbound = Not bound
+shortcuts_conflict = { $key } is already { $command }.
+theme_unsaved_title = Unsaved theme changes
+theme_unsaved_body = Switching themes now throws away the colours you changed.
+discard_changes = Discard
+
+downloader_add_url = Add a URL…
+downloader_url_title = Download from a URL
+downloader_history = URL downloads
+
+interface_skin = Skin
+interface_skin_description = The shape of the interface: how round things are, how tall a row sits.
+
+home_plays =
+    { $count ->
+        [one] { $count } play
+       *[other] { $count } plays
+    }
+
+interface_ambient = Ambient light
+interface_ambient_description = Let the current cover cast its colour across the window.
+interface_ambient_glow = Glow
+interface_ambient_full = Whole window
+
+daemon_older = The background service is older than this app. Update it or restart it.
+daemon_newer = Kopuz was updated while it was open. Restart it to finish updating.
+
+sign_in_with_webview = Sign in within Kopuz
+webview_sign_in_help = Sign-in opens inside Kopuz. Close the sign-in window to cancel.
+
+settings_group_app = ஆப்
+settings_group_playback = இயக்கம்
+settings_group_services = சேவைகள்
+settings_group_theme = தீம்
+settings_group_background = பின்னணி
+settings_group_interface = இடைமுகம்
+settings_group_output = வெளியீடு
+settings_group_loudness = ஒலி அளவு
+browse = உலாவு
+
+clippsly_help = Create an App Password at clippsly.app, then sign in with your Clippsly username and that App Password. Storage limits are set by your Clippsly account.
+cloud_storage_usage = Cloud storage: { $used } of { $total } used
+upload_music = Upload music
+uploading_music = Uploading { $name }…
+music_uploaded =
+    { $count ->
+        [one] Uploaded { $count } file.
+       *[other] Uploaded { $count } files.
+    }
+music_upload_too_large = Audio files must be no larger than 500 MiB.
+cloud_storage_loading = Loading storage usage…
+
+smb_url_placeholder = smb://nas/Music
+smb_help = Connect to an SMB 2/3 share or subfolder, then sign in with your NAS account. Domain accounts can use DOMAIN\username. Files are read without mounting the share.
+invalid_smb_url = Enter smb://host/share or smb://host/share/folder, without credentials in the URL.
+
+browser_sessions_heading = ஏற்கெனவே உள்நுழைந்துள்ளீர்கள்
+browser_sessions_checking = உங்கள் உலாவிகளைச் சரிபார்க்கிறது…
+browser_session_name = { $browser } · { $profile }
+browser_session_use = பயன்படுத்து
+browser_session_importing = உள்நுழைகிறது…
+browser_session_help = நீங்கள் தேர்ந்தெடுக்கும் உலாவி சுயவிவரத்திலிருந்து Kopuz அமர்வை நகலெடுக்கிறது. உலாவி திறந்தே இருக்கலாம்.
+
+playback_error_session_expired = { $source } இல் உங்கள் உள்நுழைவு காலாவதியாகிவிட்டது. தொடர்ந்து இயக்க மீண்டும் உள்நுழையவும்.
+playback_error_challenged = நீங்கள் போட் அல்ல என்பதை { $source } சரிபார்க்க விரும்புகிறது. சில நிமிடங்கள் காத்திருந்து மீண்டும் முயலவும்.
+playback_error_refused = இந்தத் தடத்தை இயக்க { $source } மறுத்தது. உங்கள் உள்நுழைவு சரியாக உள்ளது: சிக்கல் { $source } பக்கத்தில் உள்ளது, பொதுவாக அது தானாகவே சரியாகிவிடும்.
+playback_error_unreachable = { $source } ஐ அடைய முடியவில்லை. உங்கள் இணைப்பைச் சரிபார்த்து மீண்டும் முயலவும்.
+playback_error_unavailable = இந்தத் தடத்தை { $source } ஆல் இயக்க முடியாது. அது நீக்கப்பட்டிருக்கலாம், தனிப்பட்டதாக்கப்பட்டிருக்கலாம் அல்லது உங்கள் பகுதியில் தடுக்கப்பட்டிருக்கலாம்.
+playback_sign_in_again = மீண்டும் உள்நுழை
+playback_try_again = மீண்டும் முயல்
+playback_skip = தடத்தைத் தவிர்
+playback_copy_details = விவரங்களை நகலெடு
+playback_details_copied = விவரங்கள் நகலெடுக்கப்பட்டன
+source_signed_out = ● வெளியேறியது
+source_not_responding = ● பதிலளிக்கவில்லை
+connection_test = இணைப்பைச் சோதி
+connection_testing = சோதிக்கிறது…
+connection_test_failed = சோதனையை இயக்க முடியவில்லை: { $error }
+connection_copy_report = அறிக்கையை நகலெடு
+connection_report_copied = அறிக்கை நகலெடுக்கப்பட்டது
+connection_step_reach = சேவையை அடைய முடிகிறது
+connection_step_session = உள்நுழைவு ஏற்கப்பட்டது
+connection_step_signed_in_playback = உங்கள் கணக்குடன் இயங்குகிறது
+connection_step_anonymous_playback = கணக்கு இல்லாமல் இயங்குகிறது
+connection_step_playback_token = இயக்க டோக்கன்
+connection_step_passed = தேர்ச்சி
+connection_step_failed = தோல்வி
+connection_step_skipped = தவிர்க்கப்பட்டது
+
+sync_interval = Sync and rescan every
+sync_interval_never = Never
+sync_interval_minutes = { $count } min
+sync_interval_hours = { $count } h
+sync_interval_days = { $count } d
+
+error_setting_locked = A managed settings file pins this setting, so it cannot be changed here.
+error_connect_not_offered = This integration does not connect that way.
+error_api_key_missing = Set the API key and secret first.
+error_sign_in_not_started = The service did not start the sign-in. Check the API key and your connection.
+error_browser_not_opened = Could not open a browser for the sign-in.
+error_sign_in_timed_out = The sign-in was not approved in time.
+error_browser_profile_gone = That browser profile is no longer there.
+error_browser_cookies_unreadable = Could not read the cookies of that browser profile.
+error_browser_profile_signed_out = That browser profile is not signed in to the service. Sign in there, or paste your token instead.
+error_browser_profile_no_token = The service did not show a token for that profile. Paste it instead.
+error_integration_unreachable = Could not reach the service. Check your connection.
+error_credential_rejected = The service does not accept that token. Paste your token instead.
+error_default_source_undeletable = The default folder source cannot be deleted.
+error_empty_source_folder = A source folder cannot be empty.
+error_code_invalid_input = Not accepted: { $detail }
+error_code_not_found = That is no longer there.
+error_code_conflict = Already in use or in progress: { $detail }
+error_code_source_auth_expired = The source did not accept the sign-in. Sign in again in Settings.
+error_code_source_unreachable = The source could not be reached. Check your connection.
+error_code_unsupported = Not supported here: { $detail }
+error_code_internal = Something went wrong: { $detail }
+error_code_source_challenged = The source wants to check that you're not a bot. Wait a few minutes and try again.
+error_code_source_refused = The source refused the request. This is on its side and usually clears up on its own.
+error_code_item_unavailable = The source can't play this. It may have been removed, made private or blocked in your region.
+copy_image = Copy image
+save_image = Save image…
+image_copied = Image copied
+image_saved = Image saved
+image_copy_failed = Couldn't copy the image: { $error }
+image_save_failed = Couldn't save the image: { $error }
+for_you = For you
+service_summary_folders = Music files on this computer or a mounted drive
+service_summary_jellyfin = Music from your own Jellyfin server
+service_summary_subsonic = Navidrome, Airsonic or a Subsonic server of your own
+service_summary_custom = Any other server with a Subsonic-compatible API, at the address you enter
+service_summary_ytmusic = YouTube Music's catalog, plus your library and likes when you sign in
+service_summary_soundcloud = Tracks, playlists and likes from your SoundCloud account
+service_summary_applemusic = Apple Music's catalog and your library; playback needs a subscription
+service_summary_spotify = Your Spotify library, played through Spotify in a browser; needs Premium
+service_summary_nextcloud = Music files stored in your Nextcloud
+service_summary_clippsly = Music you upload to your Clippsly cloud locker, streamed back from there
+service_summary_smb = Music files on a network share (SMB), read without mounting it
+onboarding_welcome_blurb = Kopuz plays the music on this computer, on your own server and on your streaming services, all from one place.
+onboarding_desktop_library_note = If you use the Kopuz desktop app, your library is already here
+onboarding_privacy_title = Privacy
+onboarding_privacy_discord = Discord presence shows the song you're playing on your Discord profile.
+onboarding_privacy_updates = Update checks ask GitHub for the newest Kopuz release when the app starts.
+onboarding_privacy_watch_history = YouTube watch history adds the songs you play here to your YouTube history, which shapes its recommendations.
+onboarding_ready_summary =
+    { $tracks ->
+        [one] { $tracks } track
+       *[other] { $tracks } tracks
+    }, { $albums ->
+        [one] { $albums } album
+       *[other] { $albums } albums
+    }
+onboarding_start_listening = Start listening
+onboarding_run_again = Run setup again
+onboarding_probe_found =
+    { $count ->
+        [one] Found { $count } track
+       *[other] Found { $count } tracks
+    }
+onboarding_probe_empty = No music found in this folder
+onboarding_probe_unreachable = Can't reach { $url }
+onboarding_step = Step { $current } of { $total }
+edit_url = Edit URL
+continue = Continue
+onboarding_group_local = On this computer
+tips_title = A few things to know
+tips_search = searches everything and runs commands
+tips_now_playing = Click the cover in the player bar to open Now Playing
+tips_source_switcher = Switch between your sources from the menu in the top bar
+daemon_down_title = Kopuz needs its background service
+daemon_not_answering = A Kopuz daemon is already running but not answering. Quit it, then retry.
+retry = Retry
+connectivity_check_urls = Connectivity checks
+connectivity_check_urls_description = Addresses asked when a source stops answering, to tell a dropped connection from a server that is down. Leave empty to skip the check.
+error_network_down = You're offline. Until the connection is back, only music on this computer or your local network can play.
+offline_mode = Offline mode
+offline_mode_on = Offline mode is on. Only downloads and cached songs play.
+offline_mode_off = Offline mode is off.
+offline_mark = Offline
+cached_mark = Cached
+offline_cache = Offline cache
+offline_cache_enabled = Keep songs you play for offline listening
+offline_cache_max_size = Maximum size
+offline_cache_used = { $used } of { $max } used
+offline_cache_clear = Clear cache
+offline_cache_description = Songs you stream from across the internet are kept on this computer so they play without a connection, and the next song is fetched ahead. Once the cache is full, the songs played longest ago go first. Downloads are kept apart and never removed. Turning this off keeps what is cached.
+back_online_switch_to = Back online, switch to { $source }?
+onboarding_offline_cache = Keep songs you play for offline listening (up to { $size })
+error_offline_mode = Offline mode is on, and this song has no downloaded or cached copy to play.
+offline_mode_description = Only downloads and cached songs play, and nothing reaches the internet until you turn it off.
+offline_mode_turn_off = Turn off offline mode
+network_moved_offline = No internet connection. Moved to { $source }, which works without it.
+back_online = Back online.
+back_online_still_offline = Back online. Offline mode stays on until you turn it off.
+source_needs_internet = Needs the internet
+discover_your_mixes = Your mixes
+discover_never_played = Never played
+discover_forgotten_favorites = Forgotten favorites
+plugins = Plugins
+plugins_description = Plugins add sources to Kopuz. Official ones ship with it and update with it. Community ones come from the marketplace: they run sandboxed, reach only the hosts they list, and install or remove with one click.
+plugins_installed = Installed
+plugins_marketplace = Marketplace
+plugins_marketplace_unreachable = The marketplace could not be reached: { $error }
+plugins_marketplace_empty = The marketplace has no community plugins to offer yet.
+plugin_official = Official
+plugin_native = In Kopuz
+plugin_community = Community
+plugin_by = by { $author }
+plugin_reaches = Reaches { $hosts }
+plugin_your_server = your server
+plugin_install = Install
+plugin_update = Update
+plugin_remove = Remove
+plugin_working = Working…
+library_empty_offline = Nothing is available offline yet
+library_empty_offline_detail = Download songs, or play them while online, to keep them for offline listening.
+
+# Audio CDs
+cd_rip_flac = Rip to FLAC
+cd_rip_help = Save all tracks as lossless FLAC files. Playback stops while ripping. Existing files are kept. Requires ffmpeg.
+cd_output_directory = Output folder (absolute path on the computer running Kopuz)
+cd_rip_finished = Ripping finished. You can add the output folder to a local library.
+cd_rip_cancelled = Ripping cancelled. Completed tracks have been kept.
+
+removable_found = Removable media found
+removable_listen_help = Switch to this disc and start listening? It stays available while inserted. Removing it returns you to your previous source with playback stopped.
+removable_later = Not now
+removable_listen = Listen
+removable_temporary = Temporary — until ejected

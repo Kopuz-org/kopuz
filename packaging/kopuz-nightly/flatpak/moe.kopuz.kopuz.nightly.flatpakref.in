@@ -1,0 +1,9 @@
+[Flatpak Ref]
+Name=moe.kopuz.kopuz.nightly
+Branch=stable
+Title=Kopuz Nightly
+Url=https://flatpak.kopuz.moe/repo/
+RuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo
+SuggestRemoteName=kopuz
+IsRuntime=false
+GPGKey=@GPGKEY@

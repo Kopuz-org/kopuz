@@ -1,0 +1,70 @@
+# The GPUI app's .deb and .rpm, from the repo root after a release build of kopuz, kopuzd and kopuzctl.
+name: kopuz
+arch: amd64
+platform: linux
+version: ${VERSION}
+release: 1
+section: sound
+priority: optional
+maintainer: temidaradev <temidaradev@proton.me>
+description: A modern, lightweight music player, with the kopuzd daemon it runs on.
+vendor: Kopuz
+homepage: https://github.com/Kopuz-org/kopuz
+license: EUPL-1.2
+
+contents:
+  - src: target/release/kopuz
+    dst: /usr/bin/kopuz
+    file_info:
+      mode: 0755
+  - src: target/release/kopuzd
+    dst: /usr/bin/kopuzd
+    file_info:
+      mode: 0755
+  - src: target/release/kopuzctl
+    dst: /usr/bin/kopuzctl
+    file_info:
+      mode: 0755
+  - src: data/moe.kopuz.kopuz.desktop
+    dst: /usr/share/applications/moe.kopuz.kopuz.desktop
+  - src: data/moe.kopuz.kopuz.metainfo.xml
+    dst: /usr/share/metainfo/moe.kopuz.kopuz.metainfo.xml
+  - src: apps/legacy/kopuz/assets/logo.png
+    dst: /usr/share/icons/hicolor/256x256/apps/moe.kopuz.kopuz.png
+  - src: packaging/systemd/kopuzd.service
+    dst: /usr/lib/systemd/user/kopuzd.service
+  - src: LICENSE
+    dst: /usr/share/licenses/kopuz/LICENSE
+
+# kopuz links xcb/xkbcommon and dlopens wayland, vulkan and fontconfig; kopuzd links ALSA and OpenSSL and won't start without CA certs.
+overrides:
+  deb:
+    depends:
+      - ca-certificates
+      - libasound2
+      - libssl3
+      - libstdc++6
+      - libxcb1
+      - libxkbcommon0
+      - libxkbcommon-x11-0
+      - libwayland-client0
+      - libvulkan1
+      - libfontconfig1
+      - libfreetype6
+    recommends:
+      - ffmpeg
+  rpm:
+    depends:
+      - ca-certificates
+      - alsa-lib
+      - openssl-libs
+      - libstdc++
+      - libxcb
+      - libxkbcommon
+      - libxkbcommon-x11
+      - libwayland-client
+      - vulkan-loader
+      - fontconfig
+      - freetype
+    recommends:
+      - ffmpeg

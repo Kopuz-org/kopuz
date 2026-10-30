@@ -33,7 +33,7 @@ reviews:
         instructions: |
           Look at the "## Before / After" section. Pass if it says "No visible or
           audible change" and the diff does not change UI or playback: no changes under
-          crates/components, crates/pages, crates/kopuz/assets or crates/player, and no
+          apps/legacy/components, apps/legacy/pages, apps/legacy/kopuz/assets or daemon/player, and no
           change to rendered markup or styles elsewhere. Otherwise pass only if the table
           has at least one row whose Change cell is filled and whose Before and After
           cells each contain an image, a video or a link to an uploaded attachment. Fail

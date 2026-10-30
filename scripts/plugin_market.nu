@@ -10,7 +10,7 @@
 def main [] {
   let root = ($env.FILE_PWD | path dirname)
   let out = ($root | path join "target" "plugin-market")
-  let examples = (glob ($root | path join "examples" "plugins" "*" "kopuz-plugin.toml") | sort)
+  let examples = (glob ($root | path join "daemon" "plugins" "examples" "*" "kopuz-plugin.toml") | sort)
 
   let packages = ($examples | each {|manifest| open ($manifest | path dirname | path join "Cargo.toml") | get package.name })
   let args = ($packages | each {|package| ["-p" $package] } | flatten)

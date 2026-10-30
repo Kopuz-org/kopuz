@@ -1,15 +1,18 @@
 # Agent Development Guide
 
 A file for [guiding coding agents](https://agents.md/). Kopuz is a Rust + Dioxus
-music player; the workspace is the crates under `crates/`. See `CONTRIBUTING.md`
-for the human process and `README.md` for platform setup.
+music player; one Cargo workspace holds the daemon and its frontends, laid out by
+layer under `shared/`, `daemon/` and `apps/` (see Directory Structure). See
+`CONTRIBUTING.md` for the human process and `README.md` for platform setup.
 
 ## Commands
 
-- **Serve (dev):** `just serve` — regenerates Tailwind, then `dx serve --package kopuz`.
+- **Serve (dev):** `just serve` — regenerates Tailwind, then `dx serve --package kopuz-legacy`.
   Debug builds use a separate `kopuz-debug.db`, so this never touches real data
   (`KOPUZ_DB_PATH` overrides the location).
-- **Build (release):** `just build` (= `dx build --package kopuz --release`).
+- **Build (release):** `just build` (= `dx build --package kopuz-legacy --release`).
+- **GPUI frontend:** `just gpui run` builds it and `kopuzd` and starts both on
+  a dev socket; `just gpui` lists the rest. See `apps/kopuz/CLAUDE.md`.
 - **Lint (gate):** `cargo clippy --workspace --all-targets -- -D warnings`. Run it
   in **both** debug and `--release` — some code is `cfg`-gated. Prefix with
   `SQLX_OFFLINE=true` if it tries to reach a live DB.
@@ -19,14 +22,14 @@ for the human process and `README.md` for platform setup.
 
 Run clippy (debug + release), fmt, and the tests covering your change before each commit.
 
-## Database (`crates/db`)
+## Database (`daemon/db`)
 
-- SQLite via `sqlx`. Schema migrations are `crates/db/migrations/*.sql`; sqlx
+- SQLite via `sqlx`. Schema migrations are `daemon/db/migrations/*.sql`; sqlx
   checksums their bytes, so keep them **LF** and never edit an already-applied
   migration — add a new one.
-- `query!` / `query_as!` macros are compile-checked against `crates/db/.sqlx/`.
+- `query!` / `query_as!` macros are compile-checked against `daemon/db/.sqlx/`.
   After adding or changing one, regenerate the cache: point `DATABASE_URL` at a
-  temp DB, `sqlx migrate run`, then `cargo sqlx prepare` (run from `crates/db`).
+  temp DB, `sqlx migrate run`, then `cargo sqlx prepare` (run from `daemon/db`).
   Runtime `sqlx::query_as` (most track queries) is not macro-checked and needs no
   prepare.
 - **Crate wall:** the frontend crates (`hooks`, `pages`, `components`) reach
@@ -38,7 +41,7 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
   `AlbumInfo`, `PlaylistCatalog` — so there is no conversion layer to keep in
   step.
 - **Settings file:** `config::Settings` (typed sections, flattened to top-level
-  keys) lives only in the TOML layers next to the DB (`crates/config/src/store.rs`):
+  keys) lives only in the TOML layers next to the DB (`shared/config/src/store.rs`):
   defaults → `settings.local.toml` → `settings.toml` → `settings.d/*.toml`
   drop-ins → `KOPUZ_CONFIG_*` env. State, credentials, sources and UI prefs are
   not settings; they live in their own daemon stores and tables. Change settings
@@ -49,7 +52,7 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
   citing that file's path or the var's name. The daemon polls the files' mtimes
   and reloads live; env is read once.
 
-## Sources & covers (`crates/server`, daemon-only)
+## Sources & covers (`daemon/server`, daemon-only)
 
 - Each backend implements the `MediaSource` trait (`source.rs`): Local, Jellyfin,
   Subsonic/Custom, YtMusic, SoundCloud, Spotify, Apple Music, Nextcloud. The
@@ -67,9 +70,9 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
   is not. `discover.rs::post` is the reference; copy it rather than hand-rolling
   a builder.
 
-## i18n (`crates/i18n`)
+## i18n (`apps/common/i18n`)
 
-- Fluent `.ftl` in `crates/i18n/locales/`, baseline `en.ftl`. Add every new key to
+- Fluent `.ftl` in `apps/common/i18n/locales/`, baseline `en.ftl`. Add every new key to
   all locales — `scripts/check_locales.nu` (CI) requires parity with `en.ftl`, and
   `scripts/check_i18n_usage.nu` checks that keys are actually used.
 
@@ -84,24 +87,41 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
 
 ## Directory Structure
 
-- `crates/kopuz` — app binary (Dioxus entry `main.rs`, `build.rs` font/asset
-  embedding + Android packaging). Hosts the daemon core in-process.
-- `crates/api` — the client-facing trait and its wire types; `crates/proto` —
-  the gRPC schema; `crates/client` — the same trait over a socket.
-- `crates/daemon` — the core: session, library, catalog, radio, sources,
-  mutations, jobs, artwork, and `LocalApi` over them. `crates/kopuzd` — the
+Three layers, enforced by `scripts/check_layers.nu` (CI):
+
+- `shared/` — the daemon ↔ frontend contract. Depends on nothing else in the repo.
+- `daemon/` — the daemon and everything behind it. Depends only on `shared/`.
+- `apps/` — the frontends. `apps/common/` (shared by frontends only) depends only
+  on `shared/`; each app (`apps/cli`, `apps/legacy/`, `apps/kopuz/`) on `shared/` and
+  `apps/common/`, never on `daemon/` or another app. The one exception, listed
+  in the script: the Dioxus app hosts the daemon in-process and drives `player`
+  on Android.
+
+A bare `cargo build` / `cargo test` covers the default members (everything but
+the Dioxus app); pass `--workspace` or `-p kopuz-legacy` for it.
+
+- `apps/legacy/kopuz` — the legacy Dioxus app, package and binary `kopuz-legacy`
+  (entry `main.rs`, `build.rs` font/asset embedding + Android packaging). Hosts
+  the daemon core in-process.
+- `shared/api` — the client-facing trait and its wire types; `shared/proto` —
+  the gRPC schema; `apps/common/client` — the same trait over a socket.
+- `daemon/core` — the core: session, library, catalog, radio, sources,
+  mutations, jobs, artwork, and `LocalApi` over them. `daemon/kopuzd` — the
   headless binary and the tonic shell.
-- `crates/config` — `Settings` and its typed edits, the settings store, `Source`, `MusicService`, `MusicServer`.
-- `crates/reader` — domain models (`Track`, `Album`, `TrackId`), scanner, tag
+- `shared/config` — `Settings` and its typed edits, the settings store, `Source`, `MusicService`, `MusicServer`.
+- `daemon/reader` — domain models (`Track`, `Album`, `TrackId`), scanner, tag
   IO. Daemon-side: what crosses to a frontend is `api::TrackInfo`.
-- `crates/db` — SQLite backend, `ReadStore` / `Storage`, migrations.
-- `crates/server` — `MediaSource` backends, sync, cover resolution.
-- `crates/hooks` — Dioxus data hooks over the API (queries, player controller,
+- `daemon/db` — SQLite backend, `ReadStore` / `Storage`, migrations.
+- `daemon/server` — `MediaSource` backends, sync, cover resolution.
+- `apps/legacy/hooks` — Dioxus data hooks over the API (queries, player controller,
   artwork, sources).
-- `crates/pages`, `crates/components`, `crates/kopuz_route` — UI + routing.
-- `crates/player` audio · `crates/radio` · `crates/scrobble` · `crates/discord-presence`
-  · `crates/i18n` · `crates/utils` (`CoverUrl`, image-URL builders; frontend utilities do not link SQLite).
-- `android-src/` — Kotlin media-session classes patched in by `build.rs`.
+- `apps/legacy/pages`, `apps/legacy/components`, `apps/legacy/kopuz_route` — UI + routing.
+- `apps/kopuz/` — the native GPUI frontend: `app` (the `kopuz` binary) and
+  its feature crates, a socket-only client. `vendor/gpui-pre-linux` is its
+  patched gpui platform crate, applied through the root `[patch.crates-io]`.
+- `daemon/player` audio · `daemon/radio` · `daemon/scrobble` · `daemon/discord-presence`
+  · `apps/common/i18n` · `shared/utils` (`CoverUrl`, image-URL builders; frontend utilities do not link SQLite).
+- `apps/legacy/kopuz/android-src/` — Kotlin media-session classes its `build.rs` copies into the Android build.
 - `packaging/` (flatpak / AUR / nix) · `scripts/` (codegen + vendor helpers).
 
 ## Issues and PRs

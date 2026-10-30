@@ -1,0 +1,6 @@
+[Flatpak Repo]
+Title=Kopuz
+Url=https://flatpak.kopuz.moe/repo/
+Homepage=https://github.com/Kopuz-org/kopuz
+Comment=Kopuz and Kopuz Nightly
+GPGKey=@GPGKEY@

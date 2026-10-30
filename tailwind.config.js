@@ -2,16 +2,16 @@
 module.exports = {
   mode: "all",
   content: [
-    "./crates/kopuz/**/*.{rs,html,css}",
-    "./crates/components/**/*.{rs,html,css}",
-    "./crates/pages/**/*.{rs,html,css}",
-    "./crates/hooks/**/*.{rs,html,css}",
-    "./crates/player/**/*.{rs,html,css}",
-    "./crates/reader/**/*.{rs,html,css}",
-    "./crates/server/**/*.{rs,html,css}",
-    "./crates/utils/**/*.{rs,html,css}",
-    "./crates/config/**/*.{rs,html,css}",
-    "./crates/kopuz_route/**/*.{rs,html,css}",
+    "./apps/legacy/kopuz/**/*.{rs,html,css}",
+    "./apps/legacy/components/**/*.{rs,html,css}",
+    "./apps/legacy/pages/**/*.{rs,html,css}",
+    "./apps/legacy/hooks/**/*.{rs,html,css}",
+    "./daemon/player/**/*.{rs,html,css}",
+    "./daemon/reader/**/*.{rs,html,css}",
+    "./daemon/server/**/*.{rs,html,css}",
+    "./shared/utils/**/*.{rs,html,css}",
+    "./shared/config/**/*.{rs,html,css}",
+    "./apps/legacy/kopuz_route/**/*.{rs,html,css}",
   ],
   theme: {
     extend: {

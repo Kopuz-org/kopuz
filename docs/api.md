@@ -2,7 +2,7 @@
 
 Kopuz's playback core is a daemon. Every feature the built-in GUI has goes
 through the gRPC surface described here. The contract is one file:
-`crates/proto/proto/kopuz.proto` (package `kopuz.v1`).
+`shared/proto/proto/kopuz.proto` (package `kopuz.v1`).
 
 By default this is a local IPC channel between the daemon and a frontend on
 the same machine. `--listen` also serves it over plain TCP on the address you
