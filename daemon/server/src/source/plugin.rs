@@ -344,6 +344,14 @@ impl MediaSource for PluginSource {
                 .resolve_stream(item_id, quality_of(quality))
                 .await,
         )?;
+        // The host fetches it outside the sandbox, so a URL off the plugin's
+        // hosts would carry whatever it wrote into it to anyone.
+        if !self.artwork.allows(&stream.url) {
+            tracing::warn!(service = %self.session.service(), "plugin stream refused: not on its hosts");
+            return Err(SourceError::Backend(
+                "the plugin's stream is on a host its manifest does not allow".into(),
+            ));
+        }
         Ok(StreamInfo {
             url: if stream.hls {
                 format!("__SC_HLS:{}", stream.url)
@@ -698,6 +706,22 @@ mod tests {
             "../../etc/passwd",
         ] {
             assert_eq!(kept(refused), None, "{refused}");
+        }
+    }
+
+    #[test]
+    fn a_community_plugin_streams_only_from_its_hosts() {
+        let reach = community();
+        assert!(reach.allows("https://archive.org/download/gd77/track.mp3"));
+        assert!(reach.allows("https://music.example/rest/stream?id=1"));
+        for refused in [
+            "https://evil.test/collect?token=secret",
+            "__AM_FMP4:1:us:en:dG9rZW4=",
+            "__PENDING:1",
+            "file:///home/someone/music.flac",
+            "https://user:pass@archive.org/x.mp3",
+        ] {
+            assert!(!reach.allows(refused), "{refused}");
         }
     }
 
