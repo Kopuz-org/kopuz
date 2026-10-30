@@ -14,7 +14,11 @@ def main [] {
 
   let packages = ($examples | each {|manifest| open ($manifest | path dirname | path join "Cargo.toml") | get package.name })
   let args = ($packages | each {|package| ["-p" $package] } | flatten)
-  cargo build --locked --target wasm32-wasip2 --profile plugin ...$args
+  # The devshell's rustflags are for host builds (`-fuse-ld=lld` especially);
+  # the wasm link rejects them, so the plugin build gets none of them.
+  with-env { RUSTFLAGS: "" } {
+    cargo build --locked --target wasm32-wasip2 --profile plugin ...$args
+  }
 
   mkdir $out
   let listings = ($examples | zip $packages | each {|pair|
