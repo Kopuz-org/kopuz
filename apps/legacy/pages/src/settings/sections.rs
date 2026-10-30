@@ -841,16 +841,35 @@ fn PluginRow(
     } else {
         i18n::t("plugin_official")
     };
-    let hosts: Vec<String> = plugin
-        .network
-        .iter()
-        .map(|host| match host.as_str() {
-            "$server" => i18n::t("plugin_your_server"),
-            other => other.to_string(),
-        })
-        .collect();
-    let reaches = (!hosts.is_empty())
-        .then(|| i18n::t_with("plugin_reaches", &[("hosts", hosts.join(", ").into())]));
+    let shown = |network: &[String]| -> String {
+        network
+            .iter()
+            .map(|host| match host.as_str() {
+                "$server" => i18n::t("plugin_your_server"),
+                other => other.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let reaches = (!plugin.network.is_empty()).then(|| {
+        i18n::t_with(
+            "plugin_reaches",
+            &[("hosts", shown(&plugin.network).into())],
+        )
+    });
+    let update_reaches = plugin
+        .update
+        .as_ref()
+        .filter(|update| !update.added_hosts.is_empty())
+        .map(|update| {
+            i18n::t_with(
+                "plugin_update_reaches",
+                &[("hosts", shown(&update.added_hosts).into())],
+            )
+        });
+    // Each button agrees to the hosts shown beside it.
+    let install_network = plugin.network.clone();
+    let update_network = plugin.update.as_ref().map(|update| update.network.clone());
     let byline = (!plugin.author.is_empty())
         .then(|| i18n::t_with("plugin_by", &[("author", plugin.author.clone().into())]));
     let install_id = plugin.id.clone();
@@ -880,6 +899,12 @@ fn PluginRow(
                         "{reaches}"
                     }
                 }
+                if let Some(update_reaches) = update_reaches {
+                    p { class: "text-xs text-white/60 break-all",
+                        i { class: "fa-solid fa-triangle-exclamation mr-1" }
+                        "{update_reaches}"
+                    }
+                }
             }
             if community {
                 div { class: "flex items-center gap-2 shrink-0",
@@ -889,15 +914,25 @@ fn PluginRow(
                         button {
                             class: "{button}",
                             disabled: !idle,
-                            onclick: move |_| hooks::plugins::install(install_id.clone(), busy, changed),
+                            onclick: move |_| hooks::plugins::install(
+                                install_id.clone(),
+                                install_network.clone(),
+                                busy,
+                                changed,
+                            ),
                             "{i18n::t(\"plugin_install\")}"
                         }
                     } else {
-                        if plugin.update.is_some() {
+                        if let Some(update_network) = update_network {
                             button {
                                 class: "{button}",
                                 disabled: !idle,
-                                onclick: move |_| hooks::plugins::install(install_id.clone(), busy, changed),
+                                onclick: move |_| hooks::plugins::install(
+                                    install_id.clone(),
+                                    update_network.clone(),
+                                    busy,
+                                    changed,
+                                ),
                                 "{i18n::t(\"plugin_update\")}"
                             }
                         }

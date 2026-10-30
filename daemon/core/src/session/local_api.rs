@@ -787,8 +787,12 @@ impl api::PluginApi for LocalApi {
         Ok(self.plugins.catalog().await)
     }
 
-    async fn install_plugin(&self, id: String) -> Result<api::PluginInfo, ApiError> {
-        let info = self.plugins.install(&id).await?;
+    async fn install_plugin(
+        &self,
+        id: String,
+        network: Vec<String>,
+    ) -> Result<api::PluginInfo, ApiError> {
+        let info = self.plugins.install(&id, &network).await?;
         self.plugins_changed().await;
         Ok(info)
     }

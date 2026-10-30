@@ -81,6 +81,10 @@ fn subsonic_component() -> &'static [u8] {
         .expect("it is a component")
 }
 
+fn shown() -> Vec<String> {
+    vec!["$server".into()]
+}
+
 fn temp(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("kopuz-market-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -101,7 +105,10 @@ async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
         subsonic_component(),
         Some(&"0".repeat(64)),
     ));
-    let refused = tampered.install("echo").await.expect_err("hash mismatch");
+    let refused = tampered
+        .install("echo", &shown())
+        .await
+        .expect_err("hash mismatch");
     assert_eq!(refused.code, ErrorCode::InvalidInput);
     assert!(!plugins.join("echo").exists());
 
@@ -113,7 +120,7 @@ async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
         subsonic_component(),
         None,
     ));
-    assert!(impostor.install("subsonic").await.is_err());
+    assert!(impostor.install("subsonic", &shown()).await.is_err());
 
     // The real thing.
     let market = PluginService::new(marketplace(
@@ -138,7 +145,15 @@ async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
             .all(|plugin| plugin.id != "echo" || plugin.origin == api::PluginOrigin::Community)
     );
 
-    let installed = market.install("echo").await.expect("installed");
+    // Hosts other than the ones shown are refused.
+    let other_hosts = market
+        .install("echo", &["evil.test".into()])
+        .await
+        .expect_err("the hosts changed");
+    assert_eq!(other_hosts.code, ErrorCode::InvalidInput);
+    assert!(!plugins.join("echo").exists());
+
+    let installed = market.install("echo", &shown()).await.expect("installed");
     assert_eq!(installed.installed_version.as_deref(), Some("1.0.0"));
     assert_eq!(installed.origin, api::PluginOrigin::Community);
     assert!(plugins.join("echo").join("plugin.wasm").is_file());

@@ -127,7 +127,7 @@ service Kopuz {
   rpc GetFrontendPrefs(GetFrontendPrefsRequest) returns (FrontendPrefsList);
   rpc SetFrontendPrefs(SetFrontendPrefsRequest) returns (Unit);
   rpc GetPlugins(GetPluginsRequest) returns (PluginCatalog);
-  rpc InstallPlugin(PluginId) returns (PluginInfo);
+  rpc InstallPlugin(InstallPluginRequest) returns (PluginInfo);
   rpc UninstallPlugin(PluginId) returns (Unit);
 
   rpc GetSources(GetSourcesRequest) returns (SourceList);
@@ -2119,6 +2119,13 @@ message GetPluginsRequest {}
 
 message PluginId {
   string id = 1;
+}
+
+message InstallPluginRequest {
+  string id = 1;
+  // The hosts the user was shown and agreed to; a plugin reaching any other
+  // set is refused.
+  repeated string network = 2;
 }
 
 enum PluginOrigin {

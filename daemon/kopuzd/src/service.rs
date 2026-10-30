@@ -1414,15 +1414,16 @@ impl Kopuz for KopuzGrpc {
 
     async fn install_plugin(
         &self,
-        request: Request<proto::PluginId>,
+        request: Request<proto::InstallPluginRequest>,
     ) -> Result<Response<proto::PluginInfo>, Status> {
         if over_tcp(&request) {
             return Err(not_from_here());
         }
+        let request = request.into_inner();
         let info = self
             .0
             .api
-            .install_plugin(request.into_inner().id)
+            .install_plugin(request.id, request.network)
             .await
             .map_err(failed)?;
         Ok(Response::new(convert::plugin_info_to_proto(&info)))

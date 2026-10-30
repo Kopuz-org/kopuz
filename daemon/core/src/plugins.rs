@@ -152,8 +152,8 @@ impl PluginService {
     }
 
     /// Fetch, verify, check the manifest and compile it once before anything
-    /// is written.
-    pub async fn install(&self, id: &str) -> Result<PluginInfo, ApiError> {
+    /// is written. `network` is what the user agreed to; anything else is refused.
+    pub async fn install(&self, id: &str, network: &[String]) -> Result<PluginInfo, ApiError> {
         let dir = server::plugins::dir()
             .ok_or_else(|| ApiError::unsupported("this daemon has no plugin directory"))?
             .to_path_buf();
@@ -163,6 +163,13 @@ impl PluginService {
             .map_err(|error| ApiError::new(api::ErrorCode::SourceUnreachable, error))?;
         let listing = index.listing(id).map_err(market_error)?;
         market::check_listing(listing, &server::plugins::official_ids()).map_err(market_error)?;
+        // The index is fetched again here, so what it lists now may not be what
+        // the user was shown; the manifest is held to the listing below.
+        if plugin_host::host_set(&listing.network) != plugin_host::host_set(network) {
+            return Err(ApiError::invalid_input(
+                "the plugin now reaches different hosts than the ones shown; review them and try again",
+            ));
+        }
 
         let fetch_error = |error: String| ApiError::new(api::ErrorCode::SourceUnreachable, error);
         let manifest_bytes = self

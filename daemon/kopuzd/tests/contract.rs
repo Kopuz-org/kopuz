@@ -1021,7 +1021,7 @@ async fn plugins_are_not_installed_or_removed_over_tcp() {
     };
     refused(
         pair.tcp
-            .install_plugin("internet-archive".into())
+            .install_plugin("internet-archive".into(), vec!["archive.org".into()])
             .await
             .expect_err("install over tcp"),
     );

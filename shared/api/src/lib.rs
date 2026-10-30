@@ -688,7 +688,13 @@ pub trait PluginApi: Send + Sync {
 
     /// Download, verify and install the marketplace's version of a community
     /// plugin, replacing the installed one. Its services are offered at once.
-    async fn install_plugin(&self, id: String) -> Result<PluginInfo, ApiError>;
+    /// `network` is the hosts the user was shown; a listing that now reaches
+    /// any other set is refused.
+    async fn install_plugin(
+        &self,
+        id: String,
+        network: Vec<String>,
+    ) -> Result<PluginInfo, ApiError>;
 
     /// Remove an installed community plugin. Sources of its services stay,
     /// reading what they cached, until it is installed again.

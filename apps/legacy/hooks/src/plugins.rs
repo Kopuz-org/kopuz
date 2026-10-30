@@ -20,11 +20,17 @@ pub fn use_plugins(changed: Signal<u64>) -> Resource<Option<api::PluginCatalog>>
     })
 }
 
-pub fn install(id: String, mut busy: Signal<Option<String>>, mut changed: Signal<u64>) {
+/// `network` is the hosts the user was shown before choosing to install.
+pub fn install(
+    id: String,
+    network: Vec<String>,
+    mut busy: Signal<Option<String>>,
+    mut changed: Signal<u64>,
+) {
     let api = consume_api();
     busy.set(Some(id.clone()));
     spawn(async move {
-        if let Err(error) = api.install_plugin(id.clone()).await {
+        if let Err(error) = api.install_plugin(id.clone(), network).await {
             tracing::warn!(%error, %id, "installing a plugin failed");
             toast_api_error(&error);
         }
