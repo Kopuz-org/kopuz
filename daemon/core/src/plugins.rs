@@ -391,8 +391,10 @@ where
         return;
     };
     tokio::spawn(async move {
-        let mut loaded = stamps(dir);
-        let mut last = loaded.clone();
+        // Empty, so the first quiet poll rescans and an edit made between boot
+        // loading the plugins and this task starting is not missed.
+        let mut loaded = Stamps::new();
+        let mut last = stamps(dir);
         loop {
             tokio::time::sleep(WATCH_INTERVAL).await;
             if owner.strong_count() == 0 {
