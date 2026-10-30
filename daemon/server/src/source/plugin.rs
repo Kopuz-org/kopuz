@@ -58,18 +58,31 @@ impl PluginSource {
         track_from(self.service, track)
     }
 
-    fn album(&self, mut album: wit::Album) -> reader::Album {
-        album.cover = self.artwork().cover(album.cover);
-        album_from(album)
-    }
-
     fn albums(&self, albums: Vec<wit::Album>) -> Vec<reader::Album> {
-        albums.into_iter().map(|album| self.album(album)).collect()
+        let artwork = self.artwork();
+        albums
+            .into_iter()
+            .map(|mut album| {
+                album.cover = artwork.cover(album.cover);
+                album_from(album)
+            })
+            .collect()
     }
 
-    fn listing(&self, mut listing: wit::ArtistListing) -> (reader::ArtistCredit, Option<String>) {
-        listing.photo = self.artwork().cover(listing.photo);
-        listing_from(listing)
+    /// One allowlist per batch: building it clones the permissions, and a swap
+    /// mid-batch must not leave one batch under two plugins' hosts.
+    fn listings(
+        &self,
+        listings: Vec<wit::ArtistListing>,
+    ) -> Vec<(reader::ArtistCredit, Option<String>)> {
+        let artwork = self.artwork();
+        listings
+            .into_iter()
+            .map(|mut listing| {
+                listing.photo = artwork.cover(listing.photo);
+                listing_from(listing)
+            })
+            .collect()
     }
 
     fn radio_page(&self, page: wit::TrackPage) -> RadioPage {
@@ -541,11 +554,7 @@ impl MediaSource for PluginSource {
         Ok(LibrarySnapshot {
             albums: self.albums(snapshot.albums),
             tracks: self.tracks(snapshot.tracks),
-            artists: snapshot
-                .artists
-                .into_iter()
-                .map(|listing| self.listing(listing))
-                .collect(),
+            artists: self.listings(snapshot.artists),
         })
     }
 
@@ -576,12 +585,14 @@ impl MediaSource for PluginSource {
     }
 
     async fn fetch_playlists(&self) -> Result<Vec<PlaylistMeta>, SourceError> {
-        Ok(answer(self.session.fetch_playlists().await)?
+        let playlists = answer(self.session.fetch_playlists().await)?;
+        let artwork = self.artwork();
+        Ok(playlists
             .into_iter()
             .map(|playlist| PlaylistMeta {
                 id: playlist.id,
                 name: playlist.name,
-                image_tag: self.artwork().cover(playlist.image_tag),
+                image_tag: artwork.cover(playlist.image_tag),
             })
             .collect())
     }
@@ -589,10 +600,7 @@ impl MediaSource for PluginSource {
     async fn fetch_artists(
         &self,
     ) -> Result<Vec<(reader::ArtistCredit, Option<String>)>, SourceError> {
-        Ok(answer(self.session.fetch_artists().await)?
-            .into_iter()
-            .map(|listing| self.listing(listing))
-            .collect())
+        Ok(self.listings(answer(self.session.fetch_artists().await)?))
     }
 
     async fn fetch_favorites_page(
