@@ -284,20 +284,23 @@ impl PluginService {
 
     pub async fn uninstall(&self, id: &str) -> Result<(), ApiError> {
         let registry = server::plugins::registry();
-        let plugin = registry
+        if registry
             .plugins()
             .iter()
-            .find(|plugin| plugin.id() == id)
-            .ok_or_else(|| ApiError::not_found("no such plugin is installed"))?;
-        if plugin.origin() == plugin_host::Origin::Bundled {
+            .any(|plugin| plugin.id() == id && plugin.origin() == plugin_host::Origin::Bundled)
+        {
             return Err(ApiError::invalid_input(
                 "an official plugin ships with kopuz and cannot be removed",
             ));
         }
+        // An update that waited across a restart has files but nothing loaded.
+        let copies = registry.dirs_of(id);
+        if copies.is_empty() {
+            return Err(ApiError::not_found("no such plugin is installed"));
+        }
         let dir = server::plugins::dir()
             .ok_or_else(|| ApiError::unsupported("this daemon has no plugin directory"))?
             .to_path_buf();
-        let copies = registry.dirs_of(id);
         server::plugins::remove(move || {
             copies
                 .iter()
