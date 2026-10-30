@@ -142,6 +142,27 @@ async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
     assert_eq!(installed.installed_version.as_deref(), Some("1.0.0"));
     assert_eq!(installed.origin, api::PluginOrigin::Community);
     assert!(plugins.join("echo").join("plugin.wasm").is_file());
+    let current = market.catalog().await;
+    let echo = current.plugins.iter().find(|plugin| plugin.id == "echo");
+    assert_eq!(echo.and_then(|plugin| plugin.update.clone()), None);
+
+    // The same version republished with another component is an update.
+    let republished = PluginService::new(marketplace(
+        &temp("republished"),
+        "echo",
+        MANIFEST,
+        subsonic_component(),
+        Some(&"1".repeat(64)),
+    ));
+    let catalog = republished.catalog().await;
+    let update = catalog
+        .plugins
+        .iter()
+        .find(|plugin| plugin.id == "echo")
+        .and_then(|plugin| plugin.update.clone())
+        .expect("offered as an update");
+    assert_eq!(update.version, "1.0.0");
+    assert!(update.added_hosts.is_empty());
 
     let offered = daemon::services::all();
     let echo = offered

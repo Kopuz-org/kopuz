@@ -1,7 +1,7 @@
 //! Every loaded plugin, and which one serves each service.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -102,6 +102,14 @@ fn installed(dir: &Path) -> Vec<Plugin> {
                 None
             }
         })
+        .collect()
+}
+
+/// A host allowlist as a set, so two lists agree whatever their order or case.
+pub fn host_set(network: &[String]) -> BTreeSet<String> {
+    network
+        .iter()
+        .map(|host| host.trim().to_ascii_lowercase())
         .collect()
 }
 

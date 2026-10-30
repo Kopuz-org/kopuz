@@ -16,6 +16,11 @@ pub fn plugin_info_to_proto(value: &api::PluginInfo) -> PluginInfo {
         services: value.services.clone(),
         network: value.network.clone(),
         sandboxed: value.sandboxed,
+        update: value.update.as_ref().map(|update| PluginUpdate {
+            version: update.version.clone(),
+            network: update.network.clone(),
+            added_hosts: update.added_hosts.clone(),
+        }),
     }
 }
 
@@ -36,6 +41,11 @@ pub fn plugin_info_from_proto(value: &PluginInfo) -> api::PluginInfo {
         services: value.services.clone(),
         network: value.network.clone(),
         sandboxed: value.sandboxed,
+        update: value.update.as_ref().map(|update| api::PluginUpdate {
+            version: update.version.clone(),
+            network: update.network.clone(),
+            added_hosts: update.added_hosts.clone(),
+        }),
     }
 }
 
@@ -82,6 +92,20 @@ mod tests {
                     available_version: Some("0.2.0".into()),
                     services: vec!["bandcamp".into()],
                     network: vec!["*.bandcamp.com".into()],
+                    update: None,
+                },
+                api::PluginInfo {
+                    id: "radio".into(),
+                    origin: api::PluginOrigin::Community,
+                    sandboxed: true,
+                    installed_version: Some("1.0.0".into()),
+                    network: vec!["a.test".into()],
+                    update: Some(api::PluginUpdate {
+                        version: "1.1.0".into(),
+                        network: vec!["a.test".into(), "b.test".into()],
+                        added_hosts: vec!["b.test".into()],
+                    }),
+                    ..Default::default()
                 },
             ],
             marketplace_error: Some("offline".into()),

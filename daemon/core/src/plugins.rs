@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use api::{ApiError, PluginCatalog, PluginInfo, PluginOrigin};
+use api::{ApiError, PluginCatalog, PluginInfo, PluginOrigin, PluginUpdate};
 use plugin_host::market::{self, Index, Listing, MarketError};
 use tokio::sync::Mutex;
 
@@ -104,6 +104,7 @@ impl PluginService {
     }
 
     pub async fn catalog(&self) -> PluginCatalog {
+        let registry = server::plugins::registry();
         let mut plugins = installed();
         let marketplace_error = match self.index(false).await {
             Ok(index) => {
@@ -115,6 +116,18 @@ impl PluginService {
                     match plugins.iter_mut().find(|info| info.id == listing.id) {
                         Some(info) => {
                             info.available_version = Some(listing.version.clone());
+                            let loaded = registry
+                                .plugins()
+                                .iter()
+                                .find(|plugin| plugin.id() == listing.id);
+                            // A republished build under the same version is an update too.
+                            if loaded.is_some_and(|plugin| differs(plugin, listing)) {
+                                info.update = Some(PluginUpdate {
+                                    version: listing.version.clone(),
+                                    network: listing.network.clone(),
+                                    added_hosts: added(&info.network, &listing.network),
+                                });
+                            }
                             if info.homepage.is_none() {
                                 info.homepage = listing.homepage.clone();
                             }
@@ -264,6 +277,7 @@ fn installed() -> Vec<PluginInfo> {
                     .map(|service| service.id.clone())
                     .collect(),
                 network: manifest.permissions.network.clone(),
+                update: None,
             }
         })
         .collect()
@@ -282,6 +296,7 @@ fn listed(listing: &Listing) -> PluginInfo {
         available_version: Some(listing.version.clone()),
         services: listing.services.clone(),
         network: listing.network.clone(),
+        update: None,
     }
 }
 
@@ -290,4 +305,21 @@ async fn reload() -> Result<(), ApiError> {
     tokio::task::spawn_blocking(server::plugins::reload)
         .await
         .map_err(|error| ApiError::internal(error.to_string()))
+}
+
+/// Versions are free-form, so any other version or component counts; nothing
+/// says which of two is newer.
+fn differs(plugin: &plugin_host::Plugin, listing: &Listing) -> bool {
+    plugin.manifest().version != listing.version
+        || plugin
+            .digest()
+            .is_some_and(|digest| !digest.eq_ignore_ascii_case(listing.component.sha256.trim()))
+}
+
+fn added(installed: &[String], update: &[String]) -> Vec<String> {
+    let allowed = plugin_host::host_set(installed);
+    plugin_host::host_set(update)
+        .into_iter()
+        .filter(|host| !allowed.contains(host))
+        .collect()
 }

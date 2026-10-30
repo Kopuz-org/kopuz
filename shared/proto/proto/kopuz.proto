@@ -2142,6 +2142,16 @@ message PluginInfo {
   repeated string services = 9;
   repeated string network = 10;
   bool sandboxed = 11;
+  optional PluginUpdate update = 12;
+}
+
+// A different build of an installed plugin the marketplace lists.
+message PluginUpdate {
+  string version = 1;
+  // Everything it reaches; installing it agrees to these.
+  repeated string network = 2;
+  // What it reaches that the installed version does not.
+  repeated string added_hosts = 3;
 }
 
 message PluginCatalog {

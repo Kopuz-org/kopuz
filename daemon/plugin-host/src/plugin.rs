@@ -40,6 +40,7 @@ pub struct Plugin {
     // A bundled one is compiled on first use, so services nobody configured
     // cost nothing; an installed one is compiled at load.
     component: OnceCell<Component>,
+    digest: OnceLock<Option<String>>,
 }
 
 impl std::fmt::Debug for Plugin {
@@ -123,6 +124,7 @@ impl Plugin {
             origin,
             code,
             component: OnceCell::new(),
+            digest: OnceLock::new(),
         }
     }
 
@@ -140,6 +142,17 @@ impl Plugin {
 
     pub fn is_native(&self) -> bool {
         matches!(self.code, Code::Native)
+    }
+
+    /// The SHA-256 of the component in lowercase hex, as a marketplace lists
+    /// it; none for a native plugin.
+    pub fn digest(&self) -> Option<&str> {
+        self.digest
+            .get_or_init(|| match &self.code {
+                Code::Wasm(wasm) => Some(crate::market::sha256_hex(wasm)),
+                Code::Native => None,
+            })
+            .as_deref()
     }
 
     async fn component(&self) -> Result<&Component, PluginError> {

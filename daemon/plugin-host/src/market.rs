@@ -97,10 +97,15 @@ impl Index {
     }
 }
 
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 pub fn verify(download: &Download, bytes: &[u8]) -> Result<(), MarketError> {
-    let digest = Sha256::digest(bytes);
-    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
-    if hex.eq_ignore_ascii_case(download.sha256.trim()) {
+    if sha256_hex(bytes).eq_ignore_ascii_case(download.sha256.trim()) {
         Ok(())
     } else {
         Err(MarketError::HashMismatch)
@@ -231,10 +236,7 @@ mod tests {
     use super::*;
 
     fn sha(bytes: &[u8]) -> String {
-        Sha256::digest(bytes)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
+        sha256_hex(bytes)
     }
 
     const MANIFEST: &str = r#"

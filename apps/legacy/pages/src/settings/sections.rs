@@ -893,7 +893,7 @@ fn PluginRow(
                             "{i18n::t(\"plugin_install\")}"
                         }
                     } else {
-                        if plugin.update_available() {
+                        if plugin.update.is_some() {
                             button {
                                 class: "{button}",
                                 disabled: !idle,

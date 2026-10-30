@@ -25,15 +25,18 @@ pub struct PluginInfo {
     pub services: Vec<String>,
     /// `$server` is the configured server's host.
     pub network: Vec<String>,
+    pub update: Option<PluginUpdate>,
 }
 
-impl PluginInfo {
-    pub fn update_available(&self) -> bool {
-        match (&self.installed_version, &self.available_version) {
-            (Some(installed), Some(available)) => installed != available,
-            _ => false,
-        }
-    }
+/// A different build of an installed plugin: the marketplace lists another
+/// version, or the same version with another component.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PluginUpdate {
+    pub version: String,
+    /// Everything it reaches. Installing it agrees to these.
+    pub network: Vec<String>,
+    /// What it reaches that the installed version does not.
+    pub added_hosts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
