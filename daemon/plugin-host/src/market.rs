@@ -73,6 +73,8 @@ pub enum MarketError {
     WrongVersion { listed: String, found: String },
     #[error("the plugin claims `{0}`, a service kopuz serves itself")]
     ClaimsBuiltIn(String),
+    #[error("`{service}` is already served by the installed plugin `{by}`; remove it first")]
+    ServiceTaken { service: String, by: String },
     #[error("the plugin's manifest asks for more than the marketplace lists")]
     PermissionsDiffer,
     #[error("could not write the plugin: {0}")]
@@ -120,6 +122,24 @@ pub fn check_listing(listing: &Listing, official_ids: &[String]) -> Result<(), M
         return Err(MarketError::Manifest(ManifestError::UnsupportedApi(
             listing.api.clone(),
         )));
+    }
+    Ok(())
+}
+
+/// A plugin taking a service another installed plugin serves would be handed
+/// that plugin's sources and their credentials. `serving` names the plugin
+/// serving a service now.
+pub fn check_services(
+    listing: &Listing,
+    serving: impl Fn(&str) -> Option<String>,
+) -> Result<(), MarketError> {
+    for service in &listing.services {
+        if let Some(by) = serving(service).filter(|by| *by != listing.id) {
+            return Err(MarketError::ServiceTaken {
+                service: service.clone(),
+                by,
+            });
+        }
     }
     Ok(())
 }
@@ -310,6 +330,17 @@ mod tests {
         assert!(matches!(
             check_listing(&listing, &official),
             Err(MarketError::Official(_))
+        ));
+    }
+
+    #[test]
+    fn a_listing_cannot_take_a_service_another_plugin_serves() {
+        let listing = listing();
+        assert!(check_services(&listing, |_| None).is_ok());
+        assert!(check_services(&listing, |_| Some("bandcamp".into())).is_ok());
+        assert!(matches!(
+            check_services(&listing, |_| Some("other".into())),
+            Err(MarketError::ServiceTaken { service, by }) if service == "bandcamp" && by == "other"
         ));
     }
 

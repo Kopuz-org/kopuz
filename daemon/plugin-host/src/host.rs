@@ -64,6 +64,9 @@ impl WasiView for State {
 /// bounce a plugin elsewhere.
 fn client_for(permissions: &Arc<Permissions>, server_host: Option<String>) -> reqwest::Client {
     let permissions = Arc::clone(permissions);
+    let gate = Gate {
+        server_host: server_host.clone(),
+    };
     let policy = reqwest::redirect::Policy::custom(move |attempt| {
         let allowed = attempt
             .url()
@@ -77,10 +80,49 @@ fn client_for(permissions: &Arc<Permissions>, server_host: Option<String>) -> re
             attempt.follow()
         }
     });
-    utils::http::builder()
+    // Not `utils::http::builder`, whose resolver this one stands in for.
+    utils::http::internet_builder()
+        .dns_resolver(Arc::new(gate))
         .redirect(policy)
         .build()
         .unwrap_or_else(|_| utils::http::client())
+}
+
+/// Allowed names are checked before the lookup; this checks where they lead.
+/// Only the configured server may be on this machine or its network, so a name
+/// a plugin may reach cannot be pointed at the router or a local service.
+struct Gate {
+    server_host: Option<String>,
+}
+
+impl reqwest::dns::Resolve for Gate {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().trim_end_matches('.').to_ascii_lowercase();
+        let local_allowed = self.server_host.as_deref() == Some(host.as_str());
+        Box::pin(async move {
+            if utils::http::offline() && !utils::http::local_host(&host) {
+                return Err(gate_error("offline mode keeps requests off the internet"));
+            }
+            let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
+                .await?
+                .filter(|addr| local_allowed || !local(addr.ip()))
+                .collect();
+            if addrs.is_empty() {
+                return Err(gate_error(
+                    "the host leads only to this machine or its network",
+                ));
+            }
+            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+fn local(ip: std::net::IpAddr) -> bool {
+    ip.is_unspecified() || utils::http::local_ip(ip)
+}
+
+fn gate_error(message: &str) -> Box<dyn std::error::Error + Send + Sync> {
+    message.into()
 }
 
 fn host_of(url: &str) -> Option<String> {
@@ -178,6 +220,26 @@ impl crate::bindings::kopuz::plugin::types::Host for State {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn resolves(gate: &Gate, host: &str) -> bool {
+        use reqwest::dns::Resolve as _;
+        gate.resolve(host.parse().expect("a host name"))
+            .await
+            .is_ok()
+    }
+
+    #[tokio::test]
+    async fn only_the_server_may_lead_to_this_machine_or_its_network() {
+        let elsewhere = Gate {
+            server_host: Some("music.example".into()),
+        };
+        assert!(!resolves(&elsewhere, "localhost").await);
+        let server = Gate {
+            server_host: Some("localhost".into()),
+        };
+        assert!(resolves(&server, "localhost").await);
+        assert!(resolves(&server, "LOCALHOST.").await);
+    }
 
     #[test]
     fn the_server_host_is_read_from_its_url() {
