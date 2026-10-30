@@ -37,7 +37,8 @@ pub struct Plugin {
     id: Arc<str>,
     permissions: Arc<Permissions>,
     code: Code,
-    // Compiled on first use, so services nobody configured cost nothing.
+    // A bundled one is compiled on first use, so services nobody configured
+    // cost nothing; an installed one is compiled at load.
     component: OnceCell<Component>,
 }
 
@@ -80,6 +81,10 @@ fn runtime() -> Result<&'static Runtime, PluginError> {
         })
         .as_ref()
         .map_err(|error| PluginError::Runtime(error.clone()))
+}
+
+fn compile(engine: &Engine, wasm: &[u8]) -> Result<Component, PluginError> {
+    Component::new(engine, wasm).map_err(|error| PluginError::Invalid(format!("{error:#}")))
 }
 
 const EPOCH_TICK: std::time::Duration = std::time::Duration::from_millis(10);
@@ -146,15 +151,28 @@ impl Plugin {
         };
         self.component
             .get_or_try_init(|| async {
-                let runtime = runtime()?;
-                let engine = runtime.engine.clone();
+                let engine = runtime()?.engine.clone();
                 let wasm = wasm.clone().into_owned();
-                tokio::task::spawn_blocking(move || Component::new(&engine, &wasm))
+                tokio::task::spawn_blocking(move || compile(&engine, &wasm))
                     .await
                     .map_err(|error| PluginError::Runtime(error.to_string()))?
-                    .map_err(|error| PluginError::Invalid(format!("{error:#}")))
             })
             .await
+    }
+
+    /// Compile the plugin on this thread, so one that does not compile is
+    /// known before it is offered.
+    pub fn compile(&self) -> Result<(), PluginError> {
+        let Code::Wasm(wasm) = &self.code else {
+            return Ok(());
+        };
+        if self.component.initialized() {
+            return Ok(());
+        }
+        let component = compile(&runtime()?.engine, wasm)?;
+        // A first call racing this one compiled the same code; keep either.
+        let _ = self.component.set(component);
+        Ok(())
     }
 
     /// Compile the plugin now, so the first call to it does not wait.

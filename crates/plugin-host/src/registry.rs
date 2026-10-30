@@ -133,16 +133,19 @@ fn load_dir(dir: &Path) -> Result<Plugin, String> {
     let manifest = Manifest::parse(&manifest).map_err(|error| error.to_string())?;
     let wasm = std::fs::read(dir.join(COMPONENT_FILE))
         .map_err(|error| format!("{COMPONENT_FILE}: {error}"))?;
-    Ok(Plugin::new(
-        manifest,
-        Code::Wasm(Cow::Owned(wasm)),
-        Origin::Installed,
-    ))
+    let plugin = Plugin::new(manifest, Code::Wasm(Cow::Owned(wasm)), Origin::Installed);
+    // Checked here, or a broken copy of a bundled plugin would take its
+    // services away and fail only on the first call.
+    plugin.compile().map_err(|error| error.to_string())?;
+    Ok(plugin)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The smallest valid component: the header and nothing else.
+    const EMPTY_COMPONENT: &[u8] = b"\0asm\x0d\x00\x01\x00";
 
     fn manifest(id: &str, version: &str, services: &[&str]) -> String {
         let mut text =
@@ -168,7 +171,7 @@ mod tests {
             manifest("subsonic", "0.2.0", &["subsonic"]),
         )
         .unwrap();
-        std::fs::write(fork.join(COMPONENT_FILE), b"").unwrap();
+        std::fs::write(fork.join(COMPONENT_FILE), EMPTY_COMPONENT).unwrap();
         let broken = dir.join("broken");
         std::fs::create_dir_all(&broken).unwrap();
         std::fs::write(broken.join(MANIFEST_FILE), "id = ").unwrap();
@@ -222,7 +225,7 @@ mod tests {
             manifest("ytmusic", "2.0.0", &["ytmusic"]),
         )
         .unwrap();
-        std::fs::write(port.join(COMPONENT_FILE), b"").unwrap();
+        std::fs::write(port.join(COMPONENT_FILE), EMPTY_COMPONENT).unwrap();
         let registry = Registry::load(&native, Some(&dir));
         std::fs::remove_dir_all(&dir).ok();
         assert!(!registry.for_service("ytmusic").unwrap().is_native());
@@ -240,10 +243,31 @@ mod tests {
                 manifest("radio", "1.0.0", &["radio"]),
             )
             .unwrap();
-            std::fs::write(path.join(COMPONENT_FILE), b"").unwrap();
+            std::fs::write(path.join(COMPONENT_FILE), EMPTY_COMPONENT).unwrap();
         }
         let registry = Registry::load(&[], Some(&dir));
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(registry.plugins().len(), 1);
+    }
+
+    #[test]
+    fn a_copy_that_does_not_compile_leaves_the_bundled_plugin() {
+        let bundled = [Bundled {
+            manifest: Box::leak(manifest("subsonic", "0.1.0", &["subsonic"]).into_boxed_str()),
+            wasm: Some(EMPTY_COMPONENT),
+        }];
+        let dir = std::env::temp_dir().join(format!("kopuz-plugins-broken-{}", std::process::id()));
+        let fork = dir.join("subsonic");
+        std::fs::create_dir_all(&fork).unwrap();
+        std::fs::write(
+            fork.join(MANIFEST_FILE),
+            manifest("subsonic", "0.2.0", &["subsonic"]),
+        )
+        .unwrap();
+        std::fs::write(fork.join(COMPONENT_FILE), b"not a component").unwrap();
+        let registry = Registry::load(&bundled, Some(&dir));
+        std::fs::remove_dir_all(&dir).ok();
+        let serving = registry.for_service("subsonic").expect("subsonic served");
+        assert_eq!(serving.origin(), Origin::Bundled);
     }
 }

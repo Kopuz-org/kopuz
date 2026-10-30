@@ -188,7 +188,7 @@ impl PluginService {
             .await
             .map_err(|error| ApiError::internal(error.to_string()))?
             .map_err(market_error)?;
-        server::plugins::reload();
+        reload().await?;
         tracing::info!(plugin = %listing.id, version = %listing.version, "plugin installed");
 
         let mut info = installed()
@@ -220,7 +220,7 @@ impl PluginService {
             .await
             .map_err(|error| ApiError::internal(error.to_string()))?
             .map_err(market_error)?;
-        server::plugins::reload();
+        reload().await?;
         tracing::info!(plugin = %id, "plugin removed");
         Ok(())
     }
@@ -271,4 +271,11 @@ fn listed(listing: &Listing) -> PluginInfo {
         services: listing.services.clone(),
         network: listing.network.clone(),
     }
+}
+
+/// Off the runtime: reading the directory compiles every installed plugin.
+async fn reload() -> Result<(), ApiError> {
+    tokio::task::spawn_blocking(server::plugins::reload)
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))
 }
