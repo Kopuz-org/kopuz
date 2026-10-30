@@ -303,9 +303,10 @@ impl Reach {
         Self {
             trusted,
             permissions,
-            server_host: reqwest::Url::parse(server_url)
-                .ok()
-                .and_then(|url| url.host_str().map(str::to_string)),
+            server_host: reqwest::Url::parse(server_url).ok().and_then(|url| {
+                url.host_str()
+                    .map(|host| host.trim_end_matches('.').to_ascii_lowercase())
+            }),
         }
     }
 
@@ -344,5 +345,23 @@ impl Reach {
             && url.host_str().is_some_and(|host| {
                 self.trusted || self.permissions.allows(host, self.server_host.as_deref())
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_server_written_with_a_trailing_dot_still_names_itself() {
+        let reach = Reach::from_parts(
+            false,
+            plugin_host::manifest::Permissions {
+                network: vec!["$server".into()],
+            },
+            "https://Music.Home.test./navidrome",
+        );
+        assert!(reach.allows("https://music.home.test/stream/1"));
+        assert!(!reach.allows("https://elsewhere.test/stream/1"));
     }
 }
