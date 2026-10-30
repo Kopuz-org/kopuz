@@ -385,7 +385,6 @@ jobs:
           if-no-files-found: error
 
   macos:
-    if: ${{ !(github.ref_type == 'tag' && contains(github.ref_name, '-nightly.')) }}
     runs-on: macos-15
 
     steps:
@@ -408,29 +407,84 @@ jobs:
             cargo metadata --no-deps --format-version 1 |
               jq -r '.packages[] | select(.name == "kopuz") | .version'
           )"
+          base="$version"
 
-          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match Cargo version ${version}"
-            exit 1
+          nightly=false
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME#v}"
+            if [[ "$tag" =~ ^${base//./\\.}-nightly\.[0-9]{8}(\.[0-9]+)?$ ]]; then
+              nightly=true
+              version="$tag"
+            elif [[ "$tag" != "$base" ]]; then
+              echo "Tag ${GITHUB_REF_NAME} is neither v${base} nor a v${base}-nightly.YYYYMMDD"
+              exit 1
+            fi
           fi
 
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          # A nightly carries its tag's version in this build only; nothing is committed.
+          if [[ "$nightly" == true ]]; then
+            sed "s/\"${base}\"/\"${version}\"/g" Cargo.toml > Cargo.toml.next
+            mv Cargo.toml.next Cargo.toml
+            cargo update -w
+          fi
+
+          {
+            echo "version=${version}"
+            echo "nightly=${nightly}"
+            if [[ "$nightly" == true ]]; then
+              echo "flavor=nightly"
+              echo "asset=Kopuz-Nightly"
+              echo "product=Kopuz Nightly"
+              echo "suffix=-nightly"
+            else
+              echo "flavor=stable"
+              echo "asset=Kopuz"
+              echo "product=Kopuz"
+              echo "suffix="
+            fi
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build the app, daemon and command-line client
+        env:
+          KOPUZ_FLAVOR: ${{ steps.version.outputs.flavor }}
         run: cargo build --release --locked -p kopuz -p kopuz-kopuzd -p kopuz-ctl
 
+      - name: Name the binaries for Kopuz Nightly
+        if: steps.version.outputs.nightly == 'true'
+        run: |
+          for binary in kopuz kopuzd kopuzctl; do
+            cp "target/release/${binary}" "target/release/${binary}-nightly"
+          done
+
       - name: Bundle macOS application
-        run: cargo packager -p kopuz --release -f app --out-dir "$PWD/dist"
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NIGHTLY: ${{ steps.version.outputs.nightly }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$NIGHTLY" == true ]]; then
+            config=packaging/kopuz-nightly/kopuz-nightly.ci.toml
+            sed "s/@VERSION@/${VERSION}/" packaging/kopuz-nightly/kopuz-nightly.toml > "$config"
+            cargo packager --config "$config" --release -f app --out-dir "$PWD/dist"
+          else
+            cargo packager -p kopuz --release -f app --out-dir "$PWD/dist"
+          fi
 
       # Inside-out: the helpers first, then the bundle that seals them, never --deep.
       - name: Apply ad-hoc signature
+        shell: bash
+        env:
+          PRODUCT: ${{ steps.version.outputs.product }}
+          SUFFIX: ${{ steps.version.outputs.suffix }}
         run: |
-          test -x dist/Kopuz.app/Contents/MacOS/kopuzd
-          codesign --force --sign - dist/Kopuz.app/Contents/MacOS/kopuzd
-          codesign --force --sign - dist/Kopuz.app/Contents/MacOS/kopuzctl
-          codesign --force --sign - dist/Kopuz.app/Contents/MacOS/kopuz
-          codesign --force --sign - dist/Kopuz.app
-          codesign --verify --deep --strict --verbose=2 dist/Kopuz.app
+          app="dist/${PRODUCT}.app"
+          test -x "$app/Contents/MacOS/kopuzd${SUFFIX}"
+          for binary in kopuzd kopuzctl kopuz; do
+            codesign --force --sign - "$app/Contents/MacOS/${binary}${SUFFIX}"
+          done
+          codesign --verify --deep --strict --verbose=2 "$app"
 
       - name: Free disk space for DMG
         run: |
@@ -441,18 +495,21 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          PRODUCT: ${{ steps.version.outputs.product }}
+          ASSET: ${{ steps.version.outputs.asset }}
         run: |
           set -euo pipefail
 
-          dmg="dist/Kopuz_${VERSION}_aarch64.dmg"
-          hdiutil create -volname Kopuz -srcfolder dist/Kopuz.app -ov -format UDZO "$dmg"
+          dmg="dist/${ASSET}_${VERSION}_aarch64.dmg"
+          hdiutil create -volname "$PRODUCT" -srcfolder "dist/${PRODUCT}.app" -ov -format UDZO "$dmg"
           hdiutil verify "$dmg"
           shasum -a 256 "$dmg" > "${dmg}.sha256"
 
       - name: Upload macOS packages
         uses: actions/upload-artifact@v4
         with:
-          name: kopuz-release-macos-${{ steps.version.outputs.version }}
+          # A nightly's artifacts keep their own prefix, so its release never takes in another job's packages.
+          name: ${{ steps.version.outputs.nightly == 'true' && 'kopuz-nightly-macos' || format('kopuz-release-macos-{0}', steps.version.outputs.version) }}
           path: |
             dist/*.dmg
             dist/*.dmg.sha256
@@ -787,11 +844,11 @@ jobs:
           if-no-files-found: error
 
   publish:
-    # A release needs every job; a nightly only the GPUI Linux and Windows builds, whatever the others did.
+    # A release needs every job; a nightly only the GPUI Linux, macOS and Windows builds, whatever the others did.
     if: >-
       ${{ github.ref_type == 'tag' && !cancelled()
       && needs.linux.result == 'success' && needs.windows.result == 'success'
-      && (contains(github.ref_name, '-nightly.')
+      && ((contains(github.ref_name, '-nightly.') && needs.macos.result == 'success')
         || (needs.linux-legacy.result == 'success' && needs.macos.result == 'success'
           && needs.macos-legacy.result == 'success' && needs.windows-legacy.result == 'success'
           && needs.android.result == 'success')) }}
@@ -824,6 +881,8 @@ jobs:
             dist/*.rpm.sha256
             dist/*.exe
             dist/*.exe.sha256
+            dist/*.dmg
+            dist/*.dmg.sha256
 
       - name: Upload packages to GitHub release
         if: ${{ !contains(github.ref_name, '-nightly.') }}
@@ -1013,7 +1072,7 @@ jobs:
           done
 
   homebrew:
-    # Kopuz Nightly has no macOS build of its own yet, so the casks follow releases only.
+    # The casks carry the stable app; Kopuz Nightly's DMG goes only to its pre-release.
     if: github.ref_type == 'tag' && !contains(github.ref_name, '-nightly.')
     needs: publish
     runs-on: ubuntu-latest

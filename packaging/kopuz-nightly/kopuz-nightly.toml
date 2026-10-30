@@ -16,6 +16,10 @@ binaries = [
   { path = "kopuzctl-nightly" },
 ]
 
+[macos]
+minimum-system-version = "11.0"
+info-plist-path = "../kopuz/Info.plist"
+
 [nsis]
 installer-icon = "app.ico"
 template = "../kopuz/installer.nsi"
