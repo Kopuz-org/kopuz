@@ -166,5 +166,24 @@ async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
     );
     assert_eq!(daemon::services::resolve("echo-service"), None);
 
+    // A copy dropped in by hand under another name loads, and removing the
+    // plugin removes that directory too.
+    let by_hand = plugins.join("my-echo");
+    std::fs::create_dir_all(&by_hand).unwrap();
+    std::fs::write(by_hand.join(plugin_host::MANIFEST_FILE), MANIFEST).unwrap();
+    std::fs::write(
+        by_hand.join(plugin_host::COMPONENT_FILE),
+        subsonic_component(),
+    )
+    .unwrap();
+    server::plugins::reload();
+    assert_eq!(
+        daemon::services::resolve("echo-service"),
+        Some(config::MusicService::Plugin)
+    );
+    market.uninstall("echo").await.expect("removed");
+    assert!(!by_hand.exists());
+    assert_eq!(daemon::services::resolve("echo-service"), None);
+
     std::fs::remove_dir_all(&plugins).ok();
 }

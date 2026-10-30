@@ -184,10 +184,18 @@ impl PluginService {
             .map_err(|error| ApiError::invalid_input(error.to_string()))?;
 
         let id = listing.id.clone();
-        tokio::task::spawn_blocking(move || market::install(&dir, &id, &manifest_text, &component))
-            .await
-            .map_err(|error| ApiError::internal(error.to_string()))?
-            .map_err(market_error)?;
+        tokio::task::spawn_blocking(move || {
+            let target = market::install(&dir, &id, &manifest_text, &component)?;
+            // A hand-installed copy under another directory name would still
+            // load beside it on the next start.
+            plugin_host::dirs_of(&dir, &id)
+                .iter()
+                .filter(|copy| **copy != target)
+                .try_for_each(|copy| market::uninstall(&dir, copy))
+        })
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .map_err(market_error)?;
         reload().await?;
         tracing::info!(plugin = %listing.id, version = %listing.version, "plugin installed");
 
@@ -216,10 +224,14 @@ impl PluginService {
             .to_path_buf();
         let id = id.to_string();
         let removed = id.clone();
-        tokio::task::spawn_blocking(move || market::uninstall(&dir, &removed))
-            .await
-            .map_err(|error| ApiError::internal(error.to_string()))?
-            .map_err(market_error)?;
+        tokio::task::spawn_blocking(move || {
+            plugin_host::dirs_of(&dir, &removed)
+                .iter()
+                .try_for_each(|copy| market::uninstall(&dir, copy))
+        })
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .map_err(market_error)?;
         reload().await?;
         tracing::info!(plugin = %id, "plugin removed");
         Ok(())

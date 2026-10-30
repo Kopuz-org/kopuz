@@ -127,6 +127,20 @@ pub fn plugin_dirs(dir: &Path) -> Vec<PathBuf> {
     paths
 }
 
+/// Every directory under `dir` whose manifest names `id`, loaded or not. The
+/// directory name need not be the id.
+pub fn dirs_of(dir: &Path, id: &str) -> Vec<PathBuf> {
+    plugin_dirs(dir)
+        .into_iter()
+        .filter(|path| {
+            std::fs::read_to_string(path.join(MANIFEST_FILE))
+                .ok()
+                .and_then(|text| Manifest::parse(&text).ok())
+                .is_some_and(|manifest| manifest.id == id)
+        })
+        .collect()
+}
+
 fn load_dir(dir: &Path) -> Result<Plugin, String> {
     let manifest = std::fs::read_to_string(dir.join(MANIFEST_FILE))
         .map_err(|error| format!("{MANIFEST_FILE}: {error}"))?;
