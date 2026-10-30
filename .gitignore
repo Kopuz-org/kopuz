@@ -30,3 +30,6 @@ pr_comments.txt
 
 # local working notes for the daemon/frontend split
 docs/daemon-split-plan.md
+# Python bytecode
+__pycache__/
+*.pyc

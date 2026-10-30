@@ -5,6 +5,11 @@ on:
     branches: [main, master]
   pull_request:
 
+# A new push to a pull request makes its running checks moot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   locale-parity:
     runs-on: ubuntu-latest
@@ -23,6 +28,9 @@ jobs:
       - name: Check frontend crates know no local source
         run: nix shell nixpkgs#nushell --command nu scripts/check_frontend_sources.nu
 
+      - name: Check the shared, daemon and apps layer boundaries
+        run: nix shell nixpkgs#nushell --command nu scripts/check_layers.nu
+
       # The comparison needs a master to read; a shallow checkout carries none.
       - name: Fetch master for the wire comparison
         run: git fetch --depth=1 origin master
@@ -33,25 +41,53 @@ jobs:
       - name: Check no proto number changed meaning
         run: nix shell nixpkgs#nushell --command nu scripts/check_proto_numbers.nu
 
-  pr-build:
+  # Pull requests only check; master pushes and nightlies do the builds, linking and packaging.
+  pr-nix-eval:
     if: github.event_name == 'pull_request'
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            system: x86_64-linux
-          - os: macos-latest
-            system: aarch64-darwin
-
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Run Nix checks
-        run: nix build .#checks.${{ matrix.system }}.default
+      # Evaluation alone catches a broken flake or a file missing from a package's source.
+      - name: Evaluate the Nix packages and dev shells
+        run: |
+          for system in x86_64-linux aarch64-darwin; do
+            for output in checks devShells; do
+              nix eval --raw ".#$output.$system.default.drvPath"
+              echo
+            done
+          done
+
+  pr-clippy:
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+        mode: [debug, release]
+
+    name: clippy (${{ matrix.os }}, ${{ matrix.mode }})
+    runs-on: ${{ matrix.os }}
+    env:
+      SQLX_OFFLINE: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: clippy-${{ matrix.mode }}
+
+      - name: Run Clippy
+        shell: bash
+        run: cargo clippy --workspace --all-targets ${{ matrix.mode == 'release' && '--release' || '' }} -- -D warnings
 
   push-build:
     if: github.event_name == 'push'
@@ -83,6 +119,7 @@ jobs:
         run: cachix push kopuz result
 
   windows-build:
+    if: github.event_name == 'push'
     runs-on: windows-latest
 
     steps:
@@ -91,6 +128,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        # A new key rebuilds v8, whose build script does not rerun when CARGO_FEATURE_CRT_STATIC changes.
+        with:
+          key: crt-static
 
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
@@ -127,12 +167,12 @@ jobs:
       - name: Test the command-line client
         run: cargo test -p kopuz-ctl
 
-      - name: Build the daemon and client
-        run: cargo build --release -p kopuz-kopuzd -p kopuz-ctl
+      - name: Build the GPUI app, daemon and client
+        run: cargo build --release -p kopuz -p kopuz-kopuzd -p kopuz-ctl
 
       - name: Bundle Windows installer (.msi)
         shell: pwsh
-        run: dx bundle --release --platform desktop --package kopuz
+        run: dx bundle --release --platform desktop --package kopuz-legacy
 
       - name: List bundle output
         if: always()

@@ -85,7 +85,7 @@ def violations [before: string, after: string] {
 
 def main [--base: string = "origin/master"] {
   let repo_root = ($env.FILE_PWD | path dirname)
-  let path = "crates/proto/proto/kopuz.proto"
+  let path = "shared/proto/proto/kopuz.proto"
 
   let before = (do -i { ^git -C $repo_root show $"($base):($path)" } | complete)
   if $before.exit_code != 0 {

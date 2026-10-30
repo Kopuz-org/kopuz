@@ -32,6 +32,7 @@ jobs:
           scoped_re='^[a-z0-9][a-z0-9._-]*(/[a-z0-9][a-z0-9._-]*)?: .+'
           checked=0
           failed=0
+          # First parent only: a subtree merge brings in another repo's history, written under its own rules.
           while IFS=$'\t' read -r sha subject; do
             checked=$((checked + 1))
             if ((${#subject} > 80)); then
@@ -51,7 +52,7 @@ jobs:
               failed=1
               continue
             fi
-          done < <(git log --format='%h%x09%s' "$range")
+          done < <(git log --first-parent --format='%h%x09%s' "$range")
 
           if ((checked == 0)); then
             echo "No commits to check."

@@ -1,9 +1,13 @@
 [workspace]
-members = ["crates/*", "plugins/*", "examples/plugins/*"]
+members = ["shared/*", "daemon/*", "daemon/plugins/sdk", "daemon/plugins/subsonic", "daemon/plugins/jellyfin", "daemon/plugins/clippsly", "daemon/plugins/soundcloud", "daemon/plugins/examples/internet-archive", "apps/common/*", "apps/cli", "apps/legacy/*", "apps/kopuz/*"]
+# daemon/plugins holds crates but is not one; its crates are listed by name.
+exclude = ["vendor/*", "daemon/plugins", "apps/kopuz/.claude", "apps/kopuz/docs", "apps/kopuz/scripts"]
+# A bare `cargo build` skips the legacy Dioxus app; build it with `just build` or `-p kopuz-legacy`.
+default-members = ["shared/*", "daemon/*", "daemon/plugins/sdk", "daemon/plugins/subsonic", "daemon/plugins/jellyfin", "daemon/plugins/clippsly", "daemon/plugins/soundcloud", "daemon/plugins/examples/internet-archive", "apps/common/*", "apps/cli", "apps/kopuz/*"]
 resolver = "3"
 
 [workspace.package]
-version = "0.22.0"
+version = "0.68.0"
 edition = "2024"
 rust-version = "1.95.0"
 description = "A modern, lightweight music player built with Rust and Dioxus."
@@ -46,6 +50,7 @@ tonic-build = "0.12"
 protox = "0.7"
 tokio-stream = "0.1"
 libc = "0.2"
+semver = "1"
 tower = { version = "0.5", features = ["util"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 uuid = { version = "1.20.0", features = [
@@ -137,30 +142,40 @@ wit-bindgen = "0.63"
 url = "2.5"
 
 # Workspace components
-i18n = { package = "kopuz-i18n", version = "0.22.0", path = "./crates/i18n" }
-player = { package = "kopuz-player", version = "0.22.0", path = "./crates/player" }
-reader = { package = "kopuz-reader", version = "0.22.0", path = "./crates/reader" }
-components = { package = "kopuz-components", version = "0.22.0", path = "./crates/components" }
-hooks = { package = "kopuz-hooks", version = "0.22.0", path = "./crates/hooks" }
-pages = { package = "kopuz-pages", version = "0.22.0", path = "./crates/pages" }
-utils = { package = "kopuz-utils", version = "0.22.0", path = "./crates/utils" }
-config = { package = "kopuz-config", version = "0.22.0", path = "./crates/config" }
-db = { package = "kopuz-db", version = "0.22.0", path = "./crates/db" }
-api = { package = "kopuz-api", version = "0.22.0", path = "./crates/api" }
-proto = { package = "kopuz-proto", version = "0.22.0", path = "./crates/proto" }
-daemon = { package = "kopuz-daemon", version = "0.22.0", path = "./crates/daemon" }
-kopuzd = { package = "kopuz-kopuzd", version = "0.22.0", path = "./crates/kopuzd" }
-client = { package = "kopuz-client", version = "0.22.0", path = "./crates/client" }
-kopuz = { version = "0.22.0", path = "./crates/kopuz" }
-server = { package = "kopuz-server", version = "0.22.0", path = "./crates/server" }
-kopuz_route = { package = "kopuz-route", version = "0.22.0", path = "./crates/kopuz_route" }
-discord-presence = { package = "kopuz-discord-presence", version = "0.22.0", path = "./crates/discord-presence" }
-scrobble = { package = "kopuz-scrobble", version = "0.22.0", path = "./crates/scrobble" }
-radio = { package = "kopuz-radio", version = "0.22.0", path = "./crates/radio" }
-plugin-host = { package = "kopuz-plugin-host", version = "0.22.0", path = "./crates/plugin-host" }
-bundled-plugins = { package = "kopuz-bundled-plugins", version = "0.22.0", path = "./crates/bundled-plugins" }
+i18n = { package = "kopuz-i18n", version = "0.68.0", path = "./apps/common/i18n" }
+player = { package = "kopuz-player", version = "0.68.0", path = "./daemon/player" }
+reader = { package = "kopuz-reader", version = "0.68.0", path = "./daemon/reader" }
+components = { package = "kopuz-components", version = "0.68.0", path = "./apps/legacy/components" }
+hooks = { package = "kopuz-hooks", version = "0.68.0", path = "./apps/legacy/hooks" }
+pages = { package = "kopuz-pages", version = "0.68.0", path = "./apps/legacy/pages" }
+utils = { package = "kopuz-utils", version = "0.68.0", path = "./shared/utils" }
+config = { package = "kopuz-config", version = "0.68.0", path = "./shared/config" }
+db = { package = "kopuz-db", version = "0.68.0", path = "./daemon/db" }
+api = { package = "kopuz-api", version = "0.68.0", path = "./shared/api" }
+proto = { package = "kopuz-proto", version = "0.68.0", path = "./shared/proto" }
+daemon = { package = "kopuz-daemon", version = "0.68.0", path = "./daemon/core" }
+kopuzd = { package = "kopuz-kopuzd", version = "0.68.0", path = "./daemon/kopuzd" }
+client = { package = "kopuz-client", version = "0.68.0", path = "./apps/common/client" }
+kopuz-legacy = { version = "0.68.0", path = "./apps/legacy/kopuz" }
+server = { package = "kopuz-server", version = "0.68.0", path = "./daemon/server" }
+kopuz_route = { package = "kopuz-route", version = "0.68.0", path = "./apps/legacy/kopuz_route" }
+discord-presence = { package = "kopuz-discord-presence", version = "0.68.0", path = "./daemon/discord-presence" }
+scrobble = { package = "kopuz-scrobble", version = "0.68.0", path = "./daemon/scrobble" }
+radio = { package = "kopuz-radio", version = "0.68.0", path = "./daemon/radio" }
+plugin-host = { package = "kopuz-plugin-host", version = "0.68.0", path = "./daemon/plugin-host" }
+bundled-plugins = { package = "kopuz-bundled-plugins", version = "0.68.0", path = "./daemon/bundled-plugins" }
 
-# Steer code toward the tracing subscriber (see crates/kopuz/src/logging.rs).
+# GPUI frontend; its own `components` is a path dependency, as the key above is Dioxus's.
+gpui-kit = "0.6.4"
+futures = "0.3"
+anyhow = "1"
+commands = { path = "./apps/kopuz/commands" }
+link = { path = "./apps/kopuz/link" }
+store = { path = "./apps/kopuz/store" }
+primitives = { path = "./apps/kopuz/primitives" }
+theme = { path = "./apps/kopuz/theme" }
+
+# Steer code toward the tracing subscriber (see apps/legacy/kopuz/src/logging.rs).
 # Inherited per-crate via `[lints] workspace = true`. Build scripts (cargo:
 # directives), examples, and test diagnostics opt out with `#[expect(...)]`.
 [workspace.lints.clippy]
@@ -178,7 +193,7 @@ panic = "unwind"
 [profile.dev.package."*"]
 opt-level = 3
 
-# The official plugins, built for wasm32-wasip2 by crates/bundled-plugins.
+# The official plugins, built for wasm32-wasip2 by daemon/bundled-plugins.
 # Small beats fast here: they spend their time waiting on the network.
 [profile.plugin]
 inherits = "release"
@@ -199,3 +214,7 @@ strip = "symbols"
 lto = "thin"
 codegen-units = 1
 panic = "unwind"
+
+# Vendored for the GPUI frontend: the gpui-pre snapshot of zed's gpui_linux.
+[patch.crates-io]
+gpui-pre-linux = { path = "vendor/gpui-pre-linux" }

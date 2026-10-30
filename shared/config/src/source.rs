@@ -1,0 +1,516 @@
+use serde::{Deserialize, Serialize};
+
+/// Id of the folder source every install starts with; it is also its stored `source` column value.
+pub const DEFAULT_LOCAL_ID: &str = "local";
+
+/// Where a track/playlist/favorite comes from, and what the app is currently
+/// sourcing from: a folder library or a specific media server.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(from = "SourceRepr", into = "SourceRepr")]
+pub enum Source {
+    /// A configured folder library; its id shares the DB `source` column with server ids.
+    LocalLibrary(String),
+    Server(String),
+}
+
+/// The stored shape, which still spells the default folder library `Local`.
+#[derive(Serialize, Deserialize)]
+enum SourceRepr {
+    Local,
+    LocalLibrary(String),
+    Server(String),
+}
+
+impl From<SourceRepr> for Source {
+    fn from(repr: SourceRepr) -> Self {
+        match repr {
+            SourceRepr::Local => Source::default(),
+            SourceRepr::LocalLibrary(id) => Source::LocalLibrary(id),
+            SourceRepr::Server(id) => Source::Server(id),
+        }
+    }
+}
+
+impl From<Source> for SourceRepr {
+    fn from(source: Source) -> Self {
+        match source {
+            Source::LocalLibrary(id) if id == DEFAULT_LOCAL_ID => SourceRepr::Local,
+            Source::LocalLibrary(id) => SourceRepr::LocalLibrary(id),
+            Source::Server(id) => SourceRepr::Server(id),
+        }
+    }
+}
+
+impl Default for Source {
+    fn default() -> Self {
+        Source::LocalLibrary(DEFAULT_LOCAL_ID.to_owned())
+    }
+}
+
+impl Source {
+    /// The `source` column value: a folder library id or a server id.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Source::LocalLibrary(id) | Source::Server(id) => id.as_str(),
+        }
+    }
+
+    /// Build from a stored `source` column value.
+    pub fn from_column(s: &str) -> Self {
+        if s == DEFAULT_LOCAL_ID || s.starts_with("local:") {
+            Source::LocalLibrary(s.to_owned())
+        } else {
+            Source::Server(s.to_owned())
+        }
+    }
+
+    /// The server id, if this is a server source.
+    pub fn server_id(&self) -> Option<&str> {
+        match self {
+            Source::Server(id) => Some(id),
+            Source::LocalLibrary(_) => None,
+        }
+    }
+
+    pub fn is_local(&self) -> bool {
+        matches!(self, Source::LocalLibrary(_))
+    }
+
+    pub fn local_library_id(&self) -> Option<&str> {
+        match self {
+            Source::LocalLibrary(id) => Some(id),
+            Source::Server(_) => None,
+        }
+    }
+
+    /// Key used by the play-count cache. The default library and server sources
+    /// keep their existing uid keys; other folder libraries add their source id so
+    /// the same filesystem path can have independent counts in each library.
+    pub fn listen_count_key(&self, track_uid: &str) -> String {
+        match self {
+            Source::LocalLibrary(id) if id != DEFAULT_LOCAL_ID => format!("{id}|{track_uid}"),
+            Source::LocalLibrary(_) | Source::Server(_) => track_uid.to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SavedLocalSource {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub directories: Vec<std::path::PathBuf>,
+}
+
+impl SavedLocalSource {
+    pub fn new(name: String, directories: Vec<std::path::PathBuf>) -> Self {
+        Self {
+            id: format!("local:{}", uuid::Uuid::new_v4()),
+            name,
+            directories,
+        }
+    }
+
+    /// The folder library every install has, under the id its rows are stored with.
+    pub fn default_library(directories: Vec<std::path::PathBuf>) -> Self {
+        Self {
+            id: DEFAULT_LOCAL_ID.to_owned(),
+            name: DEFAULT_LOCAL_NAME.to_owned(),
+            directories,
+        }
+    }
+}
+
+pub const DEFAULT_LOCAL_NAME: &str = "Local Library";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+pub enum MusicService {
+    #[default]
+    Jellyfin,
+    #[serde(alias = "Navidrome")]
+    Subsonic,
+    Custom,
+    YtMusic,
+    AppleMusic,
+    SoundCloud,
+    Spotify,
+    Nextcloud,
+    Clippsly,
+    Smb,
+    AudioCd,
+    /// A service a plugin declares itself, which this enum cannot name. The
+    /// server's `plugin_service` says which.
+    Plugin,
+}
+
+impl MusicService {
+    pub const ALL: &'static [MusicService] = &[
+        MusicService::Jellyfin,
+        MusicService::Subsonic,
+        MusicService::Custom,
+        MusicService::YtMusic,
+        MusicService::SoundCloud,
+        MusicService::AppleMusic,
+        MusicService::Spotify,
+        MusicService::Nextcloud,
+        MusicService::Clippsly,
+        MusicService::Smb,
+        MusicService::AudioCd,
+    ];
+
+    /// The stable slug a client names a service by. Unlike the enum, this
+    /// crosses the wire, so it never changes for an existing service.
+    pub fn id(&self) -> &'static str {
+        match self {
+            Self::Jellyfin => "jellyfin",
+            Self::Subsonic => "subsonic",
+            Self::Custom => "custom",
+            Self::YtMusic => "ytmusic",
+            Self::AppleMusic => "applemusic",
+            Self::SoundCloud => "soundcloud",
+            Self::Spotify => "spotify",
+            Self::Nextcloud => "nextcloud",
+            Self::Clippsly => "clippsly",
+            Self::Smb => "smb",
+            Self::AudioCd => "cdda",
+            Self::Plugin => "plugin",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|service| service.id() == id)
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Jellyfin => "Jellyfin",
+            Self::Subsonic => "Subsonic",
+            Self::Custom => "Custom",
+            Self::YtMusic => "YouTube Music",
+            Self::AppleMusic => "Apple Music",
+            Self::SoundCloud => "SoundCloud",
+            Self::Spotify => "Spotify",
+            Self::Nextcloud => "Nextcloud",
+            Self::Clippsly => "Clippsly",
+            Self::Smb => "SMB / NAS",
+            Self::AudioCd => "Audio CD",
+            Self::Plugin => "Plugin",
+        }
+    }
+
+    /// Backends that authenticate via a browser sign-in window (OAuth/cookies)
+    /// rather than a URL + username/password form.
+    pub fn uses_browser_signin(&self) -> bool {
+        matches!(
+            self,
+            Self::YtMusic | Self::AppleMusic | Self::SoundCloud | Self::Spotify
+        )
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MusicServer {
+    pub name: String,
+    pub url: String,
+    #[serde(default)]
+    pub service: MusicService,
+    pub access_token: Option<String>,
+    pub user_id: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
+    /// For browser sign-in services: which browser was used. `None` means the
+    /// system default, resolved when the sign-in runs.
+    #[serde(default)]
+    pub yt_browser: Option<Browser>,
+    /// For `MusicService::YtMusic` only: anonymous mode.
+    #[serde(default)]
+    pub yt_anonymous: bool,
+    /// YouTube Music: the browser profile the session was imported from, so an
+    /// expired session can be read from it again.
+    #[serde(default)]
+    pub yt_profile: Option<String>,
+    /// The brand account in use; `None` is the signed-in account itself.
+    #[serde(default)]
+    pub account: Option<String>,
+    /// For `MusicService::AppleMusic`: the storefront code (e.g. "us",
+    /// "gb", "jp") controlling catalog region and media availability.
+    #[serde(default = "default_apple_music_storefront")]
+    pub apple_music_storefront: String,
+    /// For `MusicService::AppleMusic`: language code (e.g. "en", "ja")
+    /// controlling track/album title and lyrics language.
+    #[serde(default = "default_apple_music_language")]
+    pub apple_music_language: String,
+    /// For `MusicService::Plugin`: the slug of the service the plugin serves.
+    #[serde(default)]
+    pub plugin_service: Option<String>,
+}
+
+fn service_id(service: MusicService, plugin_service: Option<&str>) -> &str {
+    match (service, plugin_service) {
+        (MusicService::Plugin, Some(slug)) => slug,
+        (service, _) => service.id(),
+    }
+}
+
+fn default_apple_music_storefront() -> String {
+    "us".to_string()
+}
+
+fn default_apple_music_language() -> String {
+    "en".to_string()
+}
+
+impl MusicServer {
+    pub fn new(name: String, url: String) -> Self {
+        Self::new_with_service(name, url, MusicService::Jellyfin)
+    }
+
+    pub fn new_with_service(name: String, url: String, service: MusicService) -> Self {
+        Self {
+            name,
+            url: url.trim_end_matches('/').to_string(),
+            service,
+            access_token: None,
+            user_id: None,
+            id: Some(uuid::Uuid::new_v4().to_string()),
+            yt_browser: None,
+            yt_anonymous: false,
+            yt_profile: None,
+            account: None,
+            apple_music_storefront: "us".to_string(),
+            apple_music_language: "en".to_string(),
+            plugin_service: None,
+        }
+    }
+
+    pub fn yt_browser(&self) -> Option<Browser> {
+        self.yt_browser
+    }
+
+    /// The slug of the service this server speaks: its plugin's own for a
+    /// plugin service, the built-in one's otherwise.
+    pub fn service_id(&self) -> &str {
+        service_id(self.service, self.plugin_service.as_deref())
+    }
+
+    /// An anonymous source sends no cookies even if an old sign-in's token is stored.
+    pub fn ytmusic_cookies(&self) -> Option<&str> {
+        if self.service != MusicService::YtMusic || self.yt_anonymous {
+            return None;
+        }
+        self.access_token.as_deref()
+    }
+}
+
+impl Default for MusicServer {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            url: String::new(),
+            service: MusicService::Jellyfin,
+            access_token: None,
+            user_id: None,
+            id: None,
+            yt_browser: None,
+            yt_anonymous: false,
+            yt_profile: None,
+            account: None,
+            apple_music_storefront: "us".to_string(),
+            apple_music_language: "en".to_string(),
+            plugin_service: None,
+        }
+    }
+}
+
+/// Which engine a browser is built on. Everything a sign-in does differently
+/// per browser (the launch flags, where the profile keeps its cookies, how
+/// those cookies are encrypted) follows from this and not from the brand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BrowserEngine {
+    Chromium,
+    Gecko,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Browser {
+    Chrome,
+    Chromium,
+    Brave,
+    Edge,
+    Vivaldi,
+    Helium,
+    Firefox,
+    LibreWolf,
+    Zen,
+    Floorp,
+}
+
+impl Browser {
+    pub const ALL: &'static [Browser] = &[
+        Browser::Firefox,
+        Browser::Chrome,
+        Browser::Chromium,
+        Browser::Brave,
+        Browser::Edge,
+        Browser::Vivaldi,
+        Browser::Helium,
+        Browser::LibreWolf,
+        Browser::Zen,
+        Browser::Floorp,
+    ];
+
+    /// The Chromium family, in the order an automatic choice should try it.
+    /// Spotify playback is limited to these: its Web Playback SDK has a
+    /// long-standing Firefox bug, so a Gecko browser is never offered there.
+    pub const CHROMIUM_FAMILY: &'static [Browser] = &[
+        Browser::Chrome,
+        Browser::Chromium,
+        Browser::Brave,
+        Browser::Edge,
+        Browser::Vivaldi,
+        Browser::Helium,
+    ];
+
+    /// The stable id used in URL routes, settings UI option values,
+    /// libsecret lookups, etc.
+    pub fn id(self) -> &'static str {
+        match self {
+            Browser::Chrome => "chrome",
+            Browser::Chromium => "chromium",
+            Browser::Brave => "brave",
+            Browser::Edge => "edge",
+            Browser::Vivaldi => "vivaldi",
+            Browser::Helium => "helium",
+            Browser::Firefox => "firefox",
+            Browser::LibreWolf => "librewolf",
+            Browser::Zen => "zen",
+            Browser::Floorp => "floorp",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Browser::Chrome => "Chrome",
+            Browser::Chromium => "Chromium",
+            Browser::Brave => "Brave",
+            Browser::Edge => "Edge",
+            Browser::Vivaldi => "Vivaldi",
+            Browser::Helium => "Helium",
+            Browser::Firefox => "Firefox",
+            Browser::LibreWolf => "LibreWolf",
+            Browser::Zen => "Zen",
+            Browser::Floorp => "Floorp",
+        }
+    }
+
+    pub fn engine(self) -> BrowserEngine {
+        match self {
+            Browser::Chrome
+            | Browser::Chromium
+            | Browser::Brave
+            | Browser::Edge
+            | Browser::Vivaldi
+            | Browser::Helium => BrowserEngine::Chromium,
+            Browser::Firefox | Browser::LibreWolf | Browser::Zen | Browser::Floorp => {
+                BrowserEngine::Gecko
+            }
+        }
+    }
+
+    pub fn from_id(s: &str) -> Option<Browser> {
+        Browser::ALL
+            .iter()
+            .copied()
+            .find(|browser| browser.id() == s)
+    }
+}
+
+impl std::fmt::Display for Browser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+pub type JellyfinServer = MusicServer;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SavedServer {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    #[serde(default)]
+    pub service: MusicService,
+    /// Persisted browser choice for browser sign-in servers.
+    #[serde(default)]
+    pub yt_browser: Option<Browser>,
+    /// Persisted anonymous-mode flag.
+    #[serde(default)]
+    pub yt_anonymous: bool,
+    /// Persisted browser profile a YouTube Music session was imported from.
+    #[serde(default)]
+    pub yt_profile: Option<String>,
+    /// Persisted account choice, for services with several under one sign-in.
+    #[serde(default)]
+    pub account: Option<String>,
+    /// Persisted Apple Music storefront (e.g. "us", "gb", "jp").
+    #[serde(default = "default_apple_music_storefront")]
+    pub apple_music_storefront: String,
+    /// Persisted Apple Music language (e.g. "en", "ja", "de").
+    #[serde(default = "default_apple_music_language")]
+    pub apple_music_language: String,
+    /// Persisted plugin service slug, for `MusicService::Plugin`.
+    #[serde(default)]
+    pub plugin_service: Option<String>,
+}
+
+impl SavedServer {
+    pub fn new(name: String, url: String, service: MusicService) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
+            url: url.trim_end_matches('/').to_string(),
+            service,
+            yt_browser: None,
+            yt_anonymous: false,
+            yt_profile: None,
+            account: None,
+            apple_music_storefront: "us".to_string(),
+            apple_music_language: "en".to_string(),
+            plugin_service: None,
+        }
+    }
+
+    /// See [`MusicServer::service_id`].
+    pub fn service_id(&self) -> &str {
+        service_id(self.service, self.plugin_service.as_deref())
+    }
+
+    pub fn from_music_server(server: &MusicServer) -> Self {
+        Self {
+            id: server
+                .id
+                .clone()
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            name: server.name.clone(),
+            url: server.url.clone(),
+            service: server.service,
+            yt_browser: server.yt_browser,
+            yt_anonymous: server.yt_anonymous,
+            yt_profile: server.yt_profile.clone(),
+            account: server.account.clone(),
+            apple_music_storefront: server.apple_music_storefront.clone(),
+            apple_music_language: server.apple_music_language.clone(),
+            plugin_service: server.plugin_service.clone(),
+        }
+    }
+
+    pub fn matches(&self, server: &MusicServer) -> bool {
+        if let Some(sid) = server.id.as_ref()
+            && sid == &self.id
+        {
+            return true;
+        }
+        self.url == server.url && self.service == server.service
+    }
+}

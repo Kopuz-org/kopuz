@@ -1,7 +1,7 @@
 # Plugins
 
 A plugin adds a source to Kopuz. It is a WebAssembly component built against
-the WIT package in [`wit/`](../wit), plus a `kopuz-plugin.toml` manifest that
+the WIT package in [`daemon/plugin-host/wit/`](../daemon/plugin-host/wit), plus a `kopuz-plugin.toml` manifest that
 says what it is, which services it serves, what each of them supports and
 which hosts it may reach. The daemon runs it in a sandbox: no files, no
 sockets, no environment. Its only way out is the `http` import, and every
@@ -11,7 +11,7 @@ service and the daemon caches what it returns.
 
 Every source is a plugin, of one of three kinds:
 
-- **Official sandboxed plugins** live in [`plugins/`](../plugins) and are
+- **Official sandboxed plugins** live in [`daemon/plugins/`](../daemon/plugins) and are
   built into Kopuz: Subsonic (and custom Subsonic-compatible servers),
   Jellyfin, Clippsly and SoundCloud. They update with Kopuz and cannot be
   removed.
@@ -31,7 +31,7 @@ Every source is a plugin, of one of three kinds:
 ## Writing one
 
 Start a `cdylib` crate that depends on
-[`kopuz-plugin-sdk`](../plugins/sdk), implement `Source`, and export it:
+[`kopuz-plugin-sdk`](../daemon/plugins/sdk), implement `Source`, and export it:
 
 ```rust
 use kopuz_plugin_sdk::{AuthOutcome, Connection, Source, SourceError, StreamInfo, StreamQuality};
@@ -75,7 +75,7 @@ target):
 cargo build --release --target wasm32-wasip2
 ```
 
-[`examples/plugins/internet-archive`](../examples/plugins/internet-archive)
+[`daemon/plugins/examples/internet-archive`](../daemon/plugins/examples/internet-archive)
 is a complete community plugin that adds a service of its own.
 
 ## The manifest
@@ -108,7 +108,7 @@ Capabilities default to off. The keys mirror the daemon's: `sync`,
 `playlists = "none" | "add-remove" | "reorder"`,
 `radio = ["track", "playlist", "search"]`,
 `favorites-sync = "instant" | "paginated"`, and the rest listed in
-`crates/plugin-host/src/manifest.rs`. A misspelled key is an error, not a
+`daemon/plugin-host/src/manifest.rs`. A misspelled key is an error, not a
 silently disabled feature.
 
 ## Installing by hand

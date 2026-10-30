@@ -1,0 +1,102 @@
+[package]
+name = "kopuz-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "server"
+
+[lints]
+workspace = true
+
+[dependencies]
+tracing = { workspace = true }
+directories = { workspace = true }
+nextcloud-rs = { workspace = true }
+percent-encoding = { workspace = true }
+reqwest = { workspace = true, features = ["blocking", "json", "multipart"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+config = { workspace = true }
+rand = { workspace = true }
+uuid = { workspace = true }
+md5 = { workspace = true }
+sha1 = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }
+httpdate = { workspace = true }
+hex = { workspace = true }
+webbrowser = { workspace = true }
+tokio = { workspace = true, features = ["fs", "process", "rt", "sync", "net", "io-util"] }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+reader = { workspace = true }
+db = { workspace = true }
+utils = { workspace = true, features = ["http"] }
+async-trait = { workspace = true }
+arc-swap = { workspace = true }
+bundled-plugins = { workspace = true }
+plugin-host = { workspace = true }
+quick-xml = { workspace = true }
+lofty = { workspace = true }
+urlencoding = "2.1"
+regex = "1"
+m3u8-rs = "6"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+symphonia = { workspace = true }
+smb2 = "0.27.2"
+libloading = { workspace = true }
+
+[build-dependencies]
+cc = "1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }
+
+# Browser-cookie import. Not on Windows: rookie pulls `libesedb` (a bundled C
+# library) there, which can't cross-compile. Not on Android either: rookie only
+# defines its Chromium keyring backend for the desktop targets, and there is no
+# desktop browser profile to import from anyway.
+[target.'cfg(not(any(target_os = "windows", target_os = "android")))'.dependencies]
+rookie = "0.5"
+
+# Desktop-only, so both are in one table. Headless JS for YouTube (no V8 on
+# Android): deno_core runs the sig/n decipher solver and rustypipe-botguard
+# mints PoTokens, sharing one V8; versions (incl. the deno_core lock) live in
+# the workspace manifest. sqlx reads a Gecko sign-in profile's cookies.sqlite,
+# which is unencrypted (NOT rusqlite — that would double-link libsqlite3).
+[target.'cfg(not(target_os = "android"))'.dependencies]
+deno_core = { workspace = true }
+rustypipe-botguard = { workspace = true }
+sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }
+
+# Hands the DevTools pipe ends to a browser as fds 3 and 4.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+# Windows native cookie decryption (v10 DPAPI + planted v20 app-bound).
+[target.'cfg(windows)'.dependencies]
+base64 = { workspace = true }
+aes-gcm = { workspace = true }
+windows-core = "0.62"
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Rpc",
+    "Win32_Security_Cryptography",
+    "Win32_System_Memory",
+] }
+
+[[example]]
+name = "duration_probe"
+path = "examples/duration_probe.rs"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile = { workspace = true }

@@ -1,0 +1,80 @@
+name: Nightly
+
+# Tags master as v<version>-nightly.YYYYMMDD once a day when it has moved; release.yml builds Kopuz Nightly from the tag.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Tag master if it moved since the last nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          version="$(
+            cargo metadata --no-deps --format-version 1 |
+              jq -r '.packages[] | select(.name == "kopuz") | .version'
+          )"
+          head="$(git rev-parse HEAD)"
+
+          nightlies="$(git tag --list 'v*-nightly.*' --sort=-creatordate)"
+          last="${nightlies%%$'\n'*}"
+          if [[ -n "$last" && "$(git rev-list -n1 "$last")" == "$head" ]]; then
+            echo "master has not moved since ${last}"
+            exit 0
+          fi
+
+          day="$(date -u +%Y%m%d)"
+          tag="v${version}-nightly.${day}"
+          next=2
+          while git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; do
+            tag="v${version}-nightly.${day}.${next}"
+            next=$((next + 1))
+          done
+
+          git tag "$tag" "$head"
+          git push origin "refs/tags/${tag}"
+          # A tag pushed with this workflow's token starts no other workflow, so the build is started by hand.
+          if ! gh workflow run release.yml --ref "$tag"; then
+            # A tag on HEAD reads as built, so one whose build never started must go for the next run to retry.
+            git push origin --delete "refs/tags/${tag}"
+            echo "Could not start the build of ${tag}; removed the tag"
+            exit 1
+          fi
+          echo "Tagged ${head} as ${tag}"
+
+      - name: Keep the last ten nightlies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          git fetch --tags --force --quiet
+          mapfile -t nightlies < <(git tag --list 'v*-nightly.*' --sort=-creatordate)
+          for tag in "${nightlies[@]:10}"; do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              gh release delete "$tag" --cleanup-tag --yes
+            else
+              git push origin --delete "refs/tags/${tag}"
+            fi
+            echo "Removed ${tag}"
+          done

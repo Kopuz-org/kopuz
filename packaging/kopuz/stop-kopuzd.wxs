@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Stops kopuzd before install and uninstall, since it keeps kopuzd.exe open while music plays. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+  <Fragment>
+    <Property Id="WixQuietExec64CmdLine" Value="&quot;[System64Folder]taskkill.exe&quot; /F /IM kopuzd.exe" />
+    <CustomAction Id="StopKopuzd" BinaryKey="WixCA" DllEntry="WixQuietExec64" Execute="immediate" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="StopKopuzd" Before="InstallValidate" />
+    </InstallExecuteSequence>
+  </Fragment>
+</Wix>

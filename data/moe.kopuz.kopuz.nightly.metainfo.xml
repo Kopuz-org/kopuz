@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>moe.kopuz.kopuz.nightly</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>EUPL-1.2</project_license>
+  <name>Kopuz Nightly</name>
+  <icon type="stock">moe.kopuz.kopuz.nightly</icon>
+  <launchable type="desktop-id">moe.kopuz.kopuz.nightly.desktop</launchable>
+  <branding>
+    <color type="primary" scheme_preference="light">#fcf0f0</color>
+    <color type="primary" scheme_preference="dark">#0f0303</color>
+  </branding>
+  <summary>Kopuz, built every night from the latest development code</summary>
+  <description>
+    <p>
+      Kopuz Nightly is the music player Kopuz, built from its newest development code each night.
+      It keeps its own library, settings and sign-ins apart from Kopuz, so both can be installed together.
+      On first start it copies Kopuz's library if there is one.
+    </p>
+    <p>
+      Expect rough edges: a nightly gets new features first, and their bugs with them.
+    </p>
+  </description>
+  <url type="homepage">https://github.com/Kopuz-org/kopuz</url>
+  <url type="bugtracker">https://github.com/Kopuz-org/kopuz/issues</url>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Player</category>
+  </categories>
+  <keywords>
+    <keyword>music</keyword>
+    <keyword>player</keyword>
+    <keyword>jellyfin</keyword>
+    <keyword>subsonic</keyword>
+    <keyword>youtube</keyword>
+    <keyword>spotify</keyword>
+  </keywords>
+  <content_rating type="oars-1.1"/>
+</component>
