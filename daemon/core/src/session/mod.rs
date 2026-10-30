@@ -1975,8 +1975,13 @@ impl Session {
             return;
         };
         let tx = self.cmd_tx.clone();
+        let reach = self
+            .sources
+            .server
+            .as_ref()
+            .and_then(server::plugins::Reach::of_installed);
         tokio::spawn(async move {
-            if let Some(path) = load::fetch_cover_to_temp(&url, &url).await {
+            if let Some(path) = load::fetch_cover_to_temp(&url, &url, reach.as_ref()).await {
                 let _ = tx.send(SessionCmd::ExternalArtworkFetched(path));
             }
         });

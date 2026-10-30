@@ -1,0 +1,11 @@
+interface log {
+    enum level {
+        trace,
+        debug,
+        info,
+        warn,
+        error,
+    }
+
+    log: func(level: level, message: string);
+}

@@ -18,6 +18,7 @@ pub(crate) fn service_str(s: config::MusicService) -> &'static str {
         config::MusicService::Clippsly => "Clippsly",
         config::MusicService::Smb => "Smb",
         config::MusicService::AudioCd => "AudioCd",
+        config::MusicService::Plugin => "Plugin",
     }
 }
 

@@ -324,9 +324,15 @@ impl CoverRef {
             "custom" if !item_id.is_empty() => {
                 Self::remote_item(MusicService::Custom, item_id, value)
             }
-            "ytmusic" | "soundcloud" | "applemusic" | "nextcloud" | "clippsly" | "smb" => {
-                value.map_or(Self::None, Self::parse)
-            }
+            // YT Music, SoundCloud and Apple Music refs only carry
+            // self-contained artwork — a URL, or an Apple artwork template.
+            // Their item identity is irrelevant to cover resolution.
+            // Nextcloud too: an img tag won't send the Basic auth its previews
+            // need, so the sync caches art to disk and the ref carries a path.
+            // A plugin's covers are self-contained too: it cannot rely on the
+            // host knowing how to sign a URL for a service the host never saw.
+            "ytmusic" | "soundcloud" | "applemusic" | "nextcloud" | "clippsly" | "smb"
+            | "plugin" => value.map_or(Self::None, Self::parse),
             _ => Self::None,
         }
     }
@@ -360,6 +366,7 @@ impl CoverRef {
             | MusicService::Clippsly
             | MusicService::Smb
             | MusicService::AudioCd => cover.map_or(Self::None, Self::parse),
+            MusicService::Plugin => cover.map_or(Self::None, Self::parse),
         }
     }
 
@@ -414,6 +421,7 @@ impl CoverRef {
             | MusicService::Clippsly
             | MusicService::Smb
             | MusicService::AudioCd => track.cover.as_deref().map_or(Self::None, Self::parse),
+            MusicService::Plugin => track.cover.as_deref().map_or(Self::None, Self::parse),
         }
     }
 

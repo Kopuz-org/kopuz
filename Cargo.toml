@@ -1,8 +1,9 @@
 [workspace]
-members = ["shared/*", "daemon/*", "apps/common/*", "apps/cli", "apps/legacy/*", "apps/kopuz/*"]
-exclude = ["vendor/*", "apps/kopuz/.claude", "apps/kopuz/docs", "apps/kopuz/scripts"]
+members = ["shared/*", "daemon/*", "daemon/plugins/sdk", "daemon/plugins/subsonic", "daemon/plugins/jellyfin", "daemon/plugins/clippsly", "daemon/plugins/soundcloud", "daemon/plugins/examples/internet-archive", "apps/common/*", "apps/cli", "apps/legacy/*", "apps/kopuz/*"]
+# daemon/plugins holds crates but is not one; its crates are listed by name.
+exclude = ["vendor/*", "daemon/plugins", "apps/kopuz/.claude", "apps/kopuz/docs", "apps/kopuz/scripts"]
 # A bare `cargo build` skips the legacy Dioxus app; build it with `just build` or `-p kopuz-legacy`.
-default-members = ["shared/*", "daemon/*", "apps/common/*", "apps/cli", "apps/kopuz/*"]
+default-members = ["shared/*", "daemon/*", "daemon/plugins/sdk", "daemon/plugins/subsonic", "daemon/plugins/jellyfin", "daemon/plugins/clippsly", "daemon/plugins/soundcloud", "daemon/plugins/examples/internet-archive", "apps/common/*", "apps/cli", "apps/kopuz/*"]
 resolver = "3"
 
 [workspace.package]
@@ -127,6 +128,18 @@ time = "0.3"
 # pins deno_core ^0.331, so deno_core must stay on 0.331.x to share one V8 link.
 deno_core = "0.331"
 rustypipe-botguard = "0.1.2"
+# Plugin runtime. 48 is the newest release whose MSRV the pinned toolchain meets.
+wasmtime = { version = "48", default-features = false, features = [
+  "component-model",
+  "async",
+  "cranelift",
+  "runtime",
+  "std",
+  "parallel-compilation",
+] }
+wasmtime-wasi = { version = "48", default-features = false, features = ["p2"] }
+wit-bindgen = "0.63"
+url = "2.5"
 
 # Workspace components
 i18n = { package = "kopuz-i18n", version = "0.68.0", path = "./apps/common/i18n" }
@@ -149,6 +162,8 @@ kopuz_route = { package = "kopuz-route", version = "0.68.0", path = "./apps/lega
 discord-presence = { package = "kopuz-discord-presence", version = "0.68.0", path = "./daemon/discord-presence" }
 scrobble = { package = "kopuz-scrobble", version = "0.68.0", path = "./daemon/scrobble" }
 radio = { package = "kopuz-radio", version = "0.68.0", path = "./daemon/radio" }
+plugin-host = { package = "kopuz-plugin-host", version = "0.68.0", path = "./daemon/plugin-host" }
+bundled-plugins = { package = "kopuz-bundled-plugins", version = "0.68.0", path = "./daemon/bundled-plugins" }
 
 # GPUI frontend; its own `components` is a path dependency, as the key above is Dioxus's.
 gpui-kit = "0.6.4"
@@ -177,6 +192,13 @@ panic = "unwind"
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# The official plugins, built for wasm32-wasip2 by daemon/bundled-plugins.
+# Small beats fast here: they spend their time waiting on the network.
+[profile.plugin]
+inherits = "release"
+opt-level = "s"
+panic = "abort"
 
 [profile.server-dev]
 inherits = "dev"

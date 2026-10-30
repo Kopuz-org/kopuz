@@ -1,0 +1,8 @@
+package kopuz:plugin@0.1.0;
+
+world source-plugin {
+    import http;
+    import log;
+
+    export source;
+}

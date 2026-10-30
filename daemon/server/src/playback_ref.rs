@@ -30,10 +30,16 @@ impl<'a> PlaybackItemRef<'a> {
         let Some((prefix, rest)) = value.split_once(':') else {
             return Self::Local(Path::new(value));
         };
-        let Some(service) = config::MusicService::from_id(prefix) else {
+        let Some(service) = config::MusicService::from_id(prefix)
+            .or_else(|| (prefix == "plugin").then_some(config::MusicService::Plugin))
+        else {
             return Self::Local(Path::new(value));
         };
-        let item_id = if service == config::MusicService::Smb {
+        // Both take the rest whole: a path, or an id a plugin chose.
+        let item_id = if matches!(
+            service,
+            config::MusicService::Smb | config::MusicService::Plugin
+        ) {
             rest
         } else {
             rest.split(':').next().unwrap_or_default()
@@ -170,6 +176,26 @@ mod tests {
         assert_eq!(
             PlaybackItemRef::from_id(&id),
             PlaybackItemRef::Local(std::path::Path::new("nextcloud:track.flac"))
+        );
+    }
+
+    #[test]
+    fn a_plugin_item_keeps_its_whole_id() {
+        assert_eq!(
+            PlaybackItemRef::parse("plugin:gd77:01 Turning.flac"),
+            PlaybackItemRef::Server {
+                item_id: "gd77:01 Turning.flac"
+            }
+        );
+        let id = reader::TrackId::Server {
+            service: config::MusicService::Plugin,
+            item_id: "gd77:01 Turning.flac".into(),
+        };
+        assert_eq!(
+            PlaybackItemRef::from_id(&id),
+            PlaybackItemRef::Server {
+                item_id: "gd77:01 Turning.flac"
+            }
         );
     }
 

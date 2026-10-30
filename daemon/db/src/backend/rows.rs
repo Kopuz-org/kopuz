@@ -223,6 +223,7 @@ pub fn parse_service(s: &str) -> config::MusicService {
         "Clippsly" => config::MusicService::Clippsly,
         "Smb" => config::MusicService::Smb,
         "AudioCd" => config::MusicService::AudioCd,
+        "Plugin" => config::MusicService::Plugin,
         _ => config::MusicService::Jellyfin,
     }
 }

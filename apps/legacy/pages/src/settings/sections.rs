@@ -782,3 +782,169 @@ mod tests {
         assert_eq!(offline_cache_size_options(5_000_000_000).len(), 6);
     }
 }
+
+#[component]
+pub(super) fn PluginsSection() -> Element {
+    let changed = use_signal(|| 0u64);
+    let busy = use_signal(|| Option::<String>::None);
+    let catalog = hooks::plugins::use_plugins(changed);
+    let catalog = catalog().flatten().unwrap_or_default();
+    let unreachable = catalog.marketplace_error.map(|error| {
+        i18n::t_with(
+            "plugins_marketplace_unreachable",
+            &[("error", error.into())],
+        )
+    });
+    let (installed, available): (Vec<_>, Vec<_>) = catalog
+        .plugins
+        .into_iter()
+        .partition(|plugin| plugin.installed_version.is_some());
+
+    rsx! {
+        SettingsSection { title: i18n::t("plugins").to_string(),
+            p { class: "px-5 py-2.5 text-sm text-white/60 text-pretty",
+                "{i18n::t(\"plugins_description\")}"
+            }
+            SettingsGroup { label: i18n::t("plugins_installed") }
+            for plugin in installed {
+                PluginRow { key: "{plugin.id}", plugin, busy, changed }
+            }
+            SettingsGroup { label: i18n::t("plugins_marketplace") }
+            if let Some(unreachable) = unreachable {
+                p { class: "px-5 py-2.5 text-sm text-amber-300/80 text-pretty", "{unreachable}" }
+            } else if available.is_empty() {
+                p { class: "px-5 py-2.5 text-sm text-white/50", "{i18n::t(\"plugins_marketplace_empty\")}" }
+            }
+            for plugin in available {
+                PluginRow { key: "{plugin.id}", plugin, busy, changed }
+            }
+        }
+    }
+}
+
+#[component]
+fn PluginRow(
+    plugin: api::PluginInfo,
+    busy: Signal<Option<String>>,
+    changed: Signal<u64>,
+) -> Element {
+    let community = plugin.origin == api::PluginOrigin::Community;
+    let working = busy().is_some_and(|id| id == plugin.id);
+    let idle = busy().is_none();
+    let version = plugin
+        .installed_version
+        .clone()
+        .or_else(|| plugin.available_version.clone())
+        .unwrap_or_default();
+    let origin = if community {
+        i18n::t("plugin_community")
+    } else {
+        i18n::t("plugin_official")
+    };
+    let shown = |network: &[String]| -> String {
+        network
+            .iter()
+            .map(|host| match host.as_str() {
+                "$server" => i18n::t("plugin_your_server"),
+                other => other.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let reaches = (!plugin.network.is_empty()).then(|| {
+        i18n::t_with(
+            "plugin_reaches",
+            &[("hosts", shown(&plugin.network).into())],
+        )
+    });
+    let update_reaches = plugin
+        .update
+        .as_ref()
+        .filter(|update| !update.added_hosts.is_empty())
+        .map(|update| {
+            i18n::t_with(
+                "plugin_update_reaches",
+                &[("hosts", shown(&update.added_hosts).into())],
+            )
+        });
+    // Each button agrees to the hosts shown beside it.
+    let install_network = plugin.network.clone();
+    let update_network = plugin.update.as_ref().map(|update| update.network.clone());
+    let byline = (!plugin.author.is_empty())
+        .then(|| i18n::t_with("plugin_by", &[("author", plugin.author.clone().into())]));
+    let install_id = plugin.id.clone();
+    let remove_id = plugin.id.clone();
+    let button = "app-button-tonal bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded-xl text-sm transition-colors disabled:opacity-50";
+
+    rsx! {
+        div { class: "settings-row flex items-start justify-between gap-5 px-5 py-3",
+            div { class: "min-w-0 flex flex-col gap-1",
+                div { class: "flex items-center gap-2 flex-wrap",
+                    p { class: "text-sm text-white/90 font-medium", "{plugin.name}" }
+                    span { class: "text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/10 text-white/60", "{origin}" }
+                    if !plugin.sandboxed {
+                        span { class: "text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/10 text-white/60", "{i18n::t(\"plugin_native\")}" }
+                    }
+                    span { class: "text-xs text-white/40", "{version}" }
+                }
+                if let Some(byline) = byline {
+                    p { class: "text-xs text-white/50", "{byline}" }
+                }
+                if !plugin.description.is_empty() {
+                    p { class: "text-xs text-white/60 text-pretty", "{plugin.description}" }
+                }
+                if let Some(reaches) = reaches {
+                    p { class: "text-xs text-white/40 break-all",
+                        i { class: "fa-solid fa-globe mr-1" }
+                        "{reaches}"
+                    }
+                }
+                if let Some(update_reaches) = update_reaches {
+                    p { class: "text-xs text-white/60 break-all",
+                        i { class: "fa-solid fa-triangle-exclamation mr-1" }
+                        "{update_reaches}"
+                    }
+                }
+            }
+            if community {
+                div { class: "flex items-center gap-2 shrink-0",
+                    if working {
+                        span { class: "text-sm text-white/60", "{i18n::t(\"plugin_working\")}" }
+                    } else if plugin.installed_version.is_none() {
+                        button {
+                            class: "{button}",
+                            disabled: !idle,
+                            onclick: move |_| hooks::plugins::install(
+                                install_id.clone(),
+                                install_network.clone(),
+                                busy,
+                                changed,
+                            ),
+                            "{i18n::t(\"plugin_install\")}"
+                        }
+                    } else {
+                        if let Some(update_network) = update_network {
+                            button {
+                                class: "{button}",
+                                disabled: !idle,
+                                onclick: move |_| hooks::plugins::install(
+                                    install_id.clone(),
+                                    update_network.clone(),
+                                    busy,
+                                    changed,
+                                ),
+                                "{i18n::t(\"plugin_update\")}"
+                            }
+                        }
+                        button {
+                            class: "{button}",
+                            disabled: !idle,
+                            onclick: move |_| hooks::plugins::uninstall(remove_id.clone(), busy, changed),
+                            "{i18n::t(\"plugin_remove\")}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

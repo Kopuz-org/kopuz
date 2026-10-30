@@ -1,0 +1,12 @@
+id = "jellyfin"
+name = "Jellyfin"
+version = "0.1.0"
+api = "0.1"
+description = "Jellyfin media servers."
+
+[permissions]
+network = ["$server"]
+
+[[service]]
+id = "jellyfin"
+capabilities = { sync = true, downloads = true, playlists = "reorder" }

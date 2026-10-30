@@ -61,6 +61,7 @@ async fn seed_active_server(db: &db::Db, id: &str) {
         account: None,
         apple_music_storefront: "us".into(),
         apple_music_language: "en".into(),
+        plugin_service: None,
     })
     .await
     .unwrap();
@@ -77,6 +78,7 @@ async fn seed_active_server(db: &db::Db, id: &str) {
         account: None,
         apple_music_storefront: "us".into(),
         apple_music_language: "en".into(),
+        plugin_service: None,
     })
     .await
     .unwrap();

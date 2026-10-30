@@ -357,8 +357,13 @@ impl Session {
         #[cfg(target_os = "macos")]
         if let Some((url, key, mut meta)) = artwork_fetch {
             let artwork_tx = self.cmd_tx.clone();
+            let reach = self
+                .sources
+                .server
+                .as_ref()
+                .and_then(server::plugins::Reach::of_installed);
             tokio::spawn(async move {
-                let Some(path) = fetch_cover_to_temp(&url, &key).await else {
+                let Some(path) = fetch_cover_to_temp(&url, &key, reach.as_ref()).await else {
                     return;
                 };
                 meta.artwork = Some(path);
@@ -568,7 +573,11 @@ pub(super) fn temp_cover_key(track: &Track, url: &str) -> String {
 /// Download a cover to a temp file named by a hash of `key`, so repeated plays
 /// of the same album reuse the file instead of growing the temp dir. MPRIS
 /// `mpris:artUrl` wants a file too, not just macOS Now Playing.
-pub(super) async fn fetch_cover_to_temp(url: &str, key: &str) -> Option<String> {
+pub(super) async fn fetch_cover_to_temp(
+    url: &str,
+    key: &str,
+    reach: Option<&server::plugins::Reach>,
+) -> Option<String> {
     use sha2::{Digest as _, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(key.as_bytes());
@@ -584,13 +593,16 @@ pub(super) async fn fetch_cover_to_temp(url: &str, key: &str) -> Option<String> 
         return Some(path.to_string_lossy().to_string());
     }
     let fetch = async {
-        let response = utils::http::client()
-            .get(url)
-            .send()
-            .await
-            .ok()?
-            .error_for_status()
-            .ok()?;
+        let response = crate::artwork::get(
+            &utils::http::client(),
+            &crate::artwork::unredirected_client(),
+            url,
+            reach,
+        )
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?;
         response.bytes().await.ok()
     };
     let bytes = tokio::time::timeout(Duration::from_secs(30), fetch)

@@ -2163,6 +2163,12 @@
   .text-amber-300 {
     color: var(--color-amber-300);
   }
+  .text-amber-300\/80 {
+    color: color-mix(in srgb, oklch(87.9% 0.169 91.605) 80%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      color: color-mix(in oklab, var(--color-amber-300) 80%, transparent);
+    }
+  }
   .text-amber-400 {
     color: var(--color-amber-400);
   }

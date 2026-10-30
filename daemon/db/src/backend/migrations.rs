@@ -1065,6 +1065,7 @@ fn legacy_options(yt_browser: Option<&str>, yt_anonymous: bool) -> Vec<(&'static
         None,
         &defaults.apple_music_storefront,
         &defaults.apple_music_language,
+        None,
     )
 }
 
@@ -1443,6 +1444,7 @@ fn service_str(s: config::MusicService) -> &'static str {
         config::MusicService::Clippsly => "Clippsly",
         config::MusicService::Smb => "Smb",
         config::MusicService::AudioCd => "AudioCd",
+        config::MusicService::Plugin => "Plugin",
     }
 }
 

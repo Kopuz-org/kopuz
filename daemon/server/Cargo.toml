@@ -40,6 +40,9 @@ reader = { workspace = true }
 db = { workspace = true }
 utils = { workspace = true, features = ["http"] }
 async-trait = { workspace = true }
+arc-swap = { workspace = true }
+bundled-plugins = { workspace = true }
+plugin-host = { workspace = true }
 quick-xml = { workspace = true }
 lofty = { workspace = true }
 urlencoding = "2.1"

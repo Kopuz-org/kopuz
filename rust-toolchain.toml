@@ -2,3 +2,5 @@
 channel = "1.95.0"
 components = ["rustc", "cargo", "rustfmt", "rust-analyzer", "clippy"]
 profile = "minimal"
+# The official plugins under plugins/ are built for this target and embedded.
+targets = ["wasm32-wasip2"]

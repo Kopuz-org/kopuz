@@ -9,7 +9,8 @@
 //! not exist. Its 0600 mode is the access control, so the channel carries no
 //! credentials; the pipe carries a DACL that draws the same line (see
 //! `proto::pipe`). A daemon started with `--listen` also serves plain
-//! HTTP/2 on whatever address it is given, with no credentials either.
+//! HTTP/2 on whatever address it is given, with no credentials either, so
+//! installing or removing a plugin is refused there.
 //! Reflection is on:
 //!
 //! ```sh
