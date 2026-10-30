@@ -163,6 +163,13 @@ impl PluginService {
             .map_err(|error| ApiError::new(api::ErrorCode::SourceUnreachable, error))?;
         let listing = index.listing(id).map_err(market_error)?;
         market::check_listing(listing, &server::plugins::official_ids()).map_err(market_error)?;
+        let registry = server::plugins::registry();
+        market::check_services(listing, |service| {
+            registry
+                .for_service(service)
+                .map(|plugin| plugin.id().to_string())
+        })
+        .map_err(market_error)?;
         // The index is fetched again here, so what it lists now may not be what
         // the user was shown; the manifest is held to the listing below.
         if plugin_host::host_set(&listing.network) != plugin_host::host_set(network) {

@@ -157,6 +157,22 @@ async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
     assert_eq!(installed.installed_version.as_deref(), Some("1.0.0"));
     assert_eq!(installed.origin, api::PluginOrigin::Community);
     assert!(plugins.join("echo").join("plugin.wasm").is_file());
+
+    // Another plugin may not take the service, and with it echo's sources.
+    let usurper = PluginService::new(marketplace(
+        &temp("usurper"),
+        "aaa-echo",
+        &MANIFEST.replacen("id = \"echo\"", "id = \"aaa-echo\"", 1),
+        subsonic_component(),
+        None,
+    ));
+    let taken = usurper
+        .install("aaa-echo", &shown())
+        .await
+        .expect_err("the service is taken");
+    assert_eq!(taken.code, ErrorCode::InvalidInput);
+    assert!(!plugins.join("aaa-echo").exists());
+
     let current = market.catalog().await;
     let echo = current.plugins.iter().find(|plugin| plugin.id == "echo");
     assert_eq!(echo.and_then(|plugin| plugin.update.clone()), None);
