@@ -22,9 +22,10 @@ pub(super) struct PluginSource {
     db: Db,
     source: Source,
     service: MusicService,
+    /// The plugin under it can be swapped, so what it declares is read per call.
     session: Arc<Session>,
-    capabilities: Capabilities,
-    artwork: crate::plugins::Reach,
+    slug: String,
+    server_url: String,
 }
 
 impl PluginSource {
@@ -37,39 +38,51 @@ impl PluginSource {
         let slug = connection.service.clone();
         let server_url = connection.url.clone();
         let session = crate::plugins::session(connection)?;
-        let capabilities = session
-            .plugin()
-            .manifest()
-            .service(&slug)
-            .map(|declared| capabilities(&declared.capabilities))?;
-        let artwork = crate::plugins::Reach::new(session.plugin(), &server_url);
+        session.plugin().manifest().service(&slug)?;
         Some(Self {
             db,
             source,
             service,
             session,
-            capabilities,
-            artwork,
+            slug,
+            server_url,
         })
     }
 
+    fn artwork(&self) -> crate::plugins::Reach {
+        crate::plugins::Reach::new(&self.session.plugin(), &self.server_url)
+    }
+
     fn track(&self, mut track: wit::Track) -> reader::Track {
-        track.cover = self.artwork.cover(track.cover);
+        track.cover = self.artwork().cover(track.cover);
         track_from(self.service, track)
     }
 
-    fn album(&self, mut album: wit::Album) -> reader::Album {
-        album.cover = self.artwork.cover(album.cover);
-        album_from(album)
-    }
-
     fn albums(&self, albums: Vec<wit::Album>) -> Vec<reader::Album> {
-        albums.into_iter().map(|album| self.album(album)).collect()
+        let artwork = self.artwork();
+        albums
+            .into_iter()
+            .map(|mut album| {
+                album.cover = artwork.cover(album.cover);
+                album_from(album)
+            })
+            .collect()
     }
 
-    fn listing(&self, mut listing: wit::ArtistListing) -> (reader::ArtistCredit, Option<String>) {
-        listing.photo = self.artwork.cover(listing.photo);
-        listing_from(listing)
+    /// One allowlist per batch: building it clones the permissions, and a swap
+    /// mid-batch must not leave one batch under two plugins' hosts.
+    fn listings(
+        &self,
+        listings: Vec<wit::ArtistListing>,
+    ) -> Vec<(reader::ArtistCredit, Option<String>)> {
+        let artwork = self.artwork();
+        listings
+            .into_iter()
+            .map(|mut listing| {
+                listing.photo = artwork.cover(listing.photo);
+                listing_from(listing)
+            })
+            .collect()
     }
 
     fn radio_page(&self, page: wit::TrackPage) -> RadioPage {
@@ -80,7 +93,14 @@ impl PluginSource {
     }
 
     fn tracks(&self, tracks: Vec<wit::Track>) -> Vec<reader::Track> {
-        tracks.into_iter().map(|track| self.track(track)).collect()
+        let artwork = self.artwork();
+        tracks
+            .into_iter()
+            .map(|mut track| {
+                track.cover = artwork.cover(track.cover);
+                track_from(self.service, track)
+            })
+            .collect()
     }
 }
 
@@ -295,7 +315,14 @@ impl MediaSource for PluginSource {
     }
 
     fn capabilities(&self) -> Capabilities {
-        self.capabilities
+        self.session
+            .plugin()
+            .manifest()
+            .service(&self.slug)
+            .map_or_else(
+                || capabilities(&manifest::Capabilities::default()),
+                |declared| capabilities(&declared.capabilities),
+            )
     }
 
     async fn add_to_playlist(
@@ -346,7 +373,7 @@ impl MediaSource for PluginSource {
         )?;
         // The host fetches it outside the sandbox, so a URL off the plugin's
         // hosts would carry whatever it wrote into it to anyone.
-        if !self.artwork.allows(&stream.url) {
+        if !self.artwork().allows(&stream.url) {
             tracing::warn!(service = %self.session.service(), "plugin stream refused: not on its hosts");
             return Err(SourceError::Backend(
                 "the plugin's stream is on a host its manifest does not allow".into(),
@@ -535,11 +562,7 @@ impl MediaSource for PluginSource {
         Ok(LibrarySnapshot {
             albums: self.albums(snapshot.albums),
             tracks: self.tracks(snapshot.tracks),
-            artists: snapshot
-                .artists
-                .into_iter()
-                .map(|listing| self.listing(listing))
-                .collect(),
+            artists: self.listings(snapshot.artists),
         })
     }
 
@@ -570,12 +593,14 @@ impl MediaSource for PluginSource {
     }
 
     async fn fetch_playlists(&self) -> Result<Vec<PlaylistMeta>, SourceError> {
-        Ok(answer(self.session.fetch_playlists().await)?
+        let playlists = answer(self.session.fetch_playlists().await)?;
+        let artwork = self.artwork();
+        Ok(playlists
             .into_iter()
             .map(|playlist| PlaylistMeta {
                 id: playlist.id,
                 name: playlist.name,
-                image_tag: self.artwork.cover(playlist.image_tag),
+                image_tag: artwork.cover(playlist.image_tag),
             })
             .collect())
     }
@@ -583,10 +608,7 @@ impl MediaSource for PluginSource {
     async fn fetch_artists(
         &self,
     ) -> Result<Vec<(reader::ArtistCredit, Option<String>)>, SourceError> {
-        Ok(answer(self.session.fetch_artists().await)?
-            .into_iter()
-            .map(|listing| self.listing(listing))
-            .collect())
+        Ok(self.listings(answer(self.session.fetch_artists().await)?))
     }
 
     async fn fetch_favorites_page(

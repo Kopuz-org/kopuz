@@ -20,6 +20,8 @@ pub enum Table {
     Stations,
     /// Artist rows on their own: their photos and the names their source gives them.
     Artists,
+    /// The plugins loaded, and the updates waiting for their new hosts.
+    Plugins,
     Unknown,
 }
 

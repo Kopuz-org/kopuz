@@ -2128,6 +2128,16 @@ message InstallPluginRequest {
   repeated string network = 2;
 }
 
+// A newer version of an installed plugin, from the marketplace or dropped
+// into the plugin directory.
+message PluginUpdate {
+  string version = 1;
+  // Everything it reaches; installing it agrees to these.
+  repeated string network = 2;
+  // What it reaches that the installed version does not.
+  repeated string added_hosts = 3;
+}
+
 enum PluginOrigin {
   PLUGIN_ORIGIN_UNSPECIFIED = 0;
   PLUGIN_ORIGIN_OFFICIAL = 1;
@@ -2150,15 +2160,6 @@ message PluginInfo {
   repeated string network = 10;
   bool sandboxed = 11;
   optional PluginUpdate update = 12;
-}
-
-// A different build of an installed plugin the marketplace lists.
-message PluginUpdate {
-  string version = 1;
-  // Everything it reaches; installing it agrees to these.
-  repeated string network = 2;
-  // What it reaches that the installed version does not.
-  repeated string added_hosts = 3;
 }
 
 message PluginCatalog {
@@ -2597,6 +2598,7 @@ enum Table {
   TABLE_RECENTS = 7;
   TABLE_STATIONS = 8;
   TABLE_ARTISTS = 9;
+  TABLE_PLUGINS = 10;
 }
 
 enum JobKind {

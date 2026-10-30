@@ -1,8 +1,10 @@
 //! A signed-in connection to a plugin's service. An instance runs one call at
 //! a time and a sync can hold one for minutes, so a session keeps a small pool
-//! and the next stream never waits behind it.
+//! and the next stream never waits behind it. The plugin under a session can
+//! be swapped while it runs: calls already going finish on the instance they
+//! started on, and every later call opens on the new code.
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use tokio::sync::{Mutex, Semaphore};
 use wasmtime::component::ResourceAny;
@@ -17,12 +19,14 @@ const MAX_INSTANCES: usize = 4;
 pub(crate) const CALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
 struct Live {
+    /// The code this instance runs, which may no longer be the session's.
+    plugin: Arc<Plugin>,
     instance: Instance,
     session: ResourceAny,
 }
 
 pub struct Session {
-    plugin: Arc<Plugin>,
+    plugin: RwLock<Arc<Plugin>>,
     connection: wit::Connection,
     idle: Mutex<Vec<Live>>,
     slots: Semaphore,
@@ -31,7 +35,7 @@ pub struct Session {
 impl std::fmt::Debug for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Session")
-            .field("plugin", &self.plugin.id())
+            .field("plugin", &self.plugin().id())
             .field("service", &self.connection.service)
             .finish_non_exhaustive()
     }
@@ -40,25 +44,44 @@ impl std::fmt::Debug for Session {
 impl Session {
     pub fn new(plugin: Arc<Plugin>, connection: wit::Connection) -> Self {
         Self {
-            plugin,
+            plugin: RwLock::new(plugin),
             connection,
             idle: Mutex::new(Vec::new()),
             slots: Semaphore::new(MAX_INSTANCES),
         }
     }
 
-    pub fn plugin(&self) -> &Plugin {
-        &self.plugin
+    /// The plugin new calls run on.
+    pub fn plugin(&self) -> Arc<Plugin> {
+        Arc::clone(
+            &self
+                .plugin
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        )
+    }
+
+    /// Run every later call on `plugin`. Idle instances of the old code are
+    /// dropped; busy ones finish their call and are dropped then.
+    pub fn swap(&self, plugin: Arc<Plugin>) {
+        *self
+            .plugin
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = plugin;
+        // A call holding the lock is about to check the plugin itself.
+        if let Ok(mut idle) = self.idle.try_lock() {
+            let current = self.plugin();
+            idle.retain(|live| Arc::ptr_eq(&live.plugin, &current));
+        }
     }
 
     pub fn service(&self) -> &str {
         &self.connection.service
     }
 
-    async fn open(&self) -> Result<Live, PluginError> {
-        let mut instance = self.plugin.instantiate(&self.connection.url).await?;
-        let constructed = self
-            .plugin
+    async fn open(&self, plugin: Arc<Plugin>) -> Result<Live, PluginError> {
+        let mut instance = plugin.instantiate(&self.connection.url).await?;
+        let constructed = plugin
             .starting(
                 "opening a session",
                 instance
@@ -68,8 +91,34 @@ impl Session {
                     .call_constructor(&mut instance.store, &self.connection),
             )
             .await?;
-        let session = constructed.map_err(|error| self.plugin.trapped(error))?;
-        Ok(Live { instance, session })
+        let session = constructed.map_err(|error| plugin.trapped(error))?;
+        Ok(Live {
+            plugin,
+            instance,
+            session,
+        })
+    }
+
+    /// An idle instance of the current plugin, or a new one.
+    async fn checkout(&self) -> Result<Live, PluginError> {
+        let current = self.plugin();
+        let idle = {
+            let mut idle = self.idle.lock().await;
+            idle.retain(|live| Arc::ptr_eq(&live.plugin, &current));
+            idle.pop()
+        };
+        match idle {
+            Some(live) => Ok(live),
+            None => self.open(current).await,
+        }
+    }
+
+    /// Pool `live` again, unless the plugin was swapped while it ran.
+    async fn checkin(&self, live: Live) {
+        let mut idle = self.idle.lock().await;
+        if Arc::ptr_eq(&live.plugin, &self.plugin()) {
+            idle.push(live);
+        }
     }
 }
 
@@ -89,21 +138,17 @@ macro_rules! calls {
                         .acquire()
                         .await
                         .map_err(|_| PluginError::Runtime("the session is closed".into()))?;
-                    let idle = self.idle.lock().await.pop();
-                    let mut live = match idle {
-                        Some(live) => live,
-                        None => self.open().await?,
-                    };
+                    let mut live = self.checkout().await?;
                     let guest = live.instance.bindings.kopuz_plugin_source().session();
                     let call = guest.$call(&mut live.instance.store, live.session, $( $pass ),*);
                     match tokio::time::timeout(CALL_LIMIT, call).await {
                         Ok(Ok(value)) => {
-                            self.idle.lock().await.push(live);
+                            self.checkin(live).await;
                             Ok(value)
                         }
-                        Ok(Err(error)) => Err(self.plugin.trapped(error)),
+                        Ok(Err(error)) => Err(live.plugin.trapped(error)),
                         Err(_) => {
-                            tracing::error!(plugin = %self.plugin.id(), "plugin call timed out");
+                            tracing::error!(plugin = %live.plugin.id(), "plugin call timed out");
                             Err(PluginError::TimedOut)
                         }
                     }

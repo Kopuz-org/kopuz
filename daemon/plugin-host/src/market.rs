@@ -404,9 +404,9 @@ mod tests {
 
         uninstall(&dir, &dir.join("bandcamp")).unwrap();
         assert!(!installed.exists());
+        uninstall(&dir, &dir.join("bandcamp")).expect("removing what is gone is not an error");
         assert!(uninstall(&dir, &dir.join("a").join("b")).is_err());
         assert!(uninstall(&dir, dir.parent().unwrap()).is_err());
-        uninstall(&dir, &dir.join("bandcamp")).expect("removing what is gone is not an error");
         std::fs::remove_dir_all(&dir).ok();
     }
 

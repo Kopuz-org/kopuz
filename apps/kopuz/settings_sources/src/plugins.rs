@@ -26,11 +26,11 @@ pub struct Plugins {
 
 impl Plugins {
     pub fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
-        // The daemon marks the servers changed whenever the plugins it runs change.
+        // Plugins swapped in from the plugin directory arrive as a change to the plugins table.
         let subscription = cx.subscribe(
             &Invalidation::global(cx),
             |this, _, event: &TablesChanged, cx| {
-                if event.touches(&[Table::Servers]) {
+                if event.touches(&[Table::Plugins, Table::Servers]) {
                     this.refetch(cx);
                 }
             },
@@ -139,11 +139,29 @@ impl Plugins {
             .then(|| t_with("plugin_by", &[("author", plugin.author.clone().into())]));
 
         let mut actions = h_flex().flex_shrink_0().gap_2();
-        if community {
-            let id = plugin.id.clone();
-            if plugin.installed_version.is_none() {
-                let network = plugin.network.clone();
-                actions = actions.child(
+        let id = plugin.id.clone();
+        // An update waiting for its hosts can replace an official plugin too; only removal is community-only.
+        if let Some(update) = &plugin.update {
+            let id = id.clone();
+            let network = update.network.clone();
+            actions =
+                actions.child(
+                    self.button(
+                        format!("plugin-update-{id}"),
+                        t("plugin_update"),
+                        working,
+                        idle,
+                        cx,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.install(id.clone(), network.clone(), cx)
+                    })),
+                );
+        } else if community && plugin.installed_version.is_none() {
+            let id = id.clone();
+            let network = plugin.network.clone();
+            actions =
+                actions.child(
                     self.button(
                         format!("plugin-install-{id}"),
                         t("plugin_install"),
@@ -155,34 +173,16 @@ impl Plugins {
                         this.install(id.clone(), network.clone(), cx)
                     })),
                 );
-            } else {
-                if let Some(update) = &plugin.update {
-                    let id = id.clone();
-                    let network = update.network.clone();
-                    actions = actions.child(
-                        self.button(
-                            format!("plugin-update-{id}"),
-                            t("plugin_update"),
-                            working,
-                            idle,
-                            cx,
-                        )
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.install(id.clone(), network.clone(), cx)
-                        })),
-                    );
-                }
-                actions = actions.child(
-                    Button::new(SharedString::from(format!("plugin-remove-{id}")))
-                        .custom(style::tint_text_button(cx.theme().danger, cx))
-                        .small()
-                        .label(t("plugin_remove"))
-                        .disabled(!idle)
-                        .on_click(
-                            cx.listener(move |this, _, _, cx| this.uninstall(id.clone(), cx)),
-                        ),
-                );
-            }
+        }
+        if community && on_disk(plugin) {
+            actions = actions.child(
+                Button::new(SharedString::from(format!("plugin-remove-{id}")))
+                    .custom(style::tint_text_button(cx.theme().danger, cx))
+                    .small()
+                    .label(t("plugin_remove"))
+                    .disabled(!idle)
+                    .on_click(cx.listener(move |this, _, _, cx| this.uninstall(id.clone(), cx))),
+            );
         }
 
         h_flex()
@@ -244,6 +244,11 @@ impl Plugins {
     }
 }
 
+/// An update is only ever a build of a plugin already on disk, even one an update waiting across a restart left unloaded.
+fn on_disk(plugin: &PluginInfo) -> bool {
+    plugin.installed_version.is_some() || plugin.update.is_some()
+}
+
 /// The hosts as the user reads them; `$server` is the address the source was added with.
 fn hosts(network: &[String]) -> String {
     network
@@ -265,10 +270,8 @@ impl Render for Plugins {
                 &[("error", error.into())],
             )
         });
-        let (installed, available): (Vec<_>, Vec<_>) = catalog
-            .plugins
-            .iter()
-            .partition(|plugin| plugin.installed_version.is_some());
+        let (installed, available): (Vec<_>, Vec<_>) =
+            catalog.plugins.iter().partition(|plugin| on_disk(plugin));
 
         let mut card = ui::card(cx)
             .child(ui::hint(t("plugins_description"), cx))

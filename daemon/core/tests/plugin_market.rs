@@ -95,7 +95,7 @@ fn temp(name: &str) -> PathBuf {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
     let plugins = temp("installed");
-    server::plugins::init(Some(plugins.clone()));
+    server::plugins::init(Some(plugins.clone())).await;
 
     // A tampered component is refused before anything is written.
     let tampered = PluginService::new(marketplace(
@@ -219,7 +219,7 @@ async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
     assert_eq!(daemon::services::resolve("echo-service"), None);
 
     // A copy dropped in by hand under another name loads, and removing the
-    // plugin removes that directory too.
+    // plugin removes that directory.
     let by_hand = plugins.join("my-echo");
     std::fs::create_dir_all(&by_hand).unwrap();
     std::fs::write(by_hand.join(plugin_host::MANIFEST_FILE), MANIFEST).unwrap();
@@ -228,7 +228,7 @@ async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
         subsonic_component(),
     )
     .unwrap();
-    server::plugins::reload();
+    assert!(server::plugins::rescan().await);
     assert_eq!(
         daemon::services::resolve("echo-service"),
         Some(config::MusicService::Plugin)

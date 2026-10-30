@@ -118,7 +118,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let plugin_dir = std::env::var_os("KOPUZ_PLUGIN_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| data_dir.join("plugins"));
-    server::plugins::init(Some(plugin_dir));
+    server::plugins::init(Some(plugin_dir)).await;
     let settings_path = config::store::settings_path_for(data_dir);
     let settings = crate::config_service::load_settings(&settings_path)?;
     let sources = Arc::new(crate::sources::load(&database).await?);
@@ -364,6 +364,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
                 presence_pause,
             )),
     );
+    api.watch_plugins();
 
     Ok(Core {
         api,

@@ -173,21 +173,6 @@ impl Plugin {
             .await
     }
 
-    /// Compile the plugin on this thread, so one that does not compile is
-    /// known before it is offered.
-    pub fn compile(&self) -> Result<(), PluginError> {
-        let Code::Wasm(wasm) = &self.code else {
-            return Ok(());
-        };
-        if self.component.initialized() {
-            return Ok(());
-        }
-        let component = compile(&runtime()?.engine, wasm)?;
-        // A first call racing this one compiled the same code; keep either.
-        let _ = self.component.set(component);
-        Ok(())
-    }
-
     /// Compile the plugin now, so the first call to it does not wait.
     pub async fn prepare(&self) -> Result<(), PluginError> {
         self.component().await.map(|_| ())

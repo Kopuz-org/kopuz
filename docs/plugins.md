@@ -111,6 +111,11 @@ Capabilities default to off. The keys mirror the daemon's: `sync`,
 `daemon/plugin-host/src/manifest.rs`. A misspelled key is an error, not a
 silently disabled feature.
 
+A `network` entry is a host name, not an address. A name is checked where it
+resolves; an address listed there would reach whatever it names without that
+check, so the manifest is refused. `$server` covers the configured server,
+whatever its address.
+
 ## Installing by hand
 
 Put the manifest and the component in a directory of their own under the
@@ -124,9 +129,23 @@ plugins/
     plugin.wasm
 ```
 
-The daemon reads it at start. A plugin installed this way with an official
-plugin's id replaces the official one, which is how a fix to an official
-plugin is tried without rebuilding Kopuz.
+A plugin installed this way with an official plugin's id replaces the
+official one, which is how a fix to an official plugin is tried without
+rebuilding Kopuz.
+
+The daemon compiles an installed plugin before it replaces anything, so one
+that does not compile leaves the official plugin serving. It also watches the
+plugin directory and swaps changed files in while it runs, once they have
+stopped changing for two seconds. A call already running finishes on the old
+version and every later call runs the new one; sources keep their rows and
+credentials. New files that fail to compile, or whose manifest names a
+different id than the directory had loaded, are ignored and the old version
+keeps serving. New files that reach hosts the loaded version does not wait
+until the user allows them: the Plugins page lists the update with the new
+hosts, and Update loads it. The daemon records the hosts allowed for each
+plugin in `.approved-hosts.toml` in the plugin directory, so such an update
+still waits after a restart, with nothing of that plugin loaded until it is
+allowed. A plugin the record does not name yet is taken as allowed.
 
 ## Publishing to the marketplace
 
@@ -159,9 +178,18 @@ each:
 
 Installing fetches both files over HTTPS, refuses either if its hash differs,
 and refuses a manifest whose id, version, services or hosts differ from the
-listing, so what the Plugins page showed is what gets installed. The
-component is compiled once before anything is written, and the plugin
-directory is swapped in with one rename.
+listing. The index is fetched again for the install, so the hosts the Plugins
+page showed are sent with the request, and an install whose listing now reaches
+other hosts is refused. The component is compiled once before anything is
+written, the plugin directory is swapped in with one rename, and the new
+version replaces the running one the same way a file dropped in by hand does.
+
+An installed plugin shows Update when the index lists another version, or the
+same version with a component whose hash differs from the one installed.
+
+Only sandboxed plugins swap this way. YouTube Music, Apple Music, Spotify,
+Nextcloud, SMB and folders are native code inside the daemon, so a fix to
+any of them ships with a new Kopuz build.
 
 To try the flow locally, build the examples into a local marketplace and run
 the app against it (`just plugin-market` alone writes the index and prints
