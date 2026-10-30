@@ -178,6 +178,17 @@ impl PluginService {
             ));
         }
 
+        // Files are for a local test index; one from the internet names downloads.
+        if !self.index_url.starts_with("file://")
+            && [&listing.manifest.url, &listing.component.url]
+                .iter()
+                .any(|url| url.starts_with("file://"))
+        {
+            return Err(ApiError::invalid_input(
+                "a marketplace on the internet may not name files on this computer",
+            ));
+        }
+
         let fetch_error = |error: String| ApiError::new(api::ErrorCode::SourceUnreachable, error);
         let manifest_bytes = self
             .fetch(&listing.manifest.url, market::MAX_MANIFEST_BYTES)
