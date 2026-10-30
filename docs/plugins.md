@@ -111,6 +111,11 @@ Capabilities default to off. The keys mirror the daemon's: `sync`,
 `daemon/plugin-host/src/manifest.rs`. A misspelled key is an error, not a
 silently disabled feature.
 
+A `network` entry is a host name, not an address. A name is checked where it
+resolves; an address listed there would reach whatever it names without that
+check, so the manifest is refused. `$server` covers the configured server,
+whatever its address.
+
 ## Installing by hand
 
 Put the manifest and the component in a directory of their own under the

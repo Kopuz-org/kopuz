@@ -148,6 +148,10 @@ pub enum ManifestError {
     MissingId,
     #[error("the manifest lists service `{0}` twice")]
     DuplicateService(String),
+    #[error(
+        "the manifest lists `{0}` as a host, but it is an address; name the configured server as `$server`"
+    )]
+    NamesAddress(String),
 }
 
 impl Manifest {
@@ -158,6 +162,11 @@ impl Manifest {
         }
         if !SUPPORTED_API.contains(&manifest.api.as_str()) {
             return Err(ManifestError::UnsupportedApi(manifest.api));
+        }
+        for host in &manifest.permissions.network {
+            if let Some(address) = address_literal(host) {
+                return Err(ManifestError::NamesAddress(address));
+            }
         }
         let mut seen = std::collections::HashSet::new();
         for service in &manifest.services {
@@ -171,6 +180,20 @@ impl Manifest {
     pub fn service(&self, id: &str) -> Option<&Service> {
         self.services.iter().find(|service| service.id == id)
     }
+}
+
+/// `$server` names the configured server, whatever its address. A host the
+/// manifest lists is checked where it resolves; an address is not resolved, so
+/// one listed here would reach this machine or its network unchecked.
+fn address_literal(host: &str) -> Option<String> {
+    let bare = host
+        .trim()
+        .trim_end_matches('.')
+        .trim_start_matches('[')
+        .trim_end_matches(']');
+    bare.parse::<std::net::IpAddr>()
+        .ok()
+        .map(|_| host.trim().to_string())
 }
 
 impl Permissions {
@@ -269,5 +292,27 @@ mod tests {
         assert!(!permissions.allows("notsndcdn.com", None));
         assert!(permissions.allows("API.example.com.", None));
         assert!(!permissions.allows("www.api.example.com", None));
+    }
+
+    #[test]
+    fn a_listed_host_may_not_be_an_address() {
+        for address in ["127.0.0.1", "169.254.169.254.", "[::1]", "::1", "0.0.0.0"] {
+            let manifest = SUBSONIC.replace(
+                "network = [\"$server\"]",
+                &format!("network = [\"{address}\"]"),
+            );
+            assert!(
+                matches!(
+                    Manifest::parse(&manifest),
+                    Err(ManifestError::NamesAddress(_))
+                ),
+                "{address} is an address, not a host"
+            );
+        }
+        let named = SUBSONIC.replace(
+            "network = [\"$server\"]",
+            "network = [\"$server\", \"*.sndcdn.com\"]",
+        );
+        assert!(Manifest::parse(&named).is_ok());
     }
 }
