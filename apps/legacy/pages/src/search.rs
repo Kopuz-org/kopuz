@@ -1,0 +1,173 @@
+use components::playlist_modal::PlaylistModal;
+use components::search_bar::SearchBar;
+use components::search_genre_detail::SearchGenreDetail;
+use components::search_genres::SearchGenres;
+use components::search_results::SearchResults;
+use config::Settings;
+use dioxus::prelude::*;
+use hooks::use_db_queries::{use_active_source, use_genre_tracks};
+use hooks::use_search_data::use_search_data;
+
+/// Source-agnostic search. The data path (`use_search_data`, `use_genre_tracks`)
+/// is already source-scoped; the only per-source bits are the genre-detail cover
+/// (file vs remote URL), the add-to-playlist ref, and the modal flag — all
+/// keyed off the active source rather than a hardcoded source-kind split.
+#[component]
+pub fn Search(
+    settings: Signal<Settings>,
+    search_query: Signal<String>,
+    is_playing: Signal<bool>,
+    current_playing: Signal<u64>,
+    current_song_title: Signal<String>,
+    current_song_artist: Signal<String>,
+    current_song_duration: Signal<u64>,
+    current_song_progress: Signal<u64>,
+    queue: Signal<Vec<api::TrackInfo>>,
+    current_queue_index: Signal<usize>,
+    on_select_album: EventHandler<String>,
+    on_select_playlist: EventHandler<(api::CatalogItemKind, String, String)>,
+) -> Element {
+    let filters = hooks::sources::use_capabilities()().search_filters;
+    let source = use_active_source();
+    if !filters.is_empty() {
+        // Keyed like LocalSearch's bar, so a source switch remounts the field empty.
+        return rsx! {
+            for source_key in std::iter::once(source()) {
+                crate::server::search::CatalogSearch {
+                    key: "{source_key}",
+                    search_query,
+                    filters: filters.clone(),
+                    on_select_album,
+                    on_select_playlist,
+                }
+            }
+        };
+    }
+    rsx! {
+        LocalSearch {
+            settings,
+            search_query,
+            is_playing,
+            current_playing,
+            current_song_title,
+            current_song_artist,
+            current_song_duration,
+            current_song_progress,
+            queue,
+            current_queue_index,
+            on_select_album,
+            on_select_playlist,
+        }
+    }
+}
+
+/// Split from `Search` so the hook order stays fixed when the active source
+/// switches between filtered catalogue search and this one.
+#[component]
+fn LocalSearch(
+    settings: Signal<Settings>,
+    search_query: Signal<String>,
+    is_playing: Signal<bool>,
+    current_playing: Signal<u64>,
+    current_song_title: Signal<String>,
+    current_song_artist: Signal<String>,
+    current_song_duration: Signal<u64>,
+    current_song_progress: Signal<u64>,
+    queue: Signal<Vec<api::TrackInfo>>,
+    current_queue_index: Signal<usize>,
+    on_select_album: EventHandler<String>,
+    on_select_playlist: EventHandler<(api::CatalogItemKind, String, String)>,
+) -> Element {
+    let data = use_search_data(search_query);
+    let mut selected_genre = use_signal(|| None::<String>);
+
+    let mut active_menu_track = use_signal(|| None::<String>);
+    let mut show_playlist_modal = use_signal(|| false);
+    let selected_track_for_playlist = use_signal(|| None::<String>);
+
+    let source = use_active_source();
+    let selected_genre_memo = use_memo(move || selected_genre.read().clone().unwrap_or_default());
+    let genre_tracks_res = use_genre_tracks(source, selected_genre_memo);
+
+    let genre_tracks = use_memo(move || genre_tracks_res.read().clone().unwrap_or_default());
+
+    rsx! {
+        div {
+            class: crate::layout::page_container_class(&settings.read().ui.ui_style),
+
+            if *show_playlist_modal.read() {
+                PlaylistModal {
+                    on_close: move |_| show_playlist_modal.set(false),
+                    on_add_to_playlist: move |playlist_id: String| {
+                        if let Some(path) = selected_track_for_playlist.read().clone() {
+                            let refs: Vec<String> = std::iter::once(path)
+                                .filter(|reference| !reference.is_empty())
+                                .collect();
+                            hooks::playlist_actions::add_tracks(playlist_id, refs);
+                        }
+                        show_playlist_modal.set(false);
+                        active_menu_track.set(None);
+                    },
+                    on_create_playlist: move |name: String| {
+                        if let Some(path) = selected_track_for_playlist.read().clone() {
+                            let refs: Vec<String> = std::iter::once(path)
+                                .filter(|reference| !reference.is_empty())
+                                .collect();
+                            hooks::playlist_actions::create_with(name, refs);
+                        }
+                        show_playlist_modal.set(false);
+                        active_menu_track.set(None);
+                    },
+                }
+            }
+
+            if let Some(genre) = selected_genre.read().as_ref() {
+                SearchGenreDetail {
+                    genre: genre.clone(),
+                    genre_tracks: genre_tracks.read().clone(),
+                    genres: (data.genres)().clone(),
+                    on_back: move |_| selected_genre.set(None),
+                    is_playing,
+                    current_song_title,
+                    current_song_artist,
+                    current_song_duration,
+                    current_song_progress,
+                    queue,
+                    current_queue_index,
+                    active_menu_track,
+                    show_playlist_modal,
+                    selected_track_for_playlist,
+                }
+            } else {
+                // A one-item keyed list remounts the uncontrolled input, empty, when a source switch resets the query.
+                for source_key in std::iter::once(source()) {
+                    SearchBar { key: "{source_key}", search_query: data.search_query }
+                }
+
+                if let Some(Some((tracks, albums))) = data.search_results.cloned() {
+                    SearchResults {
+                        search_query: data.search_query.read().clone(),
+                        tracks: tracks.clone(),
+                        albums: albums.clone(),
+                            is_playing,
+                        current_song_title,
+                        current_song_artist,
+                        current_song_duration,
+                        current_song_progress,
+                        queue,
+                        current_queue_index,
+                        active_menu_track,
+                        show_playlist_modal,
+                        selected_track_for_playlist,
+                        on_select_album,
+                    }
+                } else {
+                    SearchGenres {
+                        genres: (data.genres)().clone(),
+                        on_select_genre: move |genre| selected_genre.set(Some(genre)),
+                    }
+                }
+            }
+        }
+    }
+}

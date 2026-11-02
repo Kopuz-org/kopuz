@@ -1,0 +1,126 @@
+use async_trait::async_trait;
+use config::Source;
+use db::Db;
+
+use super::{
+    AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesSync, LibraryActions, MediaSource,
+    PlaylistOps, RadioSeeds, SourceError, StreamInfo, mirror_created,
+};
+
+pub(super) struct LocalSource {
+    pub(super) db: Db,
+    pub(super) source: Source,
+}
+
+#[async_trait]
+impl MediaSource for LocalSource {
+    fn source(&self) -> &Source {
+        &self.source
+    }
+    fn db(&self) -> &Db {
+        &self.db
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            edit_tags: true,
+            delete_from_disk: true,
+            scan_folders: true,
+            folders: true,
+            browse_folders: false,
+            external_devices: false,
+            browser_playback: false,
+            accounts: false,
+            sync: false,
+            downloads: false,
+            uploads: false,
+            storage_quota: false,
+            discover: false,
+            dont_recommend: false,
+            music_videos: false,
+            radio: RadioSeeds::NONE,
+            play_queue: false,
+            playlists: PlaylistOps::Reorder,
+            artist_view: ArtistView::Library,
+            albums: AlbumType::Standard,
+            favorites_sync: FavoritesSync::Instant,
+            account_avatar: false,
+            stream_quality: false,
+            explicit_flags: false,
+            watch_history: false,
+            complete_play_history: true,
+            library_actions: LibraryActions::NONE,
+        }
+    }
+
+    async fn add_to_playlist(
+        &self,
+        playlist_id: &str,
+        item_refs: &[String],
+    ) -> Result<Vec<String>, SourceError> {
+        self.db
+            .add_playlist_tracks(&self.source, playlist_id, item_refs)
+            .await?;
+        Ok(item_refs.to_vec())
+    }
+
+    async fn create_playlist(
+        &self,
+        name: &str,
+        item_refs: &[String],
+    ) -> Result<String, SourceError> {
+        let id = uuid::Uuid::new_v4().to_string();
+        mirror_created(&self.db, &self.source, &id, name, item_refs).await?;
+        Ok(id)
+    }
+
+    async fn remove_from_playlist(
+        &self,
+        playlist_id: &str,
+        _track: &reader::Track,
+        position: usize,
+    ) -> Result<(), SourceError> {
+        self.remove_playlist_entry(playlist_id, position).await
+    }
+
+    async fn reorder_playlist(
+        &self,
+        playlist_id: &str,
+        ordered: &[reader::PlaylistEntry],
+        _moved: &reader::Track,
+        _new_index: usize,
+    ) -> Result<(), SourceError> {
+        self.db
+            .set_playlist_tracks(&self.source, playlist_id, ordered)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    async fn resolve_stream(
+        &self,
+        item_id: &str,
+        _: config::StreamQuality,
+    ) -> Result<StreamInfo, SourceError> {
+        Ok(StreamInfo {
+            url: item_id.to_string(),
+            format: None,
+            user_agent: None,
+            duration_secs: None,
+            bitrate: None,
+            content_length: None,
+            loudness_db: None,
+        })
+    }
+
+    async fn validate(&self) -> AuthOutcome {
+        AuthOutcome::Valid
+    }
+
+    async fn fetch_favorites(&self) -> Result<Vec<String>, SourceError> {
+        Ok(Vec::new())
+    }
+
+    async fn push_favorite(&self, _item_id: &str, _on: bool) -> Result<(), SourceError> {
+        Ok(())
+    }
+}

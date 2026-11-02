@@ -1,0 +1,37 @@
+[package]
+name = "kopuz-components"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "components"
+
+[lints]
+workspace = true
+
+[dependencies]
+dioxus = { workspace = true, features = ["desktop"] }
+tracing = { workspace = true }
+base64 = { workspace = true }
+utils = { workspace = true }
+kopuz_route = { workspace = true }
+config = { workspace = true }
+api = { workspace = true }
+hooks = { workspace = true }
+tokio = { workspace = true, features = ["time", "fs"] }
+serde_json = { workspace = true }
+i18n = { workspace = true }
+
+# Native file dialogs (folder/cover pickers). rfd doesn't work on Android
+# (which auto-detects the music dir via JNI instead).
+[target.'cfg(not(target_os = "android"))'.dependencies]
+rfd = { workspace = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+player = { workspace = true }

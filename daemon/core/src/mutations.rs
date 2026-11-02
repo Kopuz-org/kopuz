@@ -1,0 +1,507 @@
+//! Changing the library: tags, deletions, artwork.
+//!
+//! These write files and push to servers, so they run where the credentials
+//! and the library roots are. A caller names a track by key and says what it
+//! wants changed; it never passes a path, and a path that would escape the
+//! configured roots is refused rather than trusted.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use api::{ApiError, ArtworkChange, ArtworkTarget, ArtworkUpload, Table, TrackMetadataPatch};
+use sha2::{Digest, Sha256};
+
+use crate::session::SessionHandle;
+use crate::sources::source_error;
+
+/// Big enough for a scanned LP sleeve, small enough that a mistake is not a
+/// denial of service.
+const MAX_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
+
+pub struct MutationService {
+    db: db::Db,
+    session: SessionHandle,
+    /// Where uploaded pictures live, content-addressed.
+    uploads: PathBuf,
+}
+
+fn db_error(error: db::DbError) -> ApiError {
+    ApiError::internal(format!("database error: {error}"))
+}
+
+/// The roots the active source may delete inside. A server source has none:
+/// its files are not ours to unlink.
+fn configured_roots<'a>(config: &'a config::Settings, active: &config::Source) -> Vec<&'a Path> {
+    match active {
+        config::Source::LocalLibrary(id) => config
+            .library
+            .local_sources
+            .iter()
+            .find(|saved| &saved.id == id)
+            .map(|saved| saved.directories.iter().map(PathBuf::as_path).collect())
+            .unwrap_or_default(),
+        config::Source::Server(_) => Vec::new(),
+    }
+}
+
+/// Whether a path is genuinely inside a configured root, canonicalized on
+/// both sides so a symlink or `..` cannot walk out of the library.
+fn inside_a_root(config: &config::Settings, active: &config::Source, path: &Path) -> bool {
+    let Ok(target) = std::fs::canonicalize(path) else {
+        return false;
+    };
+    configured_roots(config, active).into_iter().any(|root| {
+        std::fs::canonicalize(root).is_ok_and(|root| target != root && target.starts_with(&root))
+    })
+}
+
+impl MutationService {
+    pub fn new(db: db::Db, session: SessionHandle, uploads: PathBuf) -> Arc<Self> {
+        Arc::new(Self {
+            db,
+            session,
+            uploads,
+        })
+    }
+
+    fn config(&self) -> config::Settings {
+        self.session.settings_watch().borrow().clone()
+    }
+
+    fn active(&self) -> config::Source {
+        self.session.sources().active.clone()
+    }
+
+    fn source(&self) -> server::source::ActiveSource {
+        Arc::from(server::source::active(
+            self.db.clone(),
+            &self.session.sources(),
+        ))
+    }
+
+    async fn track(&self, key: &str) -> Result<reader::Track, ApiError> {
+        self.db
+            .tracks_by_keys(&self.active(), &[key.to_string()])
+            .await
+            .map_err(db_error)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| ApiError::not_found("track not found"))
+    }
+
+    /// The file behind a track, once it is established that we may write it.
+    fn editable_path(
+        config: &config::Settings,
+        active: &config::Source,
+        track: &reader::Track,
+    ) -> Result<PathBuf, ApiError> {
+        let path = track
+            .id
+            .local_path()
+            .ok_or_else(|| ApiError::unsupported("only local files have tags to edit"))?;
+        if !inside_a_root(config, active, path) {
+            return Err(ApiError::invalid_input(
+                "that file is outside the configured library roots",
+            ));
+        }
+        Ok(path.to_path_buf())
+    }
+
+    pub async fn update_track_metadata(
+        &self,
+        patch: TrackMetadataPatch,
+    ) -> Result<api::TrackInfo, ApiError> {
+        let config = self.config();
+        let active = self.active();
+        let track = self.track(&patch.key).await?;
+        let path = Self::editable_path(&config, &active, &track)?;
+
+        let title = patch.title.unwrap_or_else(|| track.title.clone());
+        let artist = patch.artist.unwrap_or_else(|| track.artist.clone());
+        let album = patch.album.unwrap_or_else(|| track.album.clone());
+        let track_number = if patch.clear_track_number {
+            None
+        } else {
+            patch.track_number.or(track.track_number)
+        };
+        let disc_number = if patch.clear_disc_number {
+            None
+        } else {
+            patch.disc_number.or(track.disc_number)
+        };
+        let cover = match patch.cover {
+            ArtworkChange::Keep => reader::CoverChange::Keep,
+            ArtworkChange::Remove => reader::CoverChange::Remove,
+            ArtworkChange::Set(bytes) => {
+                validate_image(&bytes)?;
+                reader::CoverChange::Set(bytes)
+            }
+        };
+
+        let edits = reader::TrackEdits {
+            title: title.clone(),
+            artist: artist.clone(),
+            album: album.clone(),
+            track_number,
+            disc_number,
+            cover,
+        };
+        let written = path.clone();
+        tokio::task::spawn_blocking(move || reader::write_tags(&written, &edits))
+            .await
+            .map_err(|error| ApiError::internal(format!("tag writer task failed: {error}")))?
+            .map_err(ApiError::internal)?;
+
+        let reader::ScannedTrack {
+            track: mut scanned,
+            album: mut scanned_album,
+        } = tokio::task::spawn_blocking(move || reader::read_metadata(&path))
+            .await
+            .map_err(|error| ApiError::internal(format!("tag reader task failed: {error}")))?
+            .ok_or_else(|| ApiError::internal("the edited file could not be read back"))?;
+        scanned.cover = track.cover.clone();
+        // One file names only its own artist; the album's credit comes from every track it holds.
+        let siblings = self
+            .db
+            .album_tracks(&active, &scanned_album.id)
+            .await
+            .map_err(db_error)?;
+        let members = siblings
+            .iter()
+            .filter(|sibling| sibling.id != scanned.id)
+            .chain(std::iter::once(&scanned));
+        scanned_album.artist = reader::album_credit(&scanned_album, members);
+        self.db
+            .refile_track(&active, &scanned, &scanned_album, &track.album_id)
+            .await
+            .map_err(db_error)?;
+        self.session.invalidate(Table::Tracks);
+        self.session.invalidate(Table::Albums);
+
+        let stored = self.track(&patch.key).await?;
+        Ok(crate::wire::track_info(&stored, self.session.offline()))
+    }
+
+    pub async fn delete_tracks(&self, keys: &[String], from_disk: bool) -> Result<(), ApiError> {
+        let config = self.config();
+        let active = self.active();
+        if from_disk {
+            let tracks = self
+                .db
+                .tracks_by_keys(&active, keys)
+                .await
+                .map_err(db_error)?;
+
+            let mut paths = Vec::with_capacity(tracks.len());
+            for track in &tracks {
+                paths.push(Self::editable_path(&config, &active, track)?);
+            }
+            tokio::task::spawn_blocking(move || {
+                for path in paths {
+                    if let Err(error) = std::fs::remove_file(&path)
+                        && error.kind() != std::io::ErrorKind::NotFound
+                    {
+                        return Err(error);
+                    }
+                }
+                Ok::<(), std::io::Error>(())
+            })
+            .await
+            .map_err(|error| ApiError::internal(format!("delete task failed: {error}")))?
+            .map_err(|error| ApiError::internal(format!("file delete failed: {error}")))?;
+        }
+        self.source()
+            .delete_tracks(keys)
+            .await
+            .map_err(source_error)?;
+        self.session.invalidate(Table::Tracks);
+        Ok(())
+    }
+
+    pub async fn delete_album(&self, id: &str, from_disk: bool) -> Result<(), ApiError> {
+        if from_disk {
+            let keys: Vec<String> = self
+                .db
+                .album_tracks(&self.active(), id)
+                .await
+                .map_err(db_error)?
+                .iter()
+                .map(|track| track.id.key().into_owned())
+                .collect();
+            self.delete_tracks(&keys, true).await?;
+        }
+        self.source().delete_album(id).await.map_err(source_error)?;
+        self.session.invalidate(Table::Albums);
+        self.session.invalidate(Table::Tracks);
+        Ok(())
+    }
+
+    pub async fn upload_artwork(&self, upload: ArtworkUpload) -> Result<(), ApiError> {
+        validate_image(&upload.bytes)?;
+        if let ArtworkTarget::Track(key) = &upload.target {
+            return self
+                .set_track_cover(key, ArtworkChange::Set(upload.bytes))
+                .await;
+        }
+        let extension = match upload.content_type.as_str() {
+            "image/jpeg" => "jpg",
+            "image/png" => "png",
+            "image/webp" => "webp",
+            other => {
+                return Err(ApiError::invalid_input(format!(
+                    "unsupported artwork content type: {other}"
+                )));
+            }
+        };
+        let previous = self.current_artwork_path(&upload.target).await?;
+
+        let mut name = String::with_capacity(72);
+        for byte in Sha256::digest(&upload.bytes) {
+            use std::fmt::Write as _;
+            let _ = write!(name, "{byte:02x}");
+        }
+        let path = self.uploads.join(format!("{name}.{extension}"));
+        tokio::fs::create_dir_all(&self.uploads)
+            .await
+            .map_err(|error| ApiError::internal(format!("artwork directory failed: {error}")))?;
+        tokio::fs::write(&path, &upload.bytes)
+            .await
+            .map_err(|error| ApiError::internal(format!("artwork write failed: {error}")))?;
+        let stored = path.to_string_lossy().into_owned();
+
+        let result = match &upload.target {
+            ArtworkTarget::Album(id) => self
+                .source()
+                .update_album_cover(id, Some(&stored), true)
+                .await
+                .map_err(source_error)
+                .map(|_| Table::Albums),
+            ArtworkTarget::Artist(artist) => match self.artist_image_key(artist).await {
+                Ok((source, key)) => self
+                    .db
+                    .set_artist_image(&source, &key, "custom", Some(&stored))
+                    .await
+                    .map_err(db_error)
+                    .map(|_| Table::Tracks),
+                Err(error) => Err(error),
+            },
+            ArtworkTarget::Playlist(id) => {
+                let playlist = self.playlist(id).await?;
+                self.source()
+                    .set_playlist_cover(id, &playlist.name, &path, playlist.image_tag.as_deref())
+                    .await
+                    .map_err(source_error)
+                    .map(|_| Table::Playlists)
+            }
+            ArtworkTarget::Track(_) => unreachable!("handled above"),
+            ArtworkTarget::Catalog(_) | ArtworkTarget::Station(_) | ArtworkTarget::Account(_) => {
+                Err(ApiError::unsupported(
+                    "catalog, station and account artwork is not ours to set",
+                ))
+            }
+        };
+        match result {
+            Ok(table) => {
+                self.session.invalidate(table);
+                self.forget_upload(previous, &path).await;
+                Ok(())
+            }
+            Err(error) => {
+                let _ = tokio::fs::remove_file(&path).await;
+                Err(error)
+            }
+        }
+    }
+
+    pub async fn remove_artwork(&self, target: ArtworkTarget) -> Result<(), ApiError> {
+        if let ArtworkTarget::Track(key) = &target {
+            return self.set_track_cover(key, ArtworkChange::Remove).await;
+        }
+        let previous = self.current_artwork_path(&target).await?;
+        let table = match &target {
+            ArtworkTarget::Album(id) => {
+                self.source()
+                    .update_album_cover(id, None, false)
+                    .await
+                    .map_err(source_error)?;
+                Table::Albums
+            }
+            ArtworkTarget::Artist(artist) => {
+                let (source, key) = self.artist_image_key(artist).await?;
+                self.db
+                    .set_artist_image(&source, &key, "custom", None)
+                    .await
+                    .map_err(db_error)?;
+                Table::Tracks
+            }
+            ArtworkTarget::Playlist(id) => {
+                let playlist = self.playlist(id).await?;
+                self.db
+                    .upsert_playlist_meta(
+                        &self.active(),
+                        id,
+                        &playlist.name,
+                        None,
+                        playlist.image_tag.as_deref(),
+                    )
+                    .await
+                    .map_err(db_error)?;
+                Table::Playlists
+            }
+            ArtworkTarget::Track(_) => unreachable!("handled above"),
+            ArtworkTarget::Catalog(_) | ArtworkTarget::Station(_) | ArtworkTarget::Account(_) => {
+                return Err(ApiError::unsupported(
+                    "catalog, station and account artwork is not ours to remove",
+                ));
+            }
+        };
+        self.session.invalidate(table);
+        self.forget_upload(previous, Path::new("")).await;
+        Ok(())
+    }
+
+    /// A track's cover lives in its tags, so changing it is a tag write.
+    async fn set_track_cover(&self, key: &str, cover: ArtworkChange) -> Result<(), ApiError> {
+        self.update_track_metadata(TrackMetadataPatch {
+            key: key.to_string(),
+            cover,
+            ..Default::default()
+        })
+        .await
+        .map(|_| ())
+    }
+
+    async fn playlist(&self, id: &str) -> Result<reader::models::Playlist, ApiError> {
+        self.db
+            .load_playlists(&self.active())
+            .await
+            .map_err(db_error)?
+            .playlists
+            .into_iter()
+            .find(|playlist| playlist.id == id)
+            .ok_or_else(|| ApiError::not_found("playlist not found"))
+    }
+
+    /// The key this artist's own photo is filed under in `artist_images`, with its source.
+    async fn artist_image_key(&self, artist: &str) -> Result<(config::Source, String), ApiError> {
+        let source = self.active();
+        let row = crate::artist_row::require(&self.db, &source, artist).await?;
+        Ok((source, row.key))
+    }
+
+    async fn current_artwork_path(
+        &self,
+        target: &ArtworkTarget,
+    ) -> Result<Option<PathBuf>, ApiError> {
+        Ok(match target {
+            ArtworkTarget::Album(id) => self
+                .db
+                .album(&self.active(), id)
+                .await
+                .map_err(db_error)?
+                .and_then(|album| album.cover_path),
+            ArtworkTarget::Artist(artist) => {
+                let (source, key) = self.artist_image_key(artist).await?;
+                self.db
+                    .artist_images()
+                    .await
+                    .map_err(db_error)?
+                    .0
+                    .get(&(source.as_str().to_string(), key))
+                    .cloned()
+            }
+            ArtworkTarget::Playlist(id) => self.playlist(id).await?.cover_path,
+            _ => None,
+        })
+    }
+
+    /// Delete a picture this daemon uploaded once nothing points at it.
+    /// Anything outside the upload directory belongs to the library and is
+    /// left alone.
+    async fn forget_upload(&self, previous: Option<PathBuf>, keep: &Path) {
+        if let Some(previous) = previous
+            && previous.starts_with(&self.uploads)
+            && previous != keep
+        {
+            let _ = tokio::fs::remove_file(previous).await;
+        }
+    }
+}
+
+/// Decode the image before storing it, with bounds, so a malformed or
+/// enormous upload fails here rather than in whatever renders it.
+fn validate_image(bytes: &[u8]) -> Result<(), ApiError> {
+    if bytes.is_empty() || bytes.len() > MAX_ARTWORK_BYTES {
+        return Err(ApiError::invalid_input(
+            "artwork must be between 1 byte and 32 MiB",
+        ));
+    }
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|error| ApiError::invalid_input(format!("unreadable image: {error}")))?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(8192);
+    limits.max_image_height = Some(8192);
+    limits.max_alloc = Some(128 * 1024 * 1024);
+    reader.limits(limits);
+    reader
+        .decode()
+        .map_err(|error| ApiError::invalid_input(format!("undecodable image: {error}")))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with_root(root: &Path) -> config::Settings {
+        config::Settings {
+            library: config::Library {
+                local_sources: vec![config::SavedLocalSource::default_library(vec![
+                    root.to_path_buf(),
+                ])],
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    /// The guard that makes `from_disk` safe to expose on a socket: a path
+    /// outside the library, or reached by walking out of it, is not ours.
+    #[test]
+    fn only_files_inside_a_configured_root_are_deletable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let library = dir.path().join("library");
+        std::fs::create_dir(&library).expect("create library");
+        let inside = library.join("song.flac");
+        let outside = dir.path().join("elsewhere.flac");
+        std::fs::write(&inside, b"in").expect("write inside");
+        std::fs::write(&outside, b"out").expect("write outside");
+        let config = config_with_root(&library);
+        let local = config::Source::default();
+
+        assert!(inside_a_root(&config, &local, &inside));
+        assert!(!inside_a_root(&config, &local, &outside));
+        assert!(
+            !inside_a_root(&config, &local, &library.join("..").join("elsewhere.flac")),
+            "a traversal out of the root is still out of the root"
+        );
+        assert!(
+            !inside_a_root(&config, &local, &library),
+            "the root is not a track"
+        );
+
+        // A server source owns no local files, so nothing is deletable.
+        let server = config::Source::Server("s".into());
+        assert!(!inside_a_root(&config, &server, &inside));
+    }
+
+    #[test]
+    fn artwork_must_decode_before_it_is_stored() {
+        assert!(validate_image(b"").is_err(), "empty");
+        assert!(
+            validate_image(b"\x89PNG\r\n\x1a\nnot an image").is_err(),
+            "png magic alone is not a picture"
+        );
+    }
+}

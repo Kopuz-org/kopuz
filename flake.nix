@@ -53,19 +53,29 @@
         let
           pkgs = pkgsForEach system;
           craneLib = mkCraneLib pkgs;
+          gitRev = self.rev or self.dirtyRev or null;
+          legacy = pkgs.callPackage ./packaging/nix/crane.nix { inherit craneLib gitRev; };
         in
         {
-          kopuz = pkgs.callPackage ./packaging/nix/crane.nix {
-            inherit craneLib;
-            gitRev = self.rev or self.dirtyRev or null;
-          };
-          default = self.packages.${system}.kopuz;
+          kopuz-legacy = legacy;
+          # The GPUI app is Linux-only here, so Darwin's default stays the legacy app.
+          default = self.packages.${system}.kopuz or legacy;
+        }
+        // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          kopuz = pkgs.callPackage ./packaging/nix/kopuz.nix { inherit craneLib gitRev; };
         }
       );
 
-      checks = forAllSystems (system: {
-        default = self.packages.${system}.default;
-      });
+      checks = forAllSystems (
+        system:
+        let
+          packages = removeAttrs self.packages.${system} [ "default" ];
+        in
+        packages
+        // {
+          default = (pkgsForEach system).linkFarmFromDrvs "kopuz-checks" (builtins.attrValues packages);
+        }
+      );
 
       # Provides the default formatter for 'nix fmt'. For maximum compatibility, nixfmt
       # has been selected here. The -tree variant is a wrapper script that formats all

@@ -1,0 +1,1589 @@
+/* Default Theme — warm copper accent (deliberately not the Tailwind/SaaS
+   indigo). The `--color-indigo-*` / `--color-purple-*` var NAMES are kept so the
+   existing utility classes (`bg-indigo-500`, `text-indigo-400`, …) recolour with
+   no markup churn; only the values move to a copper ramp. */
+.theme-default {
+    --color-black: #000000;
+    --color-white: #ffffff;
+    --color-slate-400: #94a3b8;
+    --color-slate-500: #64748b;
+    --color-green-500: #22c55e;
+    --color-indigo-400: #e8a866;
+    --color-indigo-500: #d9842f;
+    --color-indigo-600: #b86a22;
+    --color-on-accent: #000000;
+    --color-indigo-900: #3a2410;
+    --color-purple-600: #cf7a3a;
+    --color-purple-700: #a85f28;
+    --color-red-400: #f87171;
+    --color-neutral-900: #171717;
+}
+
+/* Chrome that carries `text-white` copy. Mixed from the theme's base and raised
+   colours rather than fixed hex, so a light theme (or System colors in a light
+   appearance) lightens the surface along with darkening its text. Declared on
+   #app-root, the element that carries the theme class, so they resolve against
+   the active theme; under the default theme they are the #0a0a0a, #121212 and
+   #262626 they replace. */
+#app-root {
+    --surface-chrome: color-mix(in srgb, var(--color-neutral-900, #171717) 43%, var(--color-black, #000000));
+    --surface-chrome-raised: color-mix(in srgb, var(--color-neutral-900, #171717) 78%, var(--color-black, #000000));
+    --surface-field: color-mix(in srgb, var(--color-white, #ffffff) 6%, var(--color-neutral-900, #171717));
+}
+
+/* AMOLED pure black — on OLED panels every lit pixel costs battery, so the
+   base and every elevated surface collapse to true #000 and the heavy backdrop
+   blurs are dropped (they keep the GPU busy for no visible gain over black).
+   The accent ramp stays the default copper. */
+.theme-amoled {
+    --color-black: #000000;
+    --color-white: #ffffff;
+    --color-slate-400: #a3a3a3;
+    --color-slate-500: #6b6b6b;
+    --color-green-500: #22c55e;
+    --color-indigo-400: #e8a866;
+    --color-indigo-500: #d9842f;
+    --color-indigo-600: #b86a22;
+    --color-on-accent: #000000;
+    --color-indigo-900: #1c1206;
+    --color-purple-600: #cf7a3a;
+    --color-purple-700: #a85f28;
+    --color-red-400: #f87171;
+    --color-neutral-900: #000000;
+}
+
+.theme-amoled .backdrop-blur-xl,
+.theme-amoled .backdrop-blur-2xl {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+/* Gruvbox Classic Dark */
+.theme-gruvbox-classic {
+    --color-black: #282828;
+    --color-white: #ebdbb2;
+    --color-slate-400: #a89984;
+    --color-slate-500: #665c54;
+    --color-green-500: #b8bb26;
+    --color-indigo-400: #83a598;
+    --color-indigo-500: #458588;
+    --color-indigo-600: #fabd2f;
+    --color-on-accent: #000000;
+    --color-indigo-900: #1d2021;
+    --color-purple-600: #d3869b;
+    --color-purple-700: #b16286;
+    --color-red-400: #fb4934;
+    --color-neutral-900: #3c3836;
+}
+
+/* Gruvbox Dark Soft */
+.theme-gruvbox-dark-soft {
+    --color-black: #32302f;
+    --color-white: #fbf1c7;
+    --color-slate-400: #a89984;
+    --color-slate-500: #7c6f64;
+    --color-green-500: #b8bb26;
+    --color-indigo-400: #8ec07c;
+    --color-indigo-500: #83a598;
+    --color-indigo-600: #458588;
+    --color-on-accent: #000000;
+    --color-indigo-900: #3c3836;
+    --color-purple-600: #d3869b;
+    --color-purple-700: #b16286;
+    --color-red-400: #fb4934;
+    --color-neutral-900: #3c3836;
+}
+
+/* Gruvbox Material Dark */
+.theme-gruvbox {
+    --color-black: #1d2021;
+    --color-white: #d4be98;
+    --color-slate-400: #a89984;
+    --color-slate-500: #7c6f64;
+    --color-green-500: #a9b665;
+    --color-indigo-400: #89b482;
+    --color-indigo-500: #7daea3;
+    --color-indigo-600: #d3869b;
+    --color-on-accent: #000000;
+    --color-indigo-900: #1b1b1b;
+    --color-purple-600: #d3869b;
+    --color-purple-700: #b16286;
+    --color-red-400: #ea6962;
+    --color-neutral-900: #282828;
+}
+
+/* Dracula */
+.theme-dracula {
+    --color-black: #282a36;
+    --color-white: #f8f8f2;
+    --color-slate-400: #6272a4;
+    --color-slate-500: #44475a;
+    --color-green-500: #50fa7b;
+    --color-indigo-400: #caa7fc;
+    --color-indigo-500: #bd93f9;
+    --color-indigo-600: #bd93f9;
+    --color-on-accent: #000000;
+    --color-indigo-900: #191a21;
+    --color-purple-600: #ff79c6;
+    --color-purple-700: #ff79c6;
+    --color-red-400: #ff5555;
+    --color-neutral-900: #21222c;
+}
+
+/* Nord */
+.theme-nord {
+    --color-black: #2e3440;
+    --color-white: #d8dee9;
+    --color-slate-400: #81a1c1;
+    --color-slate-500: #4c566a;
+    --color-green-500: #a3be8c;
+    --color-indigo-400: #8fbcbb;
+    --color-indigo-500: #88c0d0;
+    --color-indigo-600: #5e81ac;
+    --color-on-accent: #000000;
+    --color-indigo-900: #242933;
+    --color-purple-600: #b48ead;
+    --color-purple-700: #a3799d;
+    --color-red-400: #bf616a;
+    --color-neutral-900: #3b4252;
+}
+
+/* Catppuccin Mocha */
+.theme-catppuccin {
+    --color-black: #1e1e2e;
+    --color-white: #cdd6f4;
+    --color-slate-400: #bac2de;
+    --color-slate-500: #585b70;
+    --color-green-500: #a6e3a1;
+    --color-indigo-400: #89dceb;
+    --color-indigo-500: #89b4fa;
+    --color-indigo-600: #7287fd;
+    --color-on-accent: #000000;
+    --color-indigo-900: #11111b;
+    --color-purple-600: #cba6f7;
+    --color-purple-700: #b4befe;
+    --color-red-400: #f38ba8;
+    --color-neutral-900: #181825;
+}
+
+/* Ef Night (ef-themes) */
+.theme-ef-night {
+    --color-black: #000e17;
+    --color-white: #afbcbf;
+    --color-slate-400: #70819f;
+    --color-slate-500: #3a4a66;
+    --color-green-500: #1fa526;
+    --color-indigo-400: #6fafff;
+    --color-indigo-500: #379cf6;
+    --color-indigo-600: #6a88ff;
+    --color-on-accent: #000000;
+    --color-indigo-900: #000810;
+    --color-purple-600: #af8aff;
+    --color-purple-700: #d570af;
+    --color-red-400: #ef656a;
+    --color-neutral-900: #1a202b;
+}
+
+/* Ayu Dark */
+.theme-ayu-dark {
+    --color-black: #0a0e14;
+    --color-white: #b3b1ad;
+    --color-slate-400: #626a73;
+    --color-slate-500: #3d424d;
+    --color-green-500: #c2d94c;
+    --color-indigo-400: #59c2ff;
+    --color-indigo-500: #39bae6;
+    --color-indigo-600: #59c2ff;
+    --color-on-accent: #000000;
+    --color-indigo-900: #050810;
+    --color-purple-600: #d2a6ff;
+    --color-purple-700: #c7a1eb;
+    --color-red-400: #f07178;
+    --color-neutral-900: #0d1017;
+}
+
+/* Ayu Mirage */
+.theme-ayu-mirage {
+    --color-black: #1f2430;
+    --color-white: #cbccc6;
+    --color-slate-400: #707a8c;
+    --color-slate-500: #3e4b59;
+    --color-green-500: #bae67e;
+    --color-indigo-400: #73d0ff;
+    --color-indigo-500: #5ccfe6;
+    --color-indigo-600: #73d0ff;
+    --color-on-accent: #000000;
+    --color-indigo-900: #171b24;
+    --color-purple-600: #d4bfff;
+    --color-purple-700: #c7a1eb;
+    --color-red-400: #f28779;
+    --color-neutral-900: #242936;
+}
+
+/* Vague */
+.theme-vague {
+    --color-black: #141415;
+    --color-white: #cdcdcd;
+    --color-slate-400: #606079;
+    --color-slate-500: #333738;
+    --color-green-500: #7fa563;
+    --color-indigo-400: #7e98e8;
+    --color-indigo-500: #6e94b2;
+    --color-indigo-600: #90a0b5;
+    --color-on-accent: #000000;
+    --color-indigo-900: #0e0e0f;
+    --color-purple-600: #bb9dbd;
+    --color-purple-700: #aeaed1;
+    --color-red-400: #d8647e;
+    --color-neutral-900: #1c1c24;
+}
+
+/* One Dark Pro */
+.theme-onedarkpro {
+    --color-black: #282c34;
+    --color-white: #abb2bf;
+    --color-slate-400: #7f848e;
+    --color-slate-500: #3e4452;
+    --color-green-500: #98c379;
+    --color-indigo-400: #61afef;
+    --color-indigo-500: #61afef;
+    --color-indigo-600: #528bcc;
+    --color-on-accent: #000000;
+    --color-indigo-900: #1e2127;
+    --color-purple-600: #c678dd;
+    --color-purple-700: #b15fcf;
+    --color-red-400: #e06c75;
+    --color-neutral-900: #21252b;
+}
+
+/* Osmium (@IroncladDev) */
+.theme-osmium {
+    --color-black: #14131e;
+    --color-white: #c8d5f1;
+    --color-slate-400: #949bb9;
+    --color-slate-500: #353553;
+    --color-green-500: #c9de96;
+    --color-indigo-400: #9abfe8;
+    --color-indigo-500: #b0a8eb;
+    --color-indigo-600: #9abfe8;
+    --color-on-accent: #000000;
+    --color-indigo-900: #0e0d16;
+    --color-purple-600: #d9a1e8;
+    --color-purple-700: #b0a8eb;
+    --color-red-400: #e55376;
+    --color-neutral-900: #1f1d2d;
+}
+
+/* Kanagawa Dragon */
+.theme-kanagawa-dragon {
+    --color-black: #181616;
+    --color-white: #c5c9c5;
+    --color-slate-400: #a6a69c;
+    --color-slate-500: #393836;
+    --color-green-500: #87a987;
+    --color-indigo-400: #8ba4b0;
+    --color-indigo-500: #949fb5;
+    --color-indigo-600: #8992a7;
+    --color-on-accent: #000000;
+    --color-indigo-900: #0d0c0c;
+    --color-purple-600: #a292a3;
+    --color-purple-700: #8992a7;
+    --color-red-400: #c4746e;
+    --color-neutral-900: #1d1c19;
+}
+
+/* Everforest Dark */
+.theme-everforest {
+    --color-black: #272e33;
+    --color-white: #d3c6aa;
+    --color-slate-400: #859289;
+    --color-slate-500: #414b50;
+    --color-green-500: #a7c080;
+    --color-indigo-400: #7fbbb3;
+    --color-indigo-500: #7fbbb3;
+    --color-indigo-600: #83c092;
+    --color-on-accent: #000000;
+    --color-indigo-900: #1e2326;
+    --color-purple-600: #d699b6;
+    --color-purple-700: #c48da6;
+    --color-red-400: #e67e80;
+    --color-neutral-900: #2d353b;
+}
+
+/* Rosé Pine */
+.theme-rosepine {
+    --color-black: #191724;
+    --color-white: #e0def4;
+    --color-slate-400: #908caa;
+    --color-slate-500: #403d52;
+    --color-green-500: #9ccfd8;
+    --color-indigo-400: #c4a7e7;
+    --color-indigo-500: #31748f;
+    --color-indigo-600: #c4a7e7;
+    --color-on-accent: #000000;
+    --color-indigo-900: #110f1c;
+    --color-purple-600: #c4a7e7;
+    --color-purple-700: #31748f;
+    --color-red-400: #eb6f92;
+    --color-neutral-900: #1f1d2e;
+}
+
+/* kettek16 */
+.theme-kettek16 {
+    --color-black: #090909;
+    --color-white: #fef638;
+    --cursor-color: rgba(254, 246, 232, 0.5);
+    --color0: #1d1f21;
+    --color1: #cc3311;
+    --color2: #009988;
+    --color3: #ee7733;
+    --color4: #0077bb;
+    --color5: #ee3377;
+    --color6: #33bbee;
+    --color7: #dddddd;
+    --color8: #bbbbbb;
+    --color9: #ee6677;
+    --color10: #228833;
+    --color11: #ccbb44;
+    --color12: #4477aa;
+    --color13: #aa3377;
+    --color14: #66ccee;
+    --color15: #ffffff;
+
+    --color-slate-400: var(--color7);
+    --color-slate-500: var(--color8);
+    --color-green-400: var(--color10);
+    --color-green-500: var(--color2);
+    --color-indigo-400: var(--color14);
+    --color-indigo-500: var(--color6);
+    --color-indigo-600: var(--color4);
+    --color-on-accent: #ffffff;
+    --color-indigo-900: var(--color0);
+    --color-purple-400: var(--color12);
+    --color-purple-500: var(--color13);
+    --color-purple-600: var(--color5);
+    --color-purple-700: var(--color13);
+    --color-red-400: var(--color9);
+    --color-red-500: var(--color1);
+    --color-orange-500: var(--color3);
+    --color-neutral-900: var(--color0);
+}
+
+/* Kettek16 Component Overrides - Using the full 16-color palette */
+.theme-kettek16 h1,
+.theme-kettek16 .text-3xl,
+.theme-kettek16 .text-4xl {
+    color: var(--color11) !important; /* Bright Yellow */
+}
+
+.theme-kettek16 h2,
+.theme-kettek16 .text-2xl {
+    color: var(--color14) !important; /* Cyan */
+}
+
+.theme-kettek16 h3,
+.theme-kettek16 .text-xl {
+    color: var(--color15) !important; /* Pure White */
+}
+
+.theme-kettek16 .fa-house {
+    color: var(--color1) !important;
+}
+.theme-kettek16 .fa-magnifying-glass {
+    color: var(--color3) !important;
+}
+.theme-kettek16 .fa-book {
+    color: var(--color10) !important;
+}
+.theme-kettek16 .fa-music {
+    color: var(--color12) !important;
+}
+.theme-kettek16 .fa-user {
+    color: var(--color5) !important;
+}
+.theme-kettek16 .fa-list {
+    color: var(--color6) !important;
+}
+.theme-kettek16 .fa-heart {
+    color: var(--color9) !important;
+}
+.theme-kettek16 .fa-clipboard-list {
+    color: var(--color14) !important;
+}
+.theme-kettek16 .fa-gear {
+    color: var(--color11) !important;
+}
+.theme-kettek16 .fa-compact-disc {
+    color: var(--color4) !important;
+}
+.theme-kettek16 .fa-shuffle {
+    color: var(--color13) !important;
+}
+.theme-kettek16 .fa-repeat {
+    color: var(--color13) !important;
+}
+.theme-kettek16 .fa-backward-step,
+.theme-kettek16 .fa-forward-step {
+    color: var(--color12) !important;
+}
+.theme-kettek16 .fa-volume-high {
+    color: var(--color14) !important;
+}
+.theme-kettek16 .fa-server {
+    color: var(--color10) !important;
+}
+.theme-kettek16 .fa-trash {
+    color: var(--color1) !important;
+}
+
+/* Interactive elements */
+.theme-kettek16 .group-hover\:bg-green-500 {
+    background-color: var(--color10) !important;
+}
+.theme-kettek16 .group-hover\/vol\:bg-green-500 {
+    background-color: var(--color10) !important;
+}
+.theme-kettek16 .text-green-400 {
+    color: var(--color10) !important;
+}
+.theme-kettek16 .text-red-400 {
+    color: var(--color9) !important;
+}
+.theme-kettek16 .text-red-500 {
+    color: var(--color1) !important;
+}
+
+/* Sidebar Specifics */
+.theme-kettek16 .bg-white\/5 {
+    background-color: rgba(
+        29,
+        31,
+        33,
+        0.4
+    ) !important; /* var(--color0) with opacity */
+}
+
+/* Scrubber and Progress */
+.theme-kettek16 .group-hover\:bg-green-500,
+.theme-kettek16 .group-hover\/vol\:bg-green-500 {
+    background-color: var(--color10) !important;
+}
+
+/* Album Art Dynamic Fallback */
+.theme-kettek16 .bg-indigo-600\/20 {
+    background-color: rgba(0, 119, 187, 0.2) !important; /* var(--color4) */
+}
+
+.theme-kettek16 .to-purple-600\/20 {
+    --tw-gradient-to: rgba(170, 51, 119, 0.2) !important; /* var(--color13) */
+}
+
+/* Statistics and Labels */
+.theme-kettek16 .text-slate-500 {
+    color: var(--color11) !important; /* Use yellow/gold for labels */
+}
+
+.theme-kettek16 .text-slate-400 {
+    color: var(--color7) !important;
+}
+
+/* Selection and Focus */
+.theme-kettek16 .bg-indigo-500 {
+    background-color: var(--color6) !important;
+}
+
+.theme-kettek16 .hover\:bg-indigo-400:hover {
+    background-color: var(--color14) !important;
+}
+
+/* App-wide native selects. Keep the platform menu behavior, but make the
+   closed control match the rest of Kopuz instead of looking like raw HTML. */
+select,
+select option,
+select optgroup {
+    background-color: var(--color-black, #000000) !important;
+    color: var(--color-white, #ffffff) !important;
+}
+
+select {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    color-scheme: dark;
+    min-height: 2.25rem;
+    background-color: color-mix(
+        in srgb,
+        var(--color-black, #000000) 92%,
+        var(--color-white, #ffffff)
+    ) !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='m4 6 4 4 4-4' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 0.7rem center !important;
+    background-size: 1rem !important;
+    color: var(--color-white, #ffffff) !important;
+    border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 16%, transparent) !important;
+    padding: 0.45rem 2.25rem 0.45rem 0.75rem !important;
+    border-radius: 0.5rem !important;
+    cursor: pointer;
+    transition: border-color 100ms ease, background-color 100ms ease,
+        box-shadow 100ms ease;
+}
+
+select:hover {
+    border-color: color-mix(in srgb, var(--color-white, #ffffff) 30%, transparent) !important;
+    background-color: color-mix(
+        in srgb,
+        var(--color-black, #000000) 86%,
+        var(--color-white, #ffffff)
+    ) !important;
+}
+
+select:focus {
+    outline: none !important;
+    border-color: var(--color-indigo-400, #e8a866) !important;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-indigo-500, #d9842f) 22%, transparent);
+}
+
+select:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.settings-select {
+    width: min(14rem, calc(100vw - 2rem));
+}
+
+/* A filled accent button. The label is the theme's `--color-on-accent`, picked
+   per theme for contrast against the fill; hover tints the fill with the label
+   instead of swapping to another accent shade, so the pair never drifts apart. */
+.accent-button {
+    background-color: var(--color-indigo-600, #b86a22);
+    color: var(--color-on-accent, #000000);
+    transition: background-color 100ms ease, box-shadow 100ms ease;
+}
+
+.accent-button:hover {
+    box-shadow: inset 0 0 0 999px color-mix(in srgb, var(--color-on-accent, #000000) 12%, transparent);
+}
+
+.accent-button:active {
+    box-shadow: inset 0 0 0 999px color-mix(in srgb, var(--color-on-accent, #000000) 20%, transparent);
+}
+
+.accent-button:disabled {
+    cursor: default;
+    opacity: 0.5;
+    box-shadow: none;
+}
+
+.settings-category-content {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    scroll-margin-top: 1rem;
+    contain: layout;
+    animation: settings-category-enter 220ms ease-out;
+}
+
+/* Changing a settings tab must not move the sticky navigation while the new
+   section settles. Keep the bar as the scroll anchor and reveal the section
+   below it without an animated layout shift. */
+.settings-layout-topbar .settings-category-content {
+    animation: none;
+    overflow-anchor: none;
+    scroll-margin-top: 3.5rem;
+}
+
+@keyframes settings-category-enter {
+    from {
+        opacity: 0;
+        transform: translateY(7px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.settings-section {
+    border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 11%, transparent);
+    background: color-mix(in srgb, var(--color-black, #000000) 78%, transparent);
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.24);
+}
+
+.settings-section-header {
+    background: color-mix(in srgb, var(--color-black, #000000) 58%, transparent);
+    transition: background-color 100ms ease;
+}
+
+.settings-section-header:hover {
+    background: color-mix(in srgb, var(--color-white, #ffffff) 7%, transparent);
+}
+
+.settings-section-body > .settings-row:nth-child(even) {
+    background: color-mix(in srgb, var(--color-white, #ffffff) 2.5%, transparent);
+}
+
+.settings-row {
+    min-height: 3.25rem;
+    transition: background-color 100ms ease;
+}
+
+.settings-row:hover {
+    background: color-mix(in srgb, var(--color-white, #ffffff) 5%, transparent) !important;
+}
+
+.settings-subsection-label {
+    padding: 0.65rem 1.25rem 0.45rem;
+    background: color-mix(in srgb, var(--color-black, #000000) 32%, transparent);
+    color: color-mix(in srgb, var(--color-white, #ffffff) 48%, transparent);
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+/* The title stays put while the page scrolls under it, the same as the
+   navigation beside or below it; 3.5rem tall so the top bar can stack under. */
+@media (min-width: 901px) and (min-height: 541px) {
+    .settings-page > h1 {
+        position: sticky;
+        z-index: 31;
+        top: 0;
+        display: flex;
+        height: 3.5rem;
+        align-items: center;
+        margin-bottom: 0;
+        background: color-mix(in srgb, var(--color-black, #000000) 92%, transparent);
+    }
+}
+
+@media (min-width: 901px) and (min-height: 541px) {
+    .settings-layout-cd .settings-workspace {
+        --settings-fan-radius: clamp(5rem, calc(50vh - 3.75rem), 15.5rem);
+        --settings-fan-radius: clamp(5rem, calc(50dvh - 3.75rem), 15.5rem);
+        display: grid;
+        grid-template-columns: calc(var(--settings-fan-radius) + 2rem) minmax(0, 1fr);
+        min-height: calc(100vh - 6rem);
+        min-height: calc(100dvh - 6rem);
+        align-items: start;
+        gap: 0.75rem;
+        contain: layout;
+    }
+
+    .settings-page.settings-layout-cd {
+        max-width: none !important;
+        margin-right: 0 !important;
+        margin-left: 0 !important;
+        padding-left: 0 !important;
+    }
+
+    .settings-page.settings-layout-cd > h1 {
+        padding-inline: 1.5rem;
+    }
+
+    .settings-layout-cd .settings-fan {
+        position: sticky;
+        top: max(0.5rem, calc(50vh - var(--settings-fan-radius)));
+        height: calc(var(--settings-fan-radius) * 2);
+        overflow: hidden;
+        isolation: isolate;
+        contain: strict;
+        contain-intrinsic-size: calc(var(--settings-fan-radius) + 2rem) calc(var(--settings-fan-radius) * 2);
+        will-change: transform;
+        transform: translate3d(0, 0, 0);
+        backface-visibility: hidden;
+        pointer-events: auto;
+    }
+
+    .settings-layout-cd .settings-fan-disc {
+        position: relative;
+        width: var(--settings-fan-radius);
+        height: 100%;
+        contain: strict;
+        transform: translate3d(0, 0, 0);
+        backface-visibility: hidden;
+    }
+
+    .settings-layout-cd .settings-fan-disc::before {
+        position: absolute;
+        z-index: 0;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 14%, transparent);
+        border-left: 0;
+        border-radius: 0 999px 999px 0;
+        background: radial-gradient(
+            circle at left center,
+            color-mix(in srgb, var(--color-white, #ffffff) 12%, var(--color-black, #000000)) 0 16%,
+            color-mix(in srgb, var(--color-black, #000000) 88%, transparent) 17% 28%,
+            color-mix(in srgb, var(--color-white, #ffffff) 7%, var(--color-black, #000000)) 29% 34%,
+            color-mix(in srgb, var(--color-black, #000000) 84%, transparent) 35% 52%,
+            color-mix(in srgb, var(--color-white, #ffffff) 6%, var(--color-black, #000000)) 53% 58%,
+            color-mix(in srgb, var(--color-black, #000000) 80%, transparent) 59% 78%,
+            color-mix(in srgb, var(--color-white, #ffffff) 5%, var(--color-black, #000000)) 79% 84%,
+            color-mix(in srgb, var(--color-black, #000000) 82%, transparent) 85% 100%
+        );
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+        content: "";
+        transform: translateZ(0);
+        backface-visibility: hidden;
+    }
+
+    .settings-layout-cd .settings-fan-disc::after {
+        position: absolute;
+        z-index: 10;
+        top: 50%;
+        left: -12.9%;
+        width: 25.8%;
+        aspect-ratio: 1;
+        border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 22%, transparent);
+        border-radius: 999px;
+        background: radial-gradient(
+            circle,
+            color-mix(in srgb, var(--color-black, #000000) 94%, transparent) 0 42%,
+            color-mix(in srgb, var(--color-white, #ffffff) 11%, var(--color-black, #000000)) 45% 68%,
+            color-mix(in srgb, var(--color-black, #000000) 75%, transparent) 71%
+        );
+        box-shadow: 0 0 14px rgba(0, 0, 0, 0.4);
+        content: "";
+        transform: translateY(-50%) translateZ(0);
+        backface-visibility: hidden;
+        pointer-events: none;
+    }
+
+    .settings-layout-cd .settings-fan-item {
+        --fan-angle: 0deg;
+        position: absolute;
+        z-index: 1;
+        top: 0;
+        left: -100%;
+        width: 200%;
+        height: 100%;
+        padding: 0;
+        border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 14%, transparent);
+        border-radius: 999px;
+        background: radial-gradient(
+            circle,
+            color-mix(in srgb, var(--color-white, #ffffff) 5%, transparent) 0 24%,
+            color-mix(in srgb, var(--color-white, #ffffff) 9%, var(--color-black, #000000)) 25% 76%,
+            color-mix(in srgb, var(--color-white, #ffffff) 14%, var(--color-black, #000000)) 100%
+        );
+        clip-path: polygon(50% 50%, 99.04% 40.25%, 100% 50%, 99.04% 59.75%);
+        color: white;
+        cursor: pointer;
+        opacity: 0.52;
+        transform: rotate(var(--fan-angle)) translateZ(0);
+        transform-origin: center;
+        backface-visibility: hidden;
+        transition: opacity 100ms ease, background 100ms ease;
+    }
+
+    .settings-layout-cd .settings-fan-item:hover {
+        opacity: 0.85;
+        background: radial-gradient(
+            circle,
+            color-mix(in srgb, var(--color-white, #ffffff) 10%, transparent) 0 24%,
+            color-mix(in srgb, var(--color-white, #ffffff) 16%, var(--color-black, #000000)) 25% 76%,
+            color-mix(in srgb, var(--color-white, #ffffff) 22%, var(--color-black, #000000)) 100%
+        );
+    }
+
+    .settings-layout-cd .settings-fan-item:hover + .settings-fan-label {
+        color: white;
+        opacity: 1;
+    }
+
+    .settings-layout-cd .settings-fan-item:focus-visible {
+        outline: 2px solid color-mix(in srgb, var(--color-white, #ffffff) 86%, transparent);
+        outline-offset: 3px;
+    }
+
+    .settings-layout-cd .settings-fan-item.is-selected {
+        z-index: 5;
+        opacity: 1;
+        background: radial-gradient(
+            circle,
+            color-mix(in srgb, var(--color-white, #ffffff) 14%, transparent) 0 24%,
+            color-mix(in srgb, var(--color-white, #ffffff) 22%, var(--color-black, #000000)) 25% 76%,
+            color-mix(in srgb, var(--color-white, #ffffff) 28%, var(--color-black, #000000)) 100%
+        );
+        transform: rotate(var(--fan-angle)) translateZ(0);
+    }
+
+    .settings-layout-cd .settings-fan-label {
+        position: absolute;
+        z-index: 8;
+        top: calc(50% + var(--label-y));
+        left: var(--label-x);
+        display: block;
+        width: min(8.5rem, 100%);
+        height: min(3rem, 16%);
+        font-size: clamp(0.55rem, 2.6vh, 0.8rem);
+        font-weight: 650;
+        letter-spacing: 0.015em;
+        line-height: 1.05;
+        color: color-mix(in srgb, var(--color-white, #ffffff) 78%, transparent);
+        opacity: 0.82;
+        pointer-events: none;
+        text-align: center;
+        text-rendering: optimizeSpeed;
+        transform: translate(-50%, -50%) rotate(var(--label-tilt)) translateZ(0);
+        backface-visibility: hidden;
+        transition: opacity 100ms ease, font-size 100ms ease;
+    }
+
+    .settings-layout-cd .settings-fan-label i {
+        display: none;
+    }
+
+    .settings-layout-cd .settings-fan-label > span {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 6.5rem;
+        text-align: center;
+        transform: translate(-50%, -50%);
+    }
+
+    .settings-layout-cd .settings-fan-label.is-selected {
+        font-size: clamp(0.6rem, 2.8vh, 0.86rem);
+        color: white;
+        opacity: 1;
+        transform: translate(-50%, -50%) rotate(var(--label-tilt)) translateZ(0);
+    }
+
+    .settings-layout-cd .settings-fan-mobile-label {
+        display: none;
+    }
+}
+
+@keyframes settings-category-enter {
+    from {
+        opacity: 0;
+        transform: translateY(7px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.settings-section {
+    border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 11%, transparent);
+    background: color-mix(in srgb, var(--color-black, #000000) 78%, transparent);
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.24);
+}
+
+.settings-section-header {
+    background: color-mix(in srgb, var(--color-black, #000000) 58%, transparent);
+    transition: background-color 100ms ease;
+}
+
+.settings-section-header:hover {
+    background: color-mix(in srgb, var(--color-white, #ffffff) 7%, transparent);
+}
+
+.settings-section-body > .settings-row:nth-child(even) {
+    background: color-mix(in srgb, var(--color-white, #ffffff) 2.5%, transparent);
+}
+
+.settings-row {
+    min-height: 3.25rem;
+    transition: background-color 100ms ease;
+}
+
+.settings-row:hover {
+    background: color-mix(in srgb, var(--color-white, #ffffff) 5%, transparent) !important;
+}
+
+.settings-subsection-label {
+    padding: 0.65rem 1.25rem 0.45rem;
+    background: color-mix(in srgb, var(--color-black, #000000) 32%, transparent);
+    color: color-mix(in srgb, var(--color-white, #ffffff) 48%, transparent);
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+@media (min-width: 901px) and (min-height: 541px) {
+    .settings-layout-topbar .settings-workspace {
+        display: block;
+        min-height: 0;
+    }
+
+    .settings-layout-topbar .settings-fan {
+        position: sticky;
+        z-index: 30;
+        top: 3.5rem;
+        display: flex;
+        width: 100%;
+        height: auto;
+        margin: 0 0 1rem;
+        padding: 0;
+        gap: 0.15rem;
+        overflow-x: auto;
+        overflow-y: hidden;
+        border-bottom: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 9%, transparent);
+        background: color-mix(in srgb, var(--color-black, #000000) 92%, transparent);
+        scrollbar-width: none;
+        overflow-anchor: none;
+        scroll-behavior: smooth;
+    }
+
+    .settings-layout-topbar .settings-fan::-webkit-scrollbar {
+        display: none;
+    }
+
+    .settings-layout-topbar .settings-fan-disc {
+        display: contents;
+    }
+
+    .settings-layout-topbar .settings-fan-disc::before,
+    .settings-layout-topbar .settings-fan-disc::after {
+        display: none;
+    }
+
+    .settings-layout-topbar .settings-fan-item,
+    .settings-layout-topbar .settings-fan-item.is-selected {
+        position: relative;
+        top: auto;
+        left: auto;
+        width: auto;
+        height: 2.75rem;
+        flex: 0 0 auto;
+        padding: 0 0.75rem;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        clip-path: none;
+        color: color-mix(in srgb, var(--color-white, #ffffff) 52%, transparent);
+        opacity: 1;
+        filter: none;
+        transform: none;
+    }
+
+    .settings-layout-topbar .settings-fan-item:hover {
+        background: color-mix(in srgb, var(--color-white, #ffffff) 4%, transparent);
+        color: color-mix(in srgb, var(--color-white, #ffffff) 78%, transparent);
+        filter: none;
+    }
+
+    .settings-layout-topbar .settings-fan-item.is-selected {
+        border-bottom-color: var(--color-indigo-400, #e8a866);
+        background: color-mix(in srgb, var(--color-white, #ffffff) 3%, transparent);
+        color: var(--color-white, #ffffff);
+    }
+
+    .settings-layout-topbar .settings-fan-label {
+        display: none;
+    }
+
+    .settings-layout-topbar .settings-fan-mobile-label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+}
+
+@media (max-width: 900px), (max-height: 540px) {
+    .settings-workspace {
+        display: block;
+        min-height: 0;
+    }
+
+    .settings-fan {
+        position: sticky;
+        z-index: 30;
+        top: 0;
+        display: flex;
+        width: 100%;
+        height: auto;
+        margin: 0 0 1rem;
+        padding: 0;
+        gap: 0.15rem;
+        overflow-x: auto;
+        overflow-y: hidden;
+        border-bottom: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 9%, transparent);
+        background: color-mix(in srgb, var(--color-black, #000000) 92%, transparent);
+        scrollbar-width: none;
+    }
+
+    .settings-fan::-webkit-scrollbar {
+        display: none;
+    }
+
+    .settings-fan-disc {
+        display: contents;
+    }
+
+    .settings-fan-disc::before,
+    .settings-fan-disc::after {
+        display: none;
+    }
+
+    .settings-fan-item,
+    .settings-fan-item.is-selected {
+        position: relative;
+        top: auto;
+        left: auto;
+        width: auto;
+        height: 2.75rem;
+        flex: 0 0 auto;
+        padding: 0 0.75rem;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        clip-path: none;
+        color: color-mix(in srgb, var(--color-white, #ffffff) 52%, transparent);
+        opacity: 1;
+        filter: none;
+        transform: none;
+    }
+
+    .settings-fan-item:hover {
+        background: color-mix(in srgb, var(--color-white, #ffffff) 4%, transparent);
+        color: color-mix(in srgb, var(--color-white, #ffffff) 78%, transparent);
+        filter: none;
+    }
+
+    .settings-fan-item.is-selected {
+        border-bottom-color: var(--color-indigo-400, #e8a866);
+        background: color-mix(in srgb, var(--color-white, #ffffff) 3%, transparent);
+        color: var(--color-white, #ffffff);
+        opacity: 1;
+        filter: none;
+        transform: none;
+    }
+
+    .settings-fan-label,
+    .settings-fan-label.is-selected {
+        position: static;
+        width: auto;
+        font-size: 0.75rem;
+        transform: none;
+    }
+
+    .settings-fan-label {
+        display: none;
+    }
+
+    .settings-fan-mobile-label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+}
+
+@media (max-width: 640px) {
+    .settings-toggle {
+        width: auto;
+        min-width: 9.5rem;
+        flex: none;
+    }
+
+    .settings-toggle > button {
+        padding-inline: 0.625rem;
+    }
+
+    .settings-row:has(.settings-slider) {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        row-gap: 0.5rem;
+    }
+
+    .settings-row .settings-slider {
+        display: contents;
+    }
+
+    .settings-row .settings-slider > input[type="range"] {
+        grid-row: 2;
+        grid-column: 1 / -1;
+        width: 100%;
+        height: 1.75rem;
+    }
+
+    .settings-row .settings-slider > span {
+        grid-row: 1;
+        grid-column: 2;
+        width: auto;
+    }
+
+    .settings-row > [inert]:has(.settings-slider) {
+        grid-column: 1 / -1;
+    }
+
+    .settings-row .app-select.settings-select {
+        width: auto;
+        max-width: 60%;
+    }
+
+    .settings-row .settings-select .app-select-trigger {
+        min-height: 2.75rem;
+        padding: 0;
+        gap: 0.5rem;
+        border: 0;
+        background: transparent;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        box-shadow: none;
+        color: color-mix(in srgb, var(--color-white, #ffffff) 55%, transparent);
+        font-size: 0.8125rem;
+    }
+
+    .settings-row .settings-select .app-select-chevron {
+        rotate: none;
+        transform: rotate(-90deg);
+    }
+
+    [dir="rtl"] .settings-row .settings-select .app-select-chevron {
+        transform: rotate(90deg);
+    }
+
+    .settings-row-nested {
+        position: relative;
+        padding-inline-start: 2.25rem;
+    }
+
+    .settings-row-nested::before {
+        content: "";
+        position: absolute;
+        inset-block: 0;
+        inset-inline-start: 1.25rem;
+        width: 1px;
+        background: color-mix(in srgb, var(--color-indigo-500, #d9842f) 40%, transparent);
+    }
+}
+
+.settings-index {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+}
+
+.settings-index-row {
+    display: flex;
+    width: 100%;
+    min-height: 3.5rem;
+    align-items: center;
+    gap: 0.875rem;
+    padding: 0.625rem 1rem;
+    border-top: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 7%, transparent);
+    color: var(--color-white, #ffffff);
+    text-align: start;
+    transition: background-color 100ms ease;
+}
+
+.settings-index-row:active {
+    background: color-mix(in srgb, var(--color-white, #ffffff) 5%, transparent);
+}
+
+.settings-index-icon {
+    width: 1rem;
+    flex: none;
+    color: color-mix(in srgb, var(--color-white, #ffffff) 45%, transparent);
+    font-size: 0.8125rem;
+    text-align: center;
+}
+
+.settings-index-text {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 0.125rem;
+}
+
+.settings-index-title {
+    color: color-mix(in srgb, var(--color-white, #ffffff) 92%, transparent);
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.settings-index-summary {
+    overflow: hidden;
+    color: color-mix(in srgb, var(--color-white, #ffffff) 45%, transparent);
+    font-size: 0.6875rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.settings-index-online {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-inline-end: 0.375rem;
+    border-radius: 50%;
+    background: var(--color-green-500, #22c55e);
+    vertical-align: 1px;
+}
+
+.settings-index-chevron {
+    flex: none;
+    color: color-mix(in srgb, var(--color-white, #ffffff) 30%, transparent);
+    font-size: 0.625rem;
+}
+
+[dir="rtl"] .settings-index-chevron {
+    transform: scaleX(-1);
+}
+
+[data-platform="android"] .settings-category-content {
+    contain: none;
+    animation: none;
+}
+
+/* The fan disc is built around a hub on its left edge; RTL puts the column on
+   the other side of the workspace, so mirror the geometry to keep the hub
+   against the window edge and the wedges fanning into the content. */
+@media (min-width: 901px) and (min-height: 541px) {
+    [dir="rtl"] .settings-page.settings-layout-cd {
+        padding-right: 0 !important;
+        padding-left: 1.5rem !important;
+    }
+
+    [dir="rtl"] .settings-layout-cd .settings-fan-disc::before {
+        border-right: 0;
+        border-left: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 13%, transparent);
+        border-radius: 999px 0 0 999px;
+        background:
+            repeating-radial-gradient(
+                circle at right center,
+                transparent 0 8px,
+                color-mix(in srgb, var(--color-white, #ffffff) 3.5%, transparent) 9px,
+                transparent 10px
+            ),
+            radial-gradient(
+                circle at right center,
+                color-mix(in srgb, var(--color-white, #ffffff) 8%, var(--color-black, #000000)) 0 21%,
+                color-mix(in srgb, var(--color-black, #000000) 72%, transparent) 21.5% 100%
+            );
+    }
+
+    [dir="rtl"] .settings-layout-cd .settings-fan-disc::after {
+        right: -12.9%;
+        left: auto;
+    }
+
+    [dir="rtl"] .settings-layout-cd .settings-fan-item {
+        left: 0;
+        clip-path: polygon(50% 50%, 0.96% 40.25%, 0% 50%, 0.96% 59.75%);
+        transform: rotate(calc(-1 * var(--fan-angle)));
+    }
+
+    [dir="rtl"] .settings-layout-cd .settings-fan-label {
+        left: calc(100% - var(--label-x));
+        transform: translate(-50%, -50%) rotate(calc(-1 * var(--label-tilt)));
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .settings-fan-item,
+    .settings-fan-label {
+        transition: none;
+    }
+
+    .settings-category-content {
+        animation: none;
+    }
+}
+
+.app-select-trigger {
+    display: flex;
+    min-height: 2.25rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.45rem 0.7rem 0.45rem 0.75rem;
+    border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 16%, transparent);
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--color-black, #000000) 58%, transparent);
+    -webkit-backdrop-filter: blur(14px) saturate(120%);
+    backdrop-filter: blur(14px) saturate(120%);
+    color: var(--color-white, #ffffff);
+    font-size: 0.875rem;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 100ms ease, background-color 100ms ease,
+        box-shadow 100ms ease;
+}
+
+.app-select-trigger:hover,
+.app-select-trigger[aria-expanded="true"] {
+    border-color: color-mix(in srgb, var(--color-white, #ffffff) 30%, transparent);
+    background: color-mix(in srgb, var(--color-black, #000000) 70%, transparent);
+}
+
+.app-select-trigger:focus-visible {
+    border-color: var(--color-indigo-400, #e8a866);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-indigo-500, #d9842f) 22%, transparent);
+}
+
+.app-select-chevron {
+    width: 1rem;
+    height: 1rem;
+    flex: none;
+    color: var(--color-slate-400, #94a3b8);
+    transition: transform 100ms ease;
+}
+
+.app-select-menu {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    right: 0;
+    z-index: 1;
+    width: max(100%, 16rem);
+    max-width: calc(100vw - 1rem);
+    max-height: min(20rem, 55vh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0.35rem;
+    border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 16%, transparent);
+    border-radius: 0.65rem;
+    /* Opaque like the sheet: WebKitGTK without accelerated compositing drops the blur, leaving the rows below legible through it. */
+    background: color-mix(in srgb, var(--color-black, #000000) 72%, var(--color-neutral-900, #171717));
+    -webkit-backdrop-filter: blur(18px) saturate(125%);
+    backdrop-filter: blur(18px) saturate(125%);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.app-select-menu.app-select-menu-up {
+    top: auto;
+    bottom: calc(100% + 0.35rem);
+}
+
+.app-select-option {
+    display: flex;
+    width: 100%;
+    min-height: 2rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.4rem 0.55rem;
+    border-radius: 0.4rem;
+    color: var(--color-white, #ffffff);
+    font-size: 0.875rem;
+    text-align: left;
+    cursor: pointer;
+}
+
+.app-select-option:hover,
+.app-select-option:focus-visible,
+.app-select-option-active {
+    background: color-mix(in srgb, var(--color-indigo-500, #d9842f) 18%, transparent);
+}
+
+.app-select-sheet-backdrop {
+    position: fixed;
+    z-index: 0;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    cursor: default;
+}
+
+.app-select-menu.app-select-sheet {
+    position: fixed;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    max-width: none;
+    max-height: min(28rem, 70vh);
+    padding: 1.25rem 0.5rem calc(1rem + env(safe-area-inset-bottom));
+    border-bottom: 0;
+    border-radius: 1rem 1rem 0 0;
+    background: color-mix(in srgb, var(--color-black, #000000) 72%, var(--color-neutral-900, #171717));
+}
+
+.app-select-menu.app-select-sheet::before {
+    content: "";
+    position: absolute;
+    top: 0.5rem;
+    left: 50%;
+    width: 2rem;
+    height: 3px;
+    margin-left: -1rem;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--color-white, #ffffff) 25%, transparent);
+}
+
+.app-select-sheet .app-select-option {
+    min-height: 2.75rem;
+    padding: 0.5rem 0.75rem;
+}
+
+#main-scroll-area:has(.app-select-sheet) .overflow-y-auto {
+    overflow: hidden;
+}
+
+.app-select-option-selected {
+    background: color-mix(in srgb, var(--color-indigo-500, #d9842f) 25%, transparent);
+    color: var(--color-indigo-400, #e8a866);
+}
+
+.app-select-check {
+    flex: none;
+    font-size: 0.75rem;
+}
+
+/* Kettek16 specific select styling */
+.theme-kettek16 select {
+    background-color: #090909 !important;
+    color: #fef638 !important;
+    border-color: #228833 !important;
+}
+
+.theme-kettek16 select:focus {
+    border-color: #66ccee !important;
+}
+
+.theme-kettek16 select option,
+.theme-kettek16 select optgroup {
+    background-color: #090909 !important;
+    background: #090909 !important;
+    color: #fef638 !important;
+}
+
+/* ═══════════════════════════════════════════ */
+/*                LIGHT THEMES                */
+/* ═══════════════════════════════════════════ */
+
+/* Default Light */
+.theme-default-light {
+    --color-black: #f8fafc;
+    --color-white: #1e293b;
+    --color-slate-400: #475569;
+    --color-slate-500: #cbd5e1;
+    --color-green-500: #16a34a;
+    --color-indigo-400: #6366f1;
+    --color-indigo-500: #4f46e5;
+    --color-indigo-600: #4338ca;
+    --color-on-accent: #ffffff;
+    --color-indigo-900: #e8eaf0;
+    --color-purple-600: #7c3aed;
+    --color-purple-700: #6d28d9;
+    --color-red-400: #ef4444;
+    --color-neutral-900: #f1f5f9;
+}
+
+/* Catppuccin Latte */
+.theme-catppuccin-latte {
+    --color-black: #eff1f5;
+    --color-white: #4c4f69;
+    --color-slate-400: #6c6f85;
+    --color-slate-500: #bcc0cc;
+    --color-green-500: #40a02b;
+    --color-indigo-400: #209fb5;
+    --color-indigo-500: #1e66f5;
+    --color-indigo-600: #1e66f5;
+    --color-on-accent: #ffffff;
+    --color-indigo-900: #dce0e8;
+    --color-purple-600: #8839ef;
+    --color-purple-700: #7c2ee0;
+    --color-red-400: #d20f39;
+    --color-neutral-900: #e6e9ef;
+}
+
+/* Rosé Pine Dawn */
+.theme-rosepine-dawn {
+    --color-black: #faf4ed;
+    --color-white: #575279;
+    --color-slate-400: #6e6a86;
+    --color-slate-500: #cecacd;
+    --color-green-500: #569486;
+    --color-indigo-400: #286983;
+    --color-indigo-500: #286983;
+    --color-indigo-600: #9076c4;
+    --color-on-accent: #000000;
+    --color-indigo-900: #f2e9e1;
+    --color-purple-600: #9076c4;
+    --color-purple-700: #7c5ead;
+    --color-red-400: #b4637a;
+    --color-neutral-900: #fffaf3;
+}
+
+/* Everforest Light */
+.theme-everforest-light {
+    --color-black: #fdf6e3;
+    --color-white: #5c6a72;
+    --color-slate-400: #829181;
+    --color-slate-500: #d4cfc4;
+    --color-green-500: #8da101;
+    --color-indigo-400: #35a77c;
+    --color-indigo-500: #3a94c5;
+    --color-indigo-600: #3a94c5;
+    --color-on-accent: #000000;
+    --color-indigo-900: #f4f0d9;
+    --color-purple-600: #df69ba;
+    --color-purple-700: #c55ba4;
+    --color-red-400: #f85552;
+    --color-neutral-900: #f8f0dc;
+}
+
+/* Ayu Light */
+.theme-ayu-light {
+    --color-black: #fafafa;
+    --color-white: #5c6166;
+    --color-slate-400: #8a9199;
+    --color-slate-500: #d8d8d8;
+    --color-green-500: #86b300;
+    --color-indigo-400: #55b4d4;
+    --color-indigo-500: #399ee6;
+    --color-indigo-600: #399ee6;
+    --color-on-accent: #000000;
+    --color-indigo-900: #f0f0f0;
+    --color-purple-600: #a37acc;
+    --color-purple-700: #9063b8;
+    --color-red-400: #f07171;
+    --color-neutral-900: #f3f3f3;
+}
+
+/* One Light */
+.theme-one-light {
+    --color-black: #fafafa;
+    --color-white: #383a42;
+    --color-slate-400: #696c77;
+    --color-slate-500: #d3d5db;
+    --color-green-500: #50a14f;
+    --color-indigo-400: #0184bc;
+    --color-indigo-500: #4078f2;
+    --color-indigo-600: #4078f2;
+    --color-on-accent: #000000;
+    --color-indigo-900: #ecedf0;
+    --color-purple-600: #a626a4;
+    --color-purple-700: #9118a1;
+    --color-red-400: #e45649;
+    --color-neutral-900: #f0f0f0;
+}
+
+/* Gruvbox Light Soft */
+.theme-gruvbox-light {
+    --color-black: #f2e5bc;
+    --color-white: #3c3836;
+    --color-slate-400: #665c54;
+    --color-slate-500: #d5c4a1;
+    --color-green-500: #79740e;
+    --color-indigo-400: #076678;
+    --color-indigo-500: #458588;
+    --color-indigo-600: #458588;
+    --color-on-accent: #000000;
+    --color-indigo-900: #ebdbb2;
+    --color-purple-600: #8f3f71;
+    --color-purple-700: #b16286;
+    --color-red-400: #cc241d;
+    --color-neutral-900: #f9f5d7;
+}

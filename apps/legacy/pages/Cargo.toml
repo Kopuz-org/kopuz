@@ -1,0 +1,38 @@
+[package]
+name = "kopuz-pages"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "pages"
+
+[lints]
+workspace = true
+
+# rfd is only used by the yt-dlp page, which is desktop only (excluded on Android).
+[target.'cfg(not(target_os = "android"))'.dependencies]
+rfd = { workspace = true }
+
+[dependencies]
+dioxus = { workspace = true, features = ["desktop"] }
+directories = { workspace = true }
+components = { workspace = true }
+api = { workspace = true }
+hooks = { workspace = true }
+config = { workspace = true }
+utils = { workspace = true }
+kopuz_route = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+rand = { workspace = true }
+i18n = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

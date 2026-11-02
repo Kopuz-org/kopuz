@@ -1,59 +1,59 @@
 #!/usr/bin/env bash
-# Update the kopuz-bin AUR package to the current release and push it.
-#
-# Must run as a NON-root user (makepkg refuses root) with passwordless sudo and,
-# unless DRY_RUN=1, an AUR-authorized SSH key already usable by `git`.
-#
-# Env:
-#   VERSION           release version, e.g. 0.9.0            (required)
-#   TARBALL           path to the freshly built local tarball (required; for sha256)
-#   PKGBUILD_TEMPLATE path to repo packaging/aur/PKGBUILD    (required)
-#   AUR_TEST_BUILD    run `makepkg` before pushing (default 1)
-#   DRY_RUN           do everything except `git push`        (default 0)
+# Render packaging/aur/$PKG/PKGBUILD for $VERSION, checksummed against $SOURCE_FILE, and push it to the AUR.
 set -euo pipefail
 
-: "${VERSION:?}"; : "${TARBALL:?}"; : "${PKGBUILD_TEMPLATE:?}"
-AUR_TEST_BUILD="${AUR_TEST_BUILD:-1}"
+: "${PKG:?}" "${VERSION:?}" "${SOURCE_FILE:?}"
+# pkgver cannot hold "-", so a nightly 0.68.0-nightly.20261028 is 0.68.0_nightly.20261028 to pacman.
+PKGVER="${VERSION//-/_}"
+VERIFY="${VERIFY:-build}"
 DRY_RUN="${DRY_RUN:-0}"
 [[ "$(id -u)" != 0 ]] || { echo "::error::publish-aur.sh must not run as root (makepkg)"; exit 1; }
-[[ -f "$TARBALL" ]] || { echo "::error::tarball not found: $TARBALL"; exit 1; }
+[[ -f "$SOURCE_FILE" ]] || { echo "::error::source file not found: $SOURCE_FILE"; exit 1; }
 
-sha="$(sha256sum "$TARBALL" | cut -d' ' -f1)"
-echo "==> Publishing kopuz-bin $VERSION (sha256=$sha, dry_run=$DRY_RUN)"
+template="$(cd "$(dirname "$0")/.." && pwd)/packaging/aur/$PKG/PKGBUILD"
+[[ -f "$template" ]] || { echo "::error::no PKGBUILD template at $template"; exit 1; }
 
-work="$(mktemp -d)"; cd "$work"
+sha="$(sha256sum "$SOURCE_FILE" | cut -d' ' -f1)"
+echo "==> Publishing $PKG $VERSION (sha256=$sha, verify=$VERIFY, dry_run=$DRY_RUN)"
+
+work="$(mktemp -d)"
+cd "$work"
 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o StrictHostKeyChecking=accept-new}" \
-  git clone ssh://aur@aur.archlinux.org/kopuz-bin.git
-cd kopuz-bin
+  git clone "${AUR_REMOTE:-ssh://aur@aur.archlinux.org/$PKG.git}" "$PKG"
+cd "$PKG"
 
-# pkgrel: bump within the same pkgver, else reset to 1.
-cur_ver="$(grep -m1 -oP '^pkgver=\K.*' PKGBUILD || echo '')"
-cur_rel="$(grep -m1 -oP '^pkgrel=\K[0-9]+' PKGBUILD || echo 0)"
-if [[ "$cur_ver" == "$VERSION" ]]; then rel=$((cur_rel + 1)); else rel=1; fi
-echo "==> current AUR: ${cur_ver:-none}-${cur_rel}; new: ${VERSION}-${rel}"
+# A rebuild of the same version bumps pkgrel; a new version starts over at 1.
+cur_ver="$(grep -m1 -oP '^pkgver=\K.*' PKGBUILD 2>/dev/null || true)"
+cur_rel="$(grep -m1 -oP '^pkgrel=\K[0-9]+' PKGBUILD 2>/dev/null || echo 0)"
+if [[ "$cur_ver" == "$PKGVER" ]]; then rel=$((cur_rel + 1)); else rel=1; fi
+echo "==> AUR has ${cur_ver:-nothing}-${cur_rel}; publishing ${PKGVER}-${rel}"
 
-# Render the repo template -> the exact PKGBUILD we publish.
-sed -e "s/^pkgver=.*/pkgver=${VERSION}/" \
+sed -e "s/^pkgver=.*/pkgver=${PKGVER}/" \
+    -e "s/^_version=.*/_version=${VERSION}/" \
     -e "s/^pkgrel=.*/pkgrel=${rel}/" \
     -e "s/^sha256sums=.*/sha256sums=('${sha}')/" \
-    "$PKGBUILD_TEMPLATE" > PKGBUILD
+    "$template" > PKGBUILD
 makepkg --printsrcinfo > .SRCINFO
 
-echo "==> Rendered PKGBUILD:"; sed -n '1,6p;/^source=/,/^sha256sums=/p' PKGBUILD
+case "$VERIFY" in
+  build) makepkg -f --noconfirm --nodeps ;;
+  source) makepkg --verifysource --noconfirm ;;
+  *) echo "::error::VERIFY must be build or source, not $VERIFY"; exit 1 ;;
+esac
 
-if [[ "$AUR_TEST_BUILD" == 1 ]]; then
-  echo "==> Test build (makepkg; downloads + sha-verifies the published asset)"
-  makepkg -f --noconfirm --nodeps
+if git diff --quiet && git ls-files --error-unmatch PKGBUILD >/dev/null 2>&1; then
+  echo "==> No changes; nothing to publish."
+  exit 0
 fi
-
-if git diff --quiet; then echo "==> No changes; nothing to publish."; exit 0; fi
 
 git add PKGBUILD .SRCINFO
 git -c user.name="kopuz release bot" -c user.email="noreply@kopuz.org" \
-  commit -m "upgpkg: kopuz-bin ${VERSION}-${rel}"
+  commit -m "upgpkg: $PKG ${PKGVER}-${rel}"
 
 if [[ "$DRY_RUN" == 1 ]]; then
-  echo "==> DRY_RUN: skipping push. Would push:"; git show --stat HEAD; exit 0
+  echo "==> DRY_RUN: not pushing"
+  git show --stat HEAD
+  exit 0
 fi
-git push origin master
-echo "==> Published kopuz-bin ${VERSION}-${rel} to AUR."
+git push origin HEAD:master
+echo "==> Published $PKG ${PKGVER}-${rel} to the AUR."

@@ -1,0 +1,1711 @@
+//! Read queries backing the UI's query hooks (issue #347, step 6).
+//!
+//! Track listings are sorted + filtered + windowed in SQL (only the visible
+//! slice is materialized), so a 20k-row library scrolls without ever holding
+//! the whole list in memory. The track query is built at runtime (dynamic
+//! `ORDER BY`/`WHERE` from the filter) rather than via the `query!` macro;
+//! sort/search clauses are fixed strings, values are always bound.
+
+use reader::models::{Album, CoverRef, Track};
+use sqlx::SqlitePool;
+
+use super::rows::{AlbumRow, CreditRow, TrackRow};
+use crate::{AlbumQuery, ArtistQuery, DbError, Listing, Page, Source, TrackFilter, TrackSort};
+
+/// Track columns for a `TrackRow`, `t.`-aliased and read via [`TRACKS_FROM`] so a
+/// local track's `cover_path` (NULL on the row — the cover is owned by the album)
+/// falls back to its album's cover. The track self-resolves its cover with no
+/// caller-side album lookup.
+///
+/// The album fallback is gated to local tracks: their `a.cover_path` is a
+/// filesystem path the cover resolver uses directly. A server row's `a.cover_path`
+/// is instead a service-encoded ref (e.g. `jellyfin:{albumId}:{tag}`) that the
+/// resolver would misread as the *track's* own image tag — so server rows keep
+/// their own `t.cover_path` and fall back to the album via `album_id` at resolve
+/// time (`server::cover::track`), where the encoding is understood.
+const TRACK_COLUMNS: &str = "t.rowid_pk, t.track_key, t.service, \
+    COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS cover_path, \
+    t.source_album_id, t.title, \
+    t.artist, t.album, t.duration, t.khz, t.bitrate, t.track_number, t.disc_number, \
+    mb.release_id AS mb_release_id, mb.recording_id AS mb_recording_id, mb.track_id AS mb_track_id, \
+    t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, t.explicit, t.plays";
+
+/// The rows as tracks, their credits read in one query for the lot.
+async fn with_credits(pool: &SqlitePool, rows: Vec<TrackRow>) -> Result<Vec<Track>, DbError> {
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+    let pks: Vec<i64> = rows.iter().map(|row| row.rowid_pk).collect();
+    let pks = serde_json::to_string(&pks)?;
+    let credits = sqlx::query_as!(
+        CreditRow,
+        r#"SELECT c.track_pk, c.name, ar.key AS artist_key, ar.source, ar.source_artist_id
+             FROM track_credits c JOIN artists ar ON ar.id = c.artist_pk
+            WHERE c.track_pk IN (SELECT value FROM json_each(?1))
+            ORDER BY c.track_pk, c.position"#,
+        pks
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut by_track: std::collections::HashMap<i64, Vec<reader::ArtistCredit>> =
+        std::collections::HashMap::new();
+    for credit in credits {
+        by_track
+            .entry(credit.track_pk)
+            .or_default()
+            .push(credit.into());
+    }
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let credits = by_track.remove(&row.rowid_pk).unwrap_or_default();
+            row.into_track(credits)
+        })
+        .collect())
+}
+
+/// `FROM tracks t` + the album join that backs the `COALESCE` in [`TRACK_COLUMNS`].
+/// LEFT so a track whose album row is missing still returns (cover → NULL → default).
+/// `albums` shares column names with `tracks` (`artist`/`title`/`cover_path`/…), so
+/// every query using this must `t.`-qualify its WHERE/ORDER BY columns.
+const TRACKS_FROM: &str = "FROM tracks t LEFT JOIN albums a \
+    ON a.source = t.source AND a.source_album_id = t.source_album_id \
+    LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk";
+
+/// A column to order by, and whether it runs high to low.
+type Term = (&'static str, bool);
+
+fn order_terms(sort: &TrackSort) -> Vec<Term> {
+    const TITLE: Term = ("t.title COLLATE LOCALE", false);
+    const ARTIST: Term = ("t.artist COLLATE LOCALE", false);
+    const ALBUM: Term = ("t.album COLLATE LOCALE", false);
+    const DISC: Term = ("t.disc_number", false);
+    const TRACK: Term = ("t.track_number", false);
+    match sort {
+        TrackSort::ArtistAlbum => vec![ARTIST, ALBUM, DISC, TRACK, TITLE],
+        TrackSort::Title => vec![TITLE],
+        TrackSort::Artist => vec![ARTIST, ALBUM, TRACK],
+        TrackSort::Album => vec![ALBUM, DISC, TRACK],
+        TrackSort::DateAdded => vec![("t.added_at", true), ("t.rowid_pk", true)],
+        TrackSort::PlayCount => vec![("COALESCE(lc.count, 0)", true), TITLE],
+        TrackSort::TrackNumber => vec![DISC, TRACK, TITLE],
+        TrackSort::Fields(criteria) => {
+            if criteria.is_empty() {
+                return order_terms(&TrackSort::ArtistAlbum);
+            }
+            let mut terms = Vec::new();
+            for criterion in criteria {
+                let desc = criterion.direction == config::SortDirection::Desc;
+                // Date added falls back to insertion order, and each column needs its own direction.
+                let fields: &[&'static str] = match criterion.field {
+                    config::TrackSortField::Title => &["t.title COLLATE LOCALE"],
+                    config::TrackSortField::Artist => &["t.artist COLLATE LOCALE"],
+                    config::TrackSortField::Album => &["t.album COLLATE LOCALE"],
+                    config::TrackSortField::Duration => &["t.duration"],
+                    config::TrackSortField::DateAdded => &["t.added_at", "t.rowid_pk"],
+                };
+                terms.extend(fields.iter().map(|col| (*col, desc)));
+            }
+            // Stable tail so rows equal on every criterion keep album order.
+            terms.extend([DISC, TRACK, TITLE]);
+            terms
+        }
+    }
+}
+
+fn order_by(sort: &TrackSort, reverse: bool) -> String {
+    order_terms(sort)
+        .into_iter()
+        .map(|(col, desc)| format!("{col} {}", if desc != reverse { "DESC" } else { "ASC" }))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// A value bound to a dynamically built query.
+enum Arg {
+    Text(String),
+    Int(i64),
+}
+
+/// A `WHERE` tail and its binds, numbered after `?1`, which every listing spends on the source.
+#[derive(Default)]
+struct Clauses {
+    sql: String,
+    args: Vec<Arg>,
+}
+
+impl Clauses {
+    /// The placeholder for `arg`.
+    fn bind(&mut self, arg: Arg) -> String {
+        self.args.push(arg);
+        format!("?{}", self.args.len() + 1)
+    }
+
+    /// The placeholder numbers a `LIMIT`/`OFFSET` pair takes after the filter's.
+    fn page_slots(&self) -> (usize, usize) {
+        (self.args.len() + 2, self.args.len() + 3)
+    }
+
+    /// An inclusive year range on `col`; a year of 0 is unknown and sits in no range.
+    fn year_range(&mut self, col: &str, from: Option<u16>, to: Option<u16>) -> String {
+        if from.is_none() && to.is_none() {
+            return String::new();
+        }
+        let mut sql = format!(" AND {col} > 0");
+        if let Some(from) = from {
+            let n = self.bind(Arg::Int(from.into()));
+            sql.push_str(&format!(" AND {col} >= {n}"));
+        }
+        if let Some(to) = to {
+            let n = self.bind(Arg::Int(to.into()));
+            sql.push_str(&format!(" AND {col} <= {n}"));
+        }
+        sql
+    }
+}
+
+fn bind_args<'q, O>(
+    mut query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, sqlx::sqlite::SqliteArguments<'q>>,
+    args: &'q [Arg],
+) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, sqlx::sqlite::SqliteArguments<'q>> {
+    for arg in args {
+        query = match arg {
+            Arg::Text(text) => query.bind(text.as_str()),
+            Arg::Int(int) => query.bind(*int),
+        };
+    }
+    query
+}
+
+fn bind_scalar_args<'q, O>(
+    mut query: sqlx::query::QueryScalar<'q, sqlx::Sqlite, O, sqlx::sqlite::SqliteArguments<'q>>,
+    args: &'q [Arg],
+) -> sqlx::query::QueryScalar<'q, sqlx::Sqlite, O, sqlx::sqlite::SqliteArguments<'q>> {
+    for arg in args {
+        query = match arg {
+            Arg::Text(text) => query.bind(text.as_str()),
+            Arg::Int(int) => query.bind(*int),
+        };
+    }
+    query
+}
+
+/// Whether the track keyed by `key` has a downloaded or a cached copy (`true`), or neither.
+fn plays_offline(key: &str, offline: bool) -> String {
+    let copy = format!(
+        "(EXISTS (SELECT 1 FROM offline_tracks o WHERE o.item_id = {key}) \
+          OR EXISTS (SELECT 1 FROM offline_cache oc WHERE oc.track_key = {key}))"
+    );
+    match offline {
+        true => copy,
+        false => format!("NOT {copy}"),
+    }
+}
+
+/// WHERE clause + ordered bind values for a filter (after the `source = ?1` bind).
+fn filter_clauses(filter: &TrackFilter) -> Clauses {
+    let mut c = Clauses::default();
+    if let Some(album) = &filter.album {
+        let n = c.bind(Arg::Text(album.clone()));
+        c.sql.push_str(&format!(" AND t.source_album_id = {n}"));
+    }
+    if let Some(genre) = &filter.genre {
+        let n = c.bind(Arg::Text(genre.clone()));
+        c.sql.push_str(&format!(
+            " AND EXISTS (SELECT 1 FROM albums g \
+              WHERE g.source = t.source AND g.source_album_id = t.source_album_id AND g.genre = {n})"
+        ));
+    }
+    if !filter.search.trim().is_empty() {
+        let n = c.bind(Arg::Text(format!(
+            "%{}%",
+            escape_like(filter.search.trim())
+        )));
+        c.sql.push_str(&format!(
+            " AND (t.title LIKE {n} ESCAPE '\\' OR t.artist LIKE {n} ESCAPE '\\' OR t.album LIKE {n} ESCAPE '\\')"
+        ));
+    }
+    if let Some(favorite) = filter.favorite {
+        // favorites.server_id holds the same string as tracks.source, and
+        // favorites.ref holds the track_key, so this needs no extra bind.
+        let exists = if favorite { "EXISTS" } else { "NOT EXISTS" };
+        c.sql.push_str(&format!(
+            " AND {exists} (SELECT 1 FROM favorites f \
+              WHERE f.server_id = t.source AND f.ref = t.track_key)"
+        ));
+    }
+    if let Some(downloaded) = filter.downloaded {
+        // A downloaded server track is registered under its item id, which is its track_key.
+        let exists = if downloaded { "EXISTS" } else { "NOT EXISTS" };
+        c.sql.push_str(&format!(
+            " AND {exists} (SELECT 1 FROM offline_tracks o WHERE o.item_id = t.track_key)"
+        ));
+    }
+    if let Some(offline) = filter.offline {
+        c.sql
+            .push_str(&format!(" AND {}", plays_offline("t.track_key", offline)));
+    }
+    // A subquery rather than the album join, so the count query needs no join.
+    let years = c.year_range("y.year", filter.year_from, filter.year_to);
+    if !years.is_empty() {
+        c.sql.push_str(&format!(
+            " AND EXISTS (SELECT 1 FROM albums y \
+              WHERE y.source = t.source AND y.source_album_id = t.source_album_id{years})"
+        ));
+    }
+    c
+}
+
+pub async fn tracks_page(
+    pool: &SqlitePool,
+    filter: &TrackFilter,
+    page: Page,
+) -> Result<Vec<Track>, DbError> {
+    let c = filter_clauses(filter);
+    let (limit_n, offset_n) = c.page_slots();
+    let clauses = &c.sql;
+    let order = order_by(&filter.sort, filter.reverse);
+    // PlayCount needs the listen_counts join; the other sorts stay join-free
+    // so they read straight off the tracks indexes.
+    let sql = if filter.sort == TrackSort::PlayCount {
+        format!(
+            "SELECT {TRACK_COLUMNS} {TRACKS_FROM} \
+             LEFT JOIN listen_counts lc ON lc.source = t.source AND lc.track_key = t.track_key \
+             WHERE t.source = ?1{clauses} ORDER BY {order} LIMIT ?{limit_n} OFFSET ?{offset_n}",
+        )
+    } else {
+        format!(
+            "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = ?1{clauses} ORDER BY {order} LIMIT ?{limit_n} OFFSET ?{offset_n}",
+        )
+    };
+    let q = sqlx::query_as::<_, TrackRow>(&sql).bind(filter.source.as_str());
+    let rows = bind_args(q, &c.args)
+        .bind(page.limit as i64)
+        .bind(page.offset as i64)
+        .fetch_all(pool)
+        .await?;
+    with_credits(pool, rows).await
+}
+
+pub async fn album_tracks(
+    pool: &SqlitePool,
+    source: &Source,
+    album_id: &str,
+) -> Result<Vec<Track>, DbError> {
+    let sql = format!(
+        "SELECT {TRACK_COLUMNS} {TRACKS_FROM} \
+          WHERE t.source = ?1 AND t.source_album_id = ?2 \
+          ORDER BY t.disc_number, t.track_number, t.title COLLATE LOCALE"
+    );
+    let rows = sqlx::query_as::<_, TrackRow>(&sql)
+        .bind(source.as_str())
+        .bind(album_id)
+        .fetch_all(pool)
+        .await?;
+    with_credits(pool, rows).await
+}
+
+/// One artist's tracks: those credited to it, and those on an album a real listing bills to it; `limit` caps them.
+pub async fn artist_tracks(
+    pool: &SqlitePool,
+    source: &Source,
+    artist: &str,
+    limit: Option<u32>,
+) -> Result<Vec<Track>, DbError> {
+    // SQLite reads a negative LIMIT as none.
+    let limit = limit.map_or(-1, i64::from);
+    let sql = format!(
+        "SELECT {TRACK_COLUMNS} {TRACKS_FROM} \
+          WHERE t.source = ?1 AND t.rowid_pk IN ( \
+                SELECT track_pk FROM artist_credit_rows \
+                 WHERE source = ?1 AND artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2)) \
+          ORDER BY t.album COLLATE LOCALE, t.disc_number, t.track_number, t.title COLLATE LOCALE \
+          LIMIT ?3"
+    );
+    let rows = sqlx::query_as::<_, TrackRow>(&sql)
+        .bind(source.as_str())
+        .bind(artist)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
+    with_credits(pool, rows).await
+}
+
+pub async fn genre_tracks(
+    pool: &SqlitePool,
+    source: &Source,
+    genre: &str,
+) -> Result<Vec<Track>, DbError> {
+    let sql = format!(
+        "SELECT {TRACK_COLUMNS} {TRACKS_FROM} \
+          WHERE t.source = ?1 AND a.genre = ?2 \
+          ORDER BY t.artist COLLATE LOCALE, t.album COLLATE LOCALE, t.disc_number, t.track_number"
+    );
+    let rows = sqlx::query_as::<_, TrackRow>(&sql)
+        .bind(source.as_str())
+        .bind(genre)
+        .fetch_all(pool)
+        .await?;
+    with_credits(pool, rows).await
+}
+
+fn escape_like(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+pub async fn folder_tracks(
+    pool: &SqlitePool,
+    source: &Source,
+    prefix: &str,
+) -> Result<Vec<Track>, DbError> {
+    let src = source.as_str();
+    // Local track_key IS the path. Escape LIKE metachars so a folder named "100%" doesn't widen the match.
+    let pattern = format!("{}%", escape_like(prefix));
+    let rows = sqlx::query_as!(
+        TrackRow,
+        r#"SELECT t.rowid_pk AS "rowid_pk!", t.track_key, t.service,
+                  COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
+                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
+                  t.track_number, t.disc_number,
+                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
+                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, t.explicit, t.plays
+             FROM tracks t
+             LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
+             LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
+            WHERE t.source = ?1 AND t.track_key LIKE ?2 ESCAPE '\'
+            ORDER BY t.track_key"#,
+        src,
+        pattern
+    )
+    .fetch_all(pool)
+    .await?;
+    with_credits(pool, rows).await
+}
+
+/// One track per billed artist, which is each track's first credit, as a tile bills it.
+pub async fn artist_sample_tracks(
+    pool: &SqlitePool,
+    source: &Source,
+    limit: u32,
+) -> Result<Vec<Track>, DbError> {
+    let sql = format!(
+        r#"SELECT {TRACK_COLUMNS}
+             FROM tracks t
+             JOIN (SELECT MIN(s.rowid_pk) AS track_pk,
+                          (SELECT c.artist_pk FROM track_credits c
+                            WHERE c.track_pk = s.rowid_pk ORDER BY c.position LIMIT 1) AS billed
+                     FROM tracks s
+                    WHERE s.source = ?1
+                    GROUP BY billed) first ON first.track_pk = t.rowid_pk
+             JOIN artists ar ON ar.id = first.billed
+             LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
+             LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
+            ORDER BY ar.name COLLATE LOCALE
+            LIMIT ?2"#
+    );
+    let rows = sqlx::query_as::<_, TrackRow>(&sql)
+        .bind(source.as_str())
+        .bind(i64::from(limit))
+        .fetch_all(pool)
+        .await?;
+    with_credits(pool, rows).await
+}
+
+pub async fn top_genre(pool: &SqlitePool, source: &Source) -> Result<Option<String>, DbError> {
+    let src = source.as_str();
+    Ok(sqlx::query_scalar!(
+        r#"SELECT a.genre FROM tracks t
+             JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
+             JOIN listen_counts lc ON lc.source = t.source AND lc.track_key = t.track_key
+            WHERE t.source = ?1 AND TRIM(a.genre) != ''
+            GROUP BY a.genre ORDER BY SUM(lc.count) DESC LIMIT 1"#,
+        src
+    )
+    .fetch_optional(pool)
+    .await?)
+}
+
+/// The one whole-source read: full-text search needs the corpus because its
+/// Unicode-aware matching can't be SQLite `LIKE` (ASCII-only case folding).
+/// Runs only when a query is typed — never on page mount.
+pub async fn search_corpus(pool: &SqlitePool, source: &Source) -> Result<Vec<Track>, DbError> {
+    let sql = format!(
+        "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = ?1 \
+          ORDER BY t.artist COLLATE LOCALE, t.album COLLATE LOCALE, t.disc_number, t.track_number"
+    );
+    let rows = sqlx::query_as::<_, TrackRow>(&sql)
+        .bind(source.as_str())
+        .fetch_all(pool)
+        .await?;
+    with_credits(pool, rows).await
+}
+
+pub async fn tracks_count(pool: &SqlitePool, filter: &TrackFilter) -> Result<u32, DbError> {
+    let c = filter_clauses(filter);
+    let sql = format!("SELECT COUNT(*) FROM tracks t WHERE t.source = ?1{}", c.sql);
+    let q = sqlx::query_scalar::<_, i64>(&sql).bind(filter.source.as_str());
+    Ok(bind_scalar_args(q, &c.args).fetch_one(pool).await?.max(0) as u32)
+}
+
+pub async fn tracks_by_keys(
+    pool: &SqlitePool,
+    source: &Source,
+    keys: &[String],
+) -> Result<Vec<Track>, DbError> {
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let src = source.as_str();
+    let keys_json = serde_json::to_string(keys)?;
+    let rows = sqlx::query_as!(
+        TrackRow,
+        r#"SELECT t.rowid_pk AS "rowid_pk!", t.track_key, t.service,
+                  COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
+                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
+                  t.track_number, t.disc_number,
+                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
+                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, t.explicit, t.plays
+             FROM tracks t
+             LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
+             LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
+            WHERE t.source = ?1 AND t.track_key IN (SELECT value FROM json_each(?2))"#,
+        src,
+        keys_json
+    )
+    .fetch_all(pool)
+    .await?;
+    let by_key: std::collections::HashMap<String, Track> = with_credits(pool, rows)
+        .await?
+        .into_iter()
+        .map(|t| (t.id.key().into_owned(), t))
+        .collect();
+    // get(), not remove(): a playlist can hold the same track twice.
+    Ok(keys.iter().filter_map(|k| by_key.get(k).cloned()).collect())
+}
+
+/// Swap each queued track for its library row where one exists, so a restore shows what a sync since wrote.
+pub(crate) async fn refresh_from_library(
+    pool: &SqlitePool,
+    source: &Source,
+    queue: Vec<Track>,
+) -> Result<Vec<Track>, DbError> {
+    if queue.is_empty() {
+        return Ok(queue);
+    }
+    let src = source.as_str();
+    let keys: Vec<String> = queue.iter().map(|t| t.id.key().into_owned()).collect();
+    let keys_json = serde_json::to_string(&keys)?;
+    let rows = sqlx::query_as!(
+        TrackRow,
+        r#"SELECT t.rowid_pk AS "rowid_pk!", t.track_key, t.service,
+                  COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
+                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
+                  t.track_number, t.disc_number,
+                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
+                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, t.explicit, t.plays
+             FROM tracks t
+             LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
+             LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
+            WHERE t.source = ?1 AND t.track_key IN (SELECT value FROM json_each(?2))"#,
+        src,
+        keys_json
+    )
+    .fetch_all(pool)
+    .await?;
+    let library = with_credits(pool, rows).await?;
+    Ok(queue
+        .into_iter()
+        .map(
+            |queued| match library.iter().find(|row| row.id == queued.id) {
+                // The playlist entry is the queued row's own; the library row has none.
+                Some(row) => Track {
+                    playlist_item_id: queued.playlist_item_id,
+                    ..row.clone()
+                },
+                None => queued,
+            },
+        )
+        .collect())
+}
+
+/// Every artist a track of `source` credits, one row per artist key.
+pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<crate::ArtistRow>, DbError> {
+    let src = source.as_str();
+    let rows = sqlx::query!(
+        r#"SELECT ar.key, ar.source_artist_id, ar.name, COUNT(*) AS "tracks!: i64",
+                  (SELECT COUNT(*) FROM albums al
+                    WHERE al.source = ?1 AND al.artist_pk = ar.id) AS "albums!: i64"
+             FROM artist_credit_rows cr
+             JOIN artists ar ON ar.id = cr.artist_pk
+            WHERE cr.source = ?1
+            GROUP BY ar.id"#,
+        src
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut artists: Vec<crate::ArtistRow> = rows
+        .into_iter()
+        .map(|row| crate::ArtistRow {
+            key: row.key,
+            source_id: row.source_artist_id,
+            name: row.name,
+            tracks: row.tracks.max(0) as u32,
+            albums: row.albums.max(0) as u32,
+        })
+        .collect();
+    artists.sort_by_cached_key(|artist| (artist.name.to_lowercase(), artist.key.clone()));
+    Ok(artists)
+}
+
+#[derive(sqlx::FromRow)]
+struct ArtistListRow {
+    key: String,
+    source_artist_id: Option<String>,
+    name: String,
+    n_tracks: i64,
+    n_albums: i64,
+}
+
+/// One window of [`artists`]: the name search, the order and the cut all run in SQL.
+pub async fn artists_page(
+    pool: &SqlitePool,
+    query: &ArtistQuery,
+    page: Page,
+) -> Result<Listing<crate::ArtistRow>, DbError> {
+    let mut c = Clauses::default();
+    if !query.search.trim().is_empty() {
+        let n = c.bind(Arg::Text(format!("%{}%", escape_like(query.search.trim()))));
+        c.sql
+            .push_str(&format!(" AND ar.name LIKE {n} ESCAPE '\\'"));
+    }
+    if let Some(downloaded) = query.downloaded {
+        let exists = if downloaded { "EXISTS" } else { "NOT EXISTS" };
+        c.sql.push_str(&format!(
+            " AND {exists} (SELECT 1 FROM artist_credit_rows dc \
+                JOIN tracks dt ON dt.rowid_pk = dc.track_pk \
+                JOIN offline_tracks o ON o.item_id = dt.track_key \
+               WHERE dc.source = ?1 AND dc.artist_pk = ar.id)"
+        ));
+    }
+    if let Some(offline) = query.offline {
+        let exists = if offline { "EXISTS" } else { "NOT EXISTS" };
+        c.sql.push_str(&format!(
+            " AND {exists} (SELECT 1 FROM artist_credit_rows fc \
+                JOIN tracks ft ON ft.rowid_pk = fc.track_pk \
+               WHERE fc.source = ?1 AND fc.artist_pk = ar.id AND {})",
+            plays_offline("ft.track_key", true)
+        ));
+    }
+    let src = query.source.as_str();
+    let from = "FROM artist_credit_rows cr JOIN artists ar ON ar.id = cr.artist_pk";
+
+    let count_sql = format!(
+        "SELECT COUNT(DISTINCT cr.artist_pk) {from} WHERE cr.source = ?1{}",
+        c.sql
+    );
+    let total = bind_scalar_args(sqlx::query_scalar::<_, i64>(&count_sql).bind(src), &c.args)
+        .fetch_one(pool)
+        .await?;
+
+    let mut order: Vec<String> = query
+        .sort
+        .iter()
+        .map(|sort| {
+            let col = match sort.field {
+                config::ArtistSortField::Name => "ar.name COLLATE LOCALE",
+                config::ArtistSortField::Tracks => "n_tracks",
+                config::ArtistSortField::Albums => "n_albums",
+            };
+            format!("{col} {}", direction(sort.direction))
+        })
+        .collect();
+    order.push("ar.name COLLATE LOCALE ASC".into());
+    order.push("ar.key ASC".into());
+    let (limit_n, offset_n) = c.page_slots();
+    let sql = format!(
+        "SELECT ar.key, ar.source_artist_id, ar.name, COUNT(*) AS n_tracks, \
+                (SELECT COUNT(*) FROM albums al \
+                  WHERE al.source = ?1 AND al.artist_pk = ar.id) AS n_albums \
+           {from} WHERE cr.source = ?1{} GROUP BY ar.id \
+          ORDER BY {} LIMIT ?{limit_n} OFFSET ?{offset_n}",
+        c.sql,
+        order.join(", "),
+    );
+    let rows = bind_args(sqlx::query_as::<_, ArtistListRow>(&sql).bind(src), &c.args)
+        .bind(i64::from(page.limit))
+        .bind(i64::from(page.offset))
+        .fetch_all(pool)
+        .await?;
+    Ok(Listing {
+        total: total.max(0) as u32,
+        rows: rows
+            .into_iter()
+            .map(|row| crate::ArtistRow {
+                key: row.key,
+                source_id: row.source_artist_id,
+                name: row.name,
+                tracks: row.n_tracks.max(0) as u32,
+                albums: row.n_albums.max(0) as u32,
+            })
+            .collect(),
+    })
+}
+
+fn direction(direction: config::SortDirection) -> &'static str {
+    match direction {
+        config::SortDirection::Asc => "ASC",
+        config::SortDirection::Desc => "DESC",
+    }
+}
+
+pub async fn artist_keys_unnamed_by_source(
+    pool: &SqlitePool,
+    source: &Source,
+) -> Result<std::collections::HashSet<String>, DbError> {
+    let src = source.as_str();
+    let keys = sqlx::query_scalar!(
+        "SELECT key FROM artists \
+          WHERE source = ?1 AND source_artist_id IS NOT NULL AND named_by_source = 0",
+        src
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(keys.into_iter().collect())
+}
+
+/// The key of each linked artist of `source`, by the id the source issued.
+pub async fn linked_artist_keys(
+    pool: &SqlitePool,
+    source: &Source,
+) -> Result<std::collections::HashMap<String, String>, DbError> {
+    let src = source.as_str();
+    let rows = sqlx::query!(
+        r#"SELECT source_artist_id AS "source_artist_id!: String", key FROM artists
+            WHERE source = ?1 AND source_artist_id IS NOT NULL"#,
+        src
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.source_artist_id, r.key))
+        .collect())
+}
+
+/// The key of each unlinked artist of `source`, by folded name.
+pub async fn unlinked_artist_keys(
+    pool: &SqlitePool,
+    source: &Source,
+) -> Result<std::collections::HashMap<String, String>, DbError> {
+    let src = source.as_str();
+    let rows = sqlx::query!(
+        "SELECT name_key, key FROM artists WHERE source = ?1 AND source_artist_id IS NULL",
+        src
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|r| (r.name_key, r.key)).collect())
+}
+
+/// One artist of `source` by its key, counted as [`artists`] counts it.
+pub async fn artist(
+    pool: &SqlitePool,
+    source: &Source,
+    artist: &str,
+) -> Result<Option<crate::ArtistRow>, DbError> {
+    let src = source.as_str();
+    let row = sqlx::query!(
+        r#"SELECT ar.key, ar.source_artist_id, ar.name,
+                  (SELECT COUNT(*) FROM artist_credit_rows cr
+                    WHERE cr.source = ?1 AND cr.artist_pk = ar.id) AS "tracks!: i64",
+                  (SELECT COUNT(*) FROM albums al
+                    WHERE al.source = ?1 AND al.artist_pk = ar.id) AS "albums!: i64"
+             FROM artists ar WHERE ar.source = ?1 AND ar.key = ?2"#,
+        src,
+        artist
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|row| crate::ArtistRow {
+        key: row.key,
+        source_id: row.source_artist_id,
+        name: row.name,
+        tracks: row.tracks.max(0) as u32,
+        albums: row.albums.max(0) as u32,
+    }))
+}
+
+/// What each artist of `source` (or just `one`) shows without a photo, by key: its first covered album, else its first credited track's cover.
+pub async fn artist_fallback_covers(
+    pool: &SqlitePool,
+    source: &Source,
+    one: Option<&str>,
+) -> Result<std::collections::HashMap<String, CoverRef>, DbError> {
+    // Ordered by ids and stored fields only, so the listing's ref and the fetched bytes name the same picture.
+    let albums: Vec<(String, String)> = sqlx::query_as(
+        "SELECT key, cover_path FROM ( \
+            SELECT ar.key AS key, al.cover_path AS cover_path, \
+                   ROW_NUMBER() OVER (PARTITION BY ar.id \
+                       ORDER BY al.year = 0, al.year, al.title, al.rowid_pk) AS n \
+              FROM artists ar JOIN albums al ON al.source = ar.source AND al.artist_pk = ar.id \
+             WHERE ar.source = ?1 AND (?2 IS NULL OR ar.key = ?2) \
+               AND al.cover_path IS NOT NULL AND al.cover_path != '') \
+          WHERE n = 1",
+    )
+    .bind(source.as_str())
+    .bind(one)
+    .fetch_all(pool)
+    .await?;
+    let mut covers: std::collections::HashMap<String, CoverRef> = albums
+        .into_iter()
+        .map(|(key, cover)| (key, CoverRef::parse(&cover)))
+        .filter(|(_, cover)| *cover != CoverRef::None)
+        .collect();
+
+    let firsts: Vec<(String, String)> = sqlx::query_as(
+        "SELECT key, track_key FROM ( \
+            SELECT ar.key AS key, t.track_key AS track_key, \
+                   ROW_NUMBER() OVER (PARTITION BY ar.id \
+                       ORDER BY COALESCE(t.cover_path, al.cover_path) IS NULL, t.rowid_pk) AS n \
+              FROM artists ar \
+              JOIN track_credits c ON c.artist_pk = ar.id \
+              JOIN tracks t ON t.rowid_pk = c.track_pk \
+              LEFT JOIN albums al ON al.source = t.source AND al.source_album_id = t.source_album_id \
+             WHERE ar.source = ?1 AND (?2 IS NULL OR ar.key = ?2)) \
+          WHERE n = 1",
+    )
+    .bind(source.as_str())
+    .bind(one)
+    .fetch_all(pool)
+    .await?;
+    let firsts: Vec<(String, String)> = firsts
+        .into_iter()
+        .filter(|(artist, _)| !covers.contains_key(artist))
+        .collect();
+    let keys: Vec<String> = firsts.iter().map(|(_, track)| track.clone()).collect();
+    let tracks: std::collections::HashMap<String, Track> = tracks_by_keys(pool, source, &keys)
+        .await?
+        .into_iter()
+        .map(|track| (track.id.key().into_owned(), track))
+        .collect();
+    for (artist, key) in firsts {
+        let cover = tracks.get(&key).map_or(CoverRef::None, CoverRef::for_track);
+        if cover != CoverRef::None {
+            covers.insert(artist, cover);
+        }
+    }
+    Ok(covers)
+}
+
+pub async fn genres(pool: &SqlitePool, source: &Source) -> Result<Vec<String>, DbError> {
+    Ok(sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT genre FROM albums WHERE source = ?1 AND genre != '' \
+         ORDER BY genre COLLATE LOCALE",
+    )
+    .bind(source.as_str())
+    .fetch_all(pool)
+    .await?)
+}
+
+pub async fn album(
+    pool: &SqlitePool,
+    source: &Source,
+    album_id: &str,
+) -> Result<Option<Album>, DbError> {
+    let src = source.as_str();
+    let row = sqlx::query_as!(
+        AlbumRow,
+        r#"SELECT al.source_album_id, al.title, al.artist, al.genre, al.year, al.cover_path, al.manual_cover,
+                  ar.key AS "artist_key?", ar.source_artist_id AS "artist_source_id?"
+             FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_pk
+            WHERE al.source = ?1 AND al.source_album_id = ?2"#,
+        src,
+        album_id
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(Into::into))
+}
+
+pub async fn albums(pool: &SqlitePool, source: &Source) -> Result<Vec<Album>, DbError> {
+    let rows = sqlx::query_as::<_, AlbumRow>(
+        "SELECT al.source_album_id, al.title, al.artist, al.genre, al.year, al.cover_path, \
+                al.manual_cover, ar.key AS artist_key, ar.source_artist_id AS artist_source_id \
+           FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_pk \
+          WHERE al.source = ?1 \
+          ORDER BY al.artist COLLATE LOCALE, al.title COLLATE LOCALE",
+    )
+    .bind(source.as_str())
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// One window of an album listing: filter, order and cut all run in SQL, and `total` counts the filtered set.
+pub async fn albums_page(
+    pool: &SqlitePool,
+    query: &AlbumQuery,
+    page: Page,
+) -> Result<Listing<Album>, DbError> {
+    let mut c = Clauses::default();
+    if !query.search.trim().is_empty() {
+        let n = c.bind(Arg::Text(format!("%{}%", escape_like(query.search.trim()))));
+        c.sql.push_str(&format!(
+            " AND (al.title LIKE {n} ESCAPE '\\' OR al.artist LIKE {n} ESCAPE '\\')"
+        ));
+    }
+    if let Some(genre) = &query.genre {
+        let n = c.bind(Arg::Text(genre.clone()));
+        c.sql.push_str(&format!(" AND al.genre = {n}"));
+    }
+    let years = c.year_range("al.year", query.year_from, query.year_to);
+    c.sql.push_str(&years);
+    if let Some(artist) = &query.artist_key {
+        let n = c.bind(Arg::Text(artist.clone()));
+        c.sql.push_str(&format!(" AND ar.key = {n}"));
+    }
+    if let Some(downloaded) = query.downloaded {
+        let exists = if downloaded { "EXISTS" } else { "NOT EXISTS" };
+        c.sql.push_str(&format!(
+            " AND {exists} (SELECT 1 FROM tracks dt \
+                JOIN offline_tracks o ON o.item_id = dt.track_key \
+               WHERE dt.source = al.source AND dt.source_album_id = al.source_album_id)"
+        ));
+    }
+    if let Some(offline) = query.offline {
+        let exists = if offline { "EXISTS" } else { "NOT EXISTS" };
+        c.sql.push_str(&format!(
+            " AND {exists} (SELECT 1 FROM tracks ft \
+               WHERE ft.source = al.source AND ft.source_album_id = al.source_album_id AND {})",
+            plays_offline("ft.track_key", true)
+        ));
+    }
+    if let Some(ids) = &query.ids {
+        let slots: Vec<String> = ids.iter().map(|id| c.bind(Arg::Text(id.clone()))).collect();
+        if slots.is_empty() {
+            c.sql.push_str(" AND 0");
+        } else {
+            c.sql.push_str(&format!(
+                " AND al.source_album_id IN ({})",
+                slots.join(", ")
+            ));
+        }
+    }
+    let src = query.source.as_str();
+    let from = "FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_pk";
+
+    let count_sql = format!("SELECT COUNT(*) {from} WHERE al.source = ?1{}", c.sql);
+    let total = bind_scalar_args(sqlx::query_scalar::<_, i64>(&count_sql).bind(src), &c.args)
+        .fetch_one(pool)
+        .await?;
+
+    // Only an order that reads the album's tracks pays for grouping them.
+    let tracked = query.sort.iter().any(|sort| {
+        matches!(
+            sort.field,
+            config::AlbumSortField::RecentlyAdded | config::AlbumSortField::TrackCount
+        )
+    });
+    let tracks_join = if tracked {
+        "LEFT JOIN (SELECT source_album_id, MAX(added_at) AS added_at, \
+                           MAX(rowid_pk) AS last_pk, COUNT(*) AS n \
+                      FROM tracks WHERE source = ?1 GROUP BY source_album_id) tc \
+           ON tc.source_album_id = al.source_album_id"
+    } else {
+        ""
+    };
+    let mut order: Vec<String> = Vec::new();
+    for sort in &query.sort {
+        let dir = direction(sort.direction);
+        match sort.field {
+            config::AlbumSortField::Title => order.push(format!("al.title COLLATE LOCALE {dir}")),
+            config::AlbumSortField::Artist => order.push(format!("al.artist COLLATE LOCALE {dir}")),
+            config::AlbumSortField::Year => order.push(format!("al.year {dir}")),
+            config::AlbumSortField::Genre => order.push(format!("al.genre COLLATE LOCALE {dir}")),
+            config::AlbumSortField::RecentlyAdded => {
+                order.push(format!("COALESCE(tc.added_at, 0) {dir}"));
+                order.push(format!("COALESCE(tc.last_pk, 0) {dir}"));
+            }
+            config::AlbumSortField::TrackCount => order.push(format!("COALESCE(tc.n, 0) {dir}")),
+        }
+    }
+    order.push("al.artist COLLATE LOCALE ASC".into());
+    order.push("al.title COLLATE LOCALE ASC".into());
+    order.push("al.rowid_pk ASC".into());
+    let (limit_n, offset_n) = c.page_slots();
+    let sql = format!(
+        "SELECT al.source_album_id, al.title, al.artist, al.genre, al.year, al.cover_path, \
+                al.manual_cover, ar.key AS artist_key, ar.source_artist_id AS artist_source_id \
+           {from} {tracks_join} WHERE al.source = ?1{} \
+          ORDER BY {} LIMIT ?{limit_n} OFFSET ?{offset_n}",
+        c.sql,
+        order.join(", "),
+    );
+    let rows = bind_args(sqlx::query_as::<_, AlbumRow>(&sql).bind(src), &c.args)
+        .bind(i64::from(page.limit))
+        .bind(i64::from(page.offset))
+        .fetch_all(pool)
+        .await?;
+    Ok(Listing {
+        total: total.max(0) as u32,
+        rows: rows.into_iter().map(Into::into).collect(),
+    })
+}
+
+/// Albums ordered by the newest track they hold, newest first, on the same
+/// `added_at`-then-insertion order [`TrackSort::DateAdded`] uses. An album is
+/// recent when its music is, not when its row happened to be written, and
+/// ordering on the tracks is also what lets music added to an album Kopuz
+/// already knows pull that album back up.
+///
+/// [`TrackSort::DateAdded`]: crate::TrackSort::DateAdded
+pub async fn albums_recently_added(
+    pool: &SqlitePool,
+    source: &Source,
+    limit: u32,
+) -> Result<Vec<Album>, DbError> {
+    let src = source.as_str();
+    let limit = i64::from(limit);
+    let rows = sqlx::query_as!(
+        AlbumRow,
+        r#"SELECT al.source_album_id, al.title, al.artist, al.genre, al.year, al.cover_path, al.manual_cover,
+                  ar.key AS "artist_key?", ar.source_artist_id AS "artist_source_id?"
+             FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_pk
+             JOIN tracks t ON t.source = al.source AND t.source_album_id = al.source_album_id
+            WHERE al.source = ?1
+            GROUP BY al.rowid_pk
+            ORDER BY MAX(t.added_at) DESC, MAX(t.rowid_pk) DESC
+            LIMIT ?2"#,
+        src,
+        limit
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+pub async fn albums_recently_added_page(
+    pool: &SqlitePool,
+    source: &Source,
+    page: Page,
+) -> Result<(u32, Vec<Album>), DbError> {
+    let mut transaction = pool.begin().await?;
+    let total = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM albums a WHERE a.source = ?1 AND EXISTS \
+         (SELECT 1 FROM tracks t WHERE t.source = a.source AND t.source_album_id = a.source_album_id)",
+    )
+    .bind(source.as_str())
+    .fetch_one(&mut *transaction)
+    .await?;
+    let rows = sqlx::query_as::<_, AlbumRow>(
+        "SELECT al.source_album_id, al.title, al.artist, al.genre, al.year, al.cover_path, al.manual_cover, \
+         ar.key AS artist_key, ar.source_artist_id AS artist_source_id \
+         FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_pk \
+         JOIN tracks t ON t.source = al.source AND t.source_album_id = al.source_album_id \
+         WHERE al.source = ?1 GROUP BY al.rowid_pk \
+         ORDER BY MAX(t.added_at) DESC, MAX(t.rowid_pk) DESC LIMIT ?2 OFFSET ?3",
+    )
+    .bind(source.as_str())
+    .bind(i64::from(page.limit))
+    .bind(i64::from(page.offset))
+    .fetch_all(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok((
+        total.max(0) as u32,
+        rows.into_iter().map(Into::into).collect(),
+    ))
+}
+
+pub async fn favorites(pool: &SqlitePool, server_id: &str) -> Result<Vec<String>, DbError> {
+    Ok(sqlx::query_scalar!(
+        "SELECT ref FROM favorites WHERE server_id = ?1 AND dirty != 2 \
+         ORDER BY rank, rowid",
+        server_id
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
+pub async fn favorites_liked_at(
+    pool: &SqlitePool,
+    server_id: &str,
+) -> Result<Vec<(String, i64)>, DbError> {
+    Ok(sqlx::query_as(
+        "SELECT ref, created_at FROM favorites WHERE server_id = ?1 AND dirty != 2 \
+         ORDER BY rank, rowid",
+    )
+    .bind(server_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// An album counts as played once any of its tracks has a play count or a place in the recent history.
+pub async fn unplayed_albums(pool: &SqlitePool, source: &Source) -> Result<Vec<Album>, DbError> {
+    let rows = sqlx::query_as::<_, AlbumRow>(
+        "SELECT al.source_album_id, al.title, al.artist, al.genre, al.year, al.cover_path, \
+                al.manual_cover, ar.key AS artist_key, ar.source_artist_id AS artist_source_id \
+           FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_pk \
+          WHERE al.source = ?1 \
+            AND EXISTS (SELECT 1 FROM tracks t \
+                         WHERE t.source = al.source AND t.source_album_id = al.source_album_id) \
+            AND NOT EXISTS (SELECT 1 FROM tracks t \
+                              JOIN listen_counts lc \
+                                ON lc.source = t.source AND lc.track_key = t.track_key \
+                             WHERE t.source = al.source AND t.source_album_id = al.source_album_id \
+                               AND lc.count > 0) \
+            AND NOT EXISTS (SELECT 1 FROM tracks t \
+                              JOIN recently_played rp \
+                                ON rp.source = t.source AND rp.track_key = t.track_key \
+                             WHERE t.source = al.source AND t.source_album_id = al.source_album_id) \
+          ORDER BY al.artist COLLATE LOCALE, al.title COLLATE LOCALE",
+    )
+    .bind(source.as_str())
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+pub async fn is_favorite(pool: &SqlitePool, server_id: &str, ref_: &str) -> Result<bool, DbError> {
+    let n: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM favorites WHERE server_id = ?1 AND ref = ?2 AND dirty != 2",
+        server_id,
+        ref_
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(n > 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ArtistRow;
+
+    async fn mem_pool() -> SqlitePool {
+        let options = "sqlite::memory:"
+            .parse::<sqlx::sqlite::SqliteConnectOptions>()
+            .unwrap()
+            .collation(
+                super::super::collation::NAME,
+                super::super::collation::compare,
+            );
+        let pool = SqlitePool::connect_with(options).await.unwrap();
+        crate::backend::migrations::run_migrations(&pool, None)
+            .await
+            .unwrap();
+        pool
+    }
+
+    fn track(key: &str, artist: &str, credits: &[&str], album_id: &str) -> Track {
+        Track {
+            id: reader::TrackId::Local(std::path::PathBuf::from(key)),
+            cover: None,
+            album_id: album_id.to_string(),
+            title: key.to_string(),
+            artist: artist.to_string(),
+            album: "Album".into(),
+            duration: 60,
+            khz: 44,
+            bitrate: 320,
+            track_number: None,
+            disc_number: None,
+            musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
+            playlist_item_id: None,
+            artists: credits.iter().map(|name| name.to_string()).collect(),
+            replay_gain: config::ReplayGainInfo::default(),
+            counterpart: None,
+            credits: Vec::new(),
+            explicit: false,
+            plays: None,
+        }
+    }
+
+    fn linked_track(key: &str, artist: &str, credits: &[(&str, Option<&str>)]) -> Track {
+        let names: Vec<&str> = credits.iter().map(|(name, _)| *name).collect();
+        Track {
+            credits: credits
+                .iter()
+                .map(|(name, id)| match id {
+                    Some(id) => reader::ArtistCredit::linked(*name, *id),
+                    None => reader::ArtistCredit::unlinked(*name),
+                })
+                .collect(),
+            ..track(key, artist, &names, "al-1")
+        }
+    }
+
+    fn album(id: &str, artist: &str, cover: Option<&str>) -> Album {
+        Album {
+            id: id.to_string(),
+            title: "Album".into(),
+            artist: artist.to_string(),
+            genre: String::new(),
+            year: 0,
+            cover_path: cover.map(std::path::PathBuf::from),
+            manual_cover: false,
+            artist_id: None,
+            artist_key: None,
+        }
+    }
+
+    async fn seeded() -> (SqlitePool, Source) {
+        let pool = mem_pool().await;
+        let source = Source::default();
+        // One collaboration: the artist column carries the joined credit, the credits its two names.
+        let tracks = [
+            track("/a.flac", "Ada feat. Boris", &["Ada", "Boris"], "al-1"),
+            track("/b.flac", "Ada", &["Ada"], "al-1"),
+            track("/c.flac", "Cyd", &["Cyd"], "al-2"),
+        ];
+        super::super::writes::upsert_tracks(&pool, &source, &tracks)
+            .await
+            .unwrap();
+        let albums = [
+            album("al-1", "Ada", Some("/covers/one.jpg")),
+            album("al-2", "Various Artists", Some("/covers/two.jpg")),
+        ];
+        super::super::writes::upsert_albums(&pool, &source, &albums)
+            .await
+            .unwrap();
+        (pool, source)
+    }
+
+    fn named<'a>(listed: &'a [ArtistRow], name: &str) -> &'a ArtistRow {
+        listed
+            .iter()
+            .find(|artist| artist.name == name)
+            .unwrap_or_else(|| panic!("{name} missing from {listed:?}"))
+    }
+
+    fn keys(tracks: Vec<Track>) -> Vec<String> {
+        let mut keys: Vec<String> = tracks.iter().map(|t| t.id.key().into_owned()).collect();
+        keys.sort();
+        keys
+    }
+
+    /// Every credit `artist_tracks` answers for is listed, or a tile the UI draws has no row for its picture.
+    #[tokio::test]
+    async fn every_credit_is_listed_not_just_the_artist_column() {
+        let (pool, source) = seeded().await;
+
+        let listed = artists(&pool, &source).await.unwrap();
+
+        for expected in ["Ada", "Boris", "Cyd", "Various Artists"] {
+            named(&listed, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_credited_artist_counts_the_tracks_they_are_on() {
+        let (pool, source) = seeded().await;
+
+        let listed = artists(&pool, &source).await.unwrap();
+
+        assert_eq!(named(&listed, "Boris").tracks, 1, "one collaboration");
+        assert_eq!(named(&listed, "Ada").tracks, 2, "both album tracks");
+    }
+
+    #[tokio::test]
+    async fn a_credited_artist_carries_the_id_its_source_issued() {
+        let pool = mem_pool().await;
+        let source = Source::default();
+        let tracks = [
+            linked_track(
+                "/a.flac",
+                "Ada feat. Boris",
+                &[("Ada", Some("UC-ada")), ("Boris", None)],
+            ),
+            linked_track("/b.flac", "Ada", &[("Ada", Some("UC-ada"))]),
+        ];
+        super::super::writes::upsert_tracks(&pool, &source, &tracks)
+            .await
+            .unwrap();
+
+        let listed = artists(&pool, &source).await.unwrap();
+
+        assert_eq!(named(&listed, "Ada").source_id.as_deref(), Some("UC-ada"));
+        assert_eq!(named(&listed, "Boris").source_id, None);
+        assert_eq!(
+            named(&listed, "Ada").key,
+            "UC-ada",
+            "a linked artist is keyed by its source's id"
+        );
+    }
+
+    /// SQLite's `LOWER` folds ASCII only, yet two spellings of one unlinked name are one artist in any script.
+    #[tokio::test]
+    async fn an_unlinked_name_folds_beyond_ascii() {
+        let pool = mem_pool().await;
+        let source = Source::default();
+        let tracks = [
+            track("/a.flac", "ЛСП", &["ЛСП"], "al-1"),
+            track("/b.flac", "Émilie", &["Émilie"], "al-1"),
+            track("/c.flac", "émilie", &["émilie"], "al-1"),
+        ];
+        super::super::writes::upsert_tracks(&pool, &source, &tracks)
+            .await
+            .unwrap();
+
+        let listed = artists(&pool, &source).await.unwrap();
+
+        assert_eq!(listed.len(), 2, "{listed:?}");
+        assert_eq!(
+            named(&listed, "Émilie").tracks,
+            2,
+            "the first spelling names it"
+        );
+    }
+
+    #[tokio::test]
+    async fn tracks_stored_without_credits_list_by_name_with_no_ids() {
+        let (pool, source) = seeded().await;
+
+        let listed = artists(&pool, &source).await.unwrap();
+
+        assert!(listed.iter().all(|artist| artist.source_id.is_none()));
+        assert_eq!(named(&listed, "Ada").tracks, 2);
+    }
+
+    async fn homonyms() -> (SqlitePool, Source) {
+        let pool = mem_pool().await;
+        let source = Source::Server("srv".into());
+        // All four share a track-derived album, whose guessed artist must credit none of them.
+        let tracks = [
+            linked_track("a", "Ada", &[("Ada", Some("ar-1"))]),
+            linked_track("b", "ADA", &[("ADA", Some("ar-1"))]),
+            linked_track("c", "Ada", &[("Ada", Some("ar-2"))]),
+            linked_track("d", "Ada", &[("Ada", None)]),
+            track("e", "Ада", &["Ада"], "al-9"),
+        ];
+        super::super::writes::upsert_tracks(&pool, &source, &tracks)
+            .await
+            .unwrap();
+        (pool, source)
+    }
+
+    async fn unlinked(pool: &SqlitePool, source: &Source, name: &str) -> String {
+        let listed = artists(pool, source).await.unwrap();
+        listed
+            .iter()
+            .find(|artist| artist.source_id.is_none() && artist.name == name)
+            .unwrap_or_else(|| panic!("no unlinked {name} in {listed:?}"))
+            .key
+            .clone()
+    }
+
+    #[tokio::test]
+    async fn two_ids_behind_one_name_are_two_artists_and_an_unlinked_one_a_third() {
+        let (pool, source) = homonyms().await;
+
+        let listed: Vec<(Option<String>, u32)> = artists(&pool, &source)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|artist| artist.name.eq_ignore_ascii_case("ada"))
+            .map(|artist| (artist.source_id, artist.tracks))
+            .collect();
+
+        let mut listed = listed;
+        listed.sort();
+        assert_eq!(
+            listed,
+            vec![
+                (None, 1),
+                (Some("ar-1".into()), 2),
+                (Some("ar-2".into()), 1)
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_linked_artist_is_named_as_its_source_last_named_it() {
+        let (pool, source) = homonyms().await;
+
+        let listed = artists(&pool, &source).await.unwrap();
+
+        let ar1 = listed
+            .iter()
+            .find(|artist| artist.source_id.as_deref() == Some("ar-1"))
+            .unwrap();
+        assert_eq!(ar1.name, "ADA");
+    }
+
+    #[tokio::test]
+    async fn an_artist_opens_only_the_tracks_filed_under_it() {
+        let (pool, source) = homonyms().await;
+        let found =
+            async |artist: &str| keys(artist_tracks(&pool, &source, artist, None).await.unwrap());
+
+        assert_eq!(found("ar-1").await, ["a", "b"]);
+        assert_eq!(found("ar-2").await, ["c"]);
+        assert_eq!(
+            found(&unlinked(&pool, &source, "Ada").await).await,
+            ["d"],
+            "a name never reaches a linked credit"
+        );
+        assert_eq!(found(&unlinked(&pool, &source, "Ада").await).await, ["e"]);
+    }
+
+    #[tokio::test]
+    async fn one_artist_is_named_and_counted_as_the_listing_does() {
+        let (pool, source) = homonyms().await;
+
+        let linked = artist(&pool, &source, "ar-1").await.unwrap().expect("ar-1");
+        assert_eq!((linked.name.as_str(), linked.tracks), ("ADA", 2));
+        let other = Source::Server("elsewhere".into());
+        assert_eq!(
+            artist(&pool, &other, "ar-1").await.unwrap(),
+            None,
+            "another source's row"
+        );
+        assert_eq!(artist(&pool, &source, "ar-9").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn an_unlinked_joined_credit_is_its_own_listed_artist() {
+        let pool = mem_pool().await;
+        let source = Source::Server("srv".into());
+        let tracks = [
+            track("a", "COOL&CREATE", &["COOL&CREATE"], "al-1"),
+            track(
+                "b",
+                "COOL&CREATE, beatMARIO",
+                &["COOL&CREATE, beatMARIO"],
+                "al-2",
+            ),
+            track("c", "Tyler, The Creator", &["Tyler, The Creator"], "al-3"),
+        ];
+        super::super::writes::upsert_tracks(&pool, &source, &tracks)
+            .await
+            .unwrap();
+
+        let names: Vec<String> = artists(&pool, &source)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|artist| artist.name)
+            .collect();
+
+        assert_eq!(
+            names,
+            [
+                "COOL&CREATE",
+                "COOL&CREATE, beatMARIO",
+                "Tyler, The Creator"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_blank_id_is_stored_as_none() {
+        let pool = mem_pool().await;
+        let source = Source::Server("srv".into());
+        let tracks = [linked_track("a", "Ada", &[("Ada", Some("  "))])];
+        super::super::writes::upsert_tracks(&pool, &source, &tracks)
+            .await
+            .unwrap();
+
+        let listed = artists(&pool, &source).await.unwrap();
+
+        assert_eq!(listed[0].source_id, None);
+    }
+
+    #[tokio::test]
+    async fn an_artists_albums_follow_the_same_identity() {
+        let pool = mem_pool().await;
+        let source = Source::Server("srv".into());
+        let billed = |id: &str, artist_id: Option<&str>| Album {
+            artist_id: artist_id.map(Into::into),
+            artist_key: artist_id.map(Into::into),
+            ..album(id, "Ada", None)
+        };
+        let albums = [
+            billed("x", Some("ar-1")),
+            billed("y", Some("ar-2")),
+            billed("z", None),
+        ];
+        super::super::writes::upsert_albums(&pool, &source, &albums)
+            .await
+            .unwrap();
+
+        let found = async |artist: &str| {
+            let query = crate::AlbumQuery {
+                source: source.clone(),
+                artist_key: Some(artist.to_string()),
+                ..Default::default()
+            };
+            let all = crate::Page {
+                offset: 0,
+                limit: u32::MAX,
+            };
+            let albums = albums_page(&pool, &query, all).await.unwrap().rows;
+            albums.into_iter().map(|a| a.id).collect::<Vec<_>>()
+        };
+
+        assert_eq!(found("ar-1").await, ["x"]);
+        assert_eq!(
+            found(&unlinked_row(&pool, &source, "Ada").await).await,
+            ["z"]
+        );
+        let x = album_by_id(&pool, &source, "x").await;
+        assert_eq!(x.artist_id.as_deref(), Some("ar-1"));
+        assert_eq!(x.artist_key.as_deref(), Some("ar-1"));
+    }
+
+    async fn unlinked_row(pool: &SqlitePool, source: &Source, name: &str) -> String {
+        sqlx::query_scalar(
+            "SELECT key FROM artists WHERE source = ?1 AND name = ?2 AND source_artist_id IS NULL",
+        )
+        .bind(source.as_str())
+        .bind(name)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    async fn album_by_id(pool: &SqlitePool, source: &Source, id: &str) -> Album {
+        super::album(pool, source, id).await.unwrap().unwrap()
+    }
+
+    /// The listing's fallback and the single fetch's must agree, since a ref is versioned on the picture it names.
+    async fn fallbacks(pool: &SqlitePool, source: &Source, names: &[&str]) -> Vec<CoverRef> {
+        let listed = artists(pool, source).await.unwrap();
+        let covers = artist_fallback_covers(pool, source, None).await.unwrap();
+        let mut found = Vec::new();
+        for name in names {
+            let key = &named(&listed, name).key;
+            let one = artist_fallback_covers(pool, source, Some(key))
+                .await
+                .unwrap()
+                .remove(key);
+            assert_eq!(one.as_ref(), covers.get(key), "{name} alone");
+            found.push(covers.get(key).cloned().unwrap_or(CoverRef::None));
+        }
+        found
+    }
+
+    fn local(path: &str) -> CoverRef {
+        CoverRef::Local(path.into())
+    }
+
+    #[tokio::test]
+    async fn an_artist_with_no_album_falls_back_to_its_first_tracks_cover() {
+        let (pool, source) = seeded().await;
+
+        let covers = fallbacks(&pool, &source, &["Ada", "Various Artists", "Boris", "Cyd"]).await;
+
+        assert_eq!(
+            covers,
+            [
+                local("/covers/one.jpg"),
+                local("/covers/two.jpg"),
+                // Boris has no album of his own, so his one track speaks for him.
+                local("/covers/one.jpg"),
+                local("/covers/two.jpg"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unlinked_artist_shows_its_earliest_album_over_any_track() {
+        let pool = mem_pool().await;
+        let source = Source::default();
+        let covered = |key: &str, credit: &str, album: &str, cover: &str| Track {
+            cover: Some(cover.into()),
+            ..track(key, credit, &[credit], album)
+        };
+        let tracks = [
+            covered("/n1.flac", "Natural", "al-late", "/covers/n1.jpg"),
+            covered("/n2.flac", "Natural", "al-early", "/covers/n2.jpg"),
+            covered("/s.flac", "Solo", "al-loose", "/covers/solo.jpg"),
+        ];
+        super::super::writes::upsert_tracks(&pool, &source, &tracks)
+            .await
+            .unwrap();
+        let dated = |id: &str, year: u16, cover: Option<&str>| Album {
+            year,
+            ..album(id, "Natural", cover)
+        };
+        let albums = [
+            dated("al-late", 2020, Some("/covers/late.jpg")),
+            dated("al-early", 2010, Some("/covers/early.jpg")),
+            Album {
+                artist: "Solo".into(),
+                ..dated("al-loose", 2000, None)
+            },
+        ];
+        super::super::writes::upsert_albums(&pool, &source, &albums)
+            .await
+            .unwrap();
+
+        let covers = fallbacks(&pool, &source, &["Natural", "Solo"]).await;
+
+        assert_eq!(
+            covers,
+            [local("/covers/early.jpg"), local("/covers/solo.jpg")]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_track_reads_back_with_its_credits_in_billing_order() {
+        let pool = mem_pool().await;
+        let source = Source::Server("srv".into());
+        let tracks = [linked_track(
+            "a",
+            "Ada feat. Boris",
+            &[("Ada", Some("ar-1")), ("Boris", None)],
+        )];
+        super::super::writes::upsert_tracks(&pool, &source, &tracks)
+            .await
+            .unwrap();
+
+        let read = tracks_by_keys(&pool, &source, &["a".into()]).await.unwrap();
+
+        let credits: Vec<(&str, Option<&str>, bool)> = read[0]
+            .credits
+            .iter()
+            .map(|c| (c.name.as_str(), c.id.as_deref(), c.key.is_some()))
+            .collect();
+        assert_eq!(
+            credits,
+            [("Ada", Some("ar-1"), true), ("Boris", None, true)]
+        );
+        assert_eq!(read[0].artists, ["Ada", "Boris"]);
+        assert!(
+            read[0]
+                .credits
+                .iter()
+                .all(|c| c.source.as_ref() == Some(&source))
+        );
+    }
+
+    /// An id is its issuer's alone, so a credit another source listed is filed here by name.
+    #[tokio::test]
+    async fn an_id_another_source_listed_is_filed_unlinked() {
+        let pool = mem_pool().await;
+        let source = Source::Server("srv".into());
+        let mut foreign = linked_track("a", "Ada", &[("Ada", Some("ar-1"))]);
+        foreign.credits[0].source = Some(Source::Server("elsewhere".into()));
+        super::super::writes::upsert_tracks(&pool, &source, &[foreign])
+            .await
+            .unwrap();
+
+        let listed = artists(&pool, &source).await.unwrap();
+
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].source_id, None);
+        assert_eq!(artist(&pool, &source, "ar-1").await.unwrap(), None);
+    }
+
+    fn ids(albums: Vec<Album>) -> Vec<String> {
+        albums.into_iter().map(|album| album.id).collect()
+    }
+
+    #[tokio::test]
+    async fn an_album_is_unplayed_until_a_track_of_it_is_counted_or_recent() {
+        let (pool, source) = seeded().await;
+        super::super::writes::upsert_albums(&pool, &source, &[album("al-empty", "Nobody", None)])
+            .await
+            .unwrap();
+        assert_eq!(
+            ids(unplayed_albums(&pool, &source).await.unwrap()),
+            ["al-1", "al-2"],
+            "an album with no tracks is not one to offer"
+        );
+
+        super::super::cfg_store::bump_listen_count(&pool, &source, "/b.flac")
+            .await
+            .unwrap();
+        assert_eq!(
+            ids(unplayed_albums(&pool, &source).await.unwrap()),
+            ["al-2"]
+        );
+
+        super::super::cfg_store::push_recent(&pool, &source, "/c.flac")
+            .await
+            .unwrap();
+        assert!(unplayed_albums(&pool, &source).await.unwrap().is_empty());
+
+        let elsewhere = Source::Server("srv".into());
+        super::super::cfg_store::bump_listen_count(&pool, &elsewhere, "/a.flac")
+            .await
+            .unwrap();
+        assert!(unplayed_albums(&pool, &elsewhere).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_play_is_counted_and_stamped_per_source_most_played_first() {
+        let pool = mem_pool().await;
+        let source = Source::default();
+        let other = Source::Server("srv".into());
+        let bump = |source: &Source, key: &'static str| {
+            let pool = pool.clone();
+            let source = source.clone();
+            async move {
+                super::super::cfg_store::bump_listen_count(&pool, &source, key)
+                    .await
+                    .unwrap()
+            }
+        };
+        let before: i64 = sqlx::query_scalar("SELECT unixepoch()")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        bump(&source, "/b.flac").await;
+        bump(&source, "/a.flac").await;
+        bump(&source, "/a.flac").await;
+        bump(&other, "/a.flac").await;
+
+        let history = super::super::cfg_store::play_history(&pool, &source)
+            .await
+            .unwrap();
+
+        let counted: Vec<(&str, u64)> = history
+            .iter()
+            .map(|record| (record.track_key.as_str(), record.count))
+            .collect();
+        assert_eq!(counted, [("/a.flac", 2), ("/b.flac", 1)]);
+        assert!(
+            history
+                .iter()
+                .all(|record| record.last_played_at.is_some_and(|at| at >= before))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_favorite_carries_when_it_was_liked_and_a_pending_unlike_drops_it() {
+        let pool = mem_pool().await;
+        let before: i64 = sqlx::query_scalar("SELECT unixepoch()")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO favorites (server_id, ref, dirty, created_at) \
+             VALUES ('local', '/kept.flac', 0, 100), ('local', '/gone.flac', 0, 100)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        super::super::writes::set_favorite(&pool, "local", "/new.flac", true)
+            .await
+            .unwrap();
+        super::super::writes::set_favorite(&pool, "local", "/gone.flac", false)
+            .await
+            .unwrap();
+
+        let liked = favorites_liked_at(&pool, "local").await.unwrap();
+
+        assert_eq!(liked.len(), 2);
+        assert!(liked.contains(&("/kept.flac".to_string(), 100)));
+        assert!(
+            liked
+                .iter()
+                .any(|(key, at)| key == "/new.flac" && *at >= before)
+        );
+    }
+}

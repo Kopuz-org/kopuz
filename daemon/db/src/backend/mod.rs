@@ -1,0 +1,1017 @@
+//! Native sqlx + SQLite backend. Owns the pool (behind `ArcSwap` so debug tools
+//! can hot-swap the DB) and runs migrations. SQL lives here, grouped by domain
+//! as the migration lands more methods.
+
+use std::path::Path;
+use std::sync::Arc;
+
+use arc_swap::ArcSwap;
+use sqlx::SqlitePool;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
+
+use crate::{DbError, ReadStore, Storage};
+
+mod cfg_store;
+mod collation;
+mod dump;
+mod frontend_prefs;
+mod migrations;
+mod offline_cache;
+mod queries;
+mod rows;
+mod scrobble;
+mod scrobble_queue;
+
+pub use scrobble::{QueuedScrobbleRow, ScrobbleService};
+mod writes;
+
+pub struct Native {
+    pool: ArcSwap<SqlitePool>,
+    /// The standalone settings file (issue #530), kept next to the DB.
+    settings_path: std::path::PathBuf,
+}
+
+impl Native {
+    /// Open (creating if needed) the DB at `path`, snapshot before any pending
+    /// migration, then apply migrations.
+    pub async fn open(path: &Path) -> Result<Self, DbError> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| DbError::Io(e.to_string()))?;
+        }
+        let pool = open_pool(path).await?;
+        // Read once on the pool that applies them, so a boot with nothing pending opens no second pool and runs no fill.
+        let pending = migrations::Pending::read(&pool).await?;
+        migrations::snapshot_if_pending(path, &pending);
+        let db_dir = match path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent,
+            _ => Path::new("."),
+        };
+        let settings_path = config::store::settings_path_for(db_dir);
+        migrations::apply(&pool, Some(&settings_path), &pending).await?;
+        cfg_store::purge_removable(&pool).await?;
+        Ok(Self {
+            pool: ArcSwap::from_pointee(pool),
+            settings_path,
+        })
+    }
+
+    fn pool(&self) -> Arc<SqlitePool> {
+        self.pool.load_full()
+    }
+
+    /// Rebind to a different pool (debug "load release DB" / "reset"). Live.
+    pub fn swap_pool(&self, pool: SqlitePool) {
+        self.pool.store(Arc::new(pool));
+    }
+}
+
+/// A transaction that takes the write lock up front.
+///
+/// `pool.begin()` issues a deferred `BEGIN`: the first SELECT takes a shared
+/// lock, and if another connection commits before this one writes, SQLite
+/// refuses the upgrade with SQLITE_BUSY immediately -- the busy handler is
+/// never consulted, since waiting could deadlock. A transaction that must read
+/// before it writes starts here instead, so it queues on `busy_timeout` like
+/// any other writer.
+///
+/// sqlx only tracks transactions it began itself, so a connection returned to
+/// the pool mid-way would go back still holding the write lock. Dropping this
+/// without a commit therefore detaches the connection instead: closing the
+/// handle rolls the transaction back, and the pool opens a replacement.
+pub(crate) struct ImmediateTx {
+    conn: Option<sqlx::pool::PoolConnection<sqlx::Sqlite>>,
+}
+
+pub(crate) async fn begin_immediate(pool: &SqlitePool) -> Result<ImmediateTx, DbError> {
+    let mut conn = pool.acquire().await?;
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+    Ok(ImmediateTx { conn: Some(conn) })
+}
+
+impl ImmediateTx {
+    pub(crate) async fn commit(mut self) -> Result<(), DbError> {
+        let mut conn = self.conn.take().expect("live until commit or drop");
+        match sqlx::query("COMMIT").execute(&mut *conn).await {
+            Ok(_) => Ok(()),
+            // A refused commit leaves the transaction open on the connection.
+            Err(error) => {
+                drop(conn.detach());
+                Err(error.into())
+            }
+        }
+    }
+}
+
+impl std::ops::Deref for ImmediateTx {
+    type Target = sqlx::SqliteConnection;
+    fn deref(&self) -> &Self::Target {
+        self.conn.as_deref().expect("live until commit or drop")
+    }
+}
+
+impl std::ops::DerefMut for ImmediateTx {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.conn.as_deref_mut().expect("live until commit or drop")
+    }
+}
+
+impl Drop for ImmediateTx {
+    fn drop(&mut self) {
+        if let Some(conn) = self.conn.take() {
+            drop(conn.detach());
+        }
+    }
+}
+
+async fn open_pool(path: &Path) -> Result<SqlitePool, DbError> {
+    let opts = SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
+        .busy_timeout(std::time::Duration::from_secs(5))
+        .foreign_keys(true)
+        .collation(collation::NAME, collation::compare);
+    SqlitePoolOptions::new()
+        .max_connections(5)
+        .connect_with(opts)
+        .await
+        .map_err(Into::into)
+}
+
+fn with_ext(path: &Path, suffix: &str) -> std::path::PathBuf {
+    if suffix.is_empty() {
+        path.to_path_buf()
+    } else {
+        let mut s = path.as_os_str().to_os_string();
+        s.push(suffix);
+        std::path::PathBuf::from(s)
+    }
+}
+
+#[async_trait::async_trait]
+impl ReadStore for Native {
+    async fn has_app_state(&self) -> Result<bool, DbError> {
+        cfg_store::has_app_state(&self.pool()).await
+    }
+
+    async fn tracks_page(
+        &self,
+        filter: &crate::TrackFilter,
+        page: crate::Page,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        queries::tracks_page(&self.pool(), filter, page).await
+    }
+
+    async fn tracks_count(&self, filter: &crate::TrackFilter) -> Result<u32, DbError> {
+        queries::tracks_count(&self.pool(), filter).await
+    }
+
+    async fn album_tracks(
+        &self,
+        source: &crate::Source,
+        album_id: &str,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        queries::album_tracks(&self.pool(), source, album_id).await
+    }
+
+    async fn artist_tracks(
+        &self,
+        source: &crate::Source,
+        artist: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        queries::artist_tracks(&self.pool(), source, artist, limit).await
+    }
+
+    async fn artist(
+        &self,
+        source: &crate::Source,
+        artist: &str,
+    ) -> Result<Option<crate::ArtistRow>, DbError> {
+        queries::artist(&self.pool(), source, artist).await
+    }
+
+    async fn artist_keys_unnamed_by_source(
+        &self,
+        source: &crate::Source,
+    ) -> Result<std::collections::HashSet<String>, DbError> {
+        queries::artist_keys_unnamed_by_source(&self.pool(), source).await
+    }
+
+    async fn linked_artist_keys(
+        &self,
+        source: &crate::Source,
+    ) -> Result<std::collections::HashMap<String, String>, DbError> {
+        queries::linked_artist_keys(&self.pool(), source).await
+    }
+
+    async fn unlinked_artist_keys(
+        &self,
+        source: &crate::Source,
+    ) -> Result<std::collections::HashMap<String, String>, DbError> {
+        queries::unlinked_artist_keys(&self.pool(), source).await
+    }
+
+    async fn genre_tracks(
+        &self,
+        source: &crate::Source,
+        genre: &str,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        queries::genre_tracks(&self.pool(), source, genre).await
+    }
+
+    async fn folder_tracks(
+        &self,
+        source: &crate::Source,
+        prefix: &str,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        queries::folder_tracks(&self.pool(), source, prefix).await
+    }
+
+    async fn recently_played(
+        &self,
+        source: &crate::Source,
+        limit: u32,
+    ) -> Result<Vec<String>, DbError> {
+        cfg_store::recently_played(&self.pool(), source, limit).await
+    }
+
+    async fn artist_sample_tracks(
+        &self,
+        source: &crate::Source,
+        limit: u32,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        queries::artist_sample_tracks(&self.pool(), source, limit).await
+    }
+
+    async fn top_genre(&self, source: &crate::Source) -> Result<Option<String>, DbError> {
+        queries::top_genre(&self.pool(), source).await
+    }
+
+    async fn search_corpus(&self, source: &crate::Source) -> Result<Vec<reader::Track>, DbError> {
+        queries::search_corpus(&self.pool(), source).await
+    }
+
+    async fn tracks_by_keys(
+        &self,
+        source: &crate::Source,
+        keys: &[String],
+    ) -> Result<Vec<reader::Track>, DbError> {
+        queries::tracks_by_keys(&self.pool(), source, keys).await
+    }
+
+    async fn artists(&self, source: &crate::Source) -> Result<Vec<crate::ArtistRow>, DbError> {
+        queries::artists(&self.pool(), source).await
+    }
+
+    async fn artists_page(
+        &self,
+        query: &crate::ArtistQuery,
+        page: crate::Page,
+    ) -> Result<crate::Listing<crate::ArtistRow>, DbError> {
+        queries::artists_page(&self.pool(), query, page).await
+    }
+
+    async fn artist_fallback_covers(
+        &self,
+        source: &crate::Source,
+    ) -> Result<std::collections::HashMap<String, reader::CoverRef>, DbError> {
+        queries::artist_fallback_covers(&self.pool(), source, None).await
+    }
+
+    async fn artist_fallback_cover(
+        &self,
+        source: &crate::Source,
+        artist: &str,
+    ) -> Result<Option<reader::CoverRef>, DbError> {
+        Ok(
+            queries::artist_fallback_covers(&self.pool(), source, Some(artist))
+                .await?
+                .remove(artist),
+        )
+    }
+
+    async fn genres(&self, source: &crate::Source) -> Result<Vec<String>, DbError> {
+        queries::genres(&self.pool(), source).await
+    }
+
+    async fn album(
+        &self,
+        source: &crate::Source,
+        album_id: &str,
+    ) -> Result<Option<reader::Album>, DbError> {
+        queries::album(&self.pool(), source, album_id).await
+    }
+
+    async fn artist_images(&self) -> Result<crate::ArtistImages, DbError> {
+        dump::artist_images(&self.pool()).await
+    }
+
+    async fn albums(&self, source: &crate::Source) -> Result<Vec<reader::Album>, DbError> {
+        queries::albums(&self.pool(), source).await
+    }
+
+    async fn albums_page(
+        &self,
+        query: &crate::AlbumQuery,
+        page: crate::Page,
+    ) -> Result<crate::Listing<reader::Album>, DbError> {
+        queries::albums_page(&self.pool(), query, page).await
+    }
+
+    async fn albums_recently_added(
+        &self,
+        source: &crate::Source,
+        limit: u32,
+    ) -> Result<Vec<reader::Album>, DbError> {
+        queries::albums_recently_added(&self.pool(), source, limit).await
+    }
+
+    async fn albums_recently_added_page(
+        &self,
+        source: &crate::Source,
+        page: crate::Page,
+    ) -> Result<(u32, Vec<reader::Album>), DbError> {
+        queries::albums_recently_added_page(&self.pool(), source, page).await
+    }
+
+    async fn load_queue(&self, source: &crate::Source) -> Result<crate::QueueSnapshot, DbError> {
+        dump::load_queue(&self.pool(), source).await
+    }
+
+    async fn load_playlists(
+        &self,
+        source: &crate::Source,
+    ) -> Result<reader::PlaylistStore, DbError> {
+        dump::load_playlists(&self.pool(), source).await
+    }
+
+    async fn playlist_entries(
+        &self,
+        source: &crate::Source,
+        pl_id: &str,
+    ) -> Result<Vec<reader::PlaylistEntry>, DbError> {
+        writes::playlist_entries(&self.pool(), source, pl_id).await
+    }
+
+    async fn favorites(&self, server_id: &str) -> Result<Vec<String>, DbError> {
+        queries::favorites(&self.pool(), server_id).await
+    }
+
+    async fn is_favorite(&self, server_id: &str, ref_: &str) -> Result<bool, DbError> {
+        queries::is_favorite(&self.pool(), server_id, ref_).await
+    }
+
+    async fn dirty_favorites(&self, server_id: &str) -> Result<Vec<String>, DbError> {
+        writes::dirty_favorites(&self.pool(), server_id).await
+    }
+
+    async fn dirty_unlikes(&self, server_id: &str) -> Result<Vec<String>, DbError> {
+        writes::dirty_unlikes(&self.pool(), server_id).await
+    }
+
+    async fn load_server(&self, id: &str) -> Result<Option<config::MusicServer>, DbError> {
+        cfg_store::load_server(&self.pool(), id).await
+    }
+
+    async fn load_sources(&self) -> Result<crate::StoredSources, DbError> {
+        cfg_store::load_sources(&self.pool()).await
+    }
+
+    async fn integration_credentials(
+        &self,
+    ) -> Result<std::collections::HashMap<String, String>, DbError> {
+        cfg_store::integration_credentials(&self.pool()).await
+    }
+
+    async fn playback_state(&self) -> Result<(f32, bool), DbError> {
+        cfg_store::playback_state(&self.pool()).await
+    }
+
+    async fn discord_presence_paused(&self) -> Result<Option<bool>, DbError> {
+        cfg_store::discord_presence_paused(&self.pool()).await
+    }
+
+    async fn set_server_credentials(
+        &self,
+        id: &str,
+        access_token: Option<&str>,
+        user_id: Option<&str>,
+    ) -> Result<(), DbError> {
+        cfg_store::set_server_credentials(&self.pool(), id, access_token, user_id).await
+    }
+
+    async fn cached_lyrics(&self, cache_key: &str) -> Result<Option<crate::CachedLyrics>, DbError> {
+        dump::cached_lyrics(&self.pool(), cache_key).await
+    }
+
+    async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError> {
+        writes::meta_get(&self.pool(), cache_key, kind).await
+    }
+
+    async fn meta_keys_since(&self, kind: &str, max_age_secs: i64) -> Result<Vec<String>, DbError> {
+        writes::meta_keys_since(&self.pool(), kind, max_age_secs).await
+    }
+
+    async fn scrobble_queue_all(&self) -> Result<Vec<crate::QueuedScrobbleRow>, DbError> {
+        scrobble_queue::all(&self.pool()).await
+    }
+
+    async fn frontend_prefs(&self, frontend: &str) -> Result<Vec<(String, String)>, DbError> {
+        frontend_prefs::all(&self.pool(), frontend).await
+    }
+
+    async fn listen_counts(&self) -> Result<std::collections::HashMap<String, u64>, DbError> {
+        cfg_store::listen_counts(&self.pool()).await
+    }
+
+    async fn play_history(
+        &self,
+        source: &crate::Source,
+    ) -> Result<Vec<crate::PlayRecord>, DbError> {
+        cfg_store::play_history(&self.pool(), source).await
+    }
+
+    async fn favorites_liked_at(&self, server_id: &str) -> Result<Vec<(String, i64)>, DbError> {
+        queries::favorites_liked_at(&self.pool(), server_id).await
+    }
+
+    async fn unplayed_albums(&self, source: &crate::Source) -> Result<Vec<reader::Album>, DbError> {
+        queries::unplayed_albums(&self.pool(), source).await
+    }
+
+    async fn offline_tracks(&self) -> Result<std::collections::HashMap<String, String>, DbError> {
+        cfg_store::offline_tracks(&self.pool()).await
+    }
+
+    async fn offline_cache(&self) -> Result<Vec<crate::CachedTrackRow>, DbError> {
+        offline_cache::all(&self.pool()).await
+    }
+
+    async fn pinned_stations(&self) -> Result<Vec<String>, DbError> {
+        cfg_store::pinned_stations(&self.pool()).await
+    }
+
+    async fn downloader_history(&self) -> Result<Vec<config::DownloaderHistoryEntry>, DbError> {
+        cfg_store::downloader_history(&self.pool()).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Storage for Native {
+    async fn ensure_app_state(&self) -> Result<(), DbError> {
+        cfg_store::ensure_app_state(&self.pool()).await
+    }
+
+    async fn purge_source(&self, source: &crate::Source) -> Result<(), DbError> {
+        let mut tx = self.pool().begin().await?;
+        cfg_store::purge_source(&mut tx, source.as_str()).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn save_server(&self, server: &config::SavedServer) -> Result<(), DbError> {
+        cfg_store::save_server(&self.pool(), server).await
+    }
+
+    async fn save_active_server(&self, server: &config::MusicServer) -> Result<(), DbError> {
+        cfg_store::save_active_server(&self.pool(), server).await
+    }
+
+    async fn delete_server(&self, id: &str) -> Result<(), DbError> {
+        cfg_store::delete_server(&self.pool(), id).await
+    }
+
+    async fn set_active_source(&self, source: &crate::Source) -> Result<(), DbError> {
+        cfg_store::set_active_source(&self.pool(), source).await
+    }
+
+    async fn set_server_folders(&self, id: &str, folders: &[String]) -> Result<(), DbError> {
+        cfg_store::set_server_folders(&self.pool(), id, folders).await
+    }
+
+    async fn set_device_id(&self, device_id: &str) -> Result<(), DbError> {
+        cfg_store::set_device_id(&self.pool(), device_id).await
+    }
+
+    async fn set_integration_credential(&self, key: &str, value: &str) -> Result<(), DbError> {
+        let mut conn = self.pool().acquire().await?;
+        cfg_store::write_integration_credential(&mut conn, key, value).await
+    }
+
+    async fn set_playback_state(&self, volume: f32, muted: bool) -> Result<(), DbError> {
+        cfg_store::set_playback_state(&self.pool(), volume, muted).await
+    }
+
+    async fn set_discord_presence_paused(&self, paused: bool) -> Result<(), DbError> {
+        cfg_store::set_discord_presence_paused(&self.pool(), paused).await
+    }
+
+    async fn import_legacy_json(&self, config_dir: &Path) -> Result<crate::ImportReport, DbError> {
+        migrations::run_json_import(&self.pool(), config_dir, &self.settings_path).await
+    }
+
+    async fn finalize_migration(&self, config_dir: &Path) -> Result<usize, DbError> {
+        migrations::finalize_migration(&self.pool(), config_dir).await
+    }
+
+    async fn delete_tracks(&self, source: &crate::Source, keys: &[String]) -> Result<u64, DbError> {
+        writes::delete_tracks(&self.pool(), source, keys).await
+    }
+
+    async fn delete_album(&self, source: &crate::Source, album_id: &str) -> Result<(), DbError> {
+        writes::delete_album(&self.pool(), source, album_id).await
+    }
+
+    async fn prune_source(
+        &self,
+        source: &crate::Source,
+        keep_track_keys: &[String],
+        keep_album_ids: &[String],
+    ) -> Result<(), DbError> {
+        writes::prune_source(&self.pool(), source, keep_track_keys, keep_album_ids).await
+    }
+
+    async fn name_artist(
+        &self,
+        source: &crate::Source,
+        id: &str,
+        name: &str,
+    ) -> Result<bool, DbError> {
+        writes::name_artist(&self.pool(), source, id, name).await
+    }
+
+    async fn name_artists(
+        &self,
+        source: &crate::Source,
+        named: &[(String, String)],
+    ) -> Result<usize, DbError> {
+        writes::name_artists(&self.pool(), source, named).await
+    }
+
+    async fn set_artist_image(
+        &self,
+        source: &crate::Source,
+        artist_key: &str,
+        kind: &str,
+        image_ref: Option<&str>,
+    ) -> Result<(), DbError> {
+        writes::set_artist_image(&self.pool(), source, artist_key, kind, image_ref).await
+    }
+
+    async fn update_album_cover(
+        &self,
+        source: &crate::Source,
+        album_id: &str,
+        cover_path: Option<&str>,
+        manual: bool,
+    ) -> Result<(), DbError> {
+        writes::update_album_cover(&self.pool(), source, album_id, cover_path, manual).await
+    }
+
+    async fn update_album_cover_if_not_manual(
+        &self,
+        source: &crate::Source,
+        album_id: &str,
+        cover_path: &str,
+    ) -> Result<bool, DbError> {
+        writes::update_album_cover_if_not_manual(&self.pool(), source, album_id, cover_path).await
+    }
+
+    async fn upsert_playlist_meta(
+        &self,
+        source: &crate::Source,
+        pl_id: &str,
+        name: &str,
+        cover_path: Option<&str>,
+        image_tag: Option<&str>,
+    ) -> Result<(), DbError> {
+        writes::upsert_playlist_meta(&self.pool(), source, pl_id, name, cover_path, image_tag).await
+    }
+
+    async fn delete_playlist(&self, source: &crate::Source, pl_id: &str) -> Result<(), DbError> {
+        writes::delete_playlist(&self.pool(), source, pl_id).await
+    }
+
+    async fn set_playlist_tracks(
+        &self,
+        source: &crate::Source,
+        pl_id: &str,
+        entries: &[reader::PlaylistEntry],
+    ) -> Result<(), DbError> {
+        writes::set_playlist_tracks(&self.pool(), source, pl_id, entries).await
+    }
+
+    async fn add_playlist_tracks(
+        &self,
+        source: &crate::Source,
+        pl_id: &str,
+        refs: &[String],
+    ) -> Result<(), DbError> {
+        writes::add_playlist_tracks(&self.pool(), source, pl_id, refs).await
+    }
+
+    async fn remove_playlist_tracks(
+        &self,
+        source: &crate::Source,
+        pl_id: &str,
+        refs: &[String],
+    ) -> Result<(), DbError> {
+        writes::remove_playlist_tracks(&self.pool(), source, pl_id, refs).await
+    }
+
+    async fn remove_playlist_entry(
+        &self,
+        source: &crate::Source,
+        pl_id: &str,
+        index: usize,
+    ) -> Result<(), DbError> {
+        writes::remove_playlist_entry(&self.pool(), source, pl_id, index).await
+    }
+
+    async fn upsert_playlist_tracks_page(
+        &self,
+        source: &crate::Source,
+        pl_id: &str,
+        entries: &[reader::PlaylistEntry],
+        start_position: i64,
+        epoch: i64,
+    ) -> Result<(), DbError> {
+        writes::upsert_playlist_tracks_page(
+            &self.pool(),
+            source,
+            pl_id,
+            entries,
+            start_position,
+            epoch,
+        )
+        .await
+    }
+
+    async fn sweep_playlist_tracks(
+        &self,
+        source: &crate::Source,
+        pl_id: &str,
+        epoch: i64,
+    ) -> Result<(), DbError> {
+        writes::sweep_playlist_tracks(&self.pool(), source, pl_id, epoch).await
+    }
+
+    async fn create_folder(&self, id: &str, name: &str) -> Result<(), DbError> {
+        writes::create_folder(&self.pool(), id, name).await
+    }
+
+    async fn rename_folder(&self, id: &str, name: &str) -> Result<(), DbError> {
+        writes::rename_folder(&self.pool(), id, name).await
+    }
+
+    async fn delete_folder(&self, id: &str) -> Result<(), DbError> {
+        writes::delete_folder(&self.pool(), id).await
+    }
+
+    async fn set_playlist_folder(
+        &self,
+        playlist_ref: &str,
+        folder_id: Option<&str>,
+    ) -> Result<(), DbError> {
+        writes::set_playlist_folder(&self.pool(), playlist_ref, folder_id).await
+    }
+
+    async fn bump_listen_count(
+        &self,
+        source: &crate::Source,
+        track_key: &str,
+    ) -> Result<(), DbError> {
+        cfg_store::bump_listen_count(&self.pool(), source, track_key).await
+    }
+
+    async fn push_recent(&self, source: &crate::Source, track_key: &str) -> Result<(), DbError> {
+        cfg_store::push_recent(&self.pool(), source, track_key).await
+    }
+
+    async fn set_offline_track(&self, id: &str, path: Option<&str>) -> Result<(), DbError> {
+        writes::set_offline_track(&self.pool(), id, path).await
+    }
+
+    async fn put_offline_cache(&self, row: &crate::CachedTrackRow) -> Result<(), DbError> {
+        offline_cache::put(&self.pool(), row).await
+    }
+
+    async fn touch_offline_cache(&self, track_key: &str, at: i64) -> Result<(), DbError> {
+        offline_cache::touch(&self.pool(), track_key, at).await
+    }
+
+    async fn remove_offline_cache(&self, track_keys: &[String]) -> Result<(), DbError> {
+        offline_cache::remove(&self.pool(), track_keys).await
+    }
+
+    async fn save_queue(
+        &self,
+        source: &crate::Source,
+        snap: &crate::QueueSnapshot,
+    ) -> Result<(), DbError> {
+        writes::save_queue(&self.pool(), source, snap).await
+    }
+
+    async fn save_queue_position(
+        &self,
+        source: &crate::Source,
+        snap: &crate::QueueSnapshot,
+    ) -> Result<(), DbError> {
+        writes::save_queue_position(&self.pool(), source, snap).await
+    }
+
+    async fn clear_queue(&self, source: &crate::Source) -> Result<(), DbError> {
+        writes::clear_queue(&self.pool(), source).await
+    }
+
+    async fn set_pinned_station(&self, id: &str, manifest: Option<&str>) -> Result<(), DbError> {
+        writes::set_pinned_station(&self.pool(), id, manifest).await
+    }
+
+    async fn push_downloader_history(
+        &self,
+        entry: &config::DownloaderHistoryEntry,
+        limit: usize,
+    ) -> Result<(), DbError> {
+        cfg_store::push_downloader_history(&self.pool(), entry, limit).await
+    }
+
+    async fn clear_downloader_history(&self) -> Result<(), DbError> {
+        cfg_store::clear_downloader_history(&self.pool()).await
+    }
+
+    async fn set_frontend_prefs(
+        &self,
+        frontend: &str,
+        entries: &[(String, Option<String>)],
+        budget: usize,
+    ) -> Result<Option<Vec<String>>, DbError> {
+        frontend_prefs::set(&self.pool(), frontend, entries, budget).await
+    }
+
+    async fn cache_lyrics(
+        &self,
+        cache_key: &str,
+        lyrics: Option<&utils::lyrics::Lyrics>,
+    ) -> Result<(), DbError> {
+        writes::cache_lyrics(&self.pool(), cache_key, lyrics).await
+    }
+
+    async fn scrobble_queue_push(&self, row: &crate::QueuedScrobbleRow) -> Result<(), DbError> {
+        scrobble_queue::push(&self.pool(), row).await
+    }
+
+    async fn scrobble_queue_delete(
+        &self,
+        listened_at: i64,
+        artist: &str,
+        title: &str,
+        service: crate::ScrobbleService,
+    ) -> Result<(), DbError> {
+        scrobble_queue::delete(&self.pool(), listened_at, artist, title, service).await
+    }
+
+    async fn upsert_tracks(
+        &self,
+        source: &crate::Source,
+        tracks: &[reader::Track],
+    ) -> Result<(), DbError> {
+        writes::upsert_tracks(&self.pool(), source, tracks).await
+    }
+
+    async fn upsert_albums(
+        &self,
+        source: &crate::Source,
+        albums: &[reader::Album],
+    ) -> Result<(), DbError> {
+        writes::upsert_albums(&self.pool(), source, albums).await
+    }
+
+    async fn refile_track(
+        &self,
+        source: &crate::Source,
+        track: &reader::Track,
+        album: &reader::Album,
+        left_album: &str,
+    ) -> Result<(), DbError> {
+        writes::refile_track(&self.pool(), source, track, album, left_album).await
+    }
+
+    async fn stamp_added_at(
+        &self,
+        source: &crate::Source,
+        stamps: &[(String, i64)],
+    ) -> Result<(), DbError> {
+        writes::stamp_added_at(&self.pool(), source, stamps).await
+    }
+
+    async fn set_favorite(&self, server_id: &str, ref_: &str, on: bool) -> Result<(), DbError> {
+        writes::set_favorite(&self.pool(), server_id, ref_, on).await
+    }
+
+    async fn meta_put(&self, cache_key: &str, kind: &str, payload: &str) -> Result<(), DbError> {
+        writes::meta_put(&self.pool(), cache_key, kind, payload).await
+    }
+
+    async fn debug_reset(&self, db_path: &Path) -> Result<(), DbError> {
+        self.pool().close().await;
+        for ext in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(with_ext(db_path, ext));
+        }
+        let pool = open_pool(db_path).await?;
+        migrations::run_migrations(&pool, Some(&self.settings_path)).await?;
+        self.swap_pool(pool);
+        Ok(())
+    }
+
+    async fn debug_load_release(&self, release_path: &Path, db_path: &Path) -> Result<(), DbError> {
+        if !release_path.exists() {
+            return Err(DbError::Io(format!(
+                "release db not found at {}",
+                release_path.display()
+            )));
+        }
+        self.pool().close().await;
+        for ext in ["", "-wal", "-shm"] {
+            let src = with_ext(release_path, ext);
+            let dst = with_ext(db_path, ext);
+            let _ = std::fs::remove_file(&dst);
+            if src.exists() {
+                std::fs::copy(&src, &dst).map_err(|e| DbError::Io(e.to_string()))?;
+            }
+        }
+        let pool = open_pool(db_path).await?;
+        migrations::run_migrations(&pool, Some(&self.settings_path)).await?;
+        self.swap_pool(pool);
+        Ok(())
+    }
+
+    async fn debug_seed_synthetic(&self, n: u32) -> Result<(), DbError> {
+        let pool = self.pool();
+        let mut tx = pool.begin().await?;
+        for i in 0..n {
+            let key = format!("/synthetic/{i:06}.flac");
+            let title = format!("Synthetic {i:06}");
+            let artist = format!("Artist {:03}", i % 100);
+            let album = format!("Album {:04}", i % 2000);
+            sqlx::query(
+                "INSERT OR IGNORE INTO tracks (source, track_key, path, title, artist, album) \
+                 VALUES ('local', ?1, ?1, ?2, ?3, ?4)",
+            )
+            .bind(&key)
+            .bind(&title)
+            .bind(&artist)
+            .bind(&album)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn debug_info(&self) -> Result<String, DbError> {
+        let pool = self.pool();
+        let migrations: Vec<(i64, String)> =
+            sqlx::query_as("SELECT version, description FROM _sqlx_migrations ORDER BY version")
+                .fetch_all(&*pool)
+                .await?;
+        let mut out = String::new();
+        for (v, d) in &migrations {
+            out.push_str(&format!("migration {v} — {d}\n"));
+        }
+        for table in [
+            "tracks",
+            "albums",
+            "playlists",
+            "favorites",
+            "servers",
+            "kv",
+        ] {
+            let n: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+                .fetch_one(&*pool)
+                .await?;
+            out.push_str(&format!("{table}: {n}\n"));
+        }
+        Ok(out)
+    }
+
+    async fn debug_vacuum(&self) -> Result<(), DbError> {
+        sqlx::query("VACUUM").execute(&*self.pool()).await?;
+        Ok(())
+    }
+
+    async fn clear_favorite_dirty(&self, server_id: &str, ref_: &str) -> Result<(), DbError> {
+        writes::clear_favorite_dirty(&self.pool(), server_id, ref_).await
+    }
+
+    async fn discard_pending_favorites(&self, server_id: &str) -> Result<(), DbError> {
+        writes::discard_pending_favorites(&self.pool(), server_id).await
+    }
+
+    async fn replace_favorites_clean(
+        &self,
+        server_id: &str,
+        refs: &[String],
+    ) -> Result<(), DbError> {
+        writes::replace_favorites_clean(&self.pool(), server_id, refs).await
+    }
+
+    async fn upsert_favorites_page(
+        &self,
+        server_id: &str,
+        refs: &[String],
+        start_rank: i64,
+        epoch: i64,
+    ) -> Result<(), DbError> {
+        writes::upsert_favorites_page(&self.pool(), server_id, refs, start_rank, epoch).await
+    }
+
+    async fn sweep_favorites(&self, server_id: &str, epoch: i64) -> Result<(), DbError> {
+        writes::sweep_favorites(&self.pool(), server_id, epoch).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn file_pool() -> (tempfile::TempDir, SqlitePool) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pool = open_pool(&dir.path().join("t.db")).await.expect("pool");
+        migrations::run_migrations(&pool, None)
+            .await
+            .expect("migrate");
+        (dir, pool)
+    }
+
+    #[tokio::test]
+    async fn the_locale_collation_sorts_accents_beside_their_letter() {
+        let (_dir, pool) = file_pool().await;
+        let names: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM (SELECT 'Zebra' AS name UNION ALL SELECT 'İbrahim' UNION ALL SELECT ' apple' UNION ALL SELECT 'Étoile' UNION ALL SELECT 'élan')
+             ORDER BY name COLLATE LOCALE",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("sorted");
+        assert_eq!(names, [" apple", "élan", "Étoile", "İbrahim", "Zebra"]);
+    }
+
+    /// sqlx does not know about a transaction it did not begin, so the guard
+    /// has to make sure a connection never goes back to the pool holding one.
+    /// If it did, the write below would wait out the busy timeout and fail.
+    #[tokio::test]
+    async fn dropping_an_immediate_transaction_releases_the_write_lock() {
+        let (_dir, pool) = file_pool().await;
+
+        let held = begin_immediate(&pool).await.expect("begin immediate");
+        drop(held);
+
+        let started = std::time::Instant::now();
+        cfg_store::push_recent(&pool, &crate::Source::default(), "/after.flac")
+            .await
+            .expect("the lock was released with the connection");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "took {:?}: the dropped transaction was still holding the lock",
+            started.elapsed()
+        );
+    }
+
+    /// A detached connection is replaced, not counted against the pool, so
+    /// the error path cannot exhaust it.
+    #[tokio::test]
+    async fn the_pool_survives_more_abandoned_transactions_than_it_has_connections() {
+        let (_dir, pool) = file_pool().await;
+
+        for _ in 0..8 {
+            let held = begin_immediate(&pool).await.expect("begin immediate");
+            drop(held);
+        }
+
+        let committed = begin_immediate(&pool).await.expect("still acquirable");
+        committed.commit().await.expect("commit");
+    }
+
+    #[tokio::test]
+    async fn a_committed_immediate_transaction_keeps_its_writes() {
+        let (_dir, pool) = file_pool().await;
+
+        let mut tx = begin_immediate(&pool).await.expect("begin immediate");
+        sqlx::query(
+            "INSERT INTO recently_played (source, track_key, played_at) VALUES ('local', '/x', 1)",
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("insert");
+        tx.commit().await.expect("commit");
+
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM recently_played")
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+        assert_eq!(count, 1);
+    }
+}

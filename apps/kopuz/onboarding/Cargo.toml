@@ -1,0 +1,23 @@
+[package]
+name = "onboarding"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+api = { workspace = true }
+profile = { path = "../profile" }
+store = { workspace = true }
+components = { path = "../components" }
+settings_sources = { path = "../settings_sources" }
+settings_appearance = { path = "../settings_appearance" }
+gpui-kit = { workspace = true }
+config = { workspace = true }
+i18n = { workspace = true }
+link = { workspace = true }
+tracing = { workspace = true }

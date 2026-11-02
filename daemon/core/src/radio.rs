@@ -1,0 +1,250 @@
+//! Internet radio registry, search, and pins. The registry is rebuilt when its
+//! configuration changes; the session plays stations by id.
+
+use std::sync::Arc;
+
+use api::{ApiError, ArtworkTarget, ErrorCode, RadioStationInfo, RadioStreamInfo};
+use radio::manifest::{MetadataSourceDef, StationManifest};
+use radio::registry::StationRegistry;
+use tokio::sync::{RwLock, watch};
+
+use crate::config_service::ConfigService;
+use crate::library::LibraryService;
+use crate::session::SessionHandle;
+
+pub struct RadioService {
+    registry: RwLock<StationRegistry>,
+    db: db::Db,
+    config: Arc<ConfigService>,
+    library: Arc<LibraryService>,
+    session: SessionHandle,
+    /// The last rebuild skipped the registry imports for offline mode.
+    imports_held: std::sync::atomic::AtomicBool,
+}
+
+/// A station's own picture, where its metadata carries one.
+fn manifest_artwork(manifest: &StationManifest) -> Option<String> {
+    match manifest.metadata.as_ref() {
+        Some(MetadataSourceDef::Static(metadata)) => metadata.cover_url.clone(),
+        _ => None,
+    }
+}
+
+/// The wire row. `name` and `description` stay as the registry authored them
+/// -- often translation keys -- because only the client knows the locale.
+fn station_info(manifest: &StationManifest, pinned: bool) -> RadioStationInfo {
+    RadioStationInfo {
+        artwork: manifest_artwork(manifest)
+            .map(|url| crate::artwork::url_ref(ArtworkTarget::Station(manifest.id.clone()), &url)),
+        id: manifest.id.clone(),
+        name: manifest.name.clone(),
+        description: manifest.description.clone(),
+        tags: manifest.tags.clone(),
+        streams: manifest
+            .streams
+            .iter()
+            .map(|stream| RadioStreamInfo {
+                id: stream.id.clone(),
+                name: stream.name.clone(),
+                icon: stream.icon.clone(),
+            })
+            .collect(),
+        pinned,
+        icon: manifest.icon.clone(),
+    }
+}
+
+impl RadioService {
+    pub fn new(
+        db: db::Db,
+        config: Arc<ConfigService>,
+        library: Arc<LibraryService>,
+        session: SessionHandle,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            registry: RwLock::new(StationRegistry::new()),
+            db,
+            config,
+            library,
+            session,
+            imports_held: std::sync::atomic::AtomicBool::new(false),
+        })
+    }
+
+    /// Rebuild the registry from the configured sources. Called at boot and
+    /// whenever the registry list or the pins change, so a settings toggle
+    /// takes effect without a restart.
+    pub async fn reload(&self) -> Result<(), ApiError> {
+        let registries = self.config.snapshot().await.integrations.radio_registries;
+        let pins =
+            self.db.pinned_stations().await.map_err(|error| {
+                ApiError::internal(format!("pinned stations unreadable: {error}"))
+            })?;
+        let mut registry = StationRegistry::new();
+        let offline = self.session.offline().offline_mode();
+        self.imports_held
+            .store(offline, std::sync::atomic::Ordering::SeqCst);
+        for entry in registries.iter().filter(|entry| entry.enabled && !offline) {
+            if let Err(error) = registry.import_registry(&entry.url).await {
+                tracing::warn!(url = %entry.url, %error, "radio registry import failed");
+            }
+        }
+        for json in &pins {
+            match serde_json::from_str(json) {
+                Ok(manifest) => registry.pin_manifest(manifest),
+                Err(error) => tracing::warn!(%error, "pinned radio station is invalid"),
+            }
+        }
+        self.publish(registry).await;
+        Ok(())
+    }
+
+    /// Rebuild whenever the configured registries change, so a settings toggle
+    /// takes effect without a restart. Pins reload themselves through `pin`,
+    /// which is why the key ignores them: re-importing every registry for a
+    /// pin would cost a round of network for nothing.
+    pub fn watch_config(self: &Arc<Self>, mut config: watch::Receiver<config::Settings>) {
+        let service = self.clone();
+        let mut events = self.session.subscribe();
+        tokio::spawn(async move {
+            let mut current = registry_key(&config.borrow());
+            loop {
+                tokio::select! {
+                    changed = config.changed() => {
+                        if changed.is_err() {
+                            return;
+                        }
+                        let next = registry_key(&config.borrow());
+                        if next == current {
+                            continue;
+                        }
+                        current = next;
+                    }
+                    event = events.recv() => match event {
+                        // The imports offline mode held back are fetched once it ends.
+                        Ok(api::ApiEvent::NetworkStatus(status))
+                            if !status.offline_mode.is_on()
+                                && service.imports_held.load(std::sync::atomic::Ordering::SeqCst) => {}
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                        _ => continue,
+                    },
+                }
+                if let Err(error) = service.reload().await {
+                    tracing::warn!(%error, "radio registry reload failed");
+                }
+            }
+        });
+    }
+
+    /// Share the registry with whatever resolves a stream at play time.
+    async fn publish(&self, registry: StationRegistry) {
+        let snapshot = Arc::new(registry.clone());
+        *self.registry.write().await = registry;
+        self.library.set_station_registry(snapshot);
+        self.session.invalidate(api::Table::Stations);
+    }
+
+    pub async fn stations(&self) -> Vec<RadioStationInfo> {
+        let registry = self.registry.read().await;
+        registry
+            .all_stations()
+            .into_iter()
+            .map(|station| {
+                let pinned = registry.is_registry_station(&station.id);
+                station_info(station, pinned)
+            })
+            .collect()
+    }
+
+    /// The station's icon URL, for the artwork service to proxy.
+    pub async fn artwork_url(&self, id: &str) -> Option<String> {
+        self.registry
+            .read()
+            .await
+            .get(id)
+            .and_then(manifest_artwork)
+    }
+
+    /// Search the public directory. Hits join the live registry before they
+    /// are returned, so playing one by id immediately afterwards works.
+    pub async fn search(&self, query: &str, limit: u32) -> Result<Vec<RadioStationInfo>, ApiError> {
+        let stations = if query.trim().is_empty() {
+            radio::browser::top_stations(limit).await
+        } else {
+            radio::browser::search(query, limit).await
+        }
+        .map_err(|error| ApiError::new(ErrorCode::SourceUnreachable, error.to_string()))?;
+
+        let mut registry = self.registry.write().await;
+        let mut found = Vec::with_capacity(stations.len());
+        for station in stations {
+            let manifest = radio::browser::to_manifest(&station);
+            let known = registry.get(&manifest.id).is_some();
+            let pinned = registry.is_registry_station(&manifest.id);
+            found.push(station_info(&manifest, pinned));
+
+            if !known {
+                registry.insert_manifest(manifest);
+            }
+        }
+        let snapshot = Arc::new(registry.clone());
+        drop(registry);
+        self.library.set_station_registry(snapshot);
+        Ok(found)
+    }
+
+    /// Import a registry into a throwaway of its own, so a client can tell a
+    /// user their URL is wrong before it writes it into the config that this
+    /// service rebuilds from.
+    pub async fn validate_registry(&self, url: &str) -> Result<u32, ApiError> {
+        let mut registry = StationRegistry::new();
+        registry
+            .import_registry(url)
+            .await
+            .map_err(|error| ApiError::invalid_input(error.to_string()))?;
+        Ok(registry.all_stations().len() as u32)
+    }
+
+    /// Pin a station, keeping its manifest so it survives a registry that stops listing it.
+    pub async fn pin(&self, id: &str, pinned: bool) -> Result<(), ApiError> {
+        let manifest = self
+            .registry
+            .read()
+            .await
+            .get(id)
+            .cloned()
+            .ok_or_else(|| ApiError::not_found("no such radio station"))?;
+        manifest
+            .validate()
+            .map_err(|error| ApiError::invalid_input(error.to_string()))?;
+        let json = serde_json::to_string(&manifest)
+            .map_err(|error| ApiError::internal(error.to_string()))?;
+
+        self.db
+            .set_pinned_station(&manifest.id, pinned.then_some(json.as_str()))
+            .await
+            .map_err(|error| ApiError::internal(format!("station pin failed: {error}")))?;
+        self.reload().await?;
+        if !pinned {
+            let mut registry = self.registry.write().await;
+            registry.insert_manifest(manifest);
+            let snapshot = Arc::new(registry.clone());
+            drop(registry);
+            self.library.set_station_registry(snapshot);
+            self.session.invalidate(api::Table::Stations);
+        }
+        Ok(())
+    }
+}
+
+/// What the registry is built from: the enabled registry URLs, in order.
+fn registry_key(config: &config::Settings) -> String {
+    config
+        .integrations
+        .radio_registries
+        .iter()
+        .filter(|entry| entry.enabled)
+        .map(|entry| entry.url.as_str())
+        .collect::<Vec<_>>()
+        .join(",")
+}

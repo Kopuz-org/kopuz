@@ -1,0 +1,722 @@
+//! Per-session decode worker.
+//!
+//! One thread per loaded source. It builds the media source (the factory may
+//! block on network), probes it, then decodes packets into the ring buffer.
+//! All coordination is over channels — no shared flags. At natural EOF the
+//! worker parks on its command channel with the format reader alive, so a
+//! later `Seek` resumes in place instead of stranding the session (the
+//! seek-after-end hang this refactor removes).
+
+use std::io::{Seek as _, SeekFrom};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
+use std::time::Duration;
+
+use symphonia::core::audio::GenericAudioBufferRef;
+use symphonia::core::codecs::audio::{AudioCodecParameters, AudioDecoder, AudioDecoderOptions};
+use symphonia::core::codecs::registry::RegisterableAudioDecoder;
+use symphonia::core::formats::probe::Hint;
+use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, Track, TrackType};
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::meta::MetadataOptions;
+use symphonia::core::units::Time;
+
+use super::{ActorMsg, Failure, SourceFactory};
+use crate::replaygain;
+
+pub(crate) enum WorkerCmd {
+    /// Begin decoding into the given ring. Sent once, after `Ready`.
+    Start {
+        producer: rtrb::Producer<f32>,
+        written: Arc<AtomicU64>,
+        channels: usize,
+        sample_rate: u32,
+        start_at: Option<Duration>,
+        /// Ring generation this decode feeds; echoed back on `Eof`.
+        epoch: u64,
+    },
+    /// Re-seek and switch to a fresh ring (the old one was swapped out of the
+    /// audio callback; pre-seek samples die with it). Carries the output config
+    /// because a device rebuild can revive a session onto a stream with a
+    /// different rate/channel count — the decode must retarget with the ring.
+    Seek {
+        target: Duration,
+        producer: rtrb::Producer<f32>,
+        written: Arc<AtomicU64>,
+        channels: usize,
+        sample_rate: u32,
+        /// New ring generation; a stale `Eof` tagged with the old epoch is
+        /// dropped by the actor rather than ending the freshly-seeked session.
+        epoch: u64,
+    },
+    Stop,
+}
+
+pub(crate) enum WorkerMsg {
+    /// Probe finished; the actor picks an output config and replies `Start`.
+    Ready {
+        token: u64,
+        source_sample_rate: Option<u32>,
+        seekable: bool,
+        /// Read off the probed container, so a service that transcodes and
+        /// drops the tags reports no gain rather than a stale one.
+        replay_gain: config::ReplayGainInfo,
+    },
+    /// Natural end of the source. The worker stays parked and seekable. The
+    /// epoch identifies which ring generation ended, so an `Eof` that races a
+    /// seek can't end the new ring.
+    Eof { token: u64, epoch: u64 },
+    /// Source construction / probe / codec setup failed before playback.
+    Failed { token: u64, error: Failure },
+}
+
+pub(crate) struct WorkerHandle {
+    pub cmd_tx: Sender<WorkerCmd>,
+    pub join: std::thread::JoinHandle<()>,
+}
+
+pub(crate) fn spawn(
+    token: u64,
+    factory: SourceFactory,
+    msg_tx: Sender<ActorMsg>,
+) -> std::io::Result<WorkerHandle> {
+    let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
+    let join = std::thread::Builder::new()
+        .name(format!("kopuz-decode-{token}"))
+        .spawn(move || {
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run(token, factory, &msg_tx, &cmd_rx)
+            }));
+            if outcome.is_err() {
+                tracing::error!(token, "decode worker panicked");
+                let _ = msg_tx.send(ActorMsg::Worker(WorkerMsg::Failed {
+                    token,
+                    error: "decode worker panicked".to_string().into(),
+                }));
+            }
+        })?;
+    Ok(WorkerHandle { cmd_tx, join })
+}
+
+/// Per-ring decode state, replaced whole on every `Start`/`Seek`: the ring
+/// halves, the output config the ring was sized for (decode converts to it),
+/// and the generation the actor filters stale `Eof`s by.
+struct Output {
+    producer: rtrb::Producer<f32>,
+    written: Arc<AtomicU64>,
+    channels: usize,
+    sample_rate: u32,
+    epoch: u64,
+}
+
+/// Reused per-packet conversion buffers so steady-state decode allocates
+/// nothing. Owned by `run`; each is cleared and refilled per packet.
+#[derive(Default)]
+struct Scratch {
+    interleaved: Vec<f32>,
+    converted: Vec<f32>,
+    resampled: Vec<f32>,
+}
+
+enum FlowChange {
+    /// A seek arrived: pre-seek output must be discarded.
+    Seeked,
+    /// A seek failed post-EOF; rebuild the reader from the buffered source
+    /// then seek to this target (see `reprobe_from_buffer`).
+    Reprobe(Duration),
+    /// Stop requested or the actor went away.
+    Exit,
+}
+
+enum SeekOutcome {
+    Done,
+    /// `format.seek` failed because the reader is past EOF (Matroska can't seek
+    /// there); the caller must re-probe the buffered source and retry.
+    NeedsReprobe(Duration),
+}
+
+fn run(
+    token: u64,
+    factory: SourceFactory,
+    msg_tx: &Sender<ActorMsg>,
+    cmd_rx: &Receiver<WorkerCmd>,
+) {
+    let send = |msg: WorkerMsg| {
+        let _ = msg_tx.send(ActorMsg::Worker(msg));
+    };
+    let fail = |error: Failure| {
+        tracing::error!(token, error = %error, "decode worker failed");
+        send(WorkerMsg::Failed { token, error });
+    };
+
+    let (source, hint) = match factory() {
+        Ok(parts) => parts,
+        Err(e) => return fail(Failure::opening(&e)),
+    };
+    let seekable = source.is_seekable();
+
+    let mss = MediaSourceStream::new(source, Default::default());
+    let mut format: Box<dyn FormatReader> = match symphonia::default::get_probe().probe(
+        &hint,
+        mss,
+        FormatOptions::default(),
+        MetadataOptions::default(),
+    ) {
+        Ok(format) => format,
+        Err(e) => return fail(Failure::from(format!("symphonia probe error: {e}"))),
+    };
+
+    let Some(track) = format.first_track(TrackType::Audio) else {
+        return fail(Failure::from("no supported audio tracks found".to_string()));
+    };
+    let mut track_id = track.id;
+
+    let Some(audio_params) = audio_params_for_track(track) else {
+        return fail(Failure::from("no audio codec parameters".to_string()));
+    };
+    let source_sample_rate = audio_params.sample_rate;
+
+    let (mut decoder, output_gain) = match symphonia::default::get_codecs()
+        .make_audio_decoder(&audio_params, &AudioDecoderOptions::default())
+    {
+        Ok(d) => (d, 1.0),
+        Err(_) => match symphonia_adapter_libopus::OpusDecoder::try_registry_new(
+            &audio_params,
+            &AudioDecoderOptions::default(),
+        ) {
+            Ok(d) => (d, opus_output_gain(audio_params.extra_data.as_deref())),
+            Err(e) => return fail(Failure::from(format!("symphonia codec error: {e}"))),
+        },
+    };
+
+    send(WorkerMsg::Ready {
+        token,
+        source_sample_rate,
+        seekable,
+        replay_gain: replaygain::from_format(format.as_mut()),
+    });
+
+    let mut output = match cmd_rx.recv() {
+        Ok(WorkerCmd::Start {
+            producer,
+            written,
+            channels,
+            sample_rate,
+            start_at,
+            epoch,
+        }) => {
+            if let Some(target) = start_at {
+                let outcome = seek_reader(format.as_mut(), decoder.as_mut(), track_id, target);
+                if let SeekOutcome::NeedsReprobe(t) = outcome {
+                    match reprobe_from_buffer(format, &hint, decoder.as_mut(), t) {
+                        Ok((f, tid)) => {
+                            format = f;
+                            track_id = tid;
+                        }
+                        Err(e) => return fail(Failure::from(e)),
+                    }
+                }
+            }
+            Output {
+                producer,
+                written,
+                channels,
+                sample_rate,
+                epoch,
+            }
+        }
+        _ => return,
+    };
+
+    macro_rules! reprobe_or_fail {
+        ($target:expr) => {
+            match reprobe_from_buffer(format, &hint, decoder.as_mut(), $target) {
+                Ok((f, tid)) => {
+                    format = f;
+                    track_id = tid;
+                    continue;
+                }
+                Err(e) => return fail(Failure::from(e)),
+            }
+        };
+    }
+    macro_rules! park_and_handle {
+        () => {{
+            let outcome = park_at_eof(
+                cmd_rx,
+                &mut output,
+                format.as_mut(),
+                decoder.as_mut(),
+                track_id,
+            );
+            match outcome {
+                ParkOutcome::Resume => continue,
+                ParkOutcome::Reprobe(t) => reprobe_or_fail!(t),
+                ParkOutcome::Exit => return,
+            }
+        }};
+    }
+
+    let mut scratch = Scratch::default();
+    loop {
+        let change = drain_commands(
+            cmd_rx,
+            &mut output,
+            format.as_mut(),
+            decoder.as_mut(),
+            track_id,
+        );
+        match change {
+            None => {}
+            Some(FlowChange::Seeked) => continue,
+            Some(FlowChange::Reprobe(t)) => reprobe_or_fail!(t),
+            Some(FlowChange::Exit) => return,
+        }
+
+        let packet = match format.next_packet() {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                send(WorkerMsg::Eof {
+                    token,
+                    epoch: output.epoch,
+                });
+                park_and_handle!()
+            }
+            Err(symphonia::core::errors::Error::IoError(ref e))
+                if e.kind() == std::io::ErrorKind::UnexpectedEof =>
+            {
+                send(WorkerMsg::Eof {
+                    token,
+                    epoch: output.epoch,
+                });
+                park_and_handle!()
+            }
+            Err(symphonia::core::errors::Error::ResetRequired) => {
+                decoder.reset();
+                continue;
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "format error — ending track");
+                send(WorkerMsg::Eof {
+                    token,
+                    epoch: output.epoch,
+                });
+                park_and_handle!()
+            }
+        };
+
+        if packet.track_id != track_id {
+            continue;
+        }
+
+        let decoded = match decoder.decode(&packet) {
+            Ok(d) => d,
+            Err(symphonia::core::errors::Error::DecodeError(e)) => {
+                tracing::debug!(error = %e, "recoverable decode error — skipping packet");
+                continue;
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "fatal decode error");
+                send(WorkerMsg::Eof {
+                    token,
+                    epoch: output.epoch,
+                });
+                park_and_handle!()
+            }
+        };
+
+        let samples = audio_buf_to_f32_interleaved(
+            &decoded,
+            output.channels,
+            output.sample_rate,
+            &mut scratch,
+        );
+        if output_gain != 1.0 {
+            for sample in samples.iter_mut() {
+                *sample *= output_gain;
+            }
+        }
+
+        let change = write_all(
+            cmd_rx,
+            &mut output,
+            samples,
+            format.as_mut(),
+            decoder.as_mut(),
+            track_id,
+        );
+        match change {
+            None => {}
+            Some(FlowChange::Seeked) => continue,
+            Some(FlowChange::Reprobe(t)) => reprobe_or_fail!(t),
+            Some(FlowChange::Exit) => return,
+        }
+    }
+}
+
+enum ParkOutcome {
+    Resume,
+    /// A seek failed post-EOF; the main loop must re-probe then resume.
+    Reprobe(Duration),
+    Exit,
+}
+
+/// Block on the command channel with the reader alive so a later seek can
+/// resume this session in place.
+fn park_at_eof(
+    cmd_rx: &Receiver<WorkerCmd>,
+    output: &mut Output,
+    format: &mut dyn FormatReader,
+    decoder: &mut dyn AudioDecoder,
+    track_id: u32,
+) -> ParkOutcome {
+    loop {
+        match cmd_rx.recv() {
+            Ok(WorkerCmd::Seek {
+                target,
+                producer,
+                written,
+                channels,
+                sample_rate,
+                epoch,
+            }) => {
+                *output = Output {
+                    producer,
+                    written,
+                    channels,
+                    sample_rate,
+                    epoch,
+                };
+                return match seek_reader(format, decoder, track_id, target) {
+                    SeekOutcome::Done => ParkOutcome::Resume,
+                    SeekOutcome::NeedsReprobe(t) => ParkOutcome::Reprobe(t),
+                };
+            }
+            Ok(WorkerCmd::Stop) | Err(_) => return ParkOutcome::Exit,
+            Ok(WorkerCmd::Start { .. }) => {
+                tracing::warn!("unexpected Start for an already-started decode worker");
+            }
+        }
+    }
+}
+
+/// Apply one command to the decode state. `seeked` is set (not returned) so a
+/// caller draining several commands can coalesce seeks into one `Seeked`.
+fn apply_command(
+    cmd: WorkerCmd,
+    output: &mut Output,
+    format: &mut dyn FormatReader,
+    decoder: &mut dyn AudioDecoder,
+    track_id: u32,
+    seeked: &mut bool,
+) -> Option<FlowChange> {
+    match cmd {
+        WorkerCmd::Seek {
+            target,
+            producer,
+            written,
+            channels,
+            sample_rate,
+            epoch,
+        } => {
+            *output = Output {
+                producer,
+                written,
+                channels,
+                sample_rate,
+                epoch,
+            };
+            match seek_reader(format, decoder, track_id, target) {
+                SeekOutcome::Done => {
+                    *seeked = true;
+                    None
+                }
+                SeekOutcome::NeedsReprobe(t) => Some(FlowChange::Reprobe(t)),
+            }
+        }
+        WorkerCmd::Stop => Some(FlowChange::Exit),
+        WorkerCmd::Start { .. } => {
+            tracing::warn!("unexpected Start for an already-started decode worker");
+            None
+        }
+    }
+}
+
+/// Apply any pending commands without blocking.
+fn drain_commands(
+    cmd_rx: &Receiver<WorkerCmd>,
+    output: &mut Output,
+    format: &mut dyn FormatReader,
+    decoder: &mut dyn AudioDecoder,
+    track_id: u32,
+) -> Option<FlowChange> {
+    let mut seeked = false;
+    loop {
+        match cmd_rx.try_recv() {
+            Ok(cmd) => {
+                if let Some(change) =
+                    apply_command(cmd, output, format, decoder, track_id, &mut seeked)
+                {
+                    return Some(change);
+                }
+            }
+            Err(TryRecvError::Empty) => {
+                return if seeked {
+                    Some(FlowChange::Seeked)
+                } else {
+                    None
+                };
+            }
+            Err(TryRecvError::Disconnected) => return Some(FlowChange::Exit),
+        }
+    }
+}
+
+/// Write the full sample block, backing off while the ring is full and
+/// staying responsive to Seek/Stop.
+fn write_all(
+    cmd_rx: &Receiver<WorkerCmd>,
+    output: &mut Output,
+    samples: &[f32],
+    format: &mut dyn FormatReader,
+    decoder: &mut dyn AudioDecoder,
+    track_id: u32,
+) -> Option<FlowChange> {
+    let mut offset = 0;
+    while offset < samples.len() {
+        if let Some(change) = drain_commands(cmd_rx, output, format, decoder, track_id) {
+            return Some(change);
+        }
+
+        let available = output.producer.slots().min(samples.len() - offset);
+        if available == 0 {
+            match cmd_rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(cmd) => {
+                    let mut seeked = false;
+                    if let Some(change) =
+                        apply_command(cmd, output, format, decoder, track_id, &mut seeked)
+                    {
+                        return Some(change);
+                    }
+                    if seeked {
+                        return Some(FlowChange::Seeked);
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return Some(FlowChange::Exit),
+            }
+            continue;
+        }
+        let Ok(chunk) = output.producer.write_chunk_uninit(available) else {
+            std::thread::sleep(Duration::from_millis(5));
+            continue;
+        };
+        let written = chunk.fill_from_iter(samples[offset..offset + available].iter().copied());
+        offset += written;
+        output.written.fetch_add(written as u64, Ordering::Relaxed);
+    }
+    None
+}
+
+fn seek_reader(
+    format: &mut dyn FormatReader,
+    decoder: &mut dyn AudioDecoder,
+    track_id: u32,
+    target: Duration,
+) -> SeekOutcome {
+    let time = Time::try_from_secs_f64(target.as_secs_f64()).unwrap_or_default();
+    let seek_to = SeekTo::Time {
+        time,
+        track_id: Some(track_id),
+    };
+
+    let seek_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        format.seek(SeekMode::Coarse, seek_to)
+    }));
+    match seek_result {
+        Ok(Ok(_)) => {
+            decoder.reset();
+            SeekOutcome::Done
+        }
+
+        Ok(Err(e)) => {
+            tracing::warn!(error = %e, "seek error; re-probing from buffered source");
+            SeekOutcome::NeedsReprobe(target)
+        }
+        Err(_) => {
+            tracing::warn!("seek panicked inside symphonia demuxer; continuing playback");
+            decoder.reset();
+            SeekOutcome::Done
+        }
+    }
+}
+
+/// Rebuild the format reader from its own (rewound) source so it can seek
+/// again. symphonia's Matroska demuxer can't seek past EOF; re-probing the
+/// same bytes yields a reader positioned back inside the Segment. Reuses the
+/// buffered source (`StreamBuffer` keeps the downloaded bytes) — no re-download
+/// or re-resolve. Returns the fresh reader and its audio track id.
+fn reprobe_from_buffer(
+    format: Box<dyn FormatReader>,
+    hint: &Hint,
+    decoder: &mut dyn AudioDecoder,
+    target: Duration,
+) -> Result<(Box<dyn FormatReader>, u32), String> {
+    let mut mss = format.into_inner();
+    mss.seek(SeekFrom::Start(0))
+        .map_err(|e| format!("rewind for re-probe failed: {e}"))?;
+    let mut format = symphonia::default::get_probe()
+        .probe(
+            hint,
+            mss,
+            FormatOptions::default(),
+            MetadataOptions::default(),
+        )
+        .map_err(|e| format!("re-probe failed: {e}"))?;
+    let track_id = format
+        .first_track(TrackType::Audio)
+        .map(|t| t.id)
+        .ok_or_else(|| "no audio track after re-probe".to_string())?;
+
+    seek_reader(format.as_mut(), decoder, track_id, target);
+    Ok((format, track_id))
+}
+
+pub(crate) fn parse_opushead_channels(extra: &[u8]) -> Option<u8> {
+    if extra.len() >= 10 && &extra[..8] == b"OpusHead" {
+        Some(extra[9])
+    } else {
+        None
+    }
+}
+
+/// Decode the OpusHead gain that the libopus adapter leaves unapplied, independently of ReplayGain.
+fn opus_output_gain(extra: Option<&[u8]>) -> f32 {
+    let Some(header) = extra.filter(|extra| extra.len() >= 19 && extra.starts_with(b"OpusHead"))
+    else {
+        return 1.0;
+    };
+    let q78 = i16::from_le_bytes([header[16], header[17]]);
+    10.0_f32.powf(f32::from(q78) / (256.0 * 20.0))
+}
+
+pub(crate) fn audio_params_for_track(track: &Track) -> Option<AudioCodecParameters> {
+    let mut audio_params = track
+        .codec_params
+        .as_ref()
+        .and_then(|p| p.audio())
+        .cloned()?;
+
+    if audio_params.channels.is_none() {
+        let ch = audio_params
+            .extra_data
+            .as_deref()
+            .and_then(parse_opushead_channels)
+            .unwrap_or(2);
+        audio_params.channels = Some(symphonia::core::audio::Channels::Discrete(ch as u16));
+        if audio_params.sample_rate.is_none() {
+            audio_params.sample_rate = Some(48_000);
+        }
+    }
+
+    Some(audio_params)
+}
+
+fn audio_buf_to_f32_interleaved<'a>(
+    buf: &GenericAudioBufferRef,
+    target_channels: usize,
+    target_sample_rate: u32,
+    scratch: &'a mut Scratch,
+) -> &'a mut [f32] {
+    let source_sample_rate = buf.spec().rate();
+    let src_chans = buf.num_planes().max(1);
+
+    scratch.interleaved.clear();
+    buf.copy_to_vec_interleaved(&mut scratch.interleaved);
+
+    let channels_converted = src_chans != target_channels;
+    if channels_converted {
+        convert_channels(
+            &scratch.interleaved,
+            src_chans,
+            target_channels,
+            &mut scratch.converted,
+        );
+    }
+
+    if source_sample_rate != 0 && source_sample_rate != target_sample_rate {
+        let src = if channels_converted {
+            &scratch.converted
+        } else {
+            &scratch.interleaved
+        };
+        resample(
+            src,
+            target_channels,
+            source_sample_rate,
+            target_sample_rate,
+            &mut scratch.resampled,
+        );
+        &mut scratch.resampled
+    } else if channels_converted {
+        &mut scratch.converted
+    } else {
+        &mut scratch.interleaved
+    }
+}
+
+fn convert_channels(samples: &[f32], src_channels: usize, dst_channels: usize, out: &mut Vec<f32>) {
+    let frames = samples.len() / src_channels;
+    out.clear();
+    out.reserve(frames * dst_channels);
+
+    for frame in 0..frames {
+        let src_offset = frame * src_channels;
+        for ch in 0..dst_channels {
+            if ch < src_channels {
+                out.push(samples[src_offset + ch]);
+            } else if src_channels == 1 {
+                out.push(samples[src_offset]);
+            } else {
+                out.push(0.0);
+            }
+        }
+    }
+}
+
+fn resample(samples: &[f32], channels: usize, src_rate: u32, dst_rate: u32, out: &mut Vec<f32>) {
+    out.clear();
+    if channels == 0 || src_rate == 0 || dst_rate == 0 {
+        out.extend_from_slice(samples);
+        return;
+    }
+    let src_frames = samples.len() / channels;
+    let ratio = dst_rate as f64 / src_rate as f64;
+    if ratio.is_nan() || ratio.is_infinite() {
+        out.extend_from_slice(samples);
+        return;
+    }
+    let dst_frames = (src_frames as f64 * ratio).ceil() as usize;
+    out.reserve(dst_frames * channels);
+
+    for i in 0..dst_frames {
+        let src_pos = i as f64 / ratio;
+        let src_idx = src_pos.floor() as usize;
+        let frac = src_pos - src_idx as f64;
+
+        for ch in 0..channels {
+            let s0 = if src_idx < src_frames {
+                samples[src_idx * channels + ch]
+            } else {
+                0.0
+            };
+            let s1 = if src_idx + 1 < src_frames {
+                samples[(src_idx + 1) * channels + ch]
+            } else {
+                s0
+            };
+            out.push(s0 + (s1 - s0) * frac as f32);
+        }
+    }
+}

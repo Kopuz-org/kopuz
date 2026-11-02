@@ -1,6 +1,6 @@
 <!--markdownlint-disable MD013 MD033 MD041 -->
 <div align="center">
-  <img src="../crates/kopuz/assets/banner.png" alt="Kopuz Logo" height="300"/>
+  <img src="../apps/legacy/kopuz/assets/banner.png" alt="Kopuz Logo" height="300"/>
   <h1>Kopuz</h1>
   <p>
     Kopuz; Rust ve Dioxus framework'ü ile oluşturulmuş, modern ve hafif bir müzik çalar
@@ -321,7 +321,7 @@ cd kopuz
 npm install
 
 # Serve project with Dioxus CLI
-dx serve --package kopuz
+dx serve --package kopuz-legacy
 ```
 
 ### macOS

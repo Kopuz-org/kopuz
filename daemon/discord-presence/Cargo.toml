@@ -1,0 +1,29 @@
+[package]
+name = "kopuz-discord-presence"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "discord_presence"
+
+[lints]
+workspace = true
+
+[dependencies]
+reqwest = { workspace = true, features = ["json"] }
+utils = { workspace = true, features = ["http"] }
+serde.workspace = true
+tracing.workspace = true
+db = { workspace = true }
+reader.workspace = true
+config.workspace = true
+
+# Discord IPC has no meaning on Android, so the real client is desktop-only.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+discord-rich-presence.workspace = true

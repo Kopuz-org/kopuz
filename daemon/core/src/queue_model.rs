@@ -1,0 +1,1196 @@
+//! Queue, shuffle, and loop state.
+//!
+//! While shuffling, `current` and history contain logical indices into
+//! `shuffle_order`; [`QueueModel::physical_index_of`] maps them to track indices.
+//! The session actor commits playback decisions to the engine.
+
+use api::LoopMode;
+use reader::Track;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NextOutcome {
+    /// Advance to this logical position.
+    Play(usize),
+    /// End of queue under the current loop mode: stop, don't wrap.
+    EndOfQueue,
+    Empty,
+}
+
+/// `start` stays on its track when kept, else moves to the next kept one (the
+/// last, when nothing after it is).
+pub fn without_explicit(tracks: Vec<Track>, start: Option<usize>) -> (Vec<Track>, Option<usize>) {
+    keep_where(tracks, start, |track| !track.explicit)
+}
+
+/// The tracks `keep` takes, with `start` kept as [`without_explicit`] keeps it.
+pub fn keep_where(
+    tracks: Vec<Track>,
+    start: Option<usize>,
+    keep: impl Fn(&Track) -> bool,
+) -> (Vec<Track>, Option<usize>) {
+    let start = start.map(|start| {
+        tracks
+            .iter()
+            .take(start)
+            .filter(|track| keep(track))
+            .count()
+    });
+    let kept: Vec<Track> = tracks.into_iter().filter(|track| keep(track)).collect();
+    let start = start.map(|start| start.min(kept.len().saturating_sub(1)));
+    (kept, start)
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct QueueModel {
+    items: Vec<Track>,
+    history: Vec<usize>,
+    shuffle: bool,
+    shuffle_order: Vec<usize>,
+    current: usize,
+    loop_mode: LoopMode,
+}
+
+impl QueueModel {
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    pub fn items(&self) -> &[Track] {
+        &self.items
+    }
+
+    pub fn current_position(&self) -> usize {
+        self.current
+    }
+
+    pub fn shuffle(&self) -> bool {
+        self.shuffle
+    }
+
+    pub fn shuffle_order(&self) -> &[usize] {
+        &self.shuffle_order
+    }
+
+    pub fn history(&self) -> &[usize] {
+        &self.history
+    }
+
+    pub fn loop_mode(&self) -> LoopMode {
+        self.loop_mode
+    }
+
+    pub fn set_loop_mode(&mut self, mode: LoopMode) {
+        self.loop_mode = mode;
+    }
+
+    pub fn toggle_loop(&mut self) {
+        self.loop_mode = self.loop_mode.next();
+    }
+
+    /// Map a logical position to a physical index. Without shuffle, bounds
+    /// checking is left to [`Self::track_at`].
+    pub fn physical_index_of(&self, position: usize) -> Option<usize> {
+        if self.shuffle {
+            self.shuffle_order.get(position).copied()
+        } else {
+            Some(position)
+        }
+    }
+
+    pub fn track_at(&self, position: usize) -> Option<&Track> {
+        let idx = self.physical_index_of(position)?;
+        self.items.get(idx)
+    }
+
+    pub(crate) fn track_at_mut(&mut self, position: usize) -> Option<&mut Track> {
+        let idx = self.physical_index_of(position)?;
+        self.items.get_mut(idx)
+    }
+
+    pub fn current_track(&self) -> Option<&Track> {
+        self.track_at(self.current)
+    }
+
+    /// Whether the queue is walking an album at `position`: a neighbour in play
+    /// order belongs to the same album. Always false under shuffle, even when
+    /// two tracks of one album land side by side: ReplayGain's auto mode
+    /// should level a shuffled mix track to track.
+    pub fn album_context_at(&self, position: usize, album_id: &str) -> bool {
+        if self.shuffle || album_id.is_empty() {
+            return false;
+        }
+        let shares_album = |other: usize| {
+            self.track_at(other)
+                .is_some_and(|track| track.album_id == album_id)
+        };
+        position.checked_sub(1).is_some_and(shares_album) || shares_album(position + 1)
+    }
+
+    /// Whether advancing from `idx` lands on another track. The crossfade arm
+    /// and the actual advance MUST agree on this: if the arm fires when the
+    /// advance would hit end-of-queue, playback pauses mid-fade and the song
+    /// dies ~crossfade-seconds early. Shuffle-agnostic on purpose.
+    pub fn has_following_track(idx: usize, queue_len: usize, loop_mode: LoopMode) -> bool {
+        if queue_len == 0 {
+            return false;
+        }
+        match loop_mode {
+            LoopMode::Track | LoopMode::Queue => true,
+            LoopMode::None => idx + 1 < queue_len,
+        }
+    }
+
+    pub fn has_next_track(&self) -> bool {
+        Self::has_following_track(self.current, self.items.len(), self.loop_mode)
+    }
+
+    fn push_history_dedup(&mut self) {
+        if self.history.last() != Some(&self.current) {
+            self.history.push(self.current);
+        }
+    }
+
+    /// The Next decision without taking it: repairs the shuffle permutation so
+    /// end-of-queue is measured against a permutation that still covers the
+    /// queue, but leaves `current` and history alone. A crossfade candidate is
+    /// chosen this way, because the queue must keep reading as the outgoing
+    /// track until the engine actually switches.
+    pub fn peek_next(&mut self) -> NextOutcome {
+        self.peek_next_where(|_| true)
+    }
+
+    /// Ends when every remaining track is refused; a looping queue comes round
+    /// to the current track again.
+    pub fn peek_next_where(&mut self, playable: impl Fn(&Track) -> bool) -> NextOutcome {
+        let queue_len = if self.shuffle {
+            self.repair_shuffle_order();
+            self.shuffle_order.len()
+        } else {
+            self.items.len()
+        };
+
+        if queue_len == 0 {
+            return NextOutcome::Empty;
+        }
+
+        if self.loop_mode == LoopMode::Track {
+            return NextOutcome::Play(self.current);
+        }
+        let mut idx = self.current;
+        for _ in 0..queue_len {
+            if !Self::has_following_track(idx, queue_len, self.loop_mode) {
+                return NextOutcome::EndOfQueue;
+            }
+            idx = if idx + 1 < queue_len { idx + 1 } else { 0 };
+            if self.track_at(idx).is_some_and(&playable) {
+                return NextOutcome::Play(idx);
+            }
+        }
+        NextOutcome::EndOfQueue
+    }
+
+    /// The Next decision, taken: on `Play`, history is pushed and `current`
+    /// moves to the position [`Self::peek_next`] reported.
+    pub fn advance_next(&mut self) -> NextOutcome {
+        self.advance_next_where(|_| true)
+    }
+
+    /// The tracks stepped over stay out of history.
+    pub fn advance_next_where(&mut self, playable: impl Fn(&Track) -> bool) -> NextOutcome {
+        let outcome = self.peek_next_where(playable);
+        if let NextOutcome::Play(idx) = outcome {
+            self.push_history_dedup();
+            self.current = idx;
+        }
+        outcome
+    }
+
+    /// The Previous decision, minus the caller-owned gates (crossfade revert,
+    /// rewind-then-prev). Pops history first; falls back to `position - 1`,
+    /// then to the queue tail under `LoopMode::Queue`.
+    pub fn previous_position(&mut self) -> Option<usize> {
+        let idx = self.current;
+        let queue_len = if self.shuffle {
+            self.repair_shuffle_order();
+            self.shuffle_order.len()
+        } else {
+            self.items.len()
+        };
+
+        if queue_len == 0 {
+            return None;
+        }
+
+        if let Some(prev_idx) = self.history.pop() {
+            self.current = prev_idx;
+            return Some(prev_idx);
+        }
+
+        if idx > 0 {
+            self.current = idx - 1;
+            Some(idx - 1)
+        } else if self.loop_mode == LoopMode::Queue {
+            self.current = queue_len - 1;
+            Some(queue_len - 1)
+        } else {
+            None
+        }
+    }
+
+    /// Jump to a physical index, recording history. With shuffle, the target
+    /// becomes position 0 of a fresh permutation. Returns the logical position.
+    pub fn jump_to(&mut self, physical_idx: usize) -> usize {
+        self.push_history_dedup();
+        self.current = physical_idx;
+        if self.shuffle {
+            self.rebuild_shuffle_order();
+        }
+        self.current
+    }
+
+    /// Explicit jump to a logical play-order position, leaving the running
+    /// shuffle permutation alone (unlike [`Self::jump_to`], which rebuilds it
+    /// around a physical row).
+    pub fn jump_to_position(&mut self, position: usize) -> Option<usize> {
+        let queue_len = if self.shuffle {
+            self.repair_shuffle_order();
+            self.shuffle_order.len()
+        } else {
+            self.items.len()
+        };
+        if position >= queue_len {
+            return None;
+        }
+        self.push_history_dedup();
+        self.current = position;
+        Some(position)
+    }
+
+    /// Replace tracks while retaining history and permutation; callers must
+    /// follow with [`Self::jump_to`]. An empty replacement resets all state.
+    pub fn replace(&mut self, tracks: Vec<Track>) {
+        if tracks.is_empty() {
+            self.clear();
+            return;
+        }
+        self.items = tracks;
+    }
+
+    pub fn add(&mut self, tracks: Vec<Track>) {
+        let count = tracks.len();
+        if count == 0 {
+            return;
+        }
+        self.items.extend(tracks);
+        if self.shuffle {
+            let q_len = self.items.len();
+            let start_idx = q_len - count;
+            self.shuffle_order.extend(start_idx..q_len);
+        }
+    }
+
+    /// Insert tracks immediately after the current position (in play order),
+    /// shifting history entries so they keep pointing at the same tracks.
+    pub fn insert_next(&mut self, tracks: Vec<Track>) {
+        let count = tracks.len();
+        if count == 0 {
+            return;
+        }
+
+        if self.shuffle {
+            let insert_at = if self.shuffle_order.is_empty() {
+                0
+            } else {
+                (self.current + 1).min(self.shuffle_order.len())
+            };
+            let start_idx = self.items.len();
+            self.items.extend(tracks);
+            for offset in 0..count {
+                self.shuffle_order
+                    .insert(insert_at + offset, start_idx + offset);
+            }
+            Self::shift_indices_at_or_after(&mut self.history, insert_at, count);
+        } else {
+            let insert_at = if self.items.is_empty() {
+                0
+            } else {
+                (self.current + 1).min(self.items.len())
+            };
+            for (offset, track) in tracks.into_iter().enumerate() {
+                self.items.insert(insert_at + offset, track);
+            }
+            Self::shift_indices_at_or_after(&mut self.history, insert_at, count);
+        }
+    }
+
+    /// Insert tracks at a play-order position (the queue view's drag-drop),
+    /// keeping the current pointer and history aimed at the same tracks.
+    pub fn insert_at(&mut self, position: usize, tracks: Vec<Track>) {
+        let count = tracks.len();
+        if count == 0 {
+            return;
+        }
+        let was_empty = self.items.is_empty();
+        if self.shuffle {
+            self.repair_shuffle_order();
+            let visual_insert = position.min(self.shuffle_order.len());
+            let physical_insert = self
+                .shuffle_order
+                .get(visual_insert)
+                .copied()
+                .unwrap_or(self.items.len());
+            for (offset, track) in tracks.into_iter().enumerate() {
+                self.items.insert(physical_insert + offset, track);
+            }
+            for idx in &mut self.shuffle_order {
+                if *idx >= physical_insert {
+                    *idx += count;
+                }
+            }
+            for offset in 0..count {
+                self.shuffle_order
+                    .insert(visual_insert + offset, physical_insert + offset);
+            }
+            if visual_insert <= self.current && !was_empty {
+                self.current += count;
+            }
+            Self::shift_indices_at_or_after(&mut self.history, visual_insert, count);
+        } else {
+            let insert_at = position.min(self.items.len());
+            for (offset, track) in tracks.into_iter().enumerate() {
+                self.items.insert(insert_at + offset, track);
+            }
+            if insert_at <= self.current && !was_empty {
+                self.current += count;
+            }
+            Self::shift_indices_at_or_after(&mut self.history, insert_at, count);
+        }
+    }
+
+    /// Drop every track from play-order position `from` on, with the history entries that pointed there.
+    fn drop_from(&mut self, from: usize) {
+        if self.shuffle {
+            self.repair_shuffle_order();
+            let from = from.min(self.shuffle_order.len());
+            let dropped: std::collections::HashSet<usize> =
+                self.shuffle_order.drain(from..).collect();
+            let mut remap = vec![0; self.items.len()];
+            let mut kept = Vec::with_capacity(self.items.len() - dropped.len());
+            for (idx, track) in std::mem::take(&mut self.items).into_iter().enumerate() {
+                if !dropped.contains(&idx) {
+                    remap[idx] = kept.len();
+                    kept.push(track);
+                }
+            }
+            self.items = kept;
+            for idx in &mut self.shuffle_order {
+                *idx = remap[*idx];
+            }
+        } else {
+            self.items.truncate(from);
+            let len = self.items.len();
+            self.shuffle_order.retain(|&idx| idx < len);
+        }
+        self.history.retain(|&position| position < from);
+    }
+
+    /// Remove everything from play-order position `from` on; whether anything went.
+    pub fn clear_from(&mut self, from: usize) -> bool {
+        let had = self.items.len() > from;
+        self.drop_from(from);
+        had
+    }
+
+    /// Swap everything from play-order position `from` on for `tracks`, kept in the order given.
+    pub fn replace_from(&mut self, from: usize, tracks: Vec<Track>) {
+        self.drop_from(from);
+        self.add(tracks);
+    }
+
+    /// Randomise play order from `from` on: the permutation tail under shuffle, the queue itself without.
+    pub fn shuffle_from(&mut self, from: usize) {
+        use rand::seq::SliceRandom;
+        if self.shuffle {
+            self.repair_shuffle_order();
+        }
+        let len = if self.shuffle {
+            self.shuffle_order.len()
+        } else {
+            self.items.len()
+        };
+        if from + 1 >= len {
+            return;
+        }
+        let mut order: Vec<usize> = (from..len).collect();
+        order.shuffle(&mut rand::rng());
+        if self.shuffle {
+            let old = self.shuffle_order.clone();
+            for (slot, &source) in order.iter().enumerate() {
+                self.shuffle_order[from + slot] = old[source];
+            }
+        } else {
+            let mut old: Vec<Option<Track>> = self.items.drain(from..).map(Some).collect();
+            for &source in &order {
+                if let Some(track) = old[source - from].take() {
+                    self.items.push(track);
+                }
+            }
+        }
+        let mut new_position = vec![0; len - from];
+        for (slot, &source) in order.iter().enumerate() {
+            new_position[source - from] = from + slot;
+        }
+        for position in &mut self.history {
+            if *position >= from && *position < len {
+                *position = new_position[*position - from];
+            }
+        }
+    }
+
+    pub fn set_shuffle(&mut self, on: bool) {
+        if self.shuffle != on {
+            self.toggle_shuffle();
+        }
+    }
+
+    pub fn toggle_shuffle(&mut self) {
+        self.shuffle = !self.shuffle;
+        if self.shuffle {
+            self.rebuild_shuffle_order();
+        } else {
+            self.current = self
+                .shuffle_order
+                .get(self.current)
+                .copied()
+                .unwrap_or(self.current);
+        }
+    }
+
+    /// Rebuilds `shuffle_order` as a full permutation: the track at the
+    /// physical index held in `current` stays at position 0, every other track
+    /// shuffled as a single pool (issue #362), and `current` resets to 0 as
+    /// the pointer into the permutation.
+    pub fn rebuild_shuffle_order(&mut self) {
+        use rand::seq::SliceRandom;
+        let queue_len = self.items.len();
+        let current_idx = self.current;
+
+        if queue_len == 0 {
+            self.shuffle_order = Vec::new();
+            self.current = 0;
+            return;
+        }
+
+        let mut order: Vec<usize> = Vec::with_capacity(queue_len);
+        order.push(current_idx);
+        let mut rest: Vec<usize> = (0..queue_len).filter(|&i| i != current_idx).collect();
+        rest.shuffle(&mut rand::rng());
+        order.extend(rest);
+
+        self.current = 0;
+        self.shuffle_order = order;
+    }
+
+    /// Position of a physical index inside the running permutation, or `None`
+    /// when the permutation still doesn't cover it after repair.
+    pub fn shuffle_position_of(&mut self, physical_idx: usize) -> Option<usize> {
+        self.repair_shuffle_order();
+        self.shuffle_order
+            .iter()
+            .position(|&idx| idx == physical_idx)
+    }
+
+    /// Make the permutation cover the whole queue again without disturbing the
+    /// order it already has: missing entries are shuffled among themselves and
+    /// appended rather than triggering a full reshuffle.
+    pub fn repair_shuffle_order(&mut self) {
+        let queue_len = self.items.len();
+        if self.shuffle_order.len() == queue_len
+            && self.shuffle_order.iter().all(|&idx| idx < queue_len)
+            && self
+                .shuffle_order
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                == queue_len
+        {
+            return;
+        }
+        self.shuffle_order = Self::repaired_order(&self.shuffle_order, queue_len);
+    }
+
+    pub fn repaired_order(order: &[usize], queue_len: usize) -> Vec<usize> {
+        use rand::seq::SliceRandom;
+        let mut seen = vec![false; queue_len];
+        let mut repaired: Vec<usize> = Vec::with_capacity(queue_len);
+        for &idx in order {
+            if idx < queue_len && !seen[idx] {
+                seen[idx] = true;
+                repaired.push(idx);
+            }
+        }
+        let mut missing: Vec<usize> = (0..queue_len).filter(|&idx| !seen[idx]).collect();
+        missing.shuffle(&mut rand::rng());
+        repaired.extend(missing);
+        repaired
+    }
+
+    /// Remap a logical position after moving one entry from `from` to `to`.
+    pub fn remap_queue_index(index: usize, from: usize, to: usize) -> usize {
+        if index == from {
+            to
+        } else if from < to && index > from && index <= to {
+            index - 1
+        } else if to < from && index >= to && index < from {
+            index + 1
+        } else {
+            index
+        }
+    }
+
+    pub fn shift_indices_at_or_after(indices: &mut [usize], at: usize, by: usize) {
+        for idx in indices {
+            if *idx >= at {
+                *idx += by;
+            }
+        }
+    }
+
+    pub fn swap(&mut self, from: usize, to: usize) {
+        let len = if self.shuffle {
+            self.shuffle_order.len()
+        } else {
+            self.items.len()
+        };
+        if from >= len || to >= len || from == to {
+            return;
+        }
+
+        if self.shuffle {
+            self.shuffle_order.swap(from, to);
+        } else {
+            self.items.swap(from, to);
+        }
+
+        if self.current == from {
+            self.current = to;
+        } else if self.current == to {
+            self.current = from;
+        }
+
+        for idx in self.history.iter_mut() {
+            if *idx == from {
+                *idx = to;
+            } else if *idx == to {
+                *idx = from;
+            }
+        }
+    }
+
+    pub fn move_item(&mut self, from: usize, to: usize) {
+        let len = if self.shuffle {
+            self.shuffle_order.len()
+        } else {
+            self.items.len()
+        };
+        if from >= len || to >= len || from == to {
+            return;
+        }
+
+        if self.shuffle {
+            let idx = self.shuffle_order.remove(from);
+            self.shuffle_order.insert(to, idx);
+        } else {
+            let track = self.items.remove(from);
+            self.items.insert(to, track);
+        }
+
+        self.current = Self::remap_queue_index(self.current, from, to);
+        for idx in self.history.iter_mut() {
+            *idx = Self::remap_queue_index(*idx, from, to);
+        }
+    }
+
+    /// Remove the entry at a logical position. Physical indices above the
+    /// removed track shift down, so the permutation and history are remapped;
+    /// history entries pointing at the removed position are dropped. `current`
+    /// keeps its logical position (now the following track), clamped to the
+    /// new tail.
+    pub fn remove(&mut self, position: usize) -> Option<Track> {
+        let physical = self.physical_index_of(position)?;
+        if physical >= self.items.len() {
+            return None;
+        }
+        let removed = self.items.remove(physical);
+
+        if self.shuffle {
+            if position < self.shuffle_order.len() {
+                self.shuffle_order.remove(position);
+            }
+        } else {
+            self.shuffle_order.retain(|&idx| idx != physical);
+        }
+        for idx in self.shuffle_order.iter_mut() {
+            if *idx > physical {
+                *idx -= 1;
+            }
+        }
+
+        self.history.retain(|&idx| idx != position);
+        for idx in self.history.iter_mut() {
+            if *idx > position {
+                *idx -= 1;
+            }
+        }
+
+        if position < self.current {
+            self.current -= 1;
+        }
+        let len = self.items.len();
+        if len == 0 {
+            self.current = 0;
+        } else if self.current >= len {
+            self.current = len - 1;
+        }
+        Some(removed)
+    }
+
+    /// Hard reset for a backend switch: queue, history, permutation, position.
+    pub fn clear(&mut self) {
+        self.items.clear();
+        self.history.clear();
+        self.shuffle_order.clear();
+        self.current = 0;
+    }
+
+    /// Restore a persisted queue. Returns the clamped logical position whose
+    /// track exists, or `None` when the queue is empty or the position cannot
+    /// resolve (the caller then shows an empty player).
+    pub fn restore(
+        &mut self,
+        items: Vec<Track>,
+        current_position: usize,
+        shuffle_order: Vec<usize>,
+        shuffle_enabled: bool,
+    ) -> Option<usize> {
+        self.history = Vec::new();
+        self.items = items;
+        self.shuffle = shuffle_enabled;
+        self.shuffle_order = shuffle_order;
+
+        let queue_len = self.items.len();
+        if queue_len == 0 {
+            self.current = 0;
+            return None;
+        }
+
+        if self.shuffle {
+            self.repair_shuffle_order();
+        }
+
+        let idx = current_position.min(queue_len - 1);
+        if self.track_at(idx).is_none() {
+            self.current = 0;
+            return None;
+        }
+        self.current = idx;
+        Some(idx)
+    }
+
+    /// A play-order window for `GET /v1/queue`: `(logical position, track)`
+    /// pairs. Repairs the permutation first so every position resolves.
+    pub fn window(&mut self, offset: usize, limit: usize) -> Vec<(usize, Track)> {
+        if self.shuffle {
+            self.repair_shuffle_order();
+        }
+        let len = self.items.len();
+        (offset..len.min(offset.saturating_add(limit)))
+            .filter_map(|pos| self.track_at(pos).cloned().map(|t| (pos, t)))
+            .collect()
+    }
+
+    /// The whole queue in play order, with the permutation behind it (empty while shuffle is off).
+    pub fn play_order(&mut self) -> (Vec<Track>, Vec<usize>) {
+        if !self.shuffle {
+            return (self.items.clone(), Vec::new());
+        }
+        self.repair_shuffle_order();
+        let tracks = self
+            .shuffle_order
+            .iter()
+            .filter_map(|&idx| self.items.get(idx).cloned())
+            .collect();
+        (tracks, self.shuffle_order.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track(n: usize) -> Track {
+        Track {
+            id: reader::models::TrackId::Local(std::path::PathBuf::from(format!("/t/{n}.mp3"))),
+            cover: None,
+            album_id: String::new(),
+            title: format!("t{n}"),
+            artist: String::new(),
+            album: String::new(),
+            duration: 100,
+            khz: 0,
+            bitrate: 0,
+            track_number: None,
+            disc_number: None,
+            musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
+            playlist_item_id: None,
+            credits: Vec::new(),
+            artists: vec![],
+            replay_gain: config::ReplayGainInfo::default(),
+            explicit: false,
+            plays: None,
+            counterpart: None,
+        }
+    }
+
+    fn model(n: usize) -> QueueModel {
+        let mut m = QueueModel::default();
+        m.replace((0..n).map(track).collect());
+        m
+    }
+
+    #[test]
+    fn has_following_track_matches_end_of_queue() {
+        use LoopMode::{None, Queue, Track};
+
+        assert!(!QueueModel::has_following_track(0, 0, None));
+        assert!(!QueueModel::has_following_track(0, 0, Queue));
+
+        assert!(!QueueModel::has_following_track(0, 1, None));
+        assert!(!QueueModel::has_following_track(4, 5, None));
+
+        assert!(QueueModel::has_following_track(0, 5, None));
+        assert!(QueueModel::has_following_track(3, 5, None));
+
+        assert!(QueueModel::has_following_track(0, 1, Queue));
+        assert!(QueueModel::has_following_track(4, 5, Queue));
+        assert!(QueueModel::has_following_track(4, 5, Track));
+    }
+
+    #[test]
+    fn repaired_permutation_keeps_the_order_it_already_had() {
+        let repaired = QueueModel::repaired_order(&[3, 0], 5);
+        assert_eq!(&repaired[..2], &[3, 0]);
+        assert_eq!(repaired.len(), 5);
+
+        let mut covered = repaired.clone();
+        covered.sort_unstable();
+        assert_eq!(covered, vec![0, 1, 2, 3, 4]);
+
+        let repaired = QueueModel::repaired_order(&[2, 9, 2, 0], 3);
+        assert_eq!(&repaired[..2], &[2, 0]);
+        assert_eq!(repaired.len(), 3);
+    }
+
+    #[test]
+    fn insert_at_keeps_the_pointer_on_the_playing_track() {
+        let mut m = model(3);
+        m.jump_to(1);
+        m.insert_at(0, vec![track(10), track(11)]);
+        assert_eq!(m.len(), 5);
+        assert_eq!(m.current_position(), 3);
+        assert_eq!(
+            m.current_track().map(|t| t.title.clone()),
+            Some("t1".into())
+        );
+        assert_eq!(m.items()[0].title, "t10");
+        assert_eq!(m.items()[1].title, "t11");
+
+        let mut m = model(2);
+        m.insert_at(99, vec![track(20)]);
+        assert_eq!(m.items()[2].title, "t20");
+        assert_eq!(m.current_position(), 0);
+    }
+
+    #[test]
+    fn insert_at_while_shuffling_splices_the_permutation() {
+        let mut m = model(4);
+        m.toggle_shuffle();
+        m.insert_at(2, vec![track(30), track(31)]);
+        assert_eq!(m.len(), 6);
+        assert_eq!(m.shuffle_order().len(), 6);
+        assert_eq!(m.track_at(2).map(|t| t.title.clone()), Some("t30".into()));
+        assert_eq!(m.track_at(3).map(|t| t.title.clone()), Some("t31".into()));
+        let mut covered: Vec<usize> = m.shuffle_order().to_vec();
+        covered.sort_unstable();
+        assert_eq!(covered, vec![0, 1, 2, 3, 4, 5]);
+        assert_eq!(
+            m.current_track().map(|t| t.title.clone()),
+            Some("t0".into())
+        );
+    }
+
+    #[test]
+    fn advance_stops_at_end_without_loop_and_wraps_with_queue_loop() {
+        let mut m = model(3);
+        assert_eq!(m.advance_next(), NextOutcome::Play(1));
+        assert_eq!(m.advance_next(), NextOutcome::Play(2));
+        assert_eq!(m.advance_next(), NextOutcome::EndOfQueue);
+        assert_eq!(m.current_position(), 2);
+
+        m.set_loop_mode(LoopMode::Queue);
+        assert_eq!(m.advance_next(), NextOutcome::Play(0));
+    }
+
+    #[test]
+    fn track_loop_replays_current_position() {
+        let mut m = model(3);
+        m.set_loop_mode(LoopMode::Track);
+        assert_eq!(m.advance_next(), NextOutcome::Play(0));
+        assert_eq!(m.current_position(), 0);
+    }
+
+    #[test]
+    fn previous_pops_history_before_falling_back() {
+        let mut m = model(4);
+        m.jump_to(2);
+        assert_eq!(m.history(), &[0]);
+        assert_eq!(m.previous_position(), Some(0));
+        assert_eq!(m.previous_position(), None);
+
+        m.set_loop_mode(LoopMode::Queue);
+        assert_eq!(m.previous_position(), Some(3));
+    }
+
+    #[test]
+    fn shuffle_pins_current_track_and_collapse_restores_physical_index() {
+        let mut m = model(5);
+        m.jump_to(3);
+        m.toggle_shuffle();
+        assert!(m.shuffle());
+        assert_eq!(m.current_position(), 0);
+        assert_eq!(m.shuffle_order()[0], 3);
+        assert_eq!(
+            m.current_track().map(|t| t.title.clone()),
+            Some("t3".into())
+        );
+
+        let mut covered = m.shuffle_order().to_vec();
+        covered.sort_unstable();
+        assert_eq!(covered, vec![0, 1, 2, 3, 4]);
+
+        m.toggle_shuffle();
+        assert!(!m.shuffle());
+        assert_eq!(m.current_position(), 3);
+        assert_eq!(
+            m.current_track().map(|t| t.title.clone()),
+            Some("t3".into())
+        );
+    }
+
+    #[test]
+    fn insert_next_lands_after_current_and_shifts_history() {
+        let mut m = model(3);
+        m.jump_to(1);
+        m.insert_next(vec![track(10), track(11)]);
+        assert_eq!(m.len(), 5);
+        assert_eq!(m.items()[2].title, "t10");
+        assert_eq!(m.items()[3].title, "t11");
+        assert_eq!(m.history(), &[0]);
+        assert_eq!(
+            m.current_track().map(|t| t.title.clone()),
+            Some("t1".into())
+        );
+
+        let mut m = model(3);
+        m.jump_to(0);
+        m.jump_to(2);
+        assert_eq!(m.history(), &[0]);
+        m.insert_next(vec![track(10)]);
+        assert_eq!(m.history(), &[0]);
+        assert_eq!(m.items()[3].title, "t10");
+    }
+
+    #[test]
+    fn insert_next_while_shuffling_splices_the_permutation() {
+        let mut m = model(4);
+        m.toggle_shuffle();
+        let before = m.shuffle_order().to_vec();
+        m.insert_next(vec![track(10), track(11)]);
+        assert_eq!(m.len(), 6);
+        assert_eq!(m.shuffle_order().len(), 6);
+        assert_eq!(m.shuffle_order()[1], 4);
+        assert_eq!(m.shuffle_order()[2], 5);
+        assert_eq!(m.shuffle_order()[0], before[0]);
+        assert_eq!(m.track_at(1).map(|t| t.title.clone()), Some("t10".into()));
+        assert_eq!(m.track_at(2).map(|t| t.title.clone()), Some("t11".into()));
+    }
+
+    #[test]
+    fn move_item_remaps_current_and_history() {
+        let mut m = model(5);
+        m.jump_to(1);
+        m.jump_to(3);
+        assert_eq!(m.history(), &[0, 1]);
+
+        m.move_item(3, 0);
+        assert_eq!(m.current_position(), 0);
+        assert_eq!(
+            m.current_track().map(|t| t.title.clone()),
+            Some("t3".into())
+        );
+        assert_eq!(m.history(), &[1, 2]);
+
+        assert_eq!(QueueModel::remap_queue_index(2, 0, 4), 1);
+        assert_eq!(QueueModel::remap_queue_index(0, 0, 4), 4);
+        assert_eq!(QueueModel::remap_queue_index(5, 0, 4), 5);
+    }
+
+    #[test]
+    fn swap_follows_current_and_history() {
+        let mut m = model(4);
+        m.jump_to(2);
+        m.swap(2, 0);
+        assert_eq!(m.current_position(), 0);
+        assert_eq!(
+            m.current_track().map(|t| t.title.clone()),
+            Some("t2".into())
+        );
+        assert_eq!(m.history(), &[2]);
+    }
+
+    #[test]
+    fn remove_remaps_current_history_and_permutation() {
+        let mut m = model(5);
+        m.jump_to(1);
+        m.jump_to(3);
+        assert_eq!(m.history(), &[0, 1]);
+
+        let removed = m.remove(1).expect("removed");
+        assert_eq!(removed.title, "t1");
+        assert_eq!(m.len(), 4);
+        assert_eq!(m.current_position(), 2);
+        assert_eq!(
+            m.current_track().map(|t| t.title.clone()),
+            Some("t3".into())
+        );
+        assert_eq!(m.history(), &[0]);
+
+        let removed = m.remove(3);
+        assert!(removed.is_none() || m.len() == 3);
+    }
+
+    #[test]
+    fn remove_last_position_clamps_current() {
+        let mut m = model(2);
+        m.jump_to(1);
+        m.remove(1).expect("removed");
+        assert_eq!(m.current_position(), 0);
+        assert_eq!(
+            m.current_track().map(|t| t.title.clone()),
+            Some("t0".into())
+        );
+
+        m.remove(0).expect("removed");
+        assert!(m.is_empty());
+        assert_eq!(m.current_position(), 0);
+        assert!(m.current_track().is_none());
+    }
+
+    #[test]
+    fn remove_while_shuffling_keeps_a_valid_permutation() {
+        let mut m = model(5);
+        m.toggle_shuffle();
+        let victim_position = 2;
+        let victim_title = m.track_at(victim_position).map(|t| t.title.clone());
+        m.remove(victim_position).expect("removed");
+        assert_eq!(m.len(), 4);
+        assert_eq!(m.shuffle_order().len(), 4);
+        let mut covered = m.shuffle_order().to_vec();
+        covered.sort_unstable();
+        assert_eq!(covered, vec![0, 1, 2, 3]);
+        for pos in 0..4 {
+            let title = m.track_at(pos).map(|t| t.title.clone());
+            assert!(title.is_some());
+            assert_ne!(title, victim_title);
+        }
+    }
+
+    #[test]
+    fn empty_replace_resets_pointer_history_and_permutation() {
+        let mut m = model(10);
+        m.toggle_shuffle();
+        m.jump_to_position(7);
+        m.replace(Vec::new());
+        assert!(m.is_empty());
+        assert_eq!(m.current_position(), 0);
+        assert!(m.history().is_empty());
+        assert!(m.shuffle_order().is_empty());
+        assert!(m.current_track().is_none());
+
+        m.add(vec![track(0), track(1), track(2)]);
+        assert_eq!(m.current_position(), 0);
+        assert_eq!(m.shuffle_order().len(), 3);
+        assert_eq!(
+            m.current_track().map(|t| t.title.clone()),
+            Some("t0".into())
+        );
+    }
+
+    #[test]
+    fn restore_clamps_out_of_range_positions() {
+        let mut m = QueueModel::default();
+        let restored = m.restore((0..3).map(track).collect(), 9, vec![], false);
+        assert_eq!(restored, Some(2));
+        assert_eq!(m.current_position(), 2);
+
+        let mut m = QueueModel::default();
+        assert_eq!(m.restore(Vec::new(), 3, vec![], true), None);
+        assert_eq!(m.current_position(), 0);
+    }
+
+    #[test]
+    fn restore_repairs_invalid_shuffle_order() {
+        let mut m = QueueModel::default();
+        assert_eq!(
+            m.restore((0..3).map(track).collect(), 1, vec![8, 9, 10], true),
+            Some(1)
+        );
+        let mut order = m.shuffle_order().to_vec();
+        order.sort_unstable();
+        assert_eq!(order, vec![0, 1, 2]);
+        assert!(m.current_track().is_some());
+    }
+
+    #[test]
+    fn window_lists_play_order_and_repairs_stale_permutations() {
+        let mut m = model(4);
+        let win = m.window(1, 2);
+        assert_eq!(win.len(), 2);
+        assert_eq!(win[0].0, 1);
+        assert_eq!(win[0].1.title, "t1");
+
+        let mut m = model(4);
+        m.toggle_shuffle();
+        m.add(vec![track(10)]);
+        let win = m.window(0, 10);
+        assert_eq!(win.len(), 5);
+        let mut physical: Vec<usize> = m.shuffle_order().to_vec();
+        physical.sort_unstable();
+        assert_eq!(physical, vec![0, 1, 2, 3, 4]);
+    }
+
+    fn explicit(n: usize) -> Track {
+        Track {
+            explicit: true,
+            ..track(n)
+        }
+    }
+
+    #[test]
+    fn next_steps_over_refused_tracks_and_ends_when_only_they_remain() {
+        let mut m = QueueModel::default();
+        m.replace(vec![track(0), explicit(1), track(2), explicit(3)]);
+        m.jump_to(0);
+        let clean = |t: &Track| !t.explicit;
+
+        assert_eq!(m.advance_next_where(clean), NextOutcome::Play(2));
+        assert_eq!(m.history(), &[0]);
+        assert_eq!(m.peek_next_where(clean), NextOutcome::EndOfQueue);
+        assert_eq!(m.advance_next_where(clean), NextOutcome::EndOfQueue);
+        assert_eq!(m.current_position(), 2);
+        assert_eq!(
+            m.peek_next(),
+            NextOutcome::Play(3),
+            "the plain decision is unchanged"
+        );
+
+        m.set_loop_mode(LoopMode::Queue);
+        assert_eq!(m.peek_next_where(clean), NextOutcome::Play(0));
+    }
+
+    #[test]
+    fn without_explicit_keeps_the_start_on_the_track_it_named() {
+        let tracks = vec![explicit(0), track(1), explicit(2), track(3)];
+        let (kept, start) = without_explicit(tracks.clone(), Some(3));
+        assert_eq!(
+            kept.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(),
+            ["t1", "t3"]
+        );
+        assert_eq!(start, Some(1));
+        // An explicit start moves to the next kept track.
+        assert_eq!(without_explicit(tracks.clone(), Some(2)).1, Some(1));
+        assert_eq!(without_explicit(tracks.clone(), Some(0)).1, Some(0));
+        assert_eq!(without_explicit(tracks, None).1, None);
+        let (kept, _) = without_explicit(vec![explicit(0)], Some(0));
+        assert!(kept.is_empty());
+    }
+
+    fn titles(m: &mut QueueModel) -> Vec<String> {
+        m.play_order().0.into_iter().map(|t| t.title).collect()
+    }
+
+    #[test]
+    fn clear_from_drops_the_tail_and_the_history_that_pointed_into_it() {
+        for shuffle in [false, true] {
+            let mut m = model(6);
+            m.set_shuffle(shuffle);
+            m.jump_to_position(4);
+            m.jump_to_position(1);
+            assert_eq!(m.history().len(), 2);
+            let before = titles(&mut m);
+
+            assert!(m.clear_from(2));
+            assert_eq!(titles(&mut m), before[..2].to_vec());
+            assert_eq!(m.current_position(), 1);
+            assert_eq!(
+                m.history().len(),
+                1,
+                "the entry at position 4 went with its track"
+            );
+            assert!(!m.clear_from(2), "nothing left to clear");
+        }
+    }
+
+    #[test]
+    fn replace_from_keeps_what_was_before_it() {
+        for shuffle in [false, true] {
+            let mut m = model(5);
+            m.set_shuffle(shuffle);
+            m.jump_to_position(2);
+            let before = titles(&mut m);
+
+            m.replace_from(3, vec![track(20), track(21)]);
+            let mut expected = before[..3].to_vec();
+            expected.extend(["t20".to_string(), "t21".to_string()]);
+            assert_eq!(titles(&mut m), expected);
+            assert_eq!(m.len(), 5);
+        }
+    }
+
+    #[test]
+    fn shuffle_from_moves_history_entries_with_their_tracks() {
+        for shuffle in [false, true] {
+            let mut m = QueueModel::default();
+            m.replace((0..30).map(track).collect());
+            m.set_shuffle(shuffle);
+            m.jump_to_position(20);
+            m.jump_to_position(1);
+            let before = titles(&mut m);
+            let remembered = m.history().to_vec();
+
+            m.shuffle_from(2);
+            let after = titles(&mut m);
+            assert_eq!(after[..2], before[..2]);
+            assert_ne!(after, before);
+            for (old, new) in remembered.iter().zip(m.history()) {
+                assert_eq!(before[*old], after[*new]);
+            }
+        }
+    }
+}

@@ -1,0 +1,21 @@
+[package]
+name = "settings_sources"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+api = { workspace = true }
+config = { workspace = true }
+i18n = { workspace = true }
+link = { workspace = true }
+store = { workspace = true }
+theme = { workspace = true }
+components = { path = "../components" }
+gpui-kit = { workspace = true }
+tracing = { workspace = true }

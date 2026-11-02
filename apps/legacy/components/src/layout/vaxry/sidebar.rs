@@ -1,0 +1,385 @@
+#[cfg(target_os = "macos")]
+use dioxus::desktop::window;
+use dioxus::prelude::*;
+use kopuz_route::Route;
+
+use crate::sidebar::SidebarProps;
+
+#[derive(PartialEq, Clone)]
+struct NavItem {
+    key: &'static str,
+    route: Route,
+    icon: &'static str,
+}
+
+const SECTIONS: &[(&str, &[NavItem])] = &[
+    (
+        "discover",
+        &[
+            NavItem {
+                key: "home",
+                route: Route::Home,
+                icon: "fa-solid fa-house",
+            },
+            NavItem {
+                key: "search",
+                route: Route::Search,
+                icon: "fa-solid fa-magnifying-glass",
+            },
+            NavItem {
+                key: "discover",
+                route: Route::Discover,
+                icon: "fa-solid fa-compass",
+            },
+            NavItem {
+                key: "radio",
+                route: Route::Radio,
+                icon: "fa-solid fa-radio",
+            },
+        ],
+    ),
+    (
+        "library",
+        &[
+            NavItem {
+                key: "library",
+                route: Route::Library,
+                icon: "fa-solid fa-music",
+            },
+            NavItem {
+                key: "albums",
+                route: Route::Album,
+                icon: "fa-solid fa-record-vinyl",
+            },
+            NavItem {
+                key: "artists",
+                route: Route::Artist,
+                icon: "fa-solid fa-user",
+            },
+            NavItem {
+                key: "favorites",
+                route: Route::Favorites,
+                icon: "fa-solid fa-heart",
+            },
+            NavItem {
+                key: "activity",
+                route: Route::Activity,
+                icon: "fa-solid fa-chart-simple",
+            },
+            NavItem {
+                key: "playlists",
+                route: Route::Playlists,
+                icon: "fa-solid fa-list",
+            },
+        ],
+    ),
+];
+
+#[cfg(not(target_os = "android"))]
+const TOOL_ITEMS: &[NavItem] = &[
+    NavItem {
+        key: "downloader",
+        route: Route::Downloader,
+        icon: "fa-solid fa-download",
+    },
+    NavItem {
+        key: "settings",
+        route: Route::Settings,
+        icon: "fa-solid fa-gear",
+    },
+];
+
+#[cfg(target_os = "android")]
+const TOOL_ITEMS: &[NavItem] = &[NavItem {
+    key: "settings",
+    route: Route::Settings,
+    icon: "fa-solid fa-gear",
+}];
+
+#[component]
+pub fn SidebarVaxry(props: SidebarProps) -> Element {
+    let settings = use_context::<Signal<config::Settings>>();
+    let mut width = use_signal(|| 200i32);
+    let mut is_collapsed = use_signal(|| false);
+    let mut is_resizing = use_signal(|| false);
+
+    let is_android = cfg!(target_os = "android");
+    let fallback_collapse = use_signal(|| true);
+    let mut mobile_collapsed = try_consume_context::<crate::sidebar::SidebarCollapsed>()
+        .map(|c| c.0)
+        .unwrap_or(fallback_collapse);
+
+    let current_width = if *is_collapsed.read() {
+        56
+    } else {
+        *width.read()
+    };
+
+    let mut drawer_swipe = crate::gestures::use_swipe();
+    let mut on_drawer_swipe = move |evt: TouchEvent| {
+        if drawer_swipe.finish(&evt) == Some(crate::gestures::SwipeDirection::Left) {
+            mobile_collapsed.set(true);
+        }
+    };
+
+    let onmousemove = move |evt: MouseEvent| {
+        if *is_resizing.read() {
+            let new_width = evt.client_coordinates().x as i32;
+            if *is_collapsed.read() {
+                if new_width > 160 {
+                    is_collapsed.set(false);
+                    width.set(new_width);
+                }
+            } else if new_width < 130 {
+                is_collapsed.set(true);
+            } else if new_width < 400 {
+                width.set(new_width);
+            }
+        }
+    };
+    let onmouseup = move |_| is_resizing.set(false);
+
+    // Home shows the source's first catalog page, so Discover holds the rest
+    // and only appears when the source lists more than one.
+    let caps = hooks::sources::use_capabilities();
+    let has_discover = use_memo(move || caps().pages.len() > 1);
+    let collapsed = if is_android {
+        false
+    } else {
+        *is_collapsed.read()
+    };
+    let current_route = *props.current_route.read();
+
+    let root_class = if is_android {
+        "h-full flex flex-col shrink-0 select-none relative border-r border-white/10 overflow-hidden transition-all duration-300 ease-out"
+    } else {
+        "h-full flex flex-col shrink-0 select-none relative border-r border-white/5"
+    };
+    let root_style = if is_android {
+        let drawer_width = if *mobile_collapsed.read() { 0 } else { 280 };
+        format!(
+            "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: {drawer_width}px; background-color: var(--color-neutral-900); --vaxry-sidebar-fg: var(--color-white);"
+        )
+    } else if settings.read().ui.theme == "album-art"
+        || settings.read().background.cover_art_background
+        || !settings.read().background.custom_background_path.is_empty()
+    {
+        format!(
+            "width: {current_width}px; background: rgba(0, 0, 0, 0.4); --vaxry-sidebar-fg: #fff;"
+        )
+    } else {
+        format!(
+            "width: {current_width}px; background: var(--color-neutral-900); --vaxry-sidebar-fg: var(--color-white);"
+        )
+    };
+
+    rsx! {
+        if *is_resizing.read() {
+            div {
+                class: "fixed inset-0 z-[100] cursor-col-resize",
+                onmousemove,
+                onmouseup,
+            }
+        }
+        if is_android && !*mobile_collapsed.read() {
+            div {
+                class: "fixed inset-0 bg-black/80 backdrop-blur-[2px] z-[90]",
+                onclick: move |_| mobile_collapsed.set(true),
+                ontouchstart: move |evt| drawer_swipe.start(&evt),
+                ontouchmove: move |evt| drawer_swipe.update(&evt),
+                ontouchend: on_drawer_swipe,
+                ontouchcancel: move |_| drawer_swipe.reset(),
+            }
+        }
+
+        div {
+            class: "{root_class}",
+            style: "{root_style}",
+            ontouchstart: move |evt| if is_android { drawer_swipe.start(&evt) },
+            ontouchmove: move |evt| if is_android { drawer_swipe.update(&evt) },
+            ontouchend: move |evt| if is_android { on_drawer_swipe(evt) },
+            ontouchcancel: move |_| drawer_swipe.reset(),
+
+            if is_android {
+                div {
+                    class: "flex items-center justify-between px-5 border-b border-white/5 bg-white/5 shrink-0",
+                    style: "padding-top: max(env(safe-area-inset-top), 16px); padding-bottom: 16px;",
+                    h2 {
+                        class: "text-base font-bold tracking-widest text-white/90 uppercase",
+                        style: "font-family: 'JetBrains Mono', monospace;",
+                        "KOPUZ"
+                    }
+                    button {
+                        class: "p-2 rounded-xl bg-white/10 text-white active:scale-95 transition-all flex items-center justify-center border border-white/10 w-9 h-9",
+                        onclick: move |_| mobile_collapsed.set(true),
+                        i { class: "fa-solid fa-xmark text-base" }
+                    }
+                }
+            }
+
+            if cfg!(target_os = "macos") {
+                div {
+                    class: "h-10 flex-shrink-0",
+                    onmousedown: move |_| {
+                        #[cfg(target_os = "macos")]
+                        window().drag();
+                    }
+                }
+            }
+
+            if settings.read().ui.show_source_toggle {
+                crate::source_switcher::SourceSwitcher {
+                    collapsed,
+                    on_manage: move |_| props.on_navigate.call(Route::Settings),
+                }
+            }
+
+            div { class: "flex-1 overflow-y-auto overflow-x-hidden py-2",
+                for (section_key, items) in SECTIONS {
+                    div { class: "mb-2",
+                        if !collapsed {
+                            div { class: if is_android { "px-5 pt-4 pb-1" } else { "px-4 pt-3 pb-1" },
+                                span {
+                                    class: if is_android { "text-[10px] font-bold uppercase tracking-wider" } else { "text-[10px] font-bold" },
+                                    style: "color: color-mix(in oklab, var(--vaxry-sidebar-fg) 25%, transparent);",
+                                    if is_android && *section_key == "discover" {
+                                        "{i18n::t(\"browse\")}"
+                                    } else {
+                                        "{i18n::t(section_key)}"
+                                    }
+                                }
+                            }
+                        }
+                        for item in *items {
+                            if (item.route != Route::Discover || has_discover())
+                                && (!is_android || !crate::tabbar::is_tab_route(item.route))
+                            {
+                                VaxryNavItem {
+                                    key: "{item.key}",
+                                    item: item.clone(),
+                                    active: current_route.sidebar_entry() == item.route,
+                                    collapsed,
+                                    onclick: move |_| {
+                                        props.on_navigate.call(item.route);
+                                        if is_android { mobile_collapsed.set(true); }
+                                    },
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !is_android {
+                    div { class: "mx-3 my-2 h-px", style: "background: color-mix(in oklab, var(--vaxry-sidebar-fg) 6%, transparent);" }
+                }
+                for item in TOOL_ITEMS.iter().filter(|item| !is_android || !crate::tabbar::is_tab_route(item.route)) {
+                    VaxryNavItem {
+                        key: "{item.key}",
+                        item: item.clone(),
+                        active: current_route.sidebar_entry() == item.route,
+                        collapsed,
+                        onclick: move |_| {
+                            props.on_navigate.call(item.route);
+                            if is_android { mobile_collapsed.set(true); }
+                        },
+                    }
+                }
+            }
+
+            if is_android {
+                DrawerNowPlaying {}
+            } else {
+                div {
+                    class: "absolute top-0 right-0 w-2 h-full cursor-col-resize group/handle z-50",
+                    onmousedown: move |_| is_resizing.set(true),
+                    div { class: "absolute inset-y-0 right-0 w-px bg-white/0 group-hover/handle:bg-white/10 transition-colors" }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn VaxryNavItem(
+    item: NavItem,
+    active: bool,
+    collapsed: bool,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
+    let phone = cfg!(target_os = "android");
+    rsx! {
+        a {
+            class: if phone {
+                "flex items-center gap-4 cursor-pointer transition-all hover:bg-white/10 active:bg-white/15 relative mx-2 rounded-lg"
+            } else {
+                "flex items-center gap-3 cursor-pointer transition-all hover:bg-white/10 active:bg-white/15 relative mx-1 rounded-lg"
+            },
+            style: match (active, phone) {
+                (true, true) => "min-height: 48px; padding: 0 16px; background: color-mix(in oklab, var(--color-indigo-500) 15%, transparent); box-shadow: inset 3px 0 var(--color-indigo-500);",
+                (true, false) => "padding: 6px 10px; background: color-mix(in oklab, var(--color-indigo-500) 15%, transparent);",
+                (false, true) => "min-height: 48px; padding: 0 16px;",
+                (false, false) => "padding: 6px 10px;",
+            },
+            title: if collapsed { i18n::t(item.key) } else { String::new() },
+            onclick: move |evt| onclick.call(evt),
+
+            div {
+                class: "w-5 h-5 flex items-center justify-center shrink-0 text-sm",
+                style: if active {
+                    "color: var(--color-indigo-500);"
+                } else {
+                    "color: color-mix(in oklab, var(--vaxry-sidebar-fg) 40%, transparent);"
+                },
+                i { class: "{item.icon}" }
+            }
+
+            if !collapsed {
+                span {
+                    class: if phone { "text-[15px] font-medium truncate" } else { "text-sm font-medium truncate" },
+                    style: if active {
+                        "color: var(--color-indigo-500); font-weight: 600;"
+                    } else {
+                        "color: color-mix(in oklab, var(--vaxry-sidebar-fg) 70%, transparent);"
+                    },
+                    "{i18n::t(item.key)}"
+                }
+            }
+        }
+    }
+}
+
+/// The drawer covers the mini player, so it carries what is playing itself.
+#[component]
+fn DrawerNowPlaying() -> Element {
+    let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    let title = ctrl.current_song_title.read().clone();
+    if title.is_empty() {
+        return rsx! {};
+    }
+    let artist = ctrl.current_song_artist.read().clone();
+    let cover = ctrl
+        .current_cover_url(hooks::artwork::Size::Thumb)
+        .unwrap_or_default();
+    rsx! {
+        div { class: "shrink-0 flex items-center gap-3 px-5 py-4 border-t border-white/5",
+            div { class: "w-10 h-10 rounded shrink-0 overflow-hidden bg-white/5 flex items-center justify-center",
+                if cover.is_empty() {
+                    i { class: "fa-solid fa-music text-white/20" }
+                } else {
+                    img { src: "{cover}", class: "w-full h-full object-cover" }
+                }
+            }
+            div { class: "flex-1 min-w-0 flex flex-col",
+                span { class: "text-sm truncate", style: "color: var(--vaxry-sidebar-fg);", "{title}" }
+                span { class: "text-xs truncate text-slate-400", "{artist}" }
+            }
+            button {
+                class: "w-10 h-10 flex items-center justify-center active:scale-90 transition-transform",
+                style: "color: var(--vaxry-sidebar-fg);",
+                aria_label: if *ctrl.is_playing.read() { i18n::t("pause") } else { i18n::t("play") },
+                onclick: move |_| ctrl.toggle(),
+                i { class: if *ctrl.is_playing.read() { "fa-solid fa-pause" } else { "fa-solid fa-play" } }
+            }
+        }
+    }
+}

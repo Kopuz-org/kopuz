@@ -1,0 +1,18 @@
+[package]
+name = "settings_interface"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+i18n = { workspace = true }
+store = { workspace = true }
+components = { path = "../components" }
+gpui-kit = { workspace = true }
+fontdb = { version = "0.23", default-features = false }
+anyhow = { workspace = true }

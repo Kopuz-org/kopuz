@@ -1,0 +1,23 @@
+[package]
+name = "topbar"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+profile = { path = "../profile" }
+settings_interface = { path = "../settings_interface" }
+api = { workspace = true }
+commands = { workspace = true }
+i18n = { workspace = true }
+link = { workspace = true }
+store = { workspace = true }
+theme = { workspace = true }
+components = { path = "../components" }
+gpui-kit = { workspace = true }
+tracing = { workspace = true }

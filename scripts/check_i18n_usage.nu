@@ -10,7 +10,9 @@ def extract-locale-keys [path: path] {
 }
 
 def extract-rust-i18n-usages [repo_root: path] {
-  glob ($repo_root | path join "crates" "**" "*.rs")
+  [shared daemon apps]
+  | each {|dir| glob ($repo_root | path join $dir "**" "*.rs") }
+  | flatten
   | each {|file|
       open $file
       | lines
@@ -36,10 +38,10 @@ def extract-rust-i18n-usages [repo_root: path] {
 def main [] {
   let script_dir = $env.FILE_PWD
   let repo_root = ($script_dir | path dirname)
-  let baseline = ($repo_root | path join "crates" "i18n" "locales" "en.ftl")
+  let baseline = ($repo_root | path join "apps" "common" "i18n" "locales" "en.ftl")
 
   if not ($baseline | path exists) {
-    print --stderr "Missing baseline locale: crates/i18n/locales/en.ftl"
+    print --stderr "Missing baseline locale: apps/common/i18n/locales/en.ftl"
     exit 1
   }
 
@@ -60,5 +62,5 @@ def main [] {
     exit 1
   }
 
-  print "All Rust i18n::t(...) keys exist in crates/i18n/locales/en.ftl."
+  print "All Rust i18n::t(...) keys exist in apps/common/i18n/locales/en.ftl."
 }

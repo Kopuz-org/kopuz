@@ -59,7 +59,7 @@ Palette* overrides it if you keep yours somewhere else.
 
 ## Notes
 
-- The keys are the ones `crates/kopuz/assets/themes.json` uses. Extras are
+- The keys are the ones `apps/legacy/kopuz/assets/themes.json` uses. Extras are
   ignored and anything missing keeps its default colour, so a partial palette
   still works.
 - The file is only polled while the theme is selected.

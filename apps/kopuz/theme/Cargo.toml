@@ -1,0 +1,18 @@
+[package]
+name = "theme"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+config = { workspace = true }
+gpui-kit = { workspace = true }
+material-colors = "0.4.2"
+store = { workspace = true }
+serde_json = "1"
+tracing = { workspace = true }

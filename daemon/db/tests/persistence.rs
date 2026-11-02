@@ -1,0 +1,776 @@
+//! Scoped writes for playlists, favorites, queues, and active-server state.
+
+use std::path::PathBuf;
+
+use config::{MusicServer, MusicService, SavedServer};
+use db::{QueueSnapshot, Source, TrackFilter};
+use reader::models::{Track, TrackId};
+
+fn unique_db() -> PathBuf {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let pid = std::process::id();
+    let dir = std::env::temp_dir().join(format!("kopuz-persist-{pid}-{nanos}-{seq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir.join("kopuz.db")
+}
+
+fn server_track(id: &str, title: &str) -> Track {
+    Track {
+        id: TrackId::Server {
+            service: MusicService::YtMusic,
+            item_id: id.into(),
+        },
+        cover: Some("https://img/x.jpg".into()),
+        album_id: "ytmusic:album:A".into(),
+        title: title.into(),
+        artist: "Art".into(),
+        album: "YA".into(),
+        duration: 200,
+        khz: 0,
+        bitrate: 0,
+        track_number: None,
+        disc_number: None,
+        musicbrainz_release_id: None,
+        musicbrainz_recording_id: None,
+        musicbrainz_track_id: None,
+        playlist_item_id: None,
+        artists: vec!["Art".into()],
+        replay_gain: config::ReplayGainInfo::default(),
+        counterpart: None,
+        credits: Vec::new(),
+        explicit: false,
+        plays: None,
+    }
+}
+
+async fn seed_active_server(db: &db::Db, id: &str) {
+    db.ensure_app_state().await.unwrap();
+    db.save_server(&SavedServer {
+        id: id.into(),
+        name: "yt".into(),
+        url: "https://music.youtube.com".into(),
+        service: MusicService::YtMusic,
+        yt_browser: None,
+        yt_anonymous: false,
+        yt_profile: None,
+        account: None,
+        apple_music_storefront: "us".into(),
+        apple_music_language: "en".into(),
+    })
+    .await
+    .unwrap();
+    db.save_active_server(&MusicServer {
+        name: "yt".into(),
+        url: "https://music.youtube.com".into(),
+        service: MusicService::YtMusic,
+        access_token: Some("cookie".into()),
+        user_id: None,
+        id: Some(id.into()),
+        yt_browser: None,
+        yt_anonymous: false,
+        yt_profile: None,
+        account: None,
+        apple_music_storefront: "us".into(),
+        apple_music_language: "en".into(),
+    })
+    .await
+    .unwrap();
+    db.set_active_source(&config::Source::Server(id.into()))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn recently_played_round_trip() {
+    let db = db::init(&unique_db()).await.unwrap();
+    let local = Source::default();
+
+    for k in ["a", "b", "c"] {
+        db.push_recent(&local, k).await.unwrap();
+    }
+
+    db.push_recent(&local, "a").await.unwrap();
+    assert_eq!(
+        db.recently_played(&local, 50).await.unwrap(),
+        vec!["a", "c", "b"]
+    );
+
+    assert_eq!(db.recently_played(&local, 1).await.unwrap(), vec!["a"]);
+
+    let srv = Source::Server("srv-1".into());
+    db.push_recent(&srv, "VID1").await.unwrap();
+    assert_eq!(db.recently_played(&srv, 50).await.unwrap(), vec!["VID1"]);
+    assert_eq!(
+        db.recently_played(&local, 50).await.unwrap(),
+        vec!["a", "c", "b"]
+    );
+}
+
+#[tokio::test]
+async fn playlists_round_trip() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    seed_active_server(&db, "srv-1").await;
+
+    db.upsert_playlist_meta(&Source::default(), "pl-1", "Mine", None, None)
+        .await
+        .unwrap();
+    db.set_playlist_tracks(
+        &Source::default(),
+        "pl-1",
+        &["/music/a.flac".into(), "/music/b.flac".into()],
+    )
+    .await
+    .unwrap();
+
+    let srv = Source::Server("srv-1".into());
+    db.upsert_playlist_meta(&srv, "PL1", "Liked", None, Some("urlhex_ab"))
+        .await
+        .unwrap();
+    db.set_playlist_tracks(&srv, "PL1", &["VID1".into(), "VID2".into()])
+        .await
+        .unwrap();
+
+    db.create_folder("f1", "Folder").await.unwrap();
+    db.set_playlist_folder("pl-1", Some("f1")).await.unwrap();
+
+    let store = db.load_playlists(&Source::default()).await.unwrap();
+    assert_eq!(store.playlists.len(), 1);
+    assert_eq!(store.playlists[0].id, "pl-1");
+    assert_eq!(store.playlists[0].name, "Mine");
+    assert_eq!(
+        store.playlists[0].tracks,
+        vec!["/music/a.flac", "/music/b.flac"]
+    );
+    assert_eq!(store.folders.len(), 1);
+    assert_eq!(store.folders[0].playlist_ids, vec!["pl-1"]);
+
+    let store = db
+        .load_playlists(&Source::Server("srv-1".into()))
+        .await
+        .unwrap();
+    assert_eq!(store.playlists.len(), 1);
+    assert_eq!(store.playlists[0].id, "PL1");
+    assert_eq!(store.playlists[0].name, "Liked");
+    assert_eq!(store.playlists[0].tracks, vec!["VID1", "VID2"]);
+    assert_eq!(store.playlists[0].image_tag.as_deref(), Some("urlhex_ab"));
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+/// Helper: a local playlist's track refs from the loaded store.
+async fn local_playlist_tracks(db: &db::Db, id: &str) -> Vec<String> {
+    db.load_playlists(&Source::default())
+        .await
+        .unwrap()
+        .playlists
+        .into_iter()
+        .find(|p| p.id == id)
+        .unwrap_or_else(|| panic!("playlist {id} missing"))
+        .tracks
+}
+
+#[tokio::test]
+async fn playlist_add_appends_and_dedups() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    db.upsert_playlist_meta(&Source::default(), "pl", "Mine", None, None)
+        .await
+        .unwrap();
+    db.set_playlist_tracks(&Source::default(), "pl", &["a".into(), "b".into()])
+        .await
+        .unwrap();
+
+    db.add_playlist_tracks(&Source::default(), "pl", &["c".into(), "d".into()])
+        .await
+        .unwrap();
+    assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "b", "c", "d"]);
+
+    db.add_playlist_tracks(&Source::default(), "pl", &["b".into(), "e".into()])
+        .await
+        .unwrap();
+    assert_eq!(
+        local_playlist_tracks(&db, "pl").await,
+        ["a", "b", "c", "d", "e"]
+    );
+
+    db.add_playlist_tracks(&Source::default(), "pl", &["f".into(), "f".into()])
+        .await
+        .unwrap();
+    assert_eq!(
+        local_playlist_tracks(&db, "pl").await,
+        ["a", "b", "c", "d", "e", "f"]
+    );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn playlist_add_creates_playlist_if_absent() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+
+    db.add_playlist_tracks(&Source::default(), "fresh", &["x".into()])
+        .await
+        .unwrap();
+    assert_eq!(local_playlist_tracks(&db, "fresh").await, ["x"]);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn playlist_remove_keeps_remaining_order() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    db.upsert_playlist_meta(&Source::default(), "pl", "Mine", None, None)
+        .await
+        .unwrap();
+    db.set_playlist_tracks(
+        &Source::default(),
+        "pl",
+        &["a".into(), "b".into(), "c".into(), "d".into()],
+    )
+    .await
+    .unwrap();
+
+    db.remove_playlist_tracks(&Source::default(), "pl", &["b".into(), "d".into()])
+        .await
+        .unwrap();
+    assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "c"]);
+
+    db.remove_playlist_tracks(&Source::default(), "pl", &["z".into()])
+        .await
+        .unwrap();
+    assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "c"]);
+
+    db.add_playlist_tracks(&Source::default(), "pl", &["e".into()])
+        .await
+        .unwrap();
+    assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "c", "e"]);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+/// Helper: a folder's playlist_ids from the loaded store, or panic if absent.
+async fn folder_members(db: &db::Db, id: &str) -> Vec<String> {
+    db.load_playlists(&Source::default())
+        .await
+        .unwrap()
+        .folders
+        .into_iter()
+        .find(|f| f.id == id)
+        .unwrap_or_else(|| panic!("folder {id} missing"))
+        .playlist_ids
+}
+
+#[tokio::test]
+async fn folder_create_rename_delete() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+
+    db.create_folder("f1", "Rock").await.unwrap();
+    let store = db.load_playlists(&Source::default()).await.unwrap();
+    assert_eq!(store.folders.len(), 1);
+    assert_eq!(store.folders[0].name, "Rock");
+
+    db.create_folder("f1", "Metal").await.unwrap();
+    let store = db.load_playlists(&Source::default()).await.unwrap();
+    assert_eq!(store.folders.len(), 1, "no duplicate folder row");
+    assert_eq!(store.folders[0].name, "Metal");
+
+    db.rename_folder("f1", "Jazz").await.unwrap();
+    let store = db.load_playlists(&Source::default()).await.unwrap();
+    assert_eq!(store.folders[0].name, "Jazz");
+
+    db.delete_folder("f1").await.unwrap();
+    assert!(
+        db.load_playlists(&Source::default())
+            .await
+            .unwrap()
+            .folders
+            .is_empty()
+    );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn folder_move_is_not_duplicate() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    db.create_folder("f1", "A").await.unwrap();
+    db.create_folder("f2", "B").await.unwrap();
+
+    db.set_playlist_folder("p1", Some("f1")).await.unwrap();
+    assert_eq!(folder_members(&db, "f1").await, vec!["p1"]);
+
+    db.set_playlist_folder("p1", Some("f2")).await.unwrap();
+    assert!(
+        folder_members(&db, "f1").await.is_empty(),
+        "moving out of f1 clears the old membership"
+    );
+    assert_eq!(folder_members(&db, "f2").await, vec!["p1"]);
+
+    db.set_playlist_folder("p1", None).await.unwrap();
+    assert!(folder_members(&db, "f2").await.is_empty());
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn folder_membership_appends_in_order() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    db.create_folder("f1", "A").await.unwrap();
+
+    db.set_playlist_folder("pA", Some("f1")).await.unwrap();
+    db.set_playlist_folder("pB", Some("f1")).await.unwrap();
+    db.set_playlist_folder("pC", Some("f1")).await.unwrap();
+    assert_eq!(folder_members(&db, "f1").await, vec!["pA", "pB", "pC"]);
+
+    db.set_playlist_folder("pB", Some("f1")).await.unwrap();
+    assert_eq!(folder_members(&db, "f1").await, vec!["pA", "pC", "pB"]);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn deleting_folder_cascades_membership() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    db.create_folder("f1", "A").await.unwrap();
+    db.set_playlist_folder("p1", Some("f1")).await.unwrap();
+
+    db.delete_folder("f1").await.unwrap();
+
+    db.create_folder("f1", "A").await.unwrap();
+    assert!(
+        folder_members(&db, "f1").await.is_empty(),
+        "membership did not survive the folder delete"
+    );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn favorites_round_trip() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    seed_active_server(&db, "srv-1").await;
+
+    db.set_favorite("local", "/music/a.flac", true)
+        .await
+        .unwrap();
+    db.set_favorite("srv-1", "VID1", true).await.unwrap();
+
+    assert_eq!(db.favorites("local").await.unwrap(), vec!["/music/a.flac"]);
+    assert_eq!(db.favorites("srv-1").await.unwrap(), vec!["VID1"]);
+    assert!(db.is_favorite("local", "/music/a.flac").await.unwrap());
+    assert!(db.is_favorite("srv-1", "VID1").await.unwrap());
+    assert!(!db.is_favorite("srv-1", "VID2").await.unwrap());
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn fresh_like_sorts_to_top() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    seed_active_server(&db, "srv-1").await;
+
+    db.set_favorite("srv-1", "A", true).await.unwrap();
+    db.set_favorite("srv-1", "B", true).await.unwrap();
+    db.set_favorite("srv-1", "C", true).await.unwrap();
+
+    assert_eq!(db.favorites("srv-1").await.unwrap(), vec!["C", "B", "A"]);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn pull_applies_remote_order_and_fresh_like_tops_it() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    seed_active_server(&db, "srv-1").await;
+
+    db.replace_favorites_clean("srv-1", &["X".into(), "Y".into(), "Z".into()])
+        .await
+        .unwrap();
+    assert_eq!(db.favorites("srv-1").await.unwrap(), vec!["X", "Y", "Z"]);
+
+    db.set_favorite("srv-1", "NEW", true).await.unwrap();
+    assert_eq!(
+        db.favorites("srv-1").await.unwrap(),
+        vec!["NEW", "X", "Y", "Z"]
+    );
+
+    db.replace_favorites_clean("srv-1", &["Z".into(), "X".into(), "Y".into()])
+        .await
+        .unwrap();
+    assert_eq!(
+        db.favorites("srv-1").await.unwrap(),
+        vec!["NEW", "Z", "X", "Y"]
+    );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn streaming_favorites_upsert_then_sweep() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    seed_active_server(&db, "srv-1").await;
+
+    db.upsert_favorites_page("srv-1", &["A".into(), "B".into()], 0, 1)
+        .await
+        .unwrap();
+    db.upsert_favorites_page("srv-1", &["C".into()], 2, 1)
+        .await
+        .unwrap();
+    assert_eq!(db.favorites("srv-1").await.unwrap(), vec!["A", "B", "C"]);
+
+    db.set_favorite("srv-1", "LOCAL", true).await.unwrap();
+
+    db.upsert_favorites_page("srv-1", &["C".into(), "A".into()], 0, 2)
+        .await
+        .unwrap();
+    db.sweep_favorites("srv-1", 2).await.unwrap();
+
+    assert_eq!(
+        db.favorites("srv-1").await.unwrap(),
+        vec!["LOCAL", "C", "A"]
+    );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn streaming_playlist_tracks_upsert_then_sweep() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    seed_active_server(&db, "srv-1").await;
+    let srv = Source::Server("srv-1".into());
+    db.upsert_playlist_meta(&srv, "PLX", "Mix", None, None)
+        .await
+        .unwrap();
+
+    async fn entries(db: &db::Db, srv: &Source) -> Vec<String> {
+        db.load_playlists(srv)
+            .await
+            .unwrap()
+            .playlists
+            .into_iter()
+            .find(|p| p.id == "PLX")
+            .map(|p| p.tracks)
+            .unwrap_or_default()
+    }
+
+    db.upsert_playlist_tracks_page(&srv, "PLX", &["A".into(), "B".into()], 0, 1)
+        .await
+        .unwrap();
+    db.upsert_playlist_tracks_page(&srv, "PLX", &["C".into()], 2, 1)
+        .await
+        .unwrap();
+    assert_eq!(entries(&db, &srv).await, vec!["A", "B", "C"]);
+
+    db.upsert_playlist_tracks_page(&srv, "PLX", &["C".into(), "A".into()], 0, 2)
+        .await
+        .unwrap();
+    db.sweep_playlist_tracks(&srv, "PLX", 2).await.unwrap();
+
+    assert_eq!(entries(&db, &srv).await, vec!["C", "A"]);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn liked_music_playlist_surfaces_in_the_grid() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    seed_active_server(&db, "srv-1").await;
+    let srv = Source::Server("srv-1".into());
+
+    db.upsert_playlist_meta(&srv, "PLX", "Mix", None, None)
+        .await
+        .unwrap();
+    db.upsert_playlist_meta(&srv, "LM", "Liked Music", None, None)
+        .await
+        .unwrap();
+    db.set_playlist_tracks(&srv, "LM", &["VID1".into()])
+        .await
+        .unwrap();
+
+    let store = db.load_playlists(&srv).await.unwrap();
+    let ids: Vec<&str> = store.playlists.iter().map(|p| p.id.as_str()).collect();
+    assert!(
+        ids.contains(&"LM"),
+        "LM must surface as a playlist: {ids:?}"
+    );
+    assert!(ids.contains(&"PLX"));
+
+    let lm = store.playlists.iter().find(|p| p.id == "LM").unwrap();
+    assert_eq!(lm.tracks, vec!["VID1".to_string()]);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn queue_round_trips() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+
+    let snap = QueueSnapshot {
+        version: 1,
+        queue: vec![server_track("VID1", "Yt One")],
+        current_queue_index: 0,
+        progress_secs: 42,
+        shuffle_order: vec![0],
+        shuffle_enabled: true,
+        radio_cursor: None,
+        origin: None,
+        stations: Default::default(),
+    };
+    db.save_queue(&Source::default(), &snap).await.unwrap();
+    let q = db.load_queue(&Source::default()).await.unwrap();
+    assert_eq!(q.queue.len(), 1);
+    assert_eq!(q.queue[0].title, "Yt One");
+    assert_eq!(q.progress_secs, 42);
+    assert!(q.shuffle_enabled);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn each_source_keeps_its_own_queue_and_a_purge_takes_only_its_own() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let local = Source::default();
+    let server = Source::Server("srv-1".into());
+    let snap = |key: &str, title: &str, progress_secs| QueueSnapshot {
+        version: 1,
+        queue: vec![server_track(key, title)],
+        progress_secs,
+        shuffle_order: vec![0],
+        ..Default::default()
+    };
+    db.save_queue(&local, &snap("L1", "Local one", 10))
+        .await
+        .unwrap();
+    db.save_queue(&server, &snap("S1", "Server one", 20))
+        .await
+        .unwrap();
+    db.save_queue_position(&server, &snap("S1", "Server one", 25))
+        .await
+        .unwrap();
+
+    let on_local = db.load_queue(&local).await.unwrap();
+    let on_server = db.load_queue(&server).await.unwrap();
+    assert_eq!(
+        (on_local.queue[0].title.as_str(), on_local.progress_secs),
+        ("Local one", 10)
+    );
+    assert_eq!(
+        (on_server.queue[0].title.as_str(), on_server.progress_secs),
+        ("Server one", 25)
+    );
+    assert!(
+        db.load_queue(&Source::Server("never".into()))
+            .await
+            .unwrap()
+            .queue
+            .is_empty()
+    );
+
+    db.purge_source(&server).await.unwrap();
+    assert!(db.load_queue(&server).await.unwrap().queue.is_empty());
+    assert_eq!(db.load_queue(&local).await.unwrap().queue.len(), 1);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn a_library_prune_keeps_rows_a_playlist_or_favorite_holds() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let active = Source::Server("srv-1".into());
+    db.upsert_tracks(
+        &active,
+        &[
+            server_track("LIB", "In the library"),
+            server_track("PL", "Only in a playlist"),
+            server_track("FAV", "Only a favorite"),
+            server_track("GONE", "Nothing holds it"),
+        ],
+    )
+    .await
+    .unwrap();
+    db.upsert_playlist_meta(&active, "PL1", "Mix", None, None)
+        .await
+        .unwrap();
+    db.set_playlist_tracks(&active, "PL1", &["PL".into()])
+        .await
+        .unwrap();
+    db.set_favorite("srv-1", "FAV", true).await.unwrap();
+
+    db.prune_source(&active, &["LIB".into()], &[])
+        .await
+        .unwrap();
+
+    let count = db.tracks_count(&TrackFilter::new(active)).await.unwrap();
+    assert_eq!(count, 3);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn active_server_writes_never_touch_other_servers_rows() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    seed_active_server(&db, "srv-1").await;
+
+    let other = Source::Server("srv-other".into());
+    db.upsert_tracks(&other, &[server_track("OV1", "Other One")])
+        .await
+        .unwrap();
+    db.upsert_playlist_meta(&other, "OPL", "Other List", None, None)
+        .await
+        .unwrap();
+    db.set_playlist_tracks(&other, "OPL", &["OV1".into()])
+        .await
+        .unwrap();
+    db.set_favorite("srv-other", "OV1", true).await.unwrap();
+
+    let active = Source::Server("srv-1".into());
+    db.upsert_tracks(
+        &active,
+        &[
+            server_track("VID1", "Yt One"),
+            server_track("VID2", "Yt Two"),
+        ],
+    )
+    .await
+    .unwrap();
+    db.prune_source(&active, &["VID1".into(), "VID2".into()], &[])
+        .await
+        .unwrap();
+    db.upsert_playlist_meta(&active, "PL1", "Liked", None, None)
+        .await
+        .unwrap();
+    db.set_playlist_tracks(&active, "PL1", &["VID1".into()])
+        .await
+        .unwrap();
+    db.upsert_playlist_meta(&active, "TMP", "Scratch", None, None)
+        .await
+        .unwrap();
+    db.delete_playlist(&active, "TMP").await.unwrap();
+
+    let other_count = db
+        .tracks_count(&TrackFilter::new(Source::Server("srv-other".into())))
+        .await
+        .unwrap();
+    assert_eq!(other_count, 1, "other server's tracks survived");
+    assert_eq!(
+        db.favorites("srv-other").await.unwrap(),
+        vec!["OV1"],
+        "other server's favorites survived"
+    );
+
+    let store = db
+        .load_playlists(&Source::Server("srv-1".into()))
+        .await
+        .unwrap();
+    assert_eq!(store.playlists.len(), 1);
+    assert_eq!(store.playlists[0].id, "PL1");
+    assert_eq!(store.playlists[0].tracks, vec!["VID1"]);
+
+    let store = db
+        .load_playlists(&Source::Server("srv-other".into()))
+        .await
+        .unwrap();
+    assert_eq!(
+        store.playlists.len(),
+        1,
+        "other server's playlists survived"
+    );
+    assert_eq!(store.playlists[0].id, "OPL");
+    assert_eq!(store.playlists[0].tracks, vec!["OV1"]);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+/// Two accounts can hold the same video; restoring one's queue must refresh it from that account's library, not the other's.
+#[tokio::test]
+async fn a_restored_queue_refreshes_from_its_own_source_only() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let mine = Source::Server("srv-mine".into());
+    let theirs = Source::Server("srv-theirs".into());
+    db.upsert_tracks(&theirs, &[server_track("VID", "Their row")])
+        .await
+        .unwrap();
+    db.upsert_tracks(&mine, &[server_track("VID", "My row")])
+        .await
+        .unwrap();
+    let mut queued = server_track("VID", "Queued");
+    queued.playlist_item_id = Some("entry-7".into());
+    db.save_queue(
+        &mine,
+        &QueueSnapshot {
+            version: 1,
+            queue: vec![queued],
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let restored = db.load_queue(&mine).await.unwrap();
+    assert_eq!(restored.queue[0].title, "My row");
+    assert_eq!(
+        restored.queue[0].playlist_item_id.as_deref(),
+        Some("entry-7"),
+        "the queued entry keeps its own playlist entry"
+    );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+/// One listing crediting a track differently must not cost its artist the key its photo hangs on; the full prune at a sync's end clears real orphans.
+#[tokio::test]
+async fn a_briefly_uncredited_artist_keeps_its_key_until_a_full_prune() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let source = Source::Server("srv-1".into());
+    let credited = |name: &str| {
+        let mut track = server_track("T1", "Song");
+        track.artist = name.into();
+        track.artists = vec![name.into()];
+        track
+    };
+    db.upsert_tracks(&source, &[credited("Ada")]).await.unwrap();
+    let first = db.unlinked_artist_keys(&source).await.unwrap();
+
+    db.upsert_tracks(&source, &[credited("Someone Else")])
+        .await
+        .unwrap();
+    db.upsert_tracks(&source, &[credited("Ada")]).await.unwrap();
+    let back = db.unlinked_artist_keys(&source).await.unwrap();
+    assert!(
+        first.iter().all(|(name, key)| back.get(name) == Some(key)),
+        "Ada keeps her key: {first:?} vs {back:?}"
+    );
+
+    db.prune_source(&source, &["T1".into()], &[]).await.unwrap();
+    assert_eq!(
+        db.unlinked_artist_keys(&source).await.unwrap(),
+        first,
+        "the full prune leaves only the credited artist"
+    );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}

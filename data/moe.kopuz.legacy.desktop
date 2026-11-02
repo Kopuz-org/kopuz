@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Kopuz Legacy
+Comment=The previous Kopuz interface, with the music daemon built in
+Exec=kopuz-legacy
+Icon=moe.kopuz.legacy
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Player;Music;
+Keywords=Music;Player;
+StartupWMClass=kopuz-legacy

@@ -1,0 +1,25 @@
+[package]
+name = "components"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+api = { workspace = true }
+config = { workspace = true }
+i18n = { workspace = true }
+link = { workspace = true }
+profile = { path = "../profile" }
+store = { workspace = true }
+gpui-kit = { workspace = true }
+primitives = { workspace = true }
+tracing = { workspace = true }
+theme = { workspace = true }
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }

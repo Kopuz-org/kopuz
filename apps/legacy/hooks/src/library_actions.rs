@@ -1,0 +1,165 @@
+//! Library mutations through the daemon API, with errors shown as toasts.
+
+use dioxus::prelude::*;
+
+use crate::api::consume_api;
+use crate::toast::toast_api_error;
+
+/// Rewrite one track's tags, and its embedded cover with them.
+pub fn edit_track(patch: api::TrackMetadataPatch) {
+    let api = consume_api();
+    spawn(async move {
+        if let Err(error) = api.update_track_metadata(patch).await {
+            tracing::warn!(%error, "saving track tags failed");
+            toast_api_error(&error);
+        }
+    });
+}
+
+/// Forget these tracks. `from_disk` also unlinks the files, which the daemon
+/// refuses outside the configured library roots.
+pub fn delete_tracks(keys: Vec<String>, from_disk: bool) {
+    if keys.is_empty() {
+        return;
+    }
+    let api = consume_api();
+    spawn(async move {
+        if let Err(error) = api.delete_tracks(keys, from_disk).await {
+            tracing::warn!(%error, "deleting tracks failed");
+            toast_api_error(&error);
+        }
+    });
+}
+
+pub fn delete_album(id: String, from_disk: bool) {
+    let api = consume_api();
+    spawn(async move {
+        if let Err(error) = api.delete_album(id, from_disk).await {
+            tracing::warn!(%error, "deleting an album failed");
+            toast_api_error(&error);
+        }
+    });
+}
+
+/// Set a picture. The bytes come from a file the user picked; the daemon
+/// stores them and tells the source, so a server that hosts covers gets it.
+pub fn upload_artwork(target: api::ArtworkTarget, content_type: String, bytes: Vec<u8>) {
+    let api = consume_api();
+    spawn(async move {
+        let upload = api::ArtworkUpload {
+            target,
+            content_type,
+            bytes,
+        };
+        if let Err(error) = api.upload_artwork(upload).await {
+            tracing::warn!(%error, "setting artwork failed");
+            toast_api_error(&error);
+        }
+    });
+}
+
+pub fn remove_artwork(target: api::ArtworkTarget) {
+    let api = consume_api();
+    spawn(async move {
+        if let Err(error) = api.remove_artwork(target).await {
+            tracing::warn!(%error, "removing artwork failed");
+            toast_api_error(&error);
+        }
+    });
+}
+
+/// The content type for a picture the user picked, by extension.
+///
+/// The daemon decodes what it is given and rejects anything that is not an
+/// image, so this only has to be right often enough to pick a file name.
+pub fn content_type_for(path: &std::path::Path) -> String {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "png" => "image/png",
+        "webp" => "image/webp",
+        _ => "image/jpeg",
+    }
+    .to_string()
+}
+
+/// An album's track keys in the daemon's album order (disc, track, title), handed to `then`; an action menu needs no list on screen.
+pub fn with_album_keys(album_id: String, then: impl FnOnce(Vec<String>) + 'static) {
+    let api = consume_api();
+    spawn(async move {
+        let page = match api
+            .album_tracks(
+                album_id,
+                api::Page {
+                    offset: 0,
+                    limit: u32::MAX,
+                },
+            )
+            .await
+        {
+            Ok(page) => page,
+            Err(error) => {
+                tracing::warn!(%error, "reading an album's tracks failed");
+                toast_api_error(&error);
+                return;
+            }
+        };
+        then(page.items.into_iter().map(|track| track.key).collect());
+    });
+}
+
+/// `then` runs once the source took it, so a button flips only on success.
+pub fn rate(item_ref: String, rating: api::Rating, then: impl FnOnce() + 'static) {
+    let api = consume_api();
+    spawn(async move {
+        match api.rate(item_ref, rating).await {
+            Ok(()) => then(),
+            Err(error) => {
+                tracing::warn!(%error, "rating failed");
+                toast_api_error(&error);
+            }
+        }
+    });
+}
+
+pub fn follow(artist_ref: String, follow: bool, then: impl FnOnce() + 'static) {
+    let api = consume_api();
+    spawn(async move {
+        match api.follow(artist_ref, follow).await {
+            Ok(()) => then(),
+            Err(error) => {
+                tracing::warn!(%error, "following failed");
+                toast_api_error(&error);
+            }
+        }
+    });
+}
+
+pub fn save(item_ref: String, saved: bool, then: impl FnOnce() + 'static) {
+    let api = consume_api();
+    spawn(async move {
+        match api.save(item_ref, saved).await {
+            Ok(()) => then(),
+            Err(error) => {
+                tracing::warn!(%error, "saving to the library failed");
+                toast_api_error(&error);
+            }
+        }
+    });
+}
+
+pub fn remove_from_history(token: String, then: impl FnOnce() + 'static) {
+    let api = consume_api();
+    spawn(async move {
+        match api.remove_from_history(token).await {
+            Ok(()) => then(),
+            Err(error) => {
+                tracing::warn!(%error, "removing from history failed");
+                toast_api_error(&error);
+            }
+        }
+    });
+}

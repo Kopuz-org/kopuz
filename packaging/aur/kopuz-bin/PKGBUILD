@@ -1,0 +1,33 @@
+# Maintainer: temidaradev <temidaradev@proton.me>
+pkgname=kopuz-bin
+pkgver=0.22.0
+pkgrel=1
+pkgdesc="A modern music player, with the kopuzd daemon it runs on (pre-built binary)"
+arch=('x86_64')
+url="https://github.com/Kopuz-org/kopuz"
+license=('EUPL-1.2')
+provides=('kopuz' 'kopuzd' 'kopuzctl')
+conflicts=('kopuz')
+depends=(
+    'ca-certificates'
+    'alsa-lib'
+    'openssl'
+    'gcc-libs'
+    'libxcb'
+    'libxkbcommon'
+    'libxkbcommon-x11'
+    'wayland'
+    'vulkan-icd-loader'
+    'fontconfig'
+    'freetype2'
+)
+optdepends=(
+    'ffmpeg: converting YouTube downloads to MP3, FLAC or WAV'
+)
+source=("kopuz-$pkgver-$pkgrel.deb::https://github.com/Kopuz-org/kopuz/releases/download/v$pkgver/kopuz_$pkgver-1_amd64.deb")
+# Filled in at publish time from the release's kopuz_<version>-1_amd64.deb.sha256.
+sha256sums=('SKIP')
+
+package() {
+    bsdtar -xf data.tar.gz -C "$pkgdir"
+}

@@ -1,0 +1,56 @@
+# Maintainer: temidaradev <temidaradev@proton.me>
+pkgname=kopuz-legacy
+pkgver=0.22.0
+pkgrel=1
+pkgdesc="The legacy Dioxus interface of the Kopuz music player, with the daemon built in"
+arch=('x86_64')
+url="https://github.com/Kopuz-org/kopuz"
+license=('EUPL-1.2')
+depends=(
+    'webkit2gtk-4.1'
+    'gtk3'
+    'libsoup3'
+    'glib-networking'
+    'alsa-lib'
+    'openssl'
+    'xdotool'
+    'dbus'
+    'opus'
+    'libayatana-appindicator'
+    'gst-plugins-base'
+    'gst-plugins-good'
+)
+makedepends=('cargo' 'npm' 'pkgconf' 'cmake' 'clang')
+optdepends=(
+    'ffmpeg: converting YouTube downloads to MP3, FLAC or WAV'
+)
+# makepkg's -flto turns the bundled sqlite3.c into bitcode that the sqlx-macros link then drops.
+options=('!lto')
+source=("kopuz-$pkgver.tar.gz::https://github.com/Kopuz-org/kopuz/archive/refs/tags/v$pkgver.tar.gz")
+# Filled in at publish time from the tag's source tarball.
+sha256sums=('SKIP')
+
+prepare() {
+    cd "kopuz-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+    npm ci
+}
+
+build() {
+    cd "kopuz-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    export SQLX_OFFLINE=true
+    npx @tailwindcss/cli -i ./tailwind.css -o ./apps/legacy/kopuz/assets/tailwind.css --minify
+    cargo build --frozen --release -p kopuz-legacy
+}
+
+package() {
+    cd "kopuz-$pkgver"
+    install -Dm755 target/release/kopuz-legacy "$pkgdir/usr/bin/kopuz-legacy"
+    install -Dm644 data/moe.kopuz.legacy.desktop \
+        "$pkgdir/usr/share/applications/moe.kopuz.legacy.desktop"
+    install -Dm644 apps/legacy/kopuz/assets/logo.png \
+        "$pkgdir/usr/share/icons/hicolor/256x256/apps/moe.kopuz.legacy.png"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

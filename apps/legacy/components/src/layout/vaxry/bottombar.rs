@@ -1,0 +1,278 @@
+use crate::NavigationController;
+use crate::player_controls::{
+    ControlsVariant, PlaybackBufferIndicator, SeekSlider, TransportButtons, VolumeSlider,
+};
+use config::PlayerBarPosition;
+use dioxus::prelude::*;
+use hooks::use_player_controller::PlayerController;
+
+use hooks::favorites::toggle_favorite;
+
+#[component]
+pub fn BottombarVaxry(
+    mut settings: Signal<config::Settings>,
+    mut is_playing: Signal<bool>,
+    mut is_fullscreen: Signal<bool>,
+    mut current_song_duration: Signal<u64>,
+    mut current_song_progress: Signal<u64>,
+    queue: Signal<Vec<api::TrackInfo>>,
+    mut current_queue_index: Signal<usize>,
+    mut current_song_title: Signal<String>,
+    mut current_song_artist: Signal<String>,
+    mut volume: Signal<f32>,
+    mut is_rightbar_open: Signal<bool>,
+    is_devices_open: Signal<bool>,
+) -> Element {
+    let mut ctrl = use_context::<PlayerController>();
+    let is_playing = ctrl.is_playing;
+    let current_song_duration = ctrl.current_song_duration;
+    let current_song_progress = ctrl.current_song_progress;
+    let current_song_title = ctrl.current_song_title;
+    let current_song_artist = ctrl.current_song_artist;
+    let volume = ctrl.volume;
+    let mut track_menu_open = use_signal(|| false);
+    let menu_track_key = use_memo(move || {
+        ctrl.current_track_snapshot
+            .read()
+            .as_ref()
+            .map(|track| track.key.clone())
+    });
+    use_effect(move || {
+        menu_track_key.read();
+        track_menu_open.set(false);
+    });
+    let nav_ctrl = use_context::<NavigationController>();
+    let fav_track = use_memo(move || ctrl.current_track_snapshot.read().clone());
+    let is_fav = hooks::use_db_queries::use_track_is_favorite(fav_track);
+    let crate::CompactMode(mut compact_mode) = use_context::<crate::CompactMode>();
+
+    let mut bar_swipe = crate::gestures::use_swipe();
+    let on_bar_swipe = move |evt: TouchEvent| {
+        use crate::gestures::SwipeDirection;
+        match bar_swipe.finish(&evt) {
+            Some(SwipeDirection::Up) => is_fullscreen.set(true),
+            Some(SwipeDirection::Left) => ctrl.play_next(),
+            Some(SwipeDirection::Right) => ctrl.play_prev(),
+            _ => {}
+        }
+    };
+
+    if cfg!(target_os = "android") {
+        let is_loading = *ctrl.is_loading.read();
+        let buffered_ranges = ctrl.buffered_ranges.read().clone();
+        let pct = if *current_song_duration.read() > 0 {
+            (*current_song_progress.read() as f64 / *current_song_duration.read() as f64) * 100.0
+        } else {
+            0.0
+        };
+        let cover = ctrl
+            .current_cover_url(hooks::artwork::Size::Thumb)
+            .unwrap_or_default();
+        let fav = is_fav();
+        return rsx! {
+            div {
+                class: "shrink-0 h-[68px] bg-black/85 backdrop-blur-2xl border-t border-white/10 flex items-center px-3 gap-3 relative overflow-hidden",
+                onclick: move |_| is_fullscreen.set(true),
+                ontouchstart: move |evt| bar_swipe.start(&evt),
+                ontouchmove: move |evt| bar_swipe.update(&evt),
+                ontouchend: on_bar_swipe,
+                ontouchcancel: move |_| bar_swipe.reset(),
+                div { class: "absolute top-0 left-0 h-[2px] bg-white/10 w-full overflow-hidden",
+                    PlaybackBufferIndicator {
+                        ranges: buffered_ranges,
+                        played_percent: pct,
+                        loading: is_loading,
+                    }
+                    div { class: "h-full bg-white/80 transition-all duration-300", style: "width: {pct}%" }
+                }
+                div { class: "w-11 h-11 bg-white/5 rounded shrink-0 overflow-hidden flex items-center justify-center",
+                    if cover.is_empty() {
+                        i { class: "fa-solid fa-music text-white/20" }
+                    } else {
+                        img { src: "{cover}", class: "w-full h-full object-cover" }
+                    }
+                }
+                div { class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
+                    span { class: "text-[13px] font-semibold text-white/90 truncate leading-tight", "{current_song_title}" }
+                    span { class: "text-[11px] text-slate-400 truncate leading-tight", "{current_song_artist}" }
+                }
+                div { class: "flex items-center gap-0.5 pr-1", dir: "ltr",
+                    button {
+                        class: if fav { "w-10 h-10 flex items-center justify-center text-red-400 active:scale-90 transition-transform" } else { "w-10 h-10 flex items-center justify-center text-slate-400 active:scale-90 transition-transform" },
+                        onclick: move |evt| { evt.stop_propagation(); toggle_favorite(hooks::favorites::current(&ctrl)); },
+                        i { class: if fav { "fa-solid fa-heart text-sm" } else { "fa-regular fa-heart text-sm" } }
+                    }
+                    button {
+                        class: "w-11 h-11 flex items-center justify-center text-white text-xl active:scale-90 transition-transform",
+                        onclick: move |evt| { evt.stop_propagation(); ctrl.toggle(); },
+                        i { class: if *is_playing.read() { "fa-solid fa-pause" } else { "fa-solid fa-play ml-1" } }
+                    }
+                    button {
+                        class: "w-11 h-11 flex items-center justify-center text-white text-lg active:scale-90 transition-transform",
+                        onclick: move |evt| { evt.stop_propagation(); ctrl.play_next(); },
+                        i { class: "fa-solid fa-forward-step" }
+                    }
+                }
+            }
+        };
+    }
+
+    let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
+    let artist = current_track_snapshot
+        .as_ref()
+        .and_then(|track| track.primary_credit())
+        .and_then(|credit| credit.key.clone());
+    let cover = ctrl
+        .current_cover_url(hooks::artwork::Size::Thumb)
+        .unwrap_or_default();
+    let is_favorite = is_fav();
+    let heart_class = if is_favorite {
+        "text-red-400 hover:text-red-300 transition-colors"
+    } else {
+        "text-slate-500 hover:text-red-400 transition-colors"
+    };
+    let heart_icon = if is_favorite {
+        "fa-solid fa-heart"
+    } else {
+        "fa-regular fa-heart"
+    };
+
+    let position = settings.read().ui.player_bar_position;
+    let border_class = match position {
+        PlayerBarPosition::Bottom => "border-t border-white/5",
+        PlayerBarPosition::Top => "border-b border-white/5",
+    };
+
+    let menu_placement = match position {
+        PlayerBarPosition::Bottom => "top",
+        PlayerBarPosition::Top => "bottom",
+    };
+    let bar_as_fullscreen = *is_fullscreen.read() && settings.read().ui.fullscreen_use_player_bar;
+    // `backdrop-blur-xl` makes the bar a stacking context, so its menus can
+    // only rise as high as the bar itself does over the page.
+    let lift_class = if bar_as_fullscreen {
+        "relative z-[60]"
+    } else {
+        "relative z-30"
+    };
+    let bg_class = if settings.read().background.cover_art_background
+        || !settings.read().background.custom_background_path.is_empty()
+    {
+        "bg-black/40"
+    } else {
+        "bg-black/70 backdrop-blur-xl"
+    };
+
+    rsx! {
+        div {
+            class: "h-16 {bg_class} {border_class} {lift_class} px-4 flex items-center gap-3 select-none shrink-0",
+
+            div {
+                class: "shrink-0",
+                TransportButtons { is_playing, variant: ControlsVariant::Bar }
+            }
+
+            div { class: "w-px h-5 bg-white/10 shrink-0" }
+
+            if !bar_as_fullscreen {
+                div {
+                    class: "w-11 h-11 rounded overflow-hidden bg-white/5 shrink-0 flex items-center justify-center",
+                    if cover.is_empty() {
+                        i { class: "fa-solid fa-music text-white/20 text-xs" }
+                    } else {
+                        img { src: "{cover}", class: "w-full h-full object-cover" }
+                    }
+                }
+            }
+
+            div {
+                class: "flex flex-col flex-1 min-w-0 justify-center gap-0.5",
+                oncontextmenu: move |evt| {
+                    evt.prevent_default();
+                    if ctrl.current_track_snapshot.peek().is_some() {
+                        crate::dots_menu::open_at_pointer(&evt);
+                        track_menu_open.set(true);
+                    }
+                },
+                if !bar_as_fullscreen {
+                    div {
+                        class: "flex items-baseline gap-1.5 min-w-0",
+                        span {
+                            class: "text-xs font-semibold text-white/90 truncate hover:underline cursor-pointer min-w-0",
+                            onclick: move |_| {
+                                let album_id = current_track_snapshot
+                                    .as_ref()
+                                    .map(|track| track.album_id.clone())
+                                    .unwrap_or_default();
+                                nav_ctrl.navigate_to_album(album_id);
+                            },
+                            "{current_song_title}"
+                        }
+                        span { class: "text-white/20 text-[10px] shrink-0", "—" }
+                        span {
+                            class: "text-[11px] text-slate-400 truncate min-w-0 shrink-0 max-w-[40%] cursor-pointer hover:underline hover:text-slate-300",
+                            onclick: move |_| {
+                                if let Some(artist) = artist.clone() {
+                                    nav_ctrl.open_artist(artist);
+                                }
+                            },
+                            "{current_song_artist}"
+                        }
+                    }
+                }
+                SeekSlider { current_song_duration, current_song_progress, variant: ControlsVariant::Bar }
+            }
+
+            div { class: "w-px h-5 bg-white/10 shrink-0" }
+
+            div {
+                class: "flex items-center gap-2 shrink-0",
+                button {
+                    class: "{heart_class} w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/10 active:scale-95",
+                    title: if is_favorite { i18n::t("remove_from_favorites").to_string() } else { i18n::t("add_to_favorites").to_string() },
+                    onclick: move |_| { toggle_favorite(hooks::favorites::current(&ctrl)) },
+                    i { class: "{heart_icon} text-xs" }
+                }
+                crate::dont_recommend::DontRecommendButton {
+                    class: "text-slate-500 hover:text-slate-300 transition-colors text-xs w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/10 active:scale-95",
+                }
+                VolumeSlider { settings, volume, variant: ControlsVariant::Bar }
+                button {
+                    class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
+                    onclick: move |_| { let c = *is_rightbar_open.read(); is_rightbar_open.set(!c); },
+                    i { class: "fa-solid fa-list text-[10px]" }
+                }
+                crate::external_devices::ExternalDevicesButton {
+                    compact: true,
+                    is_rightbar_open,
+                    is_devices_open,
+                }
+                if let Some(track) = ctrl.current_track_snapshot.read().clone() {
+                    crate::track_actions::TrackActionsMenu {
+                        track,
+                        is_open: Some(track_menu_open()),
+                        on_open: Some(EventHandler::new(move |_| track_menu_open.set(true))),
+                        on_close: Some(EventHandler::new(move |_| track_menu_open.set(false))),
+                        placement: menu_placement.to_string(),
+                        button_class: "w-9 h-9 text-slate-500 hover:bg-white/10 active:scale-95 text-[10px]".to_string(),
+                    }
+                }
+                if cfg!(not(target_os = "android")) {
+                    button {
+                        class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
+                        title: i18n::t("mini_player").to_string(),
+                        onclick: move |_| { let c = *compact_mode.read(); compact_mode.set(!c); },
+                        i { class: "fa-solid fa-compress text-[10px]" }
+                    }
+                }
+                if !bar_as_fullscreen {
+                    button {
+                        class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
+                        onclick: move |_| is_fullscreen.set(true),
+                        i { class: "fa-solid fa-up-right-and-down-left-from-center text-[10px]" }
+                    }
+                }
+            }
+        }
+    }
+}

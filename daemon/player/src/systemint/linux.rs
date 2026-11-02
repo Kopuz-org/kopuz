@@ -1,0 +1,481 @@
+use futures_util::StreamExt as _;
+use mpris_server::{
+    LoopStatus, Metadata, PlaybackStatus, PlayerInterface, Property, RootInterface, Server, Time,
+    zbus::fdo,
+};
+use std::sync::{Arc, Mutex, OnceLock};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepeatMode {
+    Off,
+    Playlist,
+    Track,
+}
+
+impl RepeatMode {
+    fn from_mpris(status: LoopStatus) -> Self {
+        match status {
+            LoopStatus::None => Self::Off,
+            LoopStatus::Track => Self::Track,
+            LoopStatus::Playlist => Self::Playlist,
+        }
+    }
+
+    fn to_mpris(self) -> LoopStatus {
+        match self {
+            Self::Off => LoopStatus::None,
+            Self::Track => LoopStatus::Track,
+            Self::Playlist => LoopStatus::Playlist,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum SystemEvent {
+    Play,
+    Pause,
+    Toggle,
+    Next,
+    Prev,
+    /// Absolute target position in seconds.
+    Seek(f64),
+    SetShuffle(bool),
+    SetRepeat(RepeatMode),
+}
+
+/// MPRIS SetPosition requires a `mpris:trackid`; we expose a constant one
+/// (position always refers to the current track).
+const TRACK_ID: &str = "/org/kopuz/track/current";
+
+struct MprisState {
+    metadata: Metadata,
+    status: PlaybackStatus,
+    position: Time,
+    shuffle: bool,
+    repeat: RepeatMode,
+}
+
+/// The MPRIS `Identity` and `DesktopEntry`: a spawning frontend's, else Kopuz's.
+static IDENTITY: OnceLock<(String, String)> = OnceLock::new();
+
+/// Shows the MPRIS entry as `name`, with the icon and launcher of the desktop
+/// file `desktop_entry`, so the shell's media controls name the app the user
+/// started rather than a daemon they never saw. Takes effect only before the
+/// first call.
+pub fn set_identity(name: String, desktop_entry: String) {
+    let _ = IDENTITY.set((name, desktop_entry));
+}
+
+static TX: OnceLock<UnboundedSender<SystemEvent>> = OnceLock::new();
+static RX: OnceLock<tokio::sync::Mutex<UnboundedReceiver<SystemEvent>>> = OnceLock::new();
+static STATE: OnceLock<Arc<Mutex<MprisState>>> = OnceLock::new();
+static NOTIFY: OnceLock<tokio::sync::mpsc::UnboundedSender<bool>> = OnceLock::new();
+
+fn tx() -> UnboundedSender<SystemEvent> {
+    TX.get_or_init(|| {
+        let (tx, rx) = unbounded_channel();
+        RX.set(tokio::sync::Mutex::new(rx)).ok();
+        tx
+    })
+    .clone()
+}
+
+fn state() -> Arc<Mutex<MprisState>> {
+    STATE
+        .get_or_init(|| {
+            Arc::new(Mutex::new(MprisState {
+                metadata: Metadata::new(),
+                status: PlaybackStatus::Stopped,
+                position: Time::ZERO,
+                shuffle: false,
+                repeat: RepeatMode::Off,
+            }))
+        })
+        .clone()
+}
+
+fn notify() {
+    if let Some(tx) = NOTIFY.get() {
+        let _ = tx.send(true);
+    }
+}
+
+struct P(Arc<Mutex<MprisState>>, UnboundedSender<SystemEvent>);
+
+impl RootInterface for P {
+    async fn raise(&self) -> fdo::Result<()> {
+        Ok(())
+    }
+    async fn quit(&self) -> fdo::Result<()> {
+        Ok(())
+    }
+    async fn can_quit(&self) -> fdo::Result<bool> {
+        Ok(false)
+    }
+    async fn fullscreen(&self) -> fdo::Result<bool> {
+        Ok(false)
+    }
+    async fn set_fullscreen(&self, _: bool) -> mpris_server::zbus::Result<()> {
+        Ok(())
+    }
+    async fn can_set_fullscreen(&self) -> fdo::Result<bool> {
+        Ok(false)
+    }
+    async fn can_raise(&self) -> fdo::Result<bool> {
+        Ok(false)
+    }
+    async fn has_track_list(&self) -> fdo::Result<bool> {
+        Ok(false)
+    }
+    async fn identity(&self) -> fdo::Result<String> {
+        Ok(IDENTITY.get().map_or("Kopuz", |(name, _)| name).into())
+    }
+    async fn desktop_entry(&self) -> fdo::Result<String> {
+        Ok(IDENTITY.get().map_or("kopuz", |(_, entry)| entry).into())
+    }
+    async fn supported_uri_schemes(&self) -> fdo::Result<Vec<String>> {
+        Ok(vec![])
+    }
+    async fn supported_mime_types(&self) -> fdo::Result<Vec<String>> {
+        Ok(vec![])
+    }
+}
+
+impl PlayerInterface for P {
+    async fn next(&self) -> fdo::Result<()> {
+        self.1.send(SystemEvent::Next).ok();
+        Ok(())
+    }
+    async fn previous(&self) -> fdo::Result<()> {
+        self.1.send(SystemEvent::Prev).ok();
+        Ok(())
+    }
+    async fn pause(&self) -> fdo::Result<()> {
+        self.1.send(SystemEvent::Pause).ok();
+        Ok(())
+    }
+    async fn play_pause(&self) -> fdo::Result<()> {
+        self.1.send(SystemEvent::Toggle).ok();
+        Ok(())
+    }
+    async fn stop(&self) -> fdo::Result<()> {
+        self.1.send(SystemEvent::Pause).ok();
+        Ok(())
+    }
+    async fn play(&self) -> fdo::Result<()> {
+        self.1.send(SystemEvent::Play).ok();
+        Ok(())
+    }
+    async fn seek(&self, offset: Time) -> fdo::Result<()> {
+        let current = self.0.lock().map(|s| s.position).unwrap_or(Time::ZERO);
+        let target = (current.as_micros() + offset.as_micros()).max(0);
+        self.1.send(SystemEvent::Seek(target as f64 / 1e6)).ok();
+        Ok(())
+    }
+    async fn set_position(&self, _: mpris_server::TrackId, position: Time) -> fdo::Result<()> {
+        let target = position.as_micros().max(0);
+        self.1.send(SystemEvent::Seek(target as f64 / 1e6)).ok();
+        Ok(())
+    }
+    async fn open_uri(&self, _: String) -> fdo::Result<()> {
+        Ok(())
+    }
+    async fn playback_status(&self) -> fdo::Result<PlaybackStatus> {
+        Ok(self
+            .0
+            .lock()
+            .map(|s| s.status)
+            .unwrap_or(PlaybackStatus::Stopped))
+    }
+    async fn loop_status(&self) -> fdo::Result<LoopStatus> {
+        Ok(self
+            .0
+            .lock()
+            .map(|s| s.repeat.to_mpris())
+            .unwrap_or(LoopStatus::None))
+    }
+    async fn set_loop_status(&self, status: LoopStatus) -> mpris_server::zbus::Result<()> {
+        let repeat = RepeatMode::from_mpris(status);
+        if let Ok(mut s) = self.0.lock() {
+            s.repeat = repeat;
+        }
+        self.1.send(SystemEvent::SetRepeat(repeat)).ok();
+        notify();
+        Ok(())
+    }
+    async fn rate(&self) -> fdo::Result<f64> {
+        Ok(1.0)
+    }
+    async fn set_rate(&self, _: f64) -> mpris_server::zbus::Result<()> {
+        Ok(())
+    }
+    async fn shuffle(&self) -> fdo::Result<bool> {
+        Ok(self.0.lock().map(|s| s.shuffle).unwrap_or(false))
+    }
+    async fn set_shuffle(&self, shuffle: bool) -> mpris_server::zbus::Result<()> {
+        if let Ok(mut s) = self.0.lock() {
+            s.shuffle = shuffle;
+        }
+        self.1.send(SystemEvent::SetShuffle(shuffle)).ok();
+        notify();
+        Ok(())
+    }
+    async fn metadata(&self) -> fdo::Result<Metadata> {
+        Ok(self
+            .0
+            .lock()
+            .map(|s| s.metadata.clone())
+            .unwrap_or_default())
+    }
+    async fn volume(&self) -> fdo::Result<f64> {
+        Ok(1.0)
+    }
+    async fn set_volume(&self, _: f64) -> mpris_server::zbus::Result<()> {
+        Ok(())
+    }
+    async fn position(&self) -> fdo::Result<Time> {
+        Ok(self.0.lock().map(|s| s.position).unwrap_or(Time::ZERO))
+    }
+    async fn minimum_rate(&self) -> fdo::Result<f64> {
+        Ok(1.0)
+    }
+    async fn maximum_rate(&self) -> fdo::Result<f64> {
+        Ok(1.0)
+    }
+    async fn can_go_next(&self) -> fdo::Result<bool> {
+        Ok(true)
+    }
+    async fn can_go_previous(&self) -> fdo::Result<bool> {
+        Ok(true)
+    }
+    async fn can_play(&self) -> fdo::Result<bool> {
+        Ok(true)
+    }
+    async fn can_pause(&self) -> fdo::Result<bool> {
+        Ok(true)
+    }
+    async fn can_seek(&self) -> fdo::Result<bool> {
+        Ok(true)
+    }
+    async fn can_control(&self) -> fdo::Result<bool> {
+        Ok(true)
+    }
+}
+
+pub fn update_position(position: f64) {
+    setup();
+    if let Ok(mut s) = state().lock() {
+        s.position = Time::from_micros((position * 1e6) as i64);
+    }
+}
+
+/// Push the current shuffle / repeat state (changed in the UI) to MPRIS
+/// clients so their toggles stay in sync with Kopuz.
+pub fn update_modes(shuffle: bool, repeat: RepeatMode) {
+    setup();
+    let changed = if let Ok(mut s) = state().lock() {
+        let changed = s.shuffle != shuffle || s.repeat != repeat;
+        s.shuffle = shuffle;
+        s.repeat = repeat;
+        changed
+    } else {
+        false
+    };
+    if changed {
+        notify();
+    }
+}
+
+/// Take the shared bus name, or the spec's per-instance one when another
+/// player already holds it. zbus asks with `DoNotQueue`, so a taken name never
+/// becomes ours by waiting, and a second instance is legitimate anyway.
+async fn register(
+    st: &Arc<Mutex<MprisState>>,
+    events: &UnboundedSender<SystemEvent>,
+) -> Option<(Server<P>, String)> {
+    let taken = match Server::new("kopuz", P(st.clone(), events.clone())).await {
+        Ok(server) => {
+            tracing::info!(name = "kopuz", "MPRIS registered");
+            return Some((server, format!("{BUS_PREFIX}kopuz")));
+        }
+        Err(error) => error,
+    };
+    let instance = format!("kopuz.instance{}", std::process::id());
+    match Server::new(&instance, P(st.clone(), events.clone())).await {
+        Ok(server) => {
+            tracing::info!(name = %instance, "MPRIS registered");
+            Some((server, format!("{BUS_PREFIX}{instance}")))
+        }
+        Err(error) => {
+            tracing::warn!(
+                %taken,
+                %error,
+                "MPRIS registration failed; media keys are off for this process"
+            );
+            None
+        }
+    }
+}
+
+const BUS_PREFIX: &str = "org.mpris.MediaPlayer2.";
+
+/// Each time `name` is left without an owner, as when a process that took it from us exits.
+async fn owner_changes(
+    conn: &mpris_server::zbus::Connection,
+    name: &str,
+) -> Option<fdo::NameOwnerChangedStream> {
+    let dbus = fdo::DBusProxy::new(conn).await.ok()?;
+    dbus.receive_name_owner_changed_with_args(&[(0, name), (2, "")])
+        .await
+        .ok()
+}
+
+/// Waits for the next time the name is freed; without a stream it never resolves.
+async fn name_freed(owners: &mut Option<fdo::NameOwnerChangedStream>) -> bool {
+    let Some(stream) = owners.as_mut() else {
+        return std::future::pending().await;
+    };
+    let freed = stream.next().await.is_some();
+    if !freed {
+        *owners = None;
+    }
+    freed
+}
+
+/// Only ever takes a free name, since two players each taking it back from the other would never settle.
+async fn reclaim(conn: &mpris_server::zbus::Connection, name: &str) {
+    let flags = fdo::RequestNameFlags::AllowReplacement | fdo::RequestNameFlags::DoNotQueue;
+    match conn.request_name_with_flags(name, flags).await {
+        Ok(fdo::RequestNameReply::PrimaryOwner | fdo::RequestNameReply::AlreadyOwner) => {
+            tracing::info!(%name, "MPRIS name taken back");
+        }
+        Ok(reply) => tracing::debug!(%name, ?reply, "MPRIS name went to another player first"),
+        Err(error) => tracing::warn!(%name, %error, "could not take the MPRIS name back"),
+    }
+}
+
+fn setup() {
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        let (ntx, mut nrx) = tokio::sync::mpsc::unbounded_channel();
+        NOTIFY.set(ntx).ok();
+        let st = state();
+
+        let events = tx();
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    let Some((srv, name)) = register(&st, &events).await else {
+                        return;
+                    };
+                    let mut owners = owner_changes(srv.connection(), &name).await;
+                    loop {
+                        let seeked = tokio::select! {
+                            seeked = nrx.recv() => match seeked {
+                                Some(seeked) => seeked,
+                                None => break,
+                            },
+                            freed = name_freed(&mut owners) => {
+                                if freed {
+                                    reclaim(srv.connection(), &name).await;
+                                }
+                                continue;
+                            }
+                        };
+                        if seeked {
+                            let (metadata, status, position, shuffle, repeat) = match st.lock() {
+                                Ok(s) => (
+                                    s.metadata.clone(),
+                                    s.status,
+                                    s.position,
+                                    s.shuffle,
+                                    s.repeat.to_mpris(),
+                                ),
+                                Err(_) => continue,
+                            };
+                            srv.properties_changed([
+                                Property::Metadata(metadata),
+                                Property::PlaybackStatus(status),
+                                Property::Shuffle(shuffle),
+                                Property::LoopStatus(repeat),
+                            ])
+                            .await
+                            .ok();
+                            srv.emit(mpris_server::Signal::Seeked { position })
+                                .await
+                                .ok();
+                        }
+                    }
+                    tracing::warn!(
+                        "MPRIS notifier stopped; this process no longer publishes state"
+                    );
+                });
+        });
+    });
+}
+
+pub fn poll_event() -> Option<SystemEvent> {
+    setup();
+    RX.get()?.try_lock().ok()?.try_recv().ok()
+}
+
+/// Park until the MPRIS handlers hand over a control event. The zbus
+/// handlers run on their own thread and push into an unbounded channel, so
+/// this never blocks them and a media key needs no timer to be noticed.
+pub async fn wait_event() -> Option<SystemEvent> {
+    setup();
+    let rx = RX.get()?;
+    let mut guard = rx.lock().await;
+    guard.recv().await
+}
+
+pub fn update_now_playing(
+    title: &str,
+    artist: &str,
+    album: &str,
+    duration: f64,
+    position: f64,
+    playing: bool,
+    artwork_path: Option<&str>,
+) {
+    setup();
+    if let Ok(mut s) = state().lock() {
+        let mut b = Metadata::builder()
+            .title(title)
+            .artist([artist])
+            .album(album)
+            .length(Time::from_micros((duration * 1e6) as i64));
+        if let Ok(trackid) = mpris_server::TrackId::try_from(TRACK_ID) {
+            b = b.trackid(trackid);
+        }
+        if let Some(art) = artwork_path {
+            b = b.art_url(
+                if art.starts_with("http://")
+                    || art.starts_with("https://")
+                    || art.starts_with("file://")
+                {
+                    art.to_string()
+                } else if art.starts_with('/') {
+                    format!("file://{art}")
+                } else {
+                    format!(
+                        "file://{}/{art}",
+                        std::env::current_dir().unwrap_or_default().display()
+                    )
+                },
+            );
+        }
+        s.metadata = b.build();
+        s.status = if playing {
+            PlaybackStatus::Playing
+        } else {
+            PlaybackStatus::Paused
+        };
+        s.position = Time::from_micros((position * 1e6) as i64);
+    }
+    NOTIFY.get().map(|tx| tx.send(true));
+}

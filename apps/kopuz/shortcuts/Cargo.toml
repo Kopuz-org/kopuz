@@ -1,0 +1,18 @@
+[package]
+name = "shortcuts"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+commands = { workspace = true }
+i18n = { workspace = true }
+settings_interface = { path = "../settings_interface" }
+store = { workspace = true }
+components = { path = "../components" }
+gpui-kit = { workspace = true }

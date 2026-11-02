@@ -1,0 +1,51 @@
+[package]
+name = "kopuz-utils"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "utils"
+
+[lints]
+workspace = true
+
+[features]
+# HTTP client builders, for the crates that reach the network; a frontend leaves this off.
+http = ["dep:reqwest", "tokio/net"]
+
+[dependencies]
+config = { workspace = true }
+percent-encoding = { workspace = true }
+directories = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+color-thief = { workspace = true }
+image = { workspace = true }
+time = { workspace = true, features = ["formatting", "macros"] }
+icu_collator = { workspace = true }
+icu_locale_core = { workspace = true }
+reqwest = { workspace = true, optional = true, features = ["blocking"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+base64 = { workspace = true }
+jni = { workspace = true }
+ndk-context = { workspace = true }
+
+# Radio streams only; the other clients stay on rustls (see http.rs). Android trusts its store through rustls.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+reqwest = { workspace = true, optional = true, features = ["native-tls"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { workspace = true, features = ["NSLocale", "NSString"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Globalization"] }
+

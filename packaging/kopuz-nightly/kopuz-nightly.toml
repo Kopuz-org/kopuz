@@ -1,0 +1,25 @@
+# cargo-packager config for Kopuz Nightly; CI fills @VERSION@ and copies the binaries to their -nightly names first.
+name = "kopuz"
+product-name = "Kopuz Nightly"
+version = "@VERSION@"
+identifier = "moe.kopuz.kopuz.nightly"
+publisher = "temidaradev"
+authors = ["temidaradev"]
+category = "Music"
+description = "A modern, lightweight music player built with Rust and GPUI, from the latest development code."
+license-file = "../../LICENSE"
+icons = ["logo.png", "app.ico"]
+binaries-dir = "../../target/release"
+binaries = [
+  { path = "kopuz-nightly", main = true },
+  { path = "kopuzd-nightly" },
+  { path = "kopuzctl-nightly" },
+]
+
+[macos]
+minimum-system-version = "11.0"
+info-plist-path = "../kopuz/Info.plist"
+
+[nsis]
+installer-icon = "app.ico"
+template = "../kopuz/installer.nsi"

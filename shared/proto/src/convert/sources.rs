@@ -1,0 +1,695 @@
+use super::*;
+use crate::*;
+
+pub fn capabilities_to_proto(value: &api::SourceCapabilities) -> SourceCapabilities {
+    use api::{AlbumPresentation, ArtistPresentation, FavoritesSyncMode, PlaylistCapability};
+    SourceCapabilities {
+        edit_tags: value.edit_tags,
+        delete_from_disk: value.delete_from_disk,
+        scan_folders: value.scan_folders,
+        folders: value.folders,
+        sync: value.sync,
+        downloads: value.downloads,
+        rip_audio: value.rip_audio,
+        uploads: value.uploads,
+        storage_quota: value.storage_quota,
+        discover: value.discover,
+        dont_recommend: value.dont_recommend,
+        rate: value.rate,
+        follow: value.follow,
+        save: value.save,
+        remove_from_history: value.remove_from_history,
+        playlist_details: value.playlist_details,
+        track_radio: value.track_radio,
+        playlist_radio: value.playlist_radio,
+        search_radio: value.search_radio,
+        browse_folders: value.browse_folders,
+        external_devices: value.external_devices,
+        browser_playback: value.browser_playback,
+        music_videos: value.music_videos,
+        accounts: value.accounts,
+        stream_quality: value.stream_quality,
+        explicit_flags: value.explicit_flags,
+        watch_history: value.watch_history,
+        complete_play_history: value.complete_play_history,
+        playlists: match value.playlists {
+            PlaylistCapability::None => crate::PlaylistCapability::None,
+            PlaylistCapability::AddRemove => crate::PlaylistCapability::AddRemove,
+            PlaylistCapability::Reorder => crate::PlaylistCapability::Reorder,
+        } as i32,
+        artists: match value.artists {
+            ArtistPresentation::Library => crate::ArtistPresentation::Library,
+            ArtistPresentation::Remote => crate::ArtistPresentation::Remote,
+        } as i32,
+        albums: match value.albums {
+            AlbumPresentation::Standard => crate::AlbumPresentation::Standard,
+            AlbumPresentation::Remote => crate::AlbumPresentation::Remote,
+        } as i32,
+        favorites_sync: match value.favorites_sync {
+            FavoritesSyncMode::Instant => crate::FavoritesSyncMode::FavoritesSyncInstant,
+            FavoritesSyncMode::Paginated => crate::FavoritesSyncMode::FavoritesSyncPaginated,
+        } as i32,
+        pages: value.pages.iter().map(page_entry_to_proto).collect(),
+        search_filters: value
+            .search_filters
+            .iter()
+            .map(|filter| SearchFilter {
+                id: filter.id.clone(),
+                label: Some(text_to_proto(&filter.label)),
+            })
+            .collect(),
+    }
+}
+
+pub fn page_entry_to_proto(value: &api::PageEntry) -> PageEntry {
+    PageEntry {
+        id: value.id.clone(),
+        label: Some(text_to_proto(&value.label)),
+        icon: Some(icon_to_proto(&value.icon)),
+    }
+}
+
+pub fn page_entry_from_proto(value: &PageEntry) -> api::PageEntry {
+    api::PageEntry {
+        id: value.id.clone(),
+        label: value
+            .label
+            .as_ref()
+            .map(text_from_proto)
+            .unwrap_or_default(),
+        icon: value.icon.as_ref().map(icon_from_proto).unwrap_or_default(),
+    }
+}
+
+pub fn source_account_to_proto(value: &api::SourceAccount) -> SourceAccount {
+    SourceAccount {
+        id: value.id.clone(),
+        name: value.name.clone(),
+        handle: value.handle.clone(),
+        active: value.active,
+    }
+}
+
+pub fn source_account_from_proto(value: &SourceAccount) -> api::SourceAccount {
+    api::SourceAccount {
+        id: value.id.clone(),
+        name: value.name.clone(),
+        handle: value.handle.clone(),
+        active: value.active,
+    }
+}
+
+pub fn capabilities_from_proto(value: Option<&SourceCapabilities>) -> api::SourceCapabilities {
+    let Some(value) = value else {
+        return api::SourceCapabilities::default();
+    };
+    api::SourceCapabilities {
+        edit_tags: value.edit_tags,
+        delete_from_disk: value.delete_from_disk,
+        scan_folders: value.scan_folders,
+        folders: value.folders,
+        sync: value.sync,
+        downloads: value.downloads,
+        rip_audio: value.rip_audio,
+        uploads: value.uploads,
+        storage_quota: value.storage_quota,
+        discover: value.discover,
+        dont_recommend: value.dont_recommend,
+        rate: value.rate,
+        follow: value.follow,
+        save: value.save,
+        remove_from_history: value.remove_from_history,
+        playlist_details: value.playlist_details,
+        track_radio: value.track_radio,
+        playlist_radio: value.playlist_radio,
+        search_radio: value.search_radio,
+        browse_folders: value.browse_folders,
+        external_devices: value.external_devices,
+        browser_playback: value.browser_playback,
+        music_videos: value.music_videos,
+        accounts: value.accounts,
+        stream_quality: value.stream_quality,
+        explicit_flags: value.explicit_flags,
+        watch_history: value.watch_history,
+        complete_play_history: value.complete_play_history,
+        playlists: match crate::PlaylistCapability::try_from(value.playlists) {
+            Ok(crate::PlaylistCapability::AddRemove) => api::PlaylistCapability::AddRemove,
+            Ok(crate::PlaylistCapability::Reorder) => api::PlaylistCapability::Reorder,
+            _ => api::PlaylistCapability::None,
+        },
+        artists: match crate::ArtistPresentation::try_from(value.artists) {
+            Ok(crate::ArtistPresentation::Remote) => api::ArtistPresentation::Remote,
+            _ => api::ArtistPresentation::Library,
+        },
+        albums: match crate::AlbumPresentation::try_from(value.albums) {
+            Ok(crate::AlbumPresentation::Remote) => api::AlbumPresentation::Remote,
+            _ => api::AlbumPresentation::Standard,
+        },
+        favorites_sync: match crate::FavoritesSyncMode::try_from(value.favorites_sync) {
+            Ok(crate::FavoritesSyncMode::FavoritesSyncPaginated) => {
+                api::FavoritesSyncMode::Paginated
+            }
+            _ => api::FavoritesSyncMode::Instant,
+        },
+        pages: value.pages.iter().map(page_entry_from_proto).collect(),
+        search_filters: value
+            .search_filters
+            .iter()
+            .map(|filter| api::SearchFilter {
+                id: filter.id.clone(),
+                label: filter
+                    .label
+                    .as_ref()
+                    .map(text_from_proto)
+                    .unwrap_or_default(),
+            })
+            .collect(),
+    }
+}
+
+pub fn sign_in_kind_to_proto(value: api::SignInKind) -> SignInKind {
+    match value {
+        api::SignInKind::None => SignInKind::None,
+        api::SignInKind::Password => SignInKind::Password,
+        api::SignInKind::Browser => SignInKind::Browser,
+    }
+}
+
+pub fn sign_in_kind_from_proto(value: i32) -> api::SignInKind {
+    match SignInKind::try_from(value) {
+        Ok(SignInKind::Password) => api::SignInKind::Password,
+        Ok(SignInKind::Browser) => api::SignInKind::Browser,
+        Ok(SignInKind::None) | Ok(SignInKind::Unspecified) | Err(_) => api::SignInKind::None,
+    }
+}
+
+pub fn service_info_to_proto(value: &api::ServiceInfo) -> ServiceInfo {
+    ServiceInfo {
+        id: value.id.clone(),
+        name: Some(text_to_proto(&value.name)),
+        summary: Some(text_to_proto(&value.summary)),
+        icon: Some(icon_to_proto(&value.icon)),
+        accent: value.accent.clone(),
+        experimental: value.experimental,
+        fields: value.fields.iter().map(field_spec_to_proto).collect(),
+    }
+}
+
+pub fn service_info_from_proto(value: &ServiceInfo) -> api::ServiceInfo {
+    api::ServiceInfo {
+        id: value.id.clone(),
+        name: value.name.as_ref().map(text_from_proto).unwrap_or_default(),
+        summary: value
+            .summary
+            .as_ref()
+            .map(text_from_proto)
+            .unwrap_or_default(),
+        icon: value.icon.as_ref().map(icon_from_proto).unwrap_or_default(),
+        accent: value.accent.clone(),
+        experimental: value.experimental,
+        fields: value.fields.iter().map(field_spec_from_proto).collect(),
+    }
+}
+
+pub fn service_ref_to_proto(value: &api::ServiceRef) -> ServiceRef {
+    ServiceRef {
+        id: value.id.clone(),
+        name: Some(text_to_proto(&value.name)),
+        icon: Some(icon_to_proto(&value.icon)),
+        accent: value.accent.clone(),
+    }
+}
+
+pub fn service_ref_from_proto(value: &ServiceRef) -> api::ServiceRef {
+    api::ServiceRef {
+        id: value.id.clone(),
+        name: value.name.as_ref().map(text_from_proto).unwrap_or_default(),
+        icon: value.icon.as_ref().map(icon_from_proto).unwrap_or_default(),
+        accent: value.accent.clone(),
+    }
+}
+
+pub fn draft_check_to_proto(value: &api::DraftCheck) -> DraftCheck {
+    DraftCheck {
+        sign_in: sign_in_kind_to_proto(value.sign_in) as i32,
+        problems: value.problems.iter().map(problem_to_proto).collect(),
+    }
+}
+
+pub fn draft_check_from_proto(value: &DraftCheck) -> api::DraftCheck {
+    api::DraftCheck {
+        sign_in: sign_in_kind_from_proto(value.sign_in),
+        problems: value.problems.iter().map(problem_from_proto).collect(),
+    }
+}
+
+pub fn draft_probe_to_proto(value: &api::DraftProbe) -> DraftProbe {
+    let outcome = match value {
+        api::DraftProbe::Folders(folders) => draft_probe::Outcome::Folders(FolderProbeList {
+            folders: folders
+                .iter()
+                .map(|folder| FolderProbe {
+                    path: folder.path.clone(),
+                    exists: folder.exists,
+                    readable: folder.readable,
+                    audio_files: folder.audio_files,
+                    at_least: folder.at_least,
+                })
+                .collect(),
+        }),
+        api::DraftProbe::Server(probe) => draft_probe::Outcome::Server(ServerProbe {
+            outcome: Some(match probe {
+                api::ServerProbe::Reachable => server_probe::Outcome::Reachable(Unit {}),
+                api::ServerProbe::Unreachable => server_probe::Outcome::Unreachable(Unit {}),
+                api::ServerProbe::Status(status) => {
+                    server_probe::Outcome::Status(u32::from(*status))
+                }
+            }),
+        }),
+        api::DraftProbe::NotProbeable => draft_probe::Outcome::NotProbeable(Unit {}),
+    };
+    DraftProbe {
+        outcome: Some(outcome),
+    }
+}
+
+/// An outcome this build cannot read proves nothing was reached.
+pub fn draft_probe_from_proto(value: &DraftProbe) -> api::DraftProbe {
+    match &value.outcome {
+        Some(draft_probe::Outcome::Folders(list)) => api::DraftProbe::Folders(
+            list.folders
+                .iter()
+                .map(|folder| api::FolderProbe {
+                    path: folder.path.clone(),
+                    exists: folder.exists,
+                    readable: folder.readable,
+                    audio_files: folder.audio_files,
+                    at_least: folder.at_least,
+                })
+                .collect(),
+        ),
+        Some(draft_probe::Outcome::Server(probe)) => api::DraftProbe::Server(match probe.outcome {
+            Some(server_probe::Outcome::Reachable(_)) => api::ServerProbe::Reachable,
+            Some(server_probe::Outcome::Status(status)) => {
+                api::ServerProbe::Status(u16::try_from(status).unwrap_or(u16::MAX))
+            }
+            Some(server_probe::Outcome::Unreachable(_)) | None => api::ServerProbe::Unreachable,
+        }),
+        Some(draft_probe::Outcome::NotProbeable(_)) | None => api::DraftProbe::NotProbeable,
+    }
+}
+
+pub fn source_info_to_proto(value: &api::SourceInfo) -> SourceInfo {
+    SourceInfo {
+        id: value.id.clone(),
+        name: value.name.clone(),
+        service: Some(service_ref_to_proto(&value.service)),
+        active: value.active,
+        authenticated: value.authenticated,
+        sign_in: sign_in_kind_to_proto(value.sign_in) as i32,
+        reauth: sign_in_kind_to_proto(value.reauth) as i32,
+        capabilities: Some(capabilities_to_proto(&value.capabilities)),
+        detail: value.detail.clone(),
+        anonymous: value.anonymous,
+        settings: value.settings.iter().map(field_spec_to_proto).collect(),
+        needs_network: value.needs_network,
+        works_offline: value.works_offline,
+        permanent: value.permanent,
+        temporary: value.temporary,
+        state: value
+            .state
+            .map(|state| super::enums::source_state_to_proto(state) as i32),
+        avatar: value.avatar.as_ref().map(artwork_ref_to_proto),
+    }
+}
+
+pub fn source_info_from_proto(value: &SourceInfo) -> api::SourceInfo {
+    api::SourceInfo {
+        id: value.id.clone(),
+        name: value.name.clone(),
+        service: value
+            .service
+            .as_ref()
+            .map(service_ref_from_proto)
+            .unwrap_or_default(),
+        active: value.active,
+        authenticated: value.authenticated,
+        sign_in: sign_in_kind_from_proto(value.sign_in),
+        reauth: sign_in_kind_from_proto(value.reauth),
+        capabilities: capabilities_from_proto(value.capabilities.as_ref()),
+        detail: value.detail.clone(),
+        anonymous: value.anonymous,
+        settings: value.settings.iter().map(field_spec_from_proto).collect(),
+        needs_network: value.needs_network,
+        works_offline: value.works_offline,
+        permanent: value.permanent,
+        temporary: value.temporary,
+        state: value.state.map(super::enums::source_state_from_proto),
+        avatar: value.avatar.as_ref().and_then(artwork_ref_from_proto),
+    }
+}
+
+pub fn source_draft_to_proto(value: &api::SourceDraft) -> SourceDraft {
+    SourceDraft {
+        id: value.id.clone(),
+        name: value.name.clone(),
+        service: value.service.clone(),
+        values: value.values.iter().map(field_value_to_proto).collect(),
+        secrets: value.secrets.iter().map(field_value_to_proto).collect(),
+    }
+}
+
+pub fn source_draft_from_proto(value: &SourceDraft) -> api::SourceDraft {
+    api::SourceDraft {
+        id: value.id.clone(),
+        name: value.name.clone(),
+        service: value.service.clone(),
+        values: value.values.iter().map(field_value_from_proto).collect(),
+        secrets: value.secrets.iter().map(field_value_from_proto).collect(),
+    }
+}
+
+pub fn credential_provision_to_proto(value: &api::CredentialProvision) -> CredentialProvision {
+    CredentialProvision {
+        server_id: value.server_id.clone(),
+        secret: value.secret.clone(),
+        user_id: value.user_id.clone(),
+        browser: value.browser.clone(),
+    }
+}
+
+pub fn credential_provision_from_proto(value: &CredentialProvision) -> api::CredentialProvision {
+    api::CredentialProvision {
+        server_id: value.server_id.clone(),
+        secret: value.secret.clone(),
+        user_id: value.user_id.clone(),
+        browser: value.browser.clone(),
+    }
+}
+
+pub fn connect_kind_to_proto(value: api::ConnectKind) -> ConnectKind {
+    match value {
+        api::ConnectKind::None => ConnectKind::None,
+        api::ConnectKind::WebSignIn => ConnectKind::WebSignIn,
+        api::ConnectKind::BrowserProfile => ConnectKind::BrowserProfile,
+    }
+}
+
+pub fn connect_kind_from_proto(value: i32) -> api::ConnectKind {
+    match ConnectKind::try_from(value) {
+        Ok(ConnectKind::WebSignIn) => api::ConnectKind::WebSignIn,
+        Ok(ConnectKind::BrowserProfile) => api::ConnectKind::BrowserProfile,
+        Ok(ConnectKind::None) | Ok(ConnectKind::Unspecified) | Err(_) => api::ConnectKind::None,
+    }
+}
+
+pub fn integration_info_to_proto(value: &api::IntegrationInfo) -> IntegrationInfo {
+    IntegrationInfo {
+        id: value.id.clone(),
+        name: Some(text_to_proto(&value.name)),
+        icon: Some(icon_to_proto(&value.icon)),
+        configured: value.configured,
+        connect: connect_kind_to_proto(value.connect) as i32,
+        fields: value.fields.iter().map(field_spec_to_proto).collect(),
+    }
+}
+
+pub fn integration_info_from_proto(value: &IntegrationInfo) -> api::IntegrationInfo {
+    api::IntegrationInfo {
+        id: value.id.clone(),
+        name: value.name.as_ref().map(text_from_proto).unwrap_or_default(),
+        icon: value.icon.as_ref().map(icon_from_proto).unwrap_or_default(),
+        configured: value.configured,
+        connect: connect_kind_from_proto(value.connect),
+        fields: value.fields.iter().map(field_spec_from_proto).collect(),
+    }
+}
+
+pub fn browser_profile_to_proto(value: &api::BrowserProfile) -> BrowserProfile {
+    BrowserProfile {
+        id: value.id.clone(),
+        browser: value.browser.clone(),
+        name: value.name.clone(),
+    }
+}
+
+pub fn browser_profile_from_proto(value: &BrowserProfile) -> api::BrowserProfile {
+    api::BrowserProfile {
+        id: value.id.clone(),
+        browser: value.browser.clone(),
+        name: value.name.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn jellyfin() -> api::ServiceRef {
+        api::ServiceRef {
+            id: "jellyfin".into(),
+            name: api::Text::literal("Jellyfin"),
+            icon: api::Icon::Class("ph-cloud".into()),
+            accent: "#aa5cc3".into(),
+        }
+    }
+
+    fn url_field() -> api::FieldSpec {
+        api::FieldSpec {
+            key: "url".into(),
+            label: api::Text::key("settings-server-url"),
+            kind: api::FieldKind::Url,
+            required: true,
+            value: Some("https://jelly.example".into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_account_round_trips_with_and_without_an_id() {
+        for account in [
+            api::SourceAccount {
+                id: None,
+                name: "Ada".into(),
+                handle: Some("@ada".into()),
+                active: false,
+            },
+            api::SourceAccount {
+                id: Some("1122".into()),
+                name: "Ada Records".into(),
+                handle: None,
+                active: true,
+            },
+        ] {
+            assert_eq!(
+                account,
+                source_account_from_proto(&source_account_to_proto(&account))
+            );
+        }
+    }
+
+    /// A source row is what a settings page renders, so every field of it has
+    /// to survive the wire -- and none of them may be a credential.
+    #[test]
+    fn a_source_row_round_trips_without_carrying_a_secret() {
+        let info = api::SourceInfo {
+            id: "jellyfin-1".into(),
+            name: "Home".into(),
+            service: jellyfin(),
+            active: true,
+            authenticated: true,
+            sign_in: api::SignInKind::Password,
+
+            reauth: api::SignInKind::Password,
+            capabilities: api::SourceCapabilities {
+                edit_tags: false,
+                delete_from_disk: false,
+                sync: true,
+                downloads: true,
+                rip_audio: true,
+                uploads: true,
+                storage_quota: true,
+                browse_folders: true,
+                external_devices: false,
+                music_videos: true,
+                accounts: true,
+                stream_quality: true,
+                explicit_flags: true,
+                watch_history: true,
+                complete_play_history: true,
+                playlists: api::PlaylistCapability::Reorder,
+                artists: api::ArtistPresentation::Library,
+                albums: api::AlbumPresentation::Standard,
+                favorites_sync: api::FavoritesSyncMode::Paginated,
+                pages: vec![api::PageEntry {
+                    id: "FEmusic_home".into(),
+                    label: api::Text::key("home"),
+                    icon: api::Icon::Class("fa-solid fa-house".into()),
+                }],
+                search_filters: vec![api::SearchFilter {
+                    id: "songs".into(),
+                    label: api::Text::key("search_filter_songs"),
+                }],
+                ..Default::default()
+            },
+            detail: Some("https://jelly.example".into()),
+            anonymous: false,
+            settings: vec![url_field()],
+            needs_network: true,
+            works_offline: true,
+            permanent: true,
+            temporary: true,
+            state: Some(api::SourceState::AuthExpired),
+            avatar: Some(api::ArtworkRef::new(
+                api::ArtworkTarget::Account("yt".into()),
+                9,
+            )),
+        };
+        assert_eq!(info, source_info_from_proto(&source_info_to_proto(&info)));
+        let unprobed = api::SourceInfo {
+            state: None,
+            ..info
+        };
+        assert_eq!(
+            unprobed,
+            source_info_from_proto(&source_info_to_proto(&unprobed))
+        );
+    }
+
+    /// The form a client renders to add a server, and the answers it sends
+    /// back -- secrets included, since that direction is write-only.
+    #[test]
+    fn a_service_and_its_draft_round_trip() {
+        let service = api::ServiceInfo {
+            id: "jellyfin".into(),
+            name: api::Text::literal("Jellyfin"),
+            summary: api::Text::key("service_summary_jellyfin"),
+            icon: api::Icon::Svg("M0 0h24v24H0z".into()),
+            accent: "#aa5cc3".into(),
+            experimental: false,
+            fields: vec![
+                url_field(),
+                api::FieldSpec {
+                    key: "password".into(),
+                    label: api::Text::key("settings-password"),
+                    kind: api::FieldKind::Secret,
+                    ..Default::default()
+                },
+            ],
+        };
+        assert_eq!(
+            service,
+            service_info_from_proto(&service_info_to_proto(&service))
+        );
+
+        let draft = api::SourceDraft {
+            id: Some("jellyfin-1".into()),
+            name: "Home".into(),
+            service: "jellyfin".into(),
+            values: vec![api::FieldValue::new("url", "https://jelly.example")],
+            secrets: vec![api::FieldValue::new("password", "hunter2")],
+        };
+        assert_eq!(
+            draft,
+            source_draft_from_proto(&source_draft_to_proto(&draft))
+        );
+
+        let check = api::DraftCheck {
+            sign_in: api::SignInKind::Browser,
+            problems: vec![api::Problem::on("url", api::Text::key("error-url-empty"))],
+        };
+        assert_eq!(check, draft_check_from_proto(&draft_check_to_proto(&check)));
+    }
+
+    #[test]
+    fn every_draft_probe_round_trips() {
+        let folders = vec![
+            api::FolderProbe {
+                path: "/music".into(),
+                exists: true,
+                readable: true,
+                audio_files: 10_000,
+                at_least: true,
+            },
+            api::FolderProbe {
+                path: "/gone".into(),
+                ..Default::default()
+            },
+        ];
+        for probe in [
+            api::DraftProbe::Folders(folders),
+            api::DraftProbe::Folders(Vec::new()),
+            api::DraftProbe::Server(api::ServerProbe::Reachable),
+            api::DraftProbe::Server(api::ServerProbe::Unreachable),
+            api::DraftProbe::Server(api::ServerProbe::Status(401)),
+            api::DraftProbe::NotProbeable,
+        ] {
+            assert_eq!(probe, draft_probe_from_proto(&draft_probe_to_proto(&probe)));
+        }
+        assert_eq!(
+            draft_probe_from_proto(&DraftProbe::default()),
+            api::DraftProbe::NotProbeable
+        );
+    }
+
+    /// A sign-in kind this build cannot name is one it cannot drive: treat it
+    /// as nothing to do rather than guessing a flow.
+    #[test]
+    fn an_unknown_sign_in_kind_is_none() {
+        assert_eq!(sign_in_kind_from_proto(0), api::SignInKind::None);
+        assert_eq!(sign_in_kind_from_proto(404), api::SignInKind::None);
+    }
+
+    /// An integration row is rendered by the same code as a service, so it
+    /// carries the same field list -- and, like a source, never a credential.
+    #[test]
+    fn an_integration_row_round_trips_for_every_connect_kind() {
+        for connect in [
+            api::ConnectKind::None,
+            api::ConnectKind::WebSignIn,
+            api::ConnectKind::BrowserProfile,
+        ] {
+            let info = api::IntegrationInfo {
+                id: "listenbrainz".into(),
+                name: api::Text::literal("ListenBrainz"),
+                icon: api::Icon::Class("ph-broadcast".into()),
+                configured: true,
+                connect,
+                fields: vec![
+                    url_field(),
+                    api::FieldSpec {
+                        key: "token".into(),
+                        label: api::Text::key("settings-token"),
+                        kind: api::FieldKind::Secret,
+                        ..Default::default()
+                    },
+                ],
+            };
+            assert_eq!(
+                info,
+                integration_info_from_proto(&integration_info_to_proto(&info))
+            );
+        }
+    }
+
+    #[test]
+    fn a_browser_profile_round_trips() {
+        let profile = api::BrowserProfile {
+            id: "/home/me/.mozilla/firefox/a.default".into(),
+            browser: "Firefox".into(),
+            name: "default".into(),
+        };
+        assert_eq!(
+            profile,
+            browser_profile_from_proto(&browser_profile_to_proto(&profile))
+        );
+    }
+
+    /// A connect flow this build cannot name is one it cannot run: offer no
+    /// button rather than guessing at one.
+    #[test]
+    fn an_unknown_connect_kind_is_none() {
+        assert_eq!(connect_kind_from_proto(0), api::ConnectKind::None);
+        assert_eq!(connect_kind_from_proto(404), api::ConnectKind::None);
+    }
+}

@@ -2,11 +2,20 @@
 rustc-wrapper = ""
 
 [env]
-# Use the committed crates/db/.sqlx query cache instead of a live DB at build time.
+# Use the committed daemon/db/.sqlx query cache instead of a live DB at build time.
 SQLX_OFFLINE = "true"
+# The v8 crate links the C++ library statically only when this is set, and nothing else reads it; it acts on MSVC targets alone.
+CARGO_FEATURE_CRT_STATIC = "1"
 
 # Google Play mandates 16 KB page-size support for native libraries (all new
 # apps and updates since Nov 2025); NDK r26 still links 4 KB-aligned ELF
 # segments by default, which Play Console rejects.
 [target.aarch64-linux-android]
 rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+# A clean Windows has no Visual C++ runtime, so link it in rather than depend on vcruntime140/msvcp140.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

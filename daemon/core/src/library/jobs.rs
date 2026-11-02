@@ -1,0 +1,449 @@
+//! The library's long-running jobs: the local filesystem scan and the
+//! remote library pull, both cooperative with the job runner.
+
+use super::*;
+
+/// When each scanned file landed on this machine, as unix seconds: its birth
+/// time, falling back to the mtime on filesystems that do not record one. Birth
+/// time is the closer match for what "recently added" means to someone looking
+/// at their music folder, since a copy can carry the mtime it was published
+/// with but never an older birth time. Only the DB's first stamp for a track
+/// sticks, so a later tag rewrite bumping the mtime cannot resurface old music.
+fn added_at_stamps(tracks: &[reader::Track]) -> Vec<(String, i64)> {
+    tracks
+        .iter()
+        .filter_map(|track| {
+            let meta = std::fs::metadata(track.id.local_path()?).ok()?;
+            let stamped = meta.created().or_else(|_| meta.modified()).ok()?;
+            let secs = stamped
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_secs();
+            Some((track.id.key().into_owned(), secs as i64))
+        })
+        .collect()
+}
+
+impl LibraryService {
+    pub fn spawn_scan(
+        self: &Arc<Self>,
+        runner: &JobRunner,
+        trigger: Trigger,
+    ) -> Result<JobRef, ApiError> {
+        let service = self.clone();
+        runner.start_as(JobKind::Scan, trigger, move |ctx| async move {
+            let config = service.current_config();
+            service.run_scan(&ctx, &config).await
+        })
+    }
+
+    pub fn spawn_remote_sync(
+        self: &Arc<Self>,
+        runner: &JobRunner,
+        trigger: Trigger,
+    ) -> Result<JobRef, ApiError> {
+        let service = self.clone();
+        runner.start_as(JobKind::LibrarySync, trigger, move |ctx| async move {
+            let sources = service.current_sources();
+            let result = service.run_remote_sync(&ctx, &sources).await;
+            if result.is_ok() && !ctx.cancelled() {
+                crate::auto_sync::mark_synced(&service.db, JobKind::LibrarySync, &sources.active)
+                    .await;
+                let sweeper = service.clone();
+                tokio::spawn(async move { sweeper.sweep_artist_photos(true).await });
+            }
+            result
+        })
+    }
+
+    /// Local filesystem scan, ported from the app's rescan effect: DB-seeded
+    /// working set, per-root scan, retain-by-root, chunked upserts, prune,
+    /// local artist images with self-heal, then cover indexing and (when
+    /// enabled) network cover fetching. The job runner's single-flight
+    /// replaces the app's epoch supersession; cancellation is checked between
+    /// phases and chunks.
+    pub async fn run_scan(&self, ctx: &JobCtx, config: &config::Settings) -> Result<(), ApiError> {
+        let db_error = |error: db::DbError| ApiError::internal(format!("database error: {error}"));
+        for (source, configured_dirs) in Self::scan_roots(config) {
+            if ctx.cancelled() {
+                return Ok(());
+            }
+            let scannable_dirs: Vec<PathBuf> = configured_dirs
+                .iter()
+                .filter(|dir| dir.exists())
+                .cloned()
+                .collect();
+
+            if configured_dirs.is_empty() {
+                self.db
+                    .prune_source(&source, &[], &[])
+                    .await
+                    .map_err(db_error)?;
+                self.invalidate(Table::Tracks);
+                self.invalidate(Table::Albums);
+                continue;
+            }
+
+            ctx.progress("seeding", None, None, None);
+            let mut seed_tracks: Vec<Track> = Vec::new();
+            let mut seen_keys = HashSet::new();
+            for dir in &configured_dirs {
+                let mut prefix = dir.to_string_lossy().into_owned();
+                if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
+                    prefix.push(std::path::MAIN_SEPARATOR);
+                }
+                let found = self
+                    .db
+                    .folder_tracks(&source, &prefix)
+                    .await
+                    .map_err(db_error)?;
+                for track in found {
+                    if seen_keys.insert(track.id.key().into_owned()) {
+                        seed_tracks.push(track);
+                    }
+                }
+            }
+            let seed_albums = self.db.albums(&source).await.map_err(db_error)?;
+            let mut library = reader::Library {
+                root_paths: configured_dirs.clone(),
+                tracks: seed_tracks,
+                albums: seed_albums,
+                ..Default::default()
+            };
+
+            let progress_ctx = ctx.clone();
+            let progress: Arc<dyn Fn(String) + Send + Sync> = Arc::new(move |file: String| {
+                progress_ctx.progress_throttled("scanning", None, None, Some(file));
+            });
+            for dir in &scannable_dirs {
+                if ctx.cancelled() {
+                    return Ok(());
+                }
+                let _ = reader::scan_directory(
+                    dir.clone(),
+                    self.cover_cache.clone(),
+                    &mut library,
+                    progress.clone(),
+                )
+                .await;
+            }
+
+            library.tracks.retain(|track| {
+                let in_configured_root = configured_dirs.iter().any(|dir| {
+                    track
+                        .id
+                        .local_path()
+                        .is_some_and(|path| path.starts_with(dir))
+                });
+                let in_scannable_root = scannable_dirs.iter().any(|dir| {
+                    track
+                        .id
+                        .local_path()
+                        .is_some_and(|path| path.starts_with(dir))
+                });
+                in_configured_root
+                    && (!in_scannable_root
+                        || track.id.local_path().is_some_and(|path| path.exists()))
+            });
+            let valid_album_ids: HashSet<_> = library
+                .tracks
+                .iter()
+                .map(|track| track.album_id.clone())
+                .collect();
+            library
+                .albums
+                .retain(|album| valid_album_ids.contains(&album.id));
+
+            let total = library.tracks.len() as u64;
+            let mut done = 0u64;
+            for chunk in library.tracks.chunks(100) {
+                if ctx.cancelled() {
+                    return Ok(());
+                }
+                self.db
+                    .upsert_tracks(&source, chunk)
+                    .await
+                    .map_err(db_error)?;
+
+                if let Err(error) = self
+                    .db
+                    .stamp_added_at(&source, &added_at_stamps(chunk))
+                    .await
+                {
+                    tracing::warn!(%error, "could not stamp when tracks were added");
+                }
+                done += chunk.len() as u64;
+                ctx.progress("persisting", Some(done), Some(total), None);
+                self.invalidate(Table::Tracks);
+            }
+            self.db
+                .upsert_albums(&source, &library.albums)
+                .await
+                .map_err(db_error)?;
+            let keep_keys: Vec<String> = library
+                .tracks
+                .iter()
+                .map(|track| track.id.key().into_owned())
+                .collect();
+            let keep_albums: Vec<String> = library
+                .albums
+                .iter()
+                .map(|album| album.id.clone())
+                .collect();
+            self.db
+                .prune_source(&source, &keep_keys, &keep_albums)
+                .await
+                .map_err(db_error)?;
+
+            let unlinked = self
+                .db
+                .unlinked_artist_keys(&source)
+                .await
+                .map_err(db_error)?;
+            for (name, image) in &library.local_artist_images {
+                let Some(key) = unlinked.get(name) else {
+                    continue;
+                };
+                let path = image.to_string_lossy().into_owned();
+                let _ = self
+                    .db
+                    .set_artist_image(&source, key, "local", Some(&path))
+                    .await;
+            }
+            if let Ok((_, photos)) = self.db.artist_images().await {
+                for ((photo_source, key), photo) in photos {
+                    if let reader::ArtistImageRef::Local(path) = photo
+                        && photo_source == source.as_str()
+                        && !path.exists()
+                    {
+                        let _ = self.db.set_artist_image(&source, &key, "local", None).await;
+                    }
+                }
+            }
+            self.invalidate(Table::Tracks);
+            self.invalidate(Table::Albums);
+
+            ctx.progress("indexing covers", None, None, None);
+            let missing_local = reader::missing_cover_ids(&library);
+            let _ = reader::index_local_covers(
+                &mut library,
+                self.cover_cache.clone(),
+                progress.clone(),
+            )
+            .await;
+            self.persist_resolved_covers(ctx, &source, &library.albums, &missing_local)
+                .await;
+
+            if config.library.auto_fetch_covers && !ctx.cancelled() {
+                ctx.progress("fetching covers", None, None, None);
+                let lastfm_key = {
+                    let key = self.credentials.snapshot().lastfm_api_key.trim().to_owned();
+                    (!key.is_empty()).then_some(key)
+                };
+                let fetcher = reader::cover_fetcher::CoverFetcher::new(
+                    self.cover_cache.clone(),
+                    config.library.cover_fetch_strategy,
+                    lastfm_key,
+                    progress.clone(),
+                );
+                let missing_before = reader::missing_cover_ids(&library);
+                let _ = fetcher.fetch_missing_covers(&mut library).await;
+                self.persist_resolved_covers(ctx, &source, &library.albums, &missing_before)
+                    .await;
+            }
+        }
+        Ok(())
+    }
+
+    async fn persist_resolved_covers(
+        &self,
+        ctx: &JobCtx,
+        source: &config::Source,
+        albums: &[reader::Album],
+        missing_ids: &HashSet<String>,
+    ) {
+        let mut changed = Vec::new();
+        for album in albums {
+            if ctx.cancelled() {
+                break;
+            }
+            if !missing_ids.contains(&album.id) {
+                continue;
+            }
+            let Some(cover) = album.cover_path.as_ref() else {
+                continue;
+            };
+            let path = cover.to_string_lossy().into_owned();
+            match self
+                .db
+                .update_album_cover_if_not_manual(source, &album.id, &path)
+                .await
+            {
+                Ok(true) => changed.push(album.clone()),
+                Ok(false) => {}
+                Err(error) => {
+                    tracing::warn!(album_id = %album.id, %error, "cover persist failed");
+                }
+            }
+        }
+        if !changed.is_empty() {
+            if let Some(session) = self.session.get() {
+                session.update_album_covers(source, &changed);
+            }
+            self.invalidate(Table::Albums);
+
+            self.invalidate(Table::Tracks);
+        }
+    }
+
+    /// Refresh the remote library, preserving manual covers and pruning removed rows.
+    pub async fn run_remote_sync(
+        &self,
+        ctx: &JobCtx,
+        sources: &server::sources::Sources,
+    ) -> Result<(), ApiError> {
+        let source: server::source::ActiveSource =
+            Arc::from(server::source::active(self.db.clone(), sources));
+        if !source.capabilities().sync {
+            return Err(ApiError::unsupported(
+                "the active source has no library sync",
+            ));
+        }
+        let src = source.source().clone();
+        let existing_albums = self
+            .db
+            .albums(&src)
+            .await
+            .map_err(|error| ApiError::internal(format!("database error: {error}")))?;
+        let existing_albums_by_id: HashMap<String, &reader::Album> = existing_albums
+            .iter()
+            .map(|album| (normalize_album_id(&album.id), album))
+            .collect();
+        let merge_cover = |mut album: reader::Album| -> reader::Album {
+            if let Some(old) = existing_albums_by_id.get(&normalize_album_id(&album.id)) {
+                if album.cover_path.is_none() || old.manual_cover {
+                    album.cover_path = old.cover_path.clone();
+                }
+                if old.manual_cover {
+                    album.manual_cover = true;
+                }
+            }
+            album
+        };
+
+        ctx.progress("fetching library", None, None, None);
+        let progress_ctx = ctx.clone();
+        let mut snapshot = source
+            .fetch_library_with_progress(Arc::new(move |file| {
+                progress_ctx.progress_throttled("scanning", None, None, Some(file));
+            }))
+            .await
+            .map_err(crate::sources::source_error)?;
+
+        let merged_albums: Vec<reader::Album> =
+            snapshot.albums.into_iter().map(merge_cover).collect();
+        let total = (merged_albums.len() + snapshot.tracks.len()) as u64;
+        let mut done = 0u64;
+        for chunk in merged_albums.chunks(100) {
+            if ctx.cancelled() {
+                return Ok(());
+            }
+            source
+                .upsert_albums(chunk)
+                .await
+                .map_err(crate::sources::source_error)?;
+            done += chunk.len() as u64;
+            ctx.progress("persisting", Some(done), Some(total), None);
+            self.invalidate(Table::Albums);
+        }
+        for chunk in snapshot.tracks.chunks(100) {
+            if ctx.cancelled() {
+                return Ok(());
+            }
+            source
+                .upsert_tracks(chunk)
+                .await
+                .map_err(crate::sources::source_error)?;
+            done += chunk.len() as u64;
+            ctx.progress("persisting", Some(done), Some(total), None);
+            self.invalidate(Table::Tracks);
+        }
+        let linked = self.db.linked_artist_keys(&src).await.map_err(db_error)?;
+        for (artist, url) in &snapshot.artists {
+            let (Some(key), Some(url)) = (super::artist_art::credit_key(artist, &linked), url)
+            else {
+                continue;
+            };
+            let _ = source.set_artist_image(&key, "server", Some(url)).await;
+        }
+        // After the tracks: a listing renames only the rows they filed, and outranks their credits.
+        match source.name_listed_artists(&snapshot.artists).await {
+            Ok(0) => {}
+            Ok(_) => self.invalidate(Table::Artists),
+            Err(error) => tracing::warn!(%error, "could not name the listed artists"),
+        }
+        let keep_keys: Vec<String> = snapshot
+            .tracks
+            .iter()
+            .map(|track| track.id.key().into_owned())
+            .collect();
+        let keep_albums: Vec<String> = merged_albums.iter().map(|album| album.id.clone()).collect();
+        source
+            .prune(&keep_keys, &keep_albums)
+            .await
+            .map_err(crate::error::source_error)?;
+        self.invalidate(Table::Tracks);
+        self.invalidate(Table::Albums);
+        if ctx.cancelled() {
+            return Ok(());
+        }
+        ctx.progress("indexing covers", None, None, None);
+        let progress_ctx = ctx.clone();
+        let covers = source
+            .fetch_missing_covers(
+                &merged_albums,
+                &snapshot.tracks,
+                Arc::new(move |album| {
+                    progress_ctx.progress_throttled("indexing covers", None, None, Some(album));
+                }),
+            )
+            .await
+            .map_err(crate::sources::source_error)?;
+        if !covers.is_empty() && !ctx.cancelled() {
+            source
+                .upsert_albums(&covers)
+                .await
+                .map_err(crate::sources::source_error)?;
+            if let Some(session) = self.session.get() {
+                session.update_album_covers(&src, &covers);
+            }
+            let covers: HashMap<_, _> = covers
+                .iter()
+                .filter_map(|album| {
+                    album
+                        .cover_path
+                        .as_ref()
+                        .map(|path| (&album.id, path.to_string_lossy().into_owned()))
+                })
+                .collect();
+            let tracks: Vec<_> = snapshot
+                .tracks
+                .iter_mut()
+                .filter_map(|track| {
+                    let cover = covers.get(&track.album_id)?;
+                    track.cover = Some(cover.clone());
+                    Some(track.clone())
+                })
+                .collect();
+            for chunk in tracks.chunks(100) {
+                source
+                    .upsert_tracks(chunk)
+                    .await
+                    .map_err(crate::sources::source_error)?;
+            }
+            self.invalidate(Table::Albums);
+            self.invalidate(Table::Tracks);
+        }
+        Ok(())
+    }
+}

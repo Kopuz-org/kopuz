@@ -24,16 +24,16 @@ zipalign="$sdk/build-tools/$build_tools/zipalign"
 
 version="$(
   cargo metadata --no-deps --format-version 1 |
-    jq -r '.packages[] | select(.name == "kopuz") | .version'
+    jq -r '.packages[] | select(.name == "kopuz-legacy") | .version'
 )"
 
-gradle_project="target/dx/kopuz/release/android/app"
+gradle_project="target/dx/kopuz-legacy/release/android/app"
 unsigned="$gradle_project/app/build/outputs/apk/release/app-release-unsigned.apk"
 out_dir="target/android"
 out="$out_dir/kopuz-$version-arm64-v8a.apk"
 
 echo "[1/4] Compiling Rust and generating the Gradle project..."
-dx build --package kopuz --platform android --release --target aarch64-linux-android
+dx build --package kopuz-legacy --platform android --release --target aarch64-linux-android
 
 echo "[2/4] Assembling the release APK..."
 (cd "$gradle_project" && ./gradlew assembleRelease)

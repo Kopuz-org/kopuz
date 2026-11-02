@@ -1,0 +1,441 @@
+#[cfg(target_os = "macos")]
+use dioxus::desktop::window;
+use dioxus::prelude::*;
+use kopuz_route::Route;
+
+use crate::sidebar::SidebarProps;
+
+#[derive(PartialEq, Clone)]
+struct SidebarItem {
+    key: &'static str,
+    route: Route,
+    icon: &'static str,
+}
+
+#[cfg(not(target_os = "android"))]
+const TOP_MENU: &[SidebarItem] = &[
+    SidebarItem {
+        key: "home",
+        route: Route::Home,
+        icon: "fa-solid fa-house",
+    },
+    SidebarItem {
+        key: "search",
+        route: Route::Search,
+        icon: "fa-solid fa-magnifying-glass",
+    },
+    SidebarItem {
+        key: "discover",
+        route: Route::Discover,
+        icon: "fa-solid fa-compass",
+    },
+    SidebarItem {
+        key: "library",
+        route: Route::Library,
+        icon: "fa-solid fa-book",
+    },
+    SidebarItem {
+        key: "albums",
+        route: Route::Album,
+        icon: "fa-solid fa-music",
+    },
+    SidebarItem {
+        key: "artists",
+        route: Route::Artist,
+        icon: "fa-solid fa-user",
+    },
+    SidebarItem {
+        key: "playlists",
+        route: Route::Playlists,
+        icon: "fa-solid fa-list",
+    },
+    SidebarItem {
+        key: "favorites",
+        route: Route::Favorites,
+        icon: "fa-solid fa-heart",
+    },
+    SidebarItem {
+        key: "radio",
+        route: Route::Radio,
+        icon: "fa-solid fa-radio",
+    },
+    SidebarItem {
+        key: "activity",
+        route: Route::Activity,
+        icon: "fa-solid fa-chart-simple",
+    },
+    SidebarItem {
+        key: "downloader",
+        route: Route::Downloader,
+        icon: "fa-solid fa-download",
+    },
+];
+
+#[cfg(target_os = "android")]
+const TOP_MENU: &[SidebarItem] = &[
+    SidebarItem {
+        key: "home",
+        route: Route::Home,
+        icon: "fa-solid fa-house",
+    },
+    SidebarItem {
+        key: "search",
+        route: Route::Search,
+        icon: "fa-solid fa-magnifying-glass",
+    },
+    SidebarItem {
+        key: "discover",
+        route: Route::Discover,
+        icon: "fa-solid fa-compass",
+    },
+    SidebarItem {
+        key: "library",
+        route: Route::Library,
+        icon: "fa-solid fa-book",
+    },
+    SidebarItem {
+        key: "albums",
+        route: Route::Album,
+        icon: "fa-solid fa-music",
+    },
+    SidebarItem {
+        key: "artists",
+        route: Route::Artist,
+        icon: "fa-solid fa-user",
+    },
+    SidebarItem {
+        key: "playlists",
+        route: Route::Playlists,
+        icon: "fa-solid fa-list",
+    },
+    SidebarItem {
+        key: "favorites",
+        route: Route::Favorites,
+        icon: "fa-solid fa-heart",
+    },
+    SidebarItem {
+        key: "radio",
+        route: Route::Radio,
+        icon: "fa-solid fa-radio",
+    },
+    SidebarItem {
+        key: "activity",
+        route: Route::Activity,
+        icon: "fa-solid fa-chart-simple",
+    },
+];
+
+const BOTTOM_MENU: &[SidebarItem] = &[SidebarItem {
+    key: "settings",
+    route: Route::Settings,
+    icon: "fa-solid fa-gear",
+}];
+
+#[component]
+pub fn SidebarNormal(props: SidebarProps) -> Element {
+    let settings = use_context::<Signal<config::Settings>>();
+    let mut prefs = hooks::ui_prefs::use_ui_prefs();
+    let mut width = use_signal(|| 240);
+    let mut is_collapsed = use_signal(|| false);
+    let mut is_resizing = use_signal(|| false);
+
+    let is_android = cfg!(target_os = "android");
+    let fallback_collapse = use_signal(|| true);
+    let mut mobile_collapsed = try_consume_context::<crate::sidebar::SidebarCollapsed>()
+        .map(|c| c.0)
+        .unwrap_or(fallback_collapse);
+
+    let current_width = if *is_collapsed.read() {
+        72
+    } else {
+        *width.read()
+    };
+
+    let mut drawer_swipe = crate::gestures::use_swipe();
+    let mut on_drawer_swipe = move |evt: TouchEvent| {
+        if drawer_swipe.finish(&evt) == Some(crate::gestures::SwipeDirection::Left) {
+            mobile_collapsed.set(true);
+        }
+    };
+
+    let onmousemove = move |evt: MouseEvent| {
+        if *is_resizing.read() {
+            let new_width = evt.client_coordinates().x as i32;
+            if *is_collapsed.read() {
+                if new_width > 180 {
+                    is_collapsed.set(false);
+                    width.set(new_width);
+                }
+            } else if new_width < 150 {
+                is_collapsed.set(true);
+            } else if new_width < 450 {
+                width.set(new_width);
+            }
+        }
+    };
+
+    let onmouseup = move |_| is_resizing.set(false);
+
+    let extra_padding = if cfg!(target_os = "macos") {
+        "pt-10"
+    } else {
+        ""
+    };
+
+    let is_rtl = i18n::is_rtl();
+    let border_side = if is_rtl { "border-l" } else { "border-r" };
+
+    // Home shows the source's first catalog page, so Discover holds the rest
+    // and only appears when the source lists more than one.
+    let caps = hooks::sources::use_capabilities();
+    let has_discover = use_memo(move || caps().pages.len() > 1);
+    let ordered_items: Vec<SidebarItem> = {
+        let order = prefs.read().sidebar_order.clone();
+        let mut items: Vec<SidebarItem> = order
+            .iter()
+            .filter_map(|key| TOP_MENU.iter().find(|item| item.key == key).cloned())
+            .collect();
+        for item in TOP_MENU {
+            if !order.iter().any(|k| k == item.key) {
+                items.push(item.clone());
+            }
+        }
+        items.retain(|item| item.route != Route::Discover || has_discover());
+        items.retain(|item| !is_android || !crate::tabbar::is_tab_route(item.route));
+        items
+    };
+
+    let _item_count = ordered_items.len();
+    let order_len = prefs.read().sidebar_order.len();
+
+    let root_class = if is_android {
+        "h-full bg-(--surface-chrome)/97 text-slate-400 flex flex-col flex-shrink-0 select-none relative border-r border-white/10 overflow-hidden transition-all duration-300 ease-out".to_string()
+    } else {
+        format!(
+            "h-full bg-black/40 text-slate-400 flex flex-col flex-shrink-0 select-none relative {border_side} border-white/5 {extra_padding}"
+        )
+    };
+    let root_style = if is_android {
+        if *mobile_collapsed.read() {
+            "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 0px;".to_string()
+        } else {
+            "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 280px;"
+                .to_string()
+        }
+    } else {
+        format!("width: {current_width}px")
+    };
+
+    rsx! {
+        if *is_resizing.read() {
+            div {
+                class: "fixed inset-0 z-[100] cursor-col-resize",
+                onmousemove: onmousemove,
+                onmouseup: onmouseup,
+            }
+        }
+
+        if is_android && !*mobile_collapsed.read() {
+            div {
+                class: "fixed inset-0 bg-black/80 backdrop-blur-[2px] z-[90]",
+                onclick: move |_| mobile_collapsed.set(true),
+                ontouchstart: move |evt| drawer_swipe.start(&evt),
+                ontouchmove: move |evt| drawer_swipe.update(&evt),
+                ontouchend: on_drawer_swipe,
+                ontouchcancel: move |_| drawer_swipe.reset(),
+            }
+        }
+
+        div {
+            class: "app-sidebar {root_class}",
+            style: "{root_style}",
+            ontouchstart: move |evt| if is_android { drawer_swipe.start(&evt) },
+            ontouchmove: move |evt| if is_android { drawer_swipe.update(&evt) },
+            ontouchend: move |evt| if is_android { on_drawer_swipe(evt) },
+            ontouchcancel: move |_| drawer_swipe.reset(),
+
+            if is_android {
+                div {
+                    class: "flex items-center justify-between px-5 border-b border-white/5 bg-white/5 shrink-0",
+                    style: "padding-top: max(env(safe-area-inset-top), 16px); padding-bottom: 16px;",
+                    h2 {
+                        class: "text-base font-bold tracking-widest text-white/90 uppercase",
+                        style: "font-family: 'JetBrains Mono', monospace;",
+                        "KOPUZ"
+                    }
+                    button {
+                        class: "p-2 rounded-xl bg-white/10 text-white active:scale-95 transition-all flex items-center justify-center border border-white/10 w-9 h-9",
+                        onclick: move |_| mobile_collapsed.set(true),
+                        i { class: "fa-solid fa-xmark text-base" }
+                    }
+                }
+            }
+
+            if cfg!(target_os = "macos") {
+                div {
+                    class: "absolute top-0 left-0 w-full h-10 z-50",
+                    onmousedown: move |_| {
+                        #[cfg(target_os = "macos")]
+                        window().drag();
+                    }
+                }
+            }
+
+            div {
+                class: "flex-1 flex flex-col overflow-y-auto overflow-x-hidden pt-2",
+
+                if !*is_collapsed.read() && settings.read().ui.show_source_toggle {
+                    crate::source_switcher::SourceSwitcher {
+                        on_manage: move |_| props.on_navigate.call(Route::Settings),
+                    }
+                }
+
+                nav {
+                    class: "app-sidebar-nav flex-1 px-3 space-y-1",
+                    for (idx, item) in ordered_items.into_iter().enumerate() {
+                        SidebarLink {
+                            key: "{item.key}",
+                            item: item.clone(),
+                            collapsed: is_collapsed,
+                            active: props.current_route.read().sidebar_entry() == item.route,
+                            is_rtl,
+                            can_move_up: idx > 0 && idx < order_len,
+                            can_move_down: idx + 1 < order_len,
+                            onclick: move |_| {
+                                props.on_navigate.call(item.route);
+                                if is_android { mobile_collapsed.set(true); }
+                            },
+                            on_move_up: move |_| {
+                                let mut order = prefs.peek().sidebar_order.clone();
+                                if idx > 0 {
+                                    order.swap(idx, idx - 1);
+                                    prefs.write().sidebar_order = order;
+                                }
+                            },
+                            on_move_down: move |_| {
+                                let mut order = prefs.peek().sidebar_order.clone();
+                                if idx + 1 < order.len() {
+                                    order.swap(idx, idx + 1);
+                                    prefs.write().sidebar_order = order;
+                                }
+                            },
+                        }
+                    }
+                    if !is_android {
+                        div { class: "h-px bg-white/5 my-4 mx-3" }
+                    }
+                    for item in BOTTOM_MENU.iter().filter(|item| !is_android || !crate::tabbar::is_tab_route(item.route)) {
+                        SidebarLink {
+                            item: item.clone(),
+                            collapsed: is_collapsed,
+                            active: props.current_route.read().sidebar_entry() == item.route,
+                            is_rtl,
+                            can_move_up: false,
+                            can_move_down: false,
+                            onclick: move |_| {
+                                props.on_navigate.call(item.route);
+                                if is_android { mobile_collapsed.set(true); }
+                            },
+                            on_move_up: move |_| {},
+                            on_move_down: move |_| {},
+                        }
+                    }
+                }
+            }
+
+            if !is_rtl {
+                div {
+                    class: "absolute top-0 right-0 w-2 h-full cursor-col-resize group/handle z-50",
+                    onmousedown: move |_| is_resizing.set(true),
+                    div { class: "absolute inset-y-0 right-0 w-px bg-white/0 group-hover/handle:bg-white/10 transition-colors" }
+                }
+            } else {
+                div {
+                    class: "absolute top-0 left-0 w-2 h-full cursor-col-resize group/handle z-50",
+                    onmousedown: move |_| is_resizing.set(true),
+                    div { class: "absolute inset-y-0 left-0 w-px bg-white/0 group-hover/handle:bg-white/10 transition-colors" }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn SidebarLink(
+    item: SidebarItem,
+    collapsed: Signal<bool>,
+    active: bool,
+    is_rtl: bool,
+    can_move_up: bool,
+    can_move_down: bool,
+    onclick: EventHandler<MouseEvent>,
+    on_move_up: EventHandler<()>,
+    on_move_down: EventHandler<()>,
+) -> Element {
+    let is_collapsed = *collapsed.read();
+    let alignment_class = if is_collapsed {
+        "justify-center"
+    } else {
+        "justify-start px-3"
+    };
+    let indicator_base = if is_rtl {
+        "absolute right-0 w-0.5 rounded-l-full transition-all"
+    } else {
+        "absolute left-0 w-0.5 rounded-r-full transition-all"
+    };
+
+    let active_class = if active {
+        "bg-white/10 text-white"
+    } else {
+        "text-slate-400 hover:text-white/90 hover:bg-white/5"
+    };
+
+    let opacity_class = if active {
+        "opacity-100"
+    } else {
+        "opacity-70 group-hover:opacity-100"
+    };
+
+    rsx! {
+        div { class: "flex items-center group",
+            button {
+                r#type: "button",
+                class: "app-sidebar-link flex flex-1 items-center {alignment_class} relative p-3 rounded-lg transition-colors cursor-pointer {active_class}",
+                aria_label: i18n::t(item.key),
+                aria_current: if active { "page" } else { "false" },
+                title: if is_collapsed { i18n::t(item.key) } else { String::new() },
+                onclick: move |evt| onclick.call(evt),
+
+                div {
+                    class: "app-sidebar-icon flex items-center justify-center w-6 h-6 shrink-0 transition-transform group-active:scale-95",
+                    i { class: "{item.icon} text-lg" }
+                }
+
+                if !is_collapsed {
+                    span {
+                        class: "app-sidebar-label ml-4 text-sm font-medium tracking-tight {opacity_class} transition-opacity",
+                        "{i18n::t(item.key)}"
+                    }
+                }
+
+                div {
+                    class: if active {
+                        "app-sidebar-indicator {indicator_base} h-6 bg-white"
+                    } else {
+                        "app-sidebar-indicator {indicator_base} h-0 bg-white/40 group-hover:h-4"
+                    }
+                }
+            }
+
+            if !is_collapsed && (can_move_up || can_move_down) {
+                crate::reorder_buttons::ReorderButtons {
+                    class: "ps-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity",
+                    can_move_up,
+                    can_move_down,
+                    on_move_up: move |_| on_move_up.call(()),
+                    on_move_down: move |_| on_move_down.call(()),
+                }
+            }
+        }
+    }
+}
