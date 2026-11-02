@@ -214,6 +214,10 @@ fn capabilities(source: &dyn server::source::MediaSource) -> SourceCapabilities 
         music_videos: caps.music_videos,
         track_radio: caps.radio.track,
         playlist_radio: caps.radio.playlist,
+        favorites_playlist: source
+            .favorites_playlist()
+            .filter(|_| caps.radio.playlist)
+            .map(str::to_string),
         search_radio: caps.radio.track && caps.radio.search,
         playlists: match caps.playlists {
             PlaylistOps::None => PlaylistCapability::None,

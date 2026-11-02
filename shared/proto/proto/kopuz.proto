@@ -986,6 +986,8 @@ message SourceCapabilities {
   // Every play of its tracks goes through kopuz, so kopuz's play counts are its whole listening history.
   bool complete_play_history = 33;
   bool rip_audio = 34;
+  // The playlist holding the account's favorites; a playlist radio of it is the favorites radio.
+  optional string favorites_playlist = 35;
 }
 
 message SearchFilter {
