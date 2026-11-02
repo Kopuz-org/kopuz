@@ -4,8 +4,8 @@ use api::{FavoritesSyncMode, JobKind, SourceCapabilities, TrackFilter};
 use commands::Command;
 use components::format::{t, t_with};
 use components::{
-    FilterBar, FilterChip, FilterEntry, IconButton, PageHeader, Segment, Segmented, SortControl,
-    SyncStatus, icons, style,
+    FilterBar, FilterChip, FilterEntry, IconButton, PageHeader, ProgressBar, Segment, Segmented,
+    SortControl, SyncStatus, icons, style,
 };
 use config::{SortCriterion, SortDirection};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -42,6 +42,14 @@ impl Library {
                 .total(count)
                 .on_refresh(|_, _, cx| start(JobKind::FavoritesSync, cx))
         });
+        let refreshing = (!self.is_liked())
+            .then(|| {
+                let jobs = JobsModel::global(cx).read(cx);
+                jobs.progress(JobKind::Scan)
+                    .or_else(|| jobs.progress(JobKind::LibrarySync))
+                    .map(ProgressBar::job)
+            })
+            .flatten();
         v_flex()
             .w_full()
             .flex_shrink_0()
@@ -57,6 +65,7 @@ impl Library {
                     }),
             )
             .children(sync)
+            .children(refreshing)
             .children(switch)
             .child(filter_bar)
             .into_any_element()
