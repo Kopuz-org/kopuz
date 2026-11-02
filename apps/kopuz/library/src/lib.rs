@@ -300,6 +300,7 @@ impl Library {
             cx.observe(&layout, |this, _, cx| this.adopt_layout(cx)),
             cx.observe(&store::ConfigModel::global(cx), |_, _, cx| cx.notify()),
             cx.observe(&sources, |_, _, cx| cx.notify()),
+            cx.observe(&store::JobsModel::global(cx), |_, _, cx| cx.notify()),
             cx.observe_in(&navigator, window, |this, _, window, cx| {
                 this.adopt_route(window, cx)
             }),
