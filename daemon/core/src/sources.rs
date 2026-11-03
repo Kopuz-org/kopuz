@@ -1351,7 +1351,7 @@ impl SourceService {
         }
         #[cfg(not(target_os = "android"))]
         {
-            let scratch = server::ytmusic::browser_sessions::scratch_dir();
+            let scratch = server::cookies::scratch_dir();
             Ok(server::ytmusic::browser_sessions::signed_in(&scratch)
                 .await
                 .into_iter()
@@ -1391,13 +1391,14 @@ impl SourceService {
         }
         #[cfg(not(target_os = "android"))]
         {
-            let scratch = server::ytmusic::browser_sessions::scratch_dir();
+            let scratch = server::cookies::scratch_dir();
             let (browser, cookies) = server::ytmusic::browser_sessions::import(session, &scratch)
                 .await
                 .map_err(|error| {
                     use server::ytmusic::browser_sessions::ImportError;
                     let reason = match error {
                         ImportError::ProfileGone => ErrorReason::BrowserProfileGone,
+                        ImportError::BrowserOpen { .. } => ErrorReason::BrowserOpen,
                         ImportError::CookiesUnreadable(_) => ErrorReason::BrowserCookiesUnreadable,
                         ImportError::SignedOut { .. } => ErrorReason::BrowserProfileSignedOut,
                     };
@@ -2162,7 +2163,7 @@ async fn resume_from_profiles(
             return Some(cookies);
         }
     }
-    let scratch = server::ytmusic::browser_sessions::scratch_dir();
+    let scratch = server::cookies::scratch_dir();
     let (_, cookies) = server::ytmusic::browser_sessions::import(imported?, &scratch)
         .await
         .ok()?;

@@ -75,6 +75,8 @@ pub enum ErrorReason {
     BrowserProfileGone,
     /// The browser profile's cookies could not be read.
     BrowserCookiesUnreadable,
+    /// The browser is running and keeps the profile's cookies locked.
+    BrowserOpen,
     /// The browser profile is not signed in to the service.
     BrowserProfileSignedOut,
     /// The service showed no token for the browser profile's session.
@@ -108,7 +110,7 @@ pub enum ErrorReason {
 }
 
 impl ErrorReason {
-    pub const ALL: [ErrorReason; 23] = [
+    pub const ALL: [ErrorReason; 24] = [
         Self::SettingLocked,
         Self::ConnectNotOffered,
         Self::ApiKeyMissing,
@@ -132,6 +134,7 @@ impl ErrorReason {
         Self::InvalidServerUrl,
         Self::NetworkDown,
         Self::OfflineMode,
+        Self::BrowserOpen,
     ];
 
     /// The i18n key every frontend says this reason with, so they all phrase it alike.
@@ -145,6 +148,7 @@ impl ErrorReason {
             Self::SignInTimedOut => "error_sign_in_timed_out",
             Self::BrowserProfileGone => "error_browser_profile_gone",
             Self::BrowserCookiesUnreadable => "error_browser_cookies_unreadable",
+            Self::BrowserOpen => "error_browser_open",
             Self::BrowserProfileSignedOut => "error_browser_profile_signed_out",
             Self::BrowserProfileNoToken => "error_browser_profile_no_token",
             Self::IntegrationUnreachable => "error_integration_unreachable",

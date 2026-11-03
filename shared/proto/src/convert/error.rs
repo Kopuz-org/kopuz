@@ -59,6 +59,7 @@ pub fn error_reason_to_proto(value: Option<api::ErrorReason>) -> ErrorReason {
         Some(R::InvalidServerUrl) => ErrorReason::InvalidServerUrl,
         Some(R::NetworkDown) => ErrorReason::NetworkDown,
         Some(R::OfflineMode) => ErrorReason::OfflineMode,
+        Some(R::BrowserOpen) => ErrorReason::BrowserOpen,
     }
 }
 
@@ -90,6 +91,7 @@ pub fn error_reason_from_proto(value: i32) -> Option<api::ErrorReason> {
         ErrorReason::InvalidServerUrl => Some(R::InvalidServerUrl),
         ErrorReason::NetworkDown => Some(R::NetworkDown),
         ErrorReason::OfflineMode => Some(R::OfflineMode),
+        ErrorReason::BrowserOpen => Some(R::BrowserOpen),
     }
 }
 

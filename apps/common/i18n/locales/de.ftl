@@ -1066,6 +1066,7 @@ error_browser_not_opened = Für die Anmeldung konnte kein Browser geöffnet werd
 error_sign_in_timed_out = Die Anmeldung wurde nicht rechtzeitig bestätigt.
 error_browser_profile_gone = Dieses Browserprofil gibt es nicht mehr.
 error_browser_cookies_unreadable = Die Cookies dieses Browserprofils konnten nicht gelesen werden.
+error_browser_open = Schließe den Browser und versuche es erneut. Solange er läuft, hält er seine Cookies gesperrt.
 error_browser_profile_signed_out = Dieses Browserprofil ist beim Dienst nicht angemeldet. Melde dich dort an oder füge stattdessen dein Token ein.
 error_browser_profile_no_token = Der Dienst hat für dieses Profil kein Token angezeigt. Füge es stattdessen ein.
 error_integration_unreachable = Der Dienst ist nicht erreichbar. Prüfe deine Verbindung.
