@@ -245,6 +245,11 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("playlist radio"))
     }
 
+    /// The playlist that holds the account's favorites, for a radio seeded from all of them.
+    fn favorites_playlist(&self) -> Option<&str> {
+        None
+    }
+
     /// Only a source that hands out a cursor is ever asked.
     async fn more_radio(&self, _cursor: &str) -> Result<RadioPage, SourceError> {
         Err(SourceError::unsupported("radio continuation"))
