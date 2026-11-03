@@ -1081,6 +1081,7 @@ error_browser_not_opened = Could not open a browser for the sign-in.
 error_sign_in_timed_out = The sign-in was not approved in time.
 error_browser_profile_gone = That browser profile is no longer there.
 error_browser_cookies_unreadable = Could not read the cookies of that browser profile.
+error_browser_open = Close that browser, then try again. It keeps its cookies locked while it runs.
 error_browser_profile_signed_out = That browser profile is not signed in to the service. Sign in there, or paste your token instead.
 error_browser_profile_no_token = The service did not show a token for that profile. Paste it instead.
 error_integration_unreachable = Could not reach the service. Check your connection.
