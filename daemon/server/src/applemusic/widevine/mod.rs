@@ -6,11 +6,11 @@
 
 use std::path::Path;
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::ffi::CString;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::os::raw::{c_char, c_int};
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::sync::{Arc, OnceLock};
 
 pub mod discover;
@@ -25,7 +25,7 @@ pub const WIDEVINE_SYSTEM_ID: [u8; 16] = [
     0xed, 0xef, 0x8b, 0xa9, 0x79, 0xd6, 0x4a, 0xce, 0xa3, 0xc8, 0x27, 0xdc, 0xd5, 0x1d, 0x21, 0xed,
 ];
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 unsafe extern "C" {
     fn wv_open(so_path: *const c_char) -> c_int;
     fn wv_challenge(
@@ -67,10 +67,10 @@ unsafe extern "C" {
 /// keys of every session it is given and selects one per `Decrypt` by key id, so
 /// tracks decrypt concurrently. Holding it longer made a track's background
 /// decrypt block every later play until it finished.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 static LICENSE_LOCK: OnceLock<Arc<tokio::sync::Mutex<()>>> = OnceLock::new();
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn license_lock() -> Arc<tokio::sync::Mutex<()>> {
     LICENSE_LOCK
         .get_or_init(|| Arc::new(tokio::sync::Mutex::new(())))
@@ -80,20 +80,20 @@ fn license_lock() -> Arc<tokio::sync::Mutex<()>> {
 /// Serializes individual calls into the native CDM, which is one process-wide
 /// instance and not re-entrant. Each hold is a single operation (~1.6ms for a
 /// decrypt), never a whole track.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 static CALL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn call_lock() -> std::sync::MutexGuard<'static, ()> {
     CALL_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Proof the holder owns the CDM's session slot, for the span between generating
 /// a challenge and loading the licence it returns.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub struct LicenseSession(#[allow(dead_code)] tokio::sync::OwnedMutexGuard<()>);
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub struct LicenseSession;
 
 /// A CDM session and the content keys loaded into it.
@@ -103,12 +103,12 @@ pub struct LicenseSession;
 /// this closes the session and releases those keys — which is why it belongs to
 /// the track rather than to the licence exchange, and why sessions can't simply be
 /// closed once the licence has been loaded.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub struct CdmSession {
     id: Vec<u8>,
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn close_session(id: &[u8]) -> Result<(), String> {
     let _guard = call_lock();
     match unsafe { wv_close(id.as_ptr(), id.len() as u32) } {
@@ -120,7 +120,7 @@ fn close_session(id: &[u8]) -> Result<(), String> {
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl CdmSession {
     /// Close the session, reporting whether the CDM accepted it.
     ///
@@ -132,7 +132,7 @@ impl CdmSession {
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl Drop for CdmSession {
     fn drop(&mut self) {
         if self.id.is_empty() {
@@ -146,14 +146,14 @@ impl Drop for CdmSession {
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub struct CdmSession;
 
 /// Copy a shim-allocated buffer into a `Vec` and release it.
 ///
 /// # Safety
 /// `out` must be a non-null buffer of `len` bytes returned by the shim.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 unsafe fn take(out: *mut u8, len: u32) -> Vec<u8> {
     if out.is_null() {
         return Vec::new();
@@ -178,20 +178,26 @@ pub struct Cdm {
 /// Music on Android a second playback path rather than another `Cdm` — see
 /// [`mediadrm`] for the detail and for the pieces that path will need.
 ///
-/// Until it exists, every entry point says so rather than failing at link time or
-/// playing silence.
-#[cfg(target_os = "android")]
+/// iOS has no Widevine at all: Apple's own streams there are FairPlay, which only
+/// AVFoundation can play. Both phones share this stub.
+///
+/// Until either path exists, every entry point says so rather than failing at
+/// link time or playing silence.
+#[cfg(any(target_os = "android", target_os = "ios"))]
 impl Cdm {
     /// Every entry point returns this. Written once rather than routed through
     /// `open`, so that if `open` ever gains a real implementation these don't
     /// silently start reporting success — an empty challenge read as `Ok` would
     /// be worse than the unsupported error.
     fn unsupported<T>() -> Result<T, String> {
-        Err(
+        Err(if cfg!(target_os = "ios") {
+            "Apple Music playback isn't supported on iOS: there is no Widevine CDM \
+             to load, only FairPlay inside AVFoundation"
+        } else {
             "Apple Music playback isn't supported on Android yet: Widevine there \
              decrypts only inside MediaCodec, which needs a separate playback path"
-                .to_string(),
-        )
+        }
+        .to_string())
     }
 
     pub async fn open(_path: impl AsRef<Path>) -> Result<Self, String> {
@@ -234,7 +240,7 @@ impl Cdm {
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl Cdm {
     /// Take an exclusive session on the CDM at `path`, loading it if needed.
     ///
@@ -526,7 +532,7 @@ mod tests {
     /// `cargo test -p kopuz-server -- --ignored` to exercise the C++ shim.
     #[tokio::test]
     #[ignore = "needs a system Widevine CDM"]
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     async fn challenge_against_a_real_cdm() {
         let cdm = Cdm::open_system().await.expect("open a system CDM");
         let session = cdm.begin_license().await;

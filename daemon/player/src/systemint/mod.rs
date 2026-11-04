@@ -34,6 +34,16 @@ pub use android::{
     wait_back_pressed, wake_run_loop,
 };
 
+#[cfg(target_os = "ios")]
+mod ios;
+
+#[cfg(target_os = "ios")]
+pub use ios::{
+    RepeatMode, SystemEvent, configure_webview, init, login_close, login_cookies, login_is_open,
+    login_open, set_background_handler, stop_session, update_modes, update_now_playing,
+    wake_run_loop,
+};
+
 #[cfg(not(target_os = "android"))]
 pub fn request_permissions() {}
 

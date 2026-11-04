@@ -72,31 +72,52 @@ android-release:
 android-install:
     adb install -r "$(ls -t target/android/*.apk {{android_project}}/app/build/outputs/apk/debug/*.apk 2>/dev/null | head -1)"
 
+# The nix shell points DEVELOPER_DIR at a macOS-only SDK and wraps the C
+# compiler for macOS, so iOS builds run in a clean environment on the system
+# Xcode. Override with XCODE_DEVELOPER_DIR.
+ios_env := 'env -i HOME="$HOME" TERM="${TERM:-dumb}" PATH="$HOME/.cargo/bin:$(dirname "$(command -v dx)"):$(dirname "$(command -v cmake)"):/usr/bin:/bin:/usr/sbin" DEVELOPER_DIR="${XCODE_DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" IPHONEOS_DEPLOYMENT_TARGET=16.0 SQLX_OFFLINE=true'
+
 ios-build-sim:
-    dx build --ios --package kopuz-legacy --release
+    {{ios_env}} dx build --ios --package kopuz-legacy --release --target aarch64-apple-ios-sim
 
 ios-build-device:
-    dx build --ios --package kopuz-legacy --release --target aarch64-apple-ios
+    {{ios_env}} dx build --ios --package kopuz-legacy --release --target aarch64-apple-ios
 
-# Patch Info.plist for on-device install: APPL type, min OS, background audio, platform.
-ios-fix-plist:
+# Build, install and launch on a simulator (IOS_SIMULATOR, default "iPhone 17 Pro").
+ios-sim: ios-build-sim
     #!/usr/bin/env bash
     set -euo pipefail
-    PLIST="{{ios_app_path}}/Info.plist"
-    /usr/libexec/PlistBuddy -c "Set :CFBundlePackageType APPL" "$PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string APPL" "$PLIST"
-    /usr/libexec/PlistBuddy -c "Set :CFBundleInfoDictionaryVersion 6.0" "$PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleInfoDictionaryVersion string 6.0" "$PLIST"
-    /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 15.0" "$PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string 15.0" "$PLIST"
-    /usr/libexec/PlistBuddy -c "Delete :UILaunchStoryboardName" "$PLIST" 2>/dev/null || true
-    /usr/libexec/PlistBuddy -c "Add :UILaunchScreen dict" "$PLIST" 2>/dev/null || true
-    /usr/libexec/PlistBuddy -c "Add :UILaunchScreen:UIColorName string" "$PLIST" 2>/dev/null || true
-    /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "$PLIST" 2>/dev/null || true
-    /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes:0 string audio" "$PLIST" 2>/dev/null || true
-    /usr/libexec/PlistBuddy -c "Delete :CFBundleSupportedPlatforms" "$PLIST" 2>/dev/null || true
-    /usr/libexec/PlistBuddy -c "Add :CFBundleSupportedPlatforms array" "$PLIST"
-    /usr/libexec/PlistBuddy -c "Add :CFBundleSupportedPlatforms:0 string iPhoneOS" "$PLIST"
+    export DEVELOPER_DIR="${XCODE_DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+    SIM="${IOS_SIMULATOR:-iPhone 17 Pro}"
+    /usr/bin/xcrun simctl boot "$SIM" 2>/dev/null || true
+    open -a Simulator
+    /usr/bin/xcrun simctl install "$SIM" "{{ios_app_path}}"
+    /usr/bin/xcrun simctl launch --console-pty --terminate-running-process "$SIM" moe.kopuz.kopuz
+
+# Sign the device build with IOS_SIGN_IDENTITY and IOS_MOBILEPROVISION; entitlements come from the profile.
+ios-sign: ios-build-device
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${IOS_SIGN_IDENTITY:?IOS_SIGN_IDENTITY is required (see: security find-identity -v -p codesigning)}"
+    : "${IOS_MOBILEPROVISION:?IOS_MOBILEPROVISION is required (path to a .mobileprovision file)}"
+    ENTITLEMENTS="$(mktemp -d)/entitlements.plist"
+    security cms -D -i "$IOS_MOBILEPROVISION" | plutil -extract Entitlements xml1 -o "$ENTITLEMENTS" -
+    cp "$IOS_MOBILEPROVISION" "{{ios_app_path}}/embedded.mobileprovision"
+    codesign --force --sign "$IOS_SIGN_IDENTITY" --entitlements "$ENTITLEMENTS" --timestamp=none "{{ios_app_path}}"
+    codesign -vv "{{ios_app_path}}"
+
+# Install and launch on a connected iPhone (IOS_DEVICE, default the first one connected).
+ios-device: ios-sign
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export DEVELOPER_DIR="${XCODE_DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+    DEVICE="${IOS_DEVICE:-$(/usr/bin/xcrun devicectl list devices 2>/dev/null | awk '/physical/ { for (i = 2; i <= NF; i++) if ($i == "(UDID)") { print $(i - 1); exit } }')}"
+    : "${DEVICE:?no paired iPhone found; set IOS_DEVICE}"
+    /usr/bin/xcrun devicectl device install app --device "$DEVICE" "{{ios_app_path}}"
+    /usr/bin/xcrun devicectl device process launch --console --terminate-existing --device "$DEVICE" moe.kopuz.kopuz
 
 # Unsigned IPA for sideloading (Sideloadly/AltStore re-sign on install).
-ios-ipa-sideloadly: ios-build-device ios-fix-plist
+ios-ipa-sideloadly: ios-build-device
     #!/usr/bin/env bash
     set -euo pipefail
     codesign --remove-signature "{{ios_app_path}}" 2>/dev/null || true
@@ -109,20 +130,10 @@ ios-ipa-sideloadly: ios-build-device ios-fix-plist
     cd {{ios_ipa_dir}} && zip -qry Kopuz-sideloadly.ipa Payload
     echo "Sideloadly IPA created at {{ios_ipa_dir}}/Kopuz-sideloadly.ipa"
 
-# Signed IPA. Pass APPLE_SIGN_IDENTITY + IOS_MOBILEPROVISION (and optional IOS_ENTITLEMENTS) as env vars.
-ios-ipa-signed: ios-build-device ios-fix-plist
+# Signed IPA, with the same IOS_SIGN_IDENTITY and IOS_MOBILEPROVISION as ios-sign.
+ios-ipa-signed: ios-sign
     #!/usr/bin/env bash
     set -euo pipefail
-    : "${APPLE_SIGN_IDENTITY:?APPLE_SIGN_IDENTITY is required (e.g. 'Apple Development: Name (TEAMID)')}"
-    : "${IOS_MOBILEPROVISION:?IOS_MOBILEPROVISION is required (path to a .mobileprovision file)}"
-    [ -f "$IOS_MOBILEPROVISION" ] || { echo "Provisioning profile not found: $IOS_MOBILEPROVISION"; exit 1; }
-    cp "$IOS_MOBILEPROVISION" "{{ios_app_path}}/embedded.mobileprovision"
-    if [ -n "${IOS_ENTITLEMENTS:-}" ]; then
-        codesign --force --deep --sign "$APPLE_SIGN_IDENTITY" --entitlements "$IOS_ENTITLEMENTS" --timestamp=none "{{ios_app_path}}"
-    else
-        codesign --force --deep --sign "$APPLE_SIGN_IDENTITY" --timestamp=none "{{ios_app_path}}"
-    fi
-    codesign -vv "{{ios_app_path}}"
     rm -rf {{ios_ipa_dir}}/Payload
     mkdir -p {{ios_ipa_dir}}/Payload
     cp -R {{ios_app_path}} {{ios_ipa_dir}}/Payload/

@@ -35,7 +35,7 @@ fn parse_locale(name: &str) -> Option<Locale> {
     tag.parse().ok()
 }
 
-#[cfg(not(any(target_os = "macos", windows, target_os = "android")))]
+#[cfg(not(any(target_vendor = "apple", windows, target_os = "android")))]
 fn system_locale() -> Option<String> {
     ["LC_ALL", "LC_COLLATE", "LANG"]
         .into_iter()
@@ -43,7 +43,7 @@ fn system_locale() -> Option<String> {
         .find(|value| !value.is_empty())
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 fn system_locale() -> Option<String> {
     Some(
         objc2_foundation::NSLocale::currentLocale()

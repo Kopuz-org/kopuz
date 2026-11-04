@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use rfd::AsyncFileDialog;
 
 #[component]
@@ -58,7 +58,7 @@ pub fn AddPlaylistPopup(
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[component]
 fn AddFolderFromFileManagerButton(
     on_add_folder: EventHandler<String>,
@@ -81,7 +81,7 @@ fn AddFolderFromFileManagerButton(
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[component]
 fn AddFolderFromFileManagerButton(
     on_add_folder: EventHandler<String>,

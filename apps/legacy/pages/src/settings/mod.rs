@@ -175,7 +175,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
     let mut open_category = move |category: SettingsCategory, section: Option<&'static str>| {
         let shown = *active_category.peek() == category;
         active_category.set(category);
-        if cfg!(target_os = "android")
+        if cfg!(any(target_os = "android", target_os = "ios"))
             && let Some(mut subpage) = subpage
         {
             subpage.set(Some(category.title_key()));
@@ -221,7 +221,9 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
     });
 
     use_effect(move || {
-        if cfg!(target_os = "android") && subpage.is_some_and(|subpage| subpage.read().is_none()) {
+        if cfg!(any(target_os = "android", target_os = "ios"))
+            && subpage.is_some_and(|subpage| subpage.read().is_none())
+        {
             let _ = document::eval(
                 "requestAnimationFrame(() => document.getElementById('settings-index')?.scrollIntoView({ block: 'start' }))",
             );
@@ -357,7 +359,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
         );
     };
 
-    let is_android = cfg!(target_os = "android");
+    let is_android = cfg!(any(target_os = "android", target_os = "ios"));
     let showing_index = is_android && subpage.is_none_or(|subpage| subpage.read().is_none());
     let is_material3 = settings.read().ui.ui_style == config::UiStyle::Material3;
 
@@ -426,7 +428,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                             }
                         }
 
-                        if cfg!(not(target_os = "android"))
+                        if cfg!(not(any(target_os = "android", target_os = "ios")))
                             && settings.read().ui.theme == utils::live_theme::THEME_ID
                         {
                             SettingItem {
@@ -448,7 +450,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                         button {
                                             class: "app-button-tonal px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors",
                                             onclick: move |_| {
-                                                #[cfg(not(target_os = "android"))]
+                                                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                                                 spawn(async move {
                                                     if let Some(file) = rfd::AsyncFileDialog::new()
                                                         .add_filter("JSON", &["json"])
@@ -467,7 +469,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                 }
                             }
                         }
-                        if cfg!(not(target_os = "android")) {
+                        if cfg!(not(any(target_os = "android", target_os = "ios"))) {
                             SettingItem {
                                 title: i18n::t("custom_font").to_string(),
                                 config_key: "custom_font_path",
@@ -487,7 +489,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                         button {
                                             class: "app-button-tonal px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors",
                                             onclick: move |_| {
-                                                #[cfg(not(target_os = "android"))]
+                                                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                                                 spawn(async move {
                                                     if let Some(file) = rfd::AsyncFileDialog::new()
                                                         .add_filter("Fonts", &["ttf", "otf", "woff", "woff2"])
@@ -518,7 +520,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                 }
                             }
                         }
-                        if cfg!(not(target_os = "android")) {
+                        if cfg!(not(any(target_os = "android", target_os = "ios"))) {
                             SettingItem {
                                 title: i18n::t("custom_background").to_string(),
                                 config_key: "custom_background_path",
@@ -538,7 +540,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                         button {
                                             class: "app-button-tonal px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors",
                                             onclick: move |_| {
-                                                #[cfg(not(target_os = "android"))]
+                                                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                                                 spawn(async move {
                                                     if let Some(file) = rfd::AsyncFileDialog::new()
                                                         .add_filter("Images", &["jpg", "jpeg", "png", "webp", "gif", "bmp"])
@@ -683,7 +685,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                 }
                             }
                         }
-                        if cfg!(not(target_os = "android")) {
+                        if cfg!(not(any(target_os = "android", target_os = "ios"))) {
                             SettingItem {
                                 title: i18n::t("fullscreen_use_player_bar").to_string(),
                                 config_key: "fullscreen_use_player_bar",
@@ -890,7 +892,7 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                 }
                             }
                         }
-                        if cfg!(not(target_os = "android")) {
+                        if cfg!(not(any(target_os = "android", target_os = "ios"))) {
                             SettingItem {
                                 title: i18n::t("minimize_to_tray").to_string(),
                                 config_key: "minimize_to_tray",

@@ -519,12 +519,12 @@ pub fn add_fields(service: MusicService) -> Vec<FieldSpec> {
         }
         MusicService::Plugin => Vec::new(),
     };
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     let fields = webview_fields(fields);
     fields
 }
 
-#[cfg(any(target_os = "android", test))]
+#[cfg(any(target_os = "android", target_os = "ios", test))]
 fn webview_fields(mut fields: Vec<FieldSpec>) -> Vec<FieldSpec> {
     fields.retain(|field| field.key != BROWSER && field.key != PLAYBACK_BROWSER);
     for field in &mut fields {
@@ -616,7 +616,7 @@ pub fn settings(server: &ServerView<'_>, config: &Settings) -> Vec<FieldSpec> {
         }
         _ => Vec::new(),
     };
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     let fields = webview_fields(fields);
     fields
 }

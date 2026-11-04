@@ -61,7 +61,7 @@ pub(crate) async fn read_profile_cookies(
     read_cookies(browser, profile_root, domain).await
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 async fn read_gecko_cookies(
     browser: Browser,
     profile_root: &Path,
@@ -70,7 +70,7 @@ async fn read_gecko_cookies(
     super::mozilla::read_cookies(browser, profile_root, domain).await
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 async fn read_gecko_cookies(
     browser: Browser,
     _profile_root: &Path,
@@ -84,7 +84,7 @@ async fn read_gecko_cookies(
 
 /// Decrypt the isolated profile's Chromium cookie store (via `rookie`) and
 /// return every cookie scoped to `domain`.
-#[cfg(not(any(target_os = "windows", target_os = "android")))]
+#[cfg(not(any(target_os = "windows", target_os = "android", target_os = "ios")))]
 async fn read_chromium_cookies(
     browser: Browser,
     profile_root: &Path,
@@ -139,7 +139,7 @@ async fn read_chromium_cookies(
 
 /// Android: the isolated-profile sign-in that fills a Chromium cookie store is
 /// a desktop flow, so there is never a profile here to read.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 async fn read_chromium_cookies(
     browser: Browser,
     _profile_root: &Path,

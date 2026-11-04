@@ -5,7 +5,7 @@ pub mod accounts;
 pub mod actions;
 pub mod botguard;
 pub mod browse;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod browser_sessions;
 pub mod clients;
 pub mod cookies;
@@ -41,7 +41,7 @@ pub const SOURCE_PREFIX: &str = "ytmusic";
 /// initialised lazily from one worker, the other user's thread descended from
 /// a worker without the key and died on first touch (SEGV_PKUERR). The lazy
 /// calls stay as a backstop; they are no-ops after the eager one.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn ensure_v8_platform() {
     use std::sync::Once;
     static INIT: Once = Once::new();
@@ -722,7 +722,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, not(target_os = "android")))]
+#[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
 mod v8_thread_tests {
     /// One isolate on a fresh thread, running enough of a loop to hit the JIT.
     /// The value is the proof the isolate actually executed code.

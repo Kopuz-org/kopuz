@@ -47,6 +47,10 @@ fn env_dir(key: &str) -> Option<PathBuf> {
 
 /// Directories that may contain a CDM, most-likely first.
 fn search_roots() -> Vec<PathBuf> {
+    #[cfg_attr(
+        not(any(target_os = "linux", target_os = "macos", target_os = "windows")),
+        allow(unused_mut)
+    )]
     let mut roots = Vec::new();
     let home = home();
 

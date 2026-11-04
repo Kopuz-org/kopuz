@@ -39,7 +39,7 @@ pub fn Fullscreen(
     let (background_style, cover_background) = use_fullscreen_background(palette);
     let items = queue.read().clone();
 
-    if cfg!(target_os = "android") {
+    if cfg!(any(target_os = "android", target_os = "ios")) {
         rsx! {
             FullscreenAndroid {
                 is_playing,

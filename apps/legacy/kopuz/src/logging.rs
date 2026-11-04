@@ -18,10 +18,10 @@
 //! Filter precedence everywhere: `KOPUZ_LOG`, then `RUST_LOG`, then a
 //! sensible default. e.g. `KOPUZ_LOG="kopuz_server=trace,kopuz=debug"`.
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::path::Path;
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tracing_subscriber::{
     EnvFilter, Layer, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt,
 };
@@ -34,7 +34,7 @@ use tracing_subscriber::{
 /// Held in a process global rather than handed to `main` so a Ctrl+C
 /// handler can flush them too — `main`'s stack guards never run their
 /// Drop on SIGINT, which would leave a truncated, unloadable trace.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 struct LogGuards {
     _file: tracing_appender::non_blocking::WorkerGuard,
     _chrome: Option<crate::chrome_trace::FlushGuard>,
@@ -42,13 +42,13 @@ struct LogGuards {
     _ui_profile: Option<crate::ui_profile::UiProfileGuard>,
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 static GUARDS: std::sync::Mutex<Option<LogGuards>> = std::sync::Mutex::new(None);
 
 /// Quiet the chatty dependencies (and dioxus's per-render memo
 /// recompute spans, which otherwise dominate the log) regardless of
 /// the base level. Applied as a suffix to every default directive.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const QUIET_DEPS: &str = "symphonia=warn,wgpu_core=warn,wgpu_hal=warn,naga=warn,h2=warn,hyper=warn,reqwest=info,cpal=info,sctk=warn,calloop=warn,dioxus_signals=warn,dioxus_core=warn,dioxus_document=warn,zbus=warn,zbus_names=warn,tracing=warn";
 
 /// Base level for the default (no explicit KOPUZ_LOG) case. `info`
@@ -56,27 +56,27 @@ const QUIET_DEPS: &str = "symphonia=warn,wgpu_core=warn,wgpu_hal=warn,naga=warn,
 /// bumps it to `debug` for "advanced logs" without forcing the user
 /// to hand-write a full KOPUZ_LOG directive (issue #343: ordinary
 /// users' disks would fill up fast at debug).
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn default_filter() -> EnvFilter {
     let base = if debug_mode() { "debug" } else { "info" };
     EnvFilter::new(format!("{base},{QUIET_DEPS}"))
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn console_filter() -> EnvFilter {
     user_directives()
         .and_then(|s| EnvFilter::try_new(&s).ok())
         .unwrap_or_else(default_filter)
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn file_filter() -> EnvFilter {
     user_directives()
         .and_then(|s| EnvFilter::try_new(&s).ok())
         .unwrap_or_else(default_filter)
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn debug_mode() -> bool {
     std::env::var("KOPUZ_DEBUG")
         .map(|v| !v.is_empty() && v != "0" && v != "false")
@@ -85,14 +85,14 @@ fn debug_mode() -> bool {
 
 /// Whether the opt-in UI render profiler is active this session, from
 /// `KOPUZ_UI_PROFILE` (any non-empty, non-`0`/`false` value).
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn ui_profile_enabled() -> bool {
     std::env::var("KOPUZ_UI_PROFILE")
         .map(|v| !v.is_empty() && v != "0" && v != "false")
         .unwrap_or(false)
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn user_directives() -> Option<String> {
     std::env::var("KOPUZ_LOG")
         .or_else(|_| std::env::var("RUST_LOG"))
@@ -103,10 +103,10 @@ fn user_directives() -> Option<String> {
 /// The chrome trace's slot in the subscriber. Whether it is on lives in the
 /// library, which is not open yet when the subscriber is built, so the layer
 /// is installed later through this handle rather than decided up front.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 type TraceSlot = Option<Box<dyn Layer<tracing_subscriber::Registry> + Send + Sync>>;
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 static TRACE_RELOAD: std::sync::OnceLock<
     tracing_subscriber::reload::Handle<TraceSlot, tracing_subscriber::Registry>,
 > = std::sync::OnceLock::new();
@@ -114,7 +114,7 @@ static TRACE_RELOAD: std::sync::OnceLock<
 /// Initialize the global subscriber. Guards are stashed in a process
 /// global; call [`shutdown`] on normal exit. A SIGINT handler also
 /// flushes them so Ctrl+C still yields a valid trace.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn init(log_dir: &Path) {
     utils::logs::set_log_dir(log_dir.to_path_buf());
     utils::logs::rotate_session_log(log_dir);
@@ -191,7 +191,7 @@ pub fn init(log_dir: &Path) {
 /// Turn the chrome span trace on, once the library has said it is wanted.
 /// Filtered like the file sink so the trace isn't 30MB of h2/wgpu/dioxus
 /// spans burying the kopuz spans worth analyzing.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn enable_trace(log_dir: &Path) {
     let trace_path = log_dir.join("kopuz-trace.json");
     let Some(reload) = TRACE_RELOAD.get() else {
@@ -240,7 +240,7 @@ pub fn enable_trace(log_dir: &Path) {
 /// backtrace + recent log tail + version/OS) next to the logs, then defers to
 /// the previous hook so the console still shows the panic. Only fires on Rust
 /// panics — a hard native crash (SIGSEGV) won't run it.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn install_panic_hook() {
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -273,7 +273,7 @@ fn install_panic_hook() {
 
 /// Flush + drop the logging guards. Idempotent. Called on normal exit
 /// and from the SIGINT handler.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn shutdown() {
     if let Ok(mut g) = GUARDS.lock() {
         g.take();

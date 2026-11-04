@@ -17,10 +17,10 @@ pub enum Route {
     Activity,
     Radio,
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     Downloader,
     Settings,
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     ThemeEditor,
 }
 

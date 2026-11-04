@@ -1,4 +1,4 @@
-#[cfg(not(any(target_os = "windows", target_os = "android")))]
+#[cfg(not(any(target_os = "windows", target_os = "android", target_os = "ios")))]
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -33,7 +33,7 @@ pub fn delete_profile(prefix: &str, server_id: &str) -> std::io::Result<()> {
     }
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "android")))]
+#[cfg(not(any(target_os = "windows", target_os = "android", target_os = "ios")))]
 pub(crate) fn pick_cookies_path(profile_root: &Path) -> Option<PathBuf> {
     // An isolated profile is a user-data dir with its store under `Default`;
     // a listed profile is the profile dir itself.

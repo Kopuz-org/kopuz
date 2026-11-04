@@ -514,6 +514,10 @@ pub async fn resolve_and_decrypt(
         "am.timing: licence exchanged in {:.2}s",
         phase.elapsed().as_secs_f64()
     );
+    #[cfg_attr(
+        any(target_os = "android", target_os = "ios"),
+        allow(clippy::drop_non_drop)
+    )]
     drop(license);
 
     if cache_policy() == CachePolicy::Ciphertext
@@ -565,6 +569,10 @@ async fn licence_and_decrypt(
         media_user_token,
     )
     .await?;
+    #[cfg_attr(
+        any(target_os = "android", target_os = "ios"),
+        allow(clippy::drop_non_drop)
+    )]
     drop(license);
 
     let total = encrypted.len() as u64;

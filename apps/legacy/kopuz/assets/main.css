@@ -405,8 +405,8 @@ body {
     max-width: 100vw;
 }
 
-[data-platform="android"],
-[data-platform="android"] * {
+[data-phone],
+[data-phone] * {
     -webkit-user-select: none !important;
     user-select: none !important;
     -webkit-touch-callout: none !important;
@@ -414,39 +414,39 @@ body {
 }
 
 /* Material 3 draws its own seek handle and hit area. */
-[data-platform="android"]:not([data-ui-style="material3"]) .playback-seek .slider-hit {
+[data-phone]:not([data-ui-style="material3"]) .playback-seek .slider-hit {
     top: -10px;
     height: calc(100% + 20px);
 }
 
-[data-platform="android"]:not([data-ui-style="material3"]) .playback-seek-handle {
+[data-phone]:not([data-ui-style="material3"]) .playback-seek-handle {
     transition: transform 120ms ease-out;
 }
 
-[data-platform="android"]:not([data-ui-style="material3"]) .seek-dragging .playback-seek-handle {
+[data-phone]:not([data-ui-style="material3"]) .seek-dragging .playback-seek-handle {
     transform: scale(1.75);
 }
 
-[data-platform="android"] input,
-[data-platform="android"] textarea,
-[data-platform="android"] [contenteditable="true"] {
+[data-phone] input,
+[data-phone] textarea,
+[data-phone] [contenteditable="true"] {
     -webkit-user-select: text !important;
     user-select: text !important;
 }
 
-[data-platform="android"] {
+[data-phone] {
     overflow-x: hidden;
     overscroll-behavior-x: none;
 }
 
 /* Hitting the end of a list shouldn't rubber-band the page behind it — on a
    phone that reads as the whole app coming loose. */
-[data-platform="android"] .overflow-y-auto {
+[data-phone] .overflow-y-auto {
     overscroll-behavior-y: contain;
 }
 
-[data-platform="android"] button.group-hover\:opacity-100,
-[data-platform="android"] .group-hover\:opacity-100:has(button):not(nav *) {
+[data-phone] button.group-hover\:opacity-100,
+[data-phone] .group-hover\:opacity-100:has(button):not(nav *) {
     opacity: 1;
     translate: none;
 }

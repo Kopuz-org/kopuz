@@ -60,18 +60,18 @@ cc = "1"
 libc = { workspace = true }
 
 # Browser-cookie import. Not on Windows: rookie pulls `libesedb` (a bundled C
-# library) there, which can't cross-compile. Not on Android either: rookie only
+# library) there, which can't cross-compile. Not on a phone either: rookie only
 # defines its Chromium keyring backend for the desktop targets, and there is no
 # desktop browser profile to import from anyway.
-[target.'cfg(not(any(target_os = "windows", target_os = "android")))'.dependencies]
+[target.'cfg(not(any(target_os = "windows", target_os = "android", target_os = "ios")))'.dependencies]
 rookie = "0.5"
 
 # Desktop-only, so both are in one table. Headless JS for YouTube (no V8 on
-# Android): deno_core runs the sig/n decipher solver and rustypipe-botguard
+# a phone; iOS forbids the JIT it needs anyway): deno_core runs the sig/n decipher solver and rustypipe-botguard
 # mints PoTokens, sharing one V8; versions (incl. the deno_core lock) live in
 # the workspace manifest. sqlx reads a Gecko sign-in profile's cookies.sqlite,
 # which is unencrypted (NOT rusqlite — that would double-link libsqlite3).
-[target.'cfg(not(target_os = "android"))'.dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 deno_core = { workspace = true }
 rustypipe-botguard = { workspace = true }
 sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }

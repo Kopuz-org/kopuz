@@ -38,7 +38,7 @@ pub fn Header(
         COLUMNS_NORMAL
     };
 
-    if cfg!(target_os = "android") {
+    if cfg!(any(target_os = "android", target_os = "ios")) {
         if sort_state.is_none() && !is_selection_mode {
             return rsx! {};
         }
