@@ -14,7 +14,8 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 const MAX_BODY_BYTES: usize = 512 * 1024 * 1024;
 
-const MAX_MEMORY_BYTES: usize = 512 * 1024 * 1024;
+/// Room for the largest upload a plugin takes (Clippsly's 500 MiB), held once.
+const MAX_MEMORY_BYTES: usize = 768 * 1024 * 1024;
 
 pub(crate) struct State {
     wasi: WasiCtx,
