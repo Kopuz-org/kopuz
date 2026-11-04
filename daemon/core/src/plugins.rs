@@ -20,6 +20,9 @@ pub struct PluginService {
     index_url: String,
     http: reqwest::Client,
     index: Mutex<Option<(Instant, Arc<Index>)>>,
+    /// Held while the plugin directory changes, since an install and a
+    /// removal of one id share its staging paths.
+    changing: Mutex<()>,
 }
 
 impl Default for PluginService {
@@ -48,6 +51,7 @@ impl PluginService {
             index_url,
             http,
             index: Mutex::new(None),
+            changing: Mutex::new(()),
         }
     }
 
@@ -154,6 +158,7 @@ impl PluginService {
     /// Fetch, verify, check the manifest and compile it once before anything
     /// is written. `network` is what the user agreed to; anything else is refused.
     pub async fn install(&self, id: &str, network: &[String]) -> Result<PluginInfo, ApiError> {
+        let _changing = self.changing.lock().await;
         let dir = server::plugins::dir()
             .ok_or_else(|| ApiError::unsupported("this daemon has no plugin directory"))?
             .to_path_buf();
@@ -246,6 +251,7 @@ impl PluginService {
     }
 
     pub async fn uninstall(&self, id: &str) -> Result<(), ApiError> {
+        let _changing = self.changing.lock().await;
         let registry = server::plugins::registry();
         let plugin = registry
             .plugins()
