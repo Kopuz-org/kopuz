@@ -115,6 +115,27 @@ pub async fn approve(id: &str, network: &[String]) -> Option<()> {
     let _one_at_a_time = CHANGING.lock().await;
     let current = registry();
     let next = current.approve(id, network)?;
+    // Another directory holding the id would win the next rescan with the
+    // old build, so it goes before the approved one is served.
+    let kept = next.dirs_of(id);
+    let others: Vec<PathBuf> = current
+        .dirs_of(id)
+        .into_iter()
+        .filter(|copy| !kept.contains(copy))
+        .collect();
+    if let Some(root) = dir().filter(|_| !others.is_empty()) {
+        let root = root.to_path_buf();
+        let removed = tokio::task::spawn_blocking(move || {
+            others
+                .iter()
+                .try_for_each(|copy| plugin_host::market::uninstall(&root, copy))
+        })
+        .await;
+        if !matches!(removed, Ok(Ok(()))) {
+            tracing::warn!(plugin = %id, "an older copy of the plugin could not be removed; the update waits");
+            return None;
+        }
+    }
     commit(&current, Arc::new(next));
     Some(())
 }

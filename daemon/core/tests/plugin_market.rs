@@ -237,5 +237,40 @@ async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
     assert!(!by_hand.exists());
     assert_eq!(daemon::services::resolve("echo-service"), None);
 
+    // An update under another directory name that reaches a new host waits;
+    // once approved, the older copy is gone, so a rescan cannot bring it back.
+    let write = |dir: &Path, manifest: &str| {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join(plugin_host::MANIFEST_FILE), manifest).unwrap();
+        std::fs::write(dir.join(plugin_host::COMPONENT_FILE), subsonic_component()).unwrap();
+    };
+    let older = plugins.join("z-echo");
+    write(&older, MANIFEST);
+    assert!(server::plugins::rescan().await);
+    let update = MANIFEST
+        .replace("version = \"1.0.0\"", "version = \"1.1.0\"")
+        .replace(
+            r#"network = ["$server"]"#,
+            r#"network = ["$server", "extra.test"]"#,
+        );
+    write(&plugins.join("echo"), &update);
+    server::plugins::rescan().await;
+    let loaded = || {
+        server::plugins::registry()
+            .plugins()
+            .iter()
+            .find(|plugin| plugin.id() == "echo")
+            .map(|plugin| plugin.manifest().version.clone())
+    };
+    assert_eq!(loaded().as_deref(), Some("1.0.0"), "the update waits");
+    market
+        .install("echo", &["$server".into(), "extra.test".into()])
+        .await
+        .expect("approved");
+    assert!(!older.exists(), "the older copy is removed");
+    server::plugins::rescan().await;
+    assert_eq!(loaded().as_deref(), Some("1.1.0"));
+    market.uninstall("echo").await.expect("removed");
+
     std::fs::remove_dir_all(&plugins).ok();
 }
