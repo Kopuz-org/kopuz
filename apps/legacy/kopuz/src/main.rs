@@ -370,9 +370,6 @@ fn main() -> std::process::ExitCode {
             )
             .with_background_color((0, 0, 0, 255));
 
-        // WKWebView serves custom schemes reliably through WKURLSchemeHandler, so
-        // iOS keeps the desktop `artwork://` protocol rather than Android's
-        // loopback server.
         #[cfg(target_os = "ios")]
         let config = config.with_asynchronous_custom_protocol(
             "artwork",
@@ -555,9 +552,6 @@ fn App() -> Element {
     // `window().close()` (the title bar's ×, the tray's Quit) tears the window down without a CloseRequested event.
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     use_drop(exit_flush::finish_with_stashed);
-    // iOS kills a suspended app without telling it, so leaving the foreground is
-    // the last reliable moment to write down the queue and the volume; the
-    // terminate callback is sent only to an app that is still running.
     #[cfg(target_os = "ios")]
     dioxus::mobile::use_wry_event_handler(|event, _| {
         use dioxus::mobile::tao::event::Event;
