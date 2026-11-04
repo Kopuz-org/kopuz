@@ -51,6 +51,12 @@ pub fn assemble(playlist_url: &str, user_agent: Option<&str>) -> Result<Vec<u8>>
 
     let mut out = Vec::new();
     for url in segments {
+        if !utils::http::follows(playlist_url, &url) {
+            return Err(Error::new(
+                ErrorKind::PermissionDenied,
+                "an HLS segment is on a host its plugin may not reach",
+            ));
+        }
         let mut seg_req = http.get(&url);
         if let Some(ua) = user_agent {
             seg_req = seg_req.header("User-Agent", ua);
