@@ -28,9 +28,9 @@ tokio = { workspace = true, features = ["time", "fs"] }
 serde_json = { workspace = true }
 i18n = { workspace = true }
 
-# Native file dialogs (folder/cover pickers). rfd doesn't work on Android
-# (which auto-detects the music dir via JNI instead).
-[target.'cfg(not(target_os = "android"))'.dependencies]
+# Native file dialogs (folder/cover pickers). rfd doesn't work on a phone:
+# Android auto-detects the music dir via JNI, iOS reads the app's Documents.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 rfd = { workspace = true }
 
 [target.'cfg(target_os = "android")'.dependencies]

@@ -86,7 +86,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     } else {
         COLUMNS_NORMAL
     };
-    let column_gap = if cfg!(target_os = "android") {
+    let column_gap = if cfg!(any(target_os = "android", target_os = "ios")) {
         "0.5rem"
     } else {
         "1.5rem"
@@ -118,8 +118,8 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
          div {
              class: "select-none flex-1 min-h-0 flex flex-col w-full",
              div {
-                 class: if cfg!(target_os = "android") { "showcase-hero flex flex-col items-center text-center gap-4 mb-6 shrink-0" } else { "showcase-hero flex flex-col md:flex-row md:flex-wrap items-end gap-8 mb-12 shrink-0" },
-                 div { class: if cfg!(target_os = "android") { "showcase-cover w-44 h-44 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0" } else { "showcase-cover w-64 h-64 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0" },
+                 class: if cfg!(any(target_os = "android", target_os = "ios")) { "showcase-hero flex flex-col items-center text-center gap-4 mb-6 shrink-0" } else { "showcase-hero flex flex-col md:flex-row md:flex-wrap items-end gap-8 mb-12 shrink-0" },
+                 div { class: if cfg!(any(target_os = "android", target_os = "ios")) { "showcase-cover w-44 h-44 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0" } else { "showcase-cover w-64 h-64 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0" },
                      if let Some(url) = &props.cover_url {
                          img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
                      } else {
@@ -151,8 +151,8 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                              h5 { class: "text-sm font-bold text-white/60 mb-2", "{props.description}" }
                          }
                      }
-                     h1 { class: if cfg!(target_os = "android") { "showcase-title text-3xl font-semibold tracking-tight text-white mb-3 break-words line-clamp-3" } else { "showcase-title text-5xl md:text-7xl font-semibold tracking-tight text-white mb-6 break-words line-clamp-3" }, "{props.name}" }
-                     div { class: if cfg!(target_os = "android") { "flex items-center justify-center gap-4 text-slate-400" } else { "flex items-center gap-6 text-slate-400" },
+                     h1 { class: if cfg!(any(target_os = "android", target_os = "ios")) { "showcase-title text-3xl font-semibold tracking-tight text-white mb-3 break-words line-clamp-3" } else { "showcase-title text-5xl md:text-7xl font-semibold tracking-tight text-white mb-6 break-words line-clamp-3" }, "{props.name}" }
+                     div { class: if cfg!(any(target_os = "android", target_os = "ios")) { "flex items-center justify-center gap-4 text-slate-400" } else { "flex items-center gap-6 text-slate-400" },
                          {
                             let count = props.tracks.len();
                             let song_text = i18n::t_with("showcase_song_count", &[("count", count.into())]);

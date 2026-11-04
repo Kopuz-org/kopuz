@@ -162,7 +162,7 @@ pub(super) fn SettingsNavigation(
                     label_tilt: "56.25deg",
                     on_select,
                 }
-                if !cfg!(target_os = "android") {
+                if !cfg!(any(target_os = "android", target_os = "ios")) {
                     SettingsFanItem {
                         category: SettingsCategory::Tools,
                         selected,

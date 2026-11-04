@@ -1,4 +1,4 @@
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn build_window_icon() -> Option<dioxus::desktop::tao::window::Icon> {
     let image = image::load_from_memory(include_bytes!("../assets/logo-512.png")).ok()?;
     let image = image.into_rgba8();
@@ -6,7 +6,7 @@ pub fn build_window_icon() -> Option<dioxus::desktop::tao::window::Icon> {
     dioxus::desktop::tao::window::Icon::from_rgba(image.into_raw(), width, height).ok()
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn build_tray_icon() -> Option<dioxus::desktop::trayicon::Icon> {
     let image = image::load_from_memory(include_bytes!("../assets/logo-512.png")).ok()?;
     let image = image.into_rgba8();
@@ -27,12 +27,12 @@ pub fn tray_backend_available() -> bool {
         .any(|name| unsafe { libloading::Library::new(*name) }.is_ok())
 }
 
-#[cfg(all(not(target_os = "android"), not(target_os = "linux")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_os = "linux")))]
 pub fn tray_backend_available() -> bool {
     true
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn show_tray_missing_popup() {
     let escaped = serde_json::to_string(&i18n::t("tray_unavailable_message"))
         .unwrap_or_else(|_| "\"\"".to_string());
@@ -64,7 +64,7 @@ pub fn show_tray_missing_popup() {
 /// Dioxus stops polling the VirtualDom until edits are acknowledged, so suspended
 /// background frames would also stall playback tasks. Patch on interpreter
 /// assignment because the loader starts receiving edits in the same script.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub const UNGATE_EDITS_FROM_FRAME_CLOCK: &str = r#"<script>
 (function () {
   function patch(interpreter) {

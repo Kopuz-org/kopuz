@@ -278,7 +278,7 @@ fn Field(
     let stacked = matches!(
         field.kind,
         api::FieldKind::Radio { .. } | api::FieldKind::Directories
-    ) || (cfg!(target_os = "android")
+    ) || (cfg!(any(target_os = "android", target_os = "ios"))
         && !matches!(field.kind, api::FieldKind::Toggle));
     let config_key = field.config_key.clone().unwrap_or_default();
     rsx! {
@@ -300,7 +300,7 @@ fn Field(
 
 /// Pick a directory with whatever the platform offers. Android has no folder
 /// dialog, so there the path is typed.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[component]
 fn DirectoryButton(on_pick: EventHandler<String>) -> Element {
     rsx! {
@@ -318,7 +318,7 @@ fn DirectoryButton(on_pick: EventHandler<String>) -> Element {
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[component]
 fn DirectoryButton(on_pick: EventHandler<String>) -> Element {
     let _ = on_pick;

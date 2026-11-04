@@ -57,7 +57,7 @@ pub fn BottombarNormal(
         }
     };
 
-    if cfg!(target_os = "android") {
+    if cfg!(any(target_os = "android", target_os = "ios")) {
         let is_loading = *ctrl.is_loading.read();
         let buffered_ranges = ctrl.buffered_ranges.read().clone();
         let progress_percent = if *current_song_duration.read() > 0 {
@@ -244,7 +244,7 @@ pub fn BottombarNormal(
                         button_class: "w-9 h-9 hover:bg-white/10 active:scale-95 text-xs".to_string(),
                     }
                 }
-                if cfg!(not(target_os = "android")) {
+                if cfg!(not(any(target_os = "android", target_os = "ios"))) {
                     button {
                         class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                         title: i18n::t("mini_player").to_string(),

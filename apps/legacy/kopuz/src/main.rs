@@ -4,7 +4,7 @@ use components::{
     fullscreen::Fullscreen, rightbar::Rightbar, sidebar::Sidebar, tabbar::TabBar,
     titlebar::ResizeHandles, titlebar::Titlebar,
 };
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use dioxus::desktop::tao::dpi::LogicalSize;
 #[cfg(target_os = "macos")]
 use dioxus::desktop::tao::platform::macos::WindowBuilderExtMacOS;
@@ -27,16 +27,16 @@ mod app_lifecycle;
 mod artwork_http;
 mod artwork_protocol;
 mod backend;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod chrome_trace;
 mod debug_panel;
 mod desktop_shell;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod exit_flush;
 mod logging;
 mod material3;
 mod static_assets;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod ui_profile;
 mod updates;
 #[cfg(target_os = "linux")]
@@ -153,7 +153,7 @@ fn init_android_tls() -> Result<(), String> {
 
 fn main() -> std::process::ExitCode {
     // Core startup can fail before Dioxus installs its logger at launch.
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     dioxus::logger::initialize_default();
 
     #[cfg(target_os = "android")]
@@ -169,7 +169,7 @@ fn main() -> std::process::ExitCode {
 
     hooks::toast::describe_errors_with(components::forms::error_text);
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let log_dir = config::flavor::project_dirs()
             .map(|dirs| dirs.cache_dir().join("logs"))
@@ -288,10 +288,12 @@ fn main() -> std::process::ExitCode {
             .launch(App);
     }
 
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
-        // JNI media session + classloader cache. Player::new() also calls this (idempotent
-        // OnceLock), but doing it up front means the session exists before first playback.
+        // The platform media session: JNI + classloader cache on Android, the Swift
+        // audio session and remote commands on iOS. Player::new() also calls this
+        // (idempotent OnceLock), but doing it up front means the session exists
+        // before first playback.
         player::systemint::init();
 
         // `App` reads the core out of `backend` while it renders, so it has to
@@ -311,7 +313,8 @@ fn main() -> std::process::ExitCode {
         /// This script rebinds the edit path to apply batches and ack immediately —
         /// the interpreter's own headless behavior. The counter stops a stale rAF
         /// callback from acking twice, which would release the next batch before the
-        /// DOM had it.
+        /// DOM had it. WKWebView stops `requestAnimationFrame` for a backgrounded
+        /// app the same way, so iOS takes the patch too.
         const APPLY_EDITS_WITHOUT_RAF: &str = r#"<script>
 (function () {
     var attempts = 0;
@@ -345,9 +348,35 @@ fn main() -> std::process::ExitCode {
 })();
 </script>"#;
 
+        /// The stock viewport leaves iOS reporting zero safe-area insets, so the
+        /// page could not keep clear of the notch and the home indicator.
+        const VIEWPORT: &str = if cfg!(target_os = "ios") {
+            r#"<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">"#
+        } else {
+            ""
+        };
+
         let config = dioxus::mobile::Config::new()
-            .with_custom_head(static_assets::head() + APPLY_EDITS_WITHOUT_RAF)
+            .with_custom_head(
+                VIEWPORT.to_string() + &static_assets::head() + APPLY_EDITS_WITHOUT_RAF,
+            )
             .with_background_color((0, 0, 0, 255));
+
+        // WKWebView serves custom schemes reliably through WKURLSchemeHandler, so
+        // iOS keeps the desktop `artwork://` protocol rather than Android's
+        // loopback server.
+        #[cfg(target_os = "ios")]
+        let config = config.with_asynchronous_custom_protocol(
+            "artwork",
+            |_id, request, responder: dioxus::mobile::RequestAsyncResponder| {
+                let range = request
+                    .headers()
+                    .get(http::header::RANGE)
+                    .and_then(|range| range.to_str().ok())
+                    .map(str::to_string);
+                artwork_protocol::serve(request.uri().clone(), range, responder);
+            },
+        );
 
         dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
     }
@@ -378,8 +407,10 @@ fn App() -> Element {
     // first would leave the final queue/config persists (and any failure
     // warnings) out of latest.log and the trace.
 
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     app_lifecycle::use_webview_script_engine();
+    #[cfg(target_os = "ios")]
+    use_hook(player::systemint::configure_webview);
 
     #[cfg(target_os = "linux")]
     use_hook(|| {
@@ -405,7 +436,8 @@ fn App() -> Element {
     let settings_anchor: Signal<Option<String>> = use_signal(|| None);
     let cache_dir = use_memo(move || {
         // Android: external/ProjectDirs paths aren't writable; use the app-internal files
-        // dir (getFilesDir via JNI) so saves don't fail with EACCES.
+        // dir (getFilesDir via JNI) so saves don't fail with EACCES. iOS's ProjectDirs
+        // already resolve inside the app container.
         #[cfg(target_os = "android")]
         {
             let mut path = player::systemint::get_files_dir()
@@ -481,7 +513,7 @@ fn App() -> Element {
     let mut palette = use_signal(|| Option::<Vec<utils::color::Color>>::None);
     // Edits made over defaults born of a failed load are never sent, so they cannot overwrite real settings.
     let mut config_loaded_ok = use_signal(|| false);
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let close_hides_window = use_signal(|| false);
 
     // tao calls process::exit() after CloseRequested, killing the debounced
@@ -492,7 +524,7 @@ fn App() -> Element {
     // flush silently never ran. Signals are peeked here (not Send), the
     // joined thread does the blocking DB work. Idempotent across
     // CloseRequested/LoopDestroyed.
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     dioxus::desktop::use_wry_event_handler(move |event, _| {
         use dioxus::desktop::tao::event::{Event, WindowEvent};
         let shutting_down = matches!(event, Event::LoopDestroyed)
@@ -513,8 +545,18 @@ fn App() -> Element {
         }
     });
     // `window().close()` (the title bar's ×, the tray's Quit) tears the window down without a CloseRequested event.
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     use_drop(exit_flush::finish_with_stashed);
+    // iOS kills a suspended app without telling it, so leaving the foreground is
+    // the last reliable moment to write down the queue and the volume; the
+    // terminate callback is sent only to an app that is still running.
+    #[cfg(target_os = "ios")]
+    dioxus::mobile::use_wry_event_handler(|event, _| {
+        use dioxus::mobile::tao::event::Event;
+        if matches!(event, Event::Suspended | Event::LoopDestroyed) {
+            backend::shutdown();
+        }
+    });
 
     #[cfg(target_os = "macos")]
     use_effect(move || {
@@ -646,12 +688,12 @@ fn App() -> Element {
         );
     });
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     use_effect(move || {
         let unsent = config_loaded_ok().then(|| settings_handle.unsent_tracked());
         exit_flush::stash_config(unsent.unwrap_or_default());
     });
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     use_effect(move || exit_flush::stash_prefs(ui_prefs.unsent_tracked()));
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -680,7 +722,7 @@ fn App() -> Element {
     // Library/playlists/favorites have no save loops anymore — every mutation
     // commits as a targeted write at the call site and bumps a generation.
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         use dioxus::desktop::trayicon::TrayIcon;
         use dioxus::desktop::{WindowCloseBehaviour, window};
@@ -995,7 +1037,8 @@ fn App() -> Element {
     // Sidebar collapse state. On Android the sidebar is an overlay drawer that
     // starts collapsed and is toggled by the mobile header hamburger; the
     // Sidebar component reads this from context.
-    let mut is_sidebar_collapsed = use_signal(|| cfg!(target_os = "android"));
+    let mut is_sidebar_collapsed =
+        use_signal(|| cfg!(any(target_os = "android", target_os = "ios")));
     use_context_provider(|| components::sidebar::SidebarCollapsed(is_sidebar_collapsed));
 
     // Only an edge swipe opens the drawer; horizontal scrolling and sliders
@@ -1007,7 +1050,7 @@ fn App() -> Element {
             .is_some_and(|(x, _)| (0.0..=24.0).contains(&x));
         if open_swipe.finish(&evt) == Some(components::gestures::SwipeDirection::Right)
             && from_edge
-            && cfg!(target_os = "android")
+            && cfg!(any(target_os = "android", target_os = "ios"))
             && *is_sidebar_collapsed.peek()
         {
             is_sidebar_collapsed.set(false);
@@ -1015,7 +1058,7 @@ fn App() -> Element {
     };
 
     use_context_provider(|| components::CompactMode(compact_mode));
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let mut saved_window_size = use_signal(|| None::<LogicalSize<f64>>);
         use_effect(move || {
@@ -1189,7 +1232,7 @@ fn App() -> Element {
                         updates::InstallProgress::Ready => {
                             update_progress.set(Some(state));
                             // The helper waits for this process to exit before it installs.
-                            #[cfg(not(target_os = "android"))]
+                            #[cfg(not(any(target_os = "android", target_os = "ios")))]
                             {
                                 let mut close_hides_window = close_hides_window;
                                 close_hides_window.set(false);
@@ -1328,13 +1371,14 @@ fn App() -> Element {
             class: "relative z-0 flex flex-col h-screen text-white select-none overflow-x-hidden {theme_class}",
             // The activity draws edge to edge, so inset the whole column once here
             // instead of per element. `fixed` overlays escape it and carry their own.
-            style: if cfg!(target_os = "android") {
+            style: if cfg!(any(target_os = "android", target_os = "ios")) {
                 format!("{} padding-top: env(safe-area-inset-top);", background_style)
             } else {
                 background_style.to_string()
             },
             dir: "{dir}",
-            "data-platform": if cfg!(target_os = "android") { "android" } else { "desktop" },
+            "data-platform": if cfg!(target_os = "android") { "android" } else if cfg!(target_os = "ios") { "ios" } else { "desktop" },
+            "data-phone": cfg!(any(target_os = "android", target_os = "ios")).then_some("true"),
             "data-ui-style": settings.read().ui.ui_style.as_str(),
             "data-reduce-animations": "{reduce_animations}",
             tabindex: "0",
@@ -1501,17 +1545,17 @@ fn App() -> Element {
                                     }
                                 }
                             }
-                            if !cfg!(target_os = "android") && matches!(update_progress_state, None | Some(updates::InstallProgress::Failed)) {
+                            if !cfg!(any(target_os = "android", target_os = "ios")) && matches!(update_progress_state, None | Some(updates::InstallProgress::Failed)) {
                                 button {
                                     class: "ml-2 text-xs underline opacity-80 hover:opacity-100 transition-opacity",
                                     onclick: {
                                         let release_url = update.release_url.clone();
                                         move |_| {
-                                            #[cfg(not(target_os = "android"))]
+                                            #[cfg(not(any(target_os = "android", target_os = "ios")))]
                                             if let Err(e) = webbrowser::open(&release_url) {
                                                 tracing::error!("Failed to open release page: {}", e);
                                             }
-                                            #[cfg(target_os = "android")]
+                                            #[cfg(any(target_os = "android", target_os = "ios"))]
                                             let _ = &release_url;
                                         }
                                     },
@@ -1566,7 +1610,7 @@ fn App() -> Element {
                 }
                 div {
                     id: "main-scroll-area",
-                    class: if cfg!(target_os = "android") { "flex-1 min-h-0 flex flex-col overflow-hidden relative" } else { "flex-1 overflow-y-auto" },
+                    class: if cfg!(any(target_os = "android", target_os = "ios")) { "flex-1 min-h-0 flex flex-col overflow-hidden relative" } else { "flex-1 overflow-y-auto" },
                     onscroll: move |evt| {
                         let pos = evt.scroll_top();
                         let route = *current_route.peek();
@@ -1583,7 +1627,7 @@ fn App() -> Element {
                         }
                     },
 
-                    if cfg!(target_os = "android") {
+                    if cfg!(any(target_os = "android", target_os = "ios")) {
                         {
                             let is_details = match *current_route.read() {
                                 Route::Album => !selected_album_id.read().is_empty(),
@@ -1608,7 +1652,7 @@ fn App() -> Element {
                                 Route::Radio => i18n::t("radio"),
                                 Route::Activity => i18n::t("activity"),
                                 Route::Settings => settings_title.clone().unwrap_or_else(|| i18n::t("settings")),
-                                #[cfg(not(target_os = "android"))]
+                                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                                 Route::Downloader | Route::ThemeEditor => i18n::t("home"),
                             };
                             let has_image_background = settings.read().background.cover_art_background
@@ -1648,7 +1692,7 @@ fn App() -> Element {
                         }
                     }
 
-                    div { class: if cfg!(target_os = "android") { "relative flex-1 min-h-0 overflow-y-auto" } else { "contents" },
+                    div { class: if cfg!(any(target_os = "android", target_os = "ios")) { "relative flex-1 min-h-0 overflow-y-auto" } else { "contents" },
                     match *current_route.read() {
                         Route::Home => rsx! {
                             pages::home::Home {
@@ -1868,10 +1912,10 @@ fn App() -> Element {
                                 settings: settings,
                             }
                         },
-                        #[cfg(not(target_os = "android"))]
+                        #[cfg(not(any(target_os = "android", target_os = "ios")))]
                         Route::Downloader => rsx! { pages::downloader::DownloaderPage {} },
                         Route::Settings => rsx! { pages::settings::Settings { settings } },
-                        #[cfg(not(target_os = "android"))]
+                        #[cfg(not(any(target_os = "android", target_os = "ios")))]
                         Route::ThemeEditor => rsx! { pages::theme_editor::ThemeEditorPage { settings } },
                     }
                     }
@@ -1957,7 +2001,7 @@ fn App() -> Element {
                     is_devices_open: is_devices_open,
                 }
             }
-            if cfg!(target_os = "android") {
+            if cfg!(any(target_os = "android", target_os = "ios")) {
                 TabBar {
                     current_route,
                     on_navigate: move |route| {

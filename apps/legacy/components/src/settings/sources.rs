@@ -1,7 +1,7 @@
 //! Source settings controls.
 
 use dioxus::prelude::*;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use rfd::AsyncFileDialog;
 
 #[component]
@@ -47,7 +47,7 @@ pub fn MultiDirectoryPicker(
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[component]
 fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -> Element {
     rsx! {
@@ -58,6 +58,29 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
                         on_add.call(handle.path().to_path_buf());
                     }
                 });
+            },
+            class: "app-button-tonal bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
+            "{add_text}"
+        }
+    }
+}
+
+/// An iOS app reads only its own container, and the Files app shows that
+/// container's Documents as "On My iPhone › Kopuz": music copied there is the
+/// local library.
+#[cfg(target_os = "ios")]
+#[component]
+fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -> Element {
+    rsx! {
+        button {
+            onclick: move |_| {
+                let Some(home) = std::env::var_os("HOME") else {
+                    return;
+                };
+                let documents = std::path::PathBuf::from(home).join("Documents");
+                if std::fs::create_dir_all(&documents).is_ok() {
+                    on_add.call(documents);
+                }
             },
             class: "app-button-tonal bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
             "{add_text}"

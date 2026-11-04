@@ -40,7 +40,7 @@ pub(crate) fn use_settings_persistence(
         let _ = *persisted_volume.read();
         config_dirty += 1;
     });
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     use_effect(move || {
         if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;

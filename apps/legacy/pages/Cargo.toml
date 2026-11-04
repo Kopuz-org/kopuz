@@ -16,7 +16,7 @@ name = "pages"
 workspace = true
 
 # rfd is only used by the yt-dlp page, which is desktop only (excluded on Android).
-[target.'cfg(not(target_os = "android"))'.dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 rfd = { workspace = true }
 
 [dependencies]

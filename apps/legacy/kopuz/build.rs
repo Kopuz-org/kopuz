@@ -2,6 +2,10 @@
 //!
 //! On Windows we compile the app icon into the executable.
 //!
+//! On iOS we compile the Swift half of the system integration (`ios-src/`: the
+//! audio session, Now Playing and remote commands, the sign-in sheet) into a
+//! static library the binary links, the way Android gets its Kotlin.
+//!
 //! On Android we package the media-notification controller. `dx build` / `dx serve`
 //! regenerate the Gradle project from a template embedded in the `dx` binary every
 //! run, with no way to inject our media classes (`MediaSessionHelper` / `MusicService`
@@ -291,6 +295,11 @@ fn main() {
         res.compile().expect("failed to compile Windows resources");
     }
 
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("ios") {
+        build_ios_bridge(&crate_dir);
+        return;
+    }
+
     println!("cargo:rerun-if-env-changed=WRY_ANDROID_KOTLIN_FILES_OUT_DIR");
 
     let out_dir = match std::env::var("WRY_ANDROID_KOTLIN_FILES_OUT_DIR") {
@@ -375,6 +384,162 @@ fn main() {
         patch_sdk_levels(&app_dir.join("build.gradle.kts"));
         let _ = fs::remove_dir_all(app_dir.join("libs"));
     }
+}
+
+/// The deployment target the Swift objects are built for when nothing sets
+/// `IPHONEOS_DEPLOYMENT_TARGET`; matches `[ios] deployment_target` in Dioxus.toml.
+const IOS_DEPLOYMENT_TARGET: &str = "16.0";
+
+/// The SDK version the binary says it was linked against. UIKit keys its
+/// behaviour on that number, and an app linked against iOS 27 or later that has
+/// not adopted the scene lifecycle is killed as its first window appears. tao,
+/// under dioxus, still creates that window the pre-scene way, so the binary
+/// claims the last SDK before the requirement until tao adopts scenes.
+const IOS_LINKED_SDK: &str = "18.0";
+
+/// Compile `ios-src/*.swift` into `libkopuz_ios.a` and link it. The Rust side
+/// is `player::systemint::ios`, which declares the `@_cdecl` exports.
+///
+/// Swift objects autolink the Swift runtime by name (`-lswiftCore`, the
+/// compatibility shims) without saying where it lives, so both its homes go on
+/// the search path: the SDK's `usr/lib/swift` stubs and the toolchain's static
+/// shims next to `swiftc`.
+///
+/// A build failure stops the build: an app without this library would link,
+/// then play silently with the ring switch on and stop in the background.
+fn build_ios_bridge(crate_dir: &Path) {
+    use std::process::Command;
+
+    let src = crate_dir.join("ios-src");
+    println!("cargo:rerun-if-changed={}", src.display());
+    println!("cargo:rerun-if-env-changed=IPHONEOS_DEPLOYMENT_TARGET");
+    println!("cargo:rerun-if-env-changed=DEVELOPER_DIR");
+
+    let target = std::env::var("TARGET").expect("TARGET not set");
+    let simulator = target.ends_with("-sim") || target.starts_with("x86_64");
+    let arch = if target.starts_with("aarch64") {
+        "arm64"
+    } else {
+        "x86_64"
+    };
+    let sdk = if simulator {
+        "iphonesimulator"
+    } else {
+        "iphoneos"
+    };
+    let min = std::env::var("IPHONEOS_DEPLOYMENT_TARGET")
+        .unwrap_or_else(|_| IOS_DEPLOYMENT_TARGET.to_string());
+    let swift_target = format!(
+        "{arch}-apple-ios{min}{}",
+        if simulator { "-simulator" } else { "" }
+    );
+
+    let developer_dir = ios_developer_dir(sdk);
+    let xcrun = |args: &[&str]| -> String {
+        let mut command = Command::new("/usr/bin/xcrun");
+        command.args(args).env_remove("SDKROOT");
+        if let Some(dir) = &developer_dir {
+            command.env("DEVELOPER_DIR", dir);
+        }
+        let output = command
+            .output()
+            .unwrap_or_else(|e| panic!("cannot run xcrun {args:?}: {e}"));
+        assert!(
+            output.status.success(),
+            "xcrun {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+    let sdk_path = xcrun(&["--sdk", sdk, "--show-sdk-path"]);
+    let swiftc = PathBuf::from(xcrun(&["--sdk", sdk, "--find", "swiftc"]));
+
+    let mut sources: Vec<PathBuf> = fs::read_dir(&src)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", src.display()))
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("swift"))
+        .collect();
+    sources.sort();
+    for source in &sources {
+        println!("cargo:rerun-if-changed={}", source.display());
+    }
+
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not set"));
+    let library = out_dir.join("libkopuz_ios.a");
+    let mut command = Command::new(&swiftc);
+    command
+        .args([
+            "-emit-library",
+            "-static",
+            "-parse-as-library",
+            "-module-name",
+            "KopuzIOS",
+            "-swift-version",
+            "5",
+            "-O",
+            "-target",
+            &swift_target,
+            "-sdk",
+            &sdk_path,
+            "-module-cache-path",
+        ])
+        .arg(out_dir.join("swift-module-cache"))
+        .arg("-o")
+        .arg(&library)
+        .args(&sources)
+        .env_remove("SDKROOT");
+    if let Some(dir) = &developer_dir {
+        command.env("DEVELOPER_DIR", dir);
+    }
+    let status = command
+        .status()
+        .unwrap_or_else(|e| panic!("cannot run {}: {e}", swiftc.display()));
+    assert!(status.success(), "swiftc failed to build the iOS bridge");
+
+    println!("cargo:rustc-link-search=native={}", out_dir.display());
+    println!("cargo:rustc-link-lib=static=kopuz_ios");
+    println!("cargo:rustc-link-search=native={sdk_path}/usr/lib/swift");
+    if let Some(toolchain) = swiftc.parent().and_then(Path::parent) {
+        println!(
+            "cargo:rustc-link-search=native={}",
+            toolchain.join("lib/swift").join(sdk).display()
+        );
+    }
+    for framework in ["AVFoundation", "MediaPlayer", "UIKit", "WebKit"] {
+        println!("cargo:rustc-link-lib=framework={framework}");
+    }
+
+    let platform = if simulator { "ios-simulator" } else { "ios" };
+    println!("cargo:rustc-link-arg-bins=-Wl,-platform_version,{platform},{min},{IOS_LINKED_SDK}");
+}
+
+/// The Xcode to build with. The nix dev shell points `DEVELOPER_DIR` at a
+/// macOS-only SDK with no iOS platform in it, so when the inherited one cannot
+/// find `sdk`, fall back to the installed Xcode instead of failing on a path
+/// the shell chose.
+fn ios_developer_dir(sdk: &str) -> Option<PathBuf> {
+    let finds_sdk = |dir: Option<&Path>| {
+        let mut command = std::process::Command::new("/usr/bin/xcrun");
+        command
+            .args(["--sdk", sdk, "--show-sdk-path"])
+            .env_remove("SDKROOT");
+        if let Some(dir) = dir {
+            command.env("DEVELOPER_DIR", dir);
+        }
+        command.output().is_ok_and(|output| output.status.success())
+    };
+    if finds_sdk(None) {
+        return None;
+    }
+    let xcode = PathBuf::from("/Applications/Xcode.app/Contents/Developer");
+    if finds_sdk(Some(&xcode)) {
+        return Some(xcode);
+    }
+    panic!(
+        "no Xcode with the {sdk} SDK: install Xcode, or point DEVELOPER_DIR at one \
+         (the nix shell's DEVELOPER_DIR is a macOS-only SDK)"
+    );
 }
 
 /// Status-bar icon for the media notification, generated from the brand

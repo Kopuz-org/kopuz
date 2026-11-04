@@ -1,5 +1,5 @@
 //! OS media-key integration for the daemon process: MPRIS (Linux), SMTC
-//! (Windows), and MPRemoteCommandCenter (macOS) commands flow into the
+//! (Windows), and MPRemoteCommandCenter (macOS, iOS) commands flow into the
 //! session; shuffle/repeat modes flow back out where the platform shows them.
 //!
 //! Now-playing metadata itself is pushed by the player engine
@@ -10,7 +10,7 @@
 
 #![cfg_attr(target_os = "android", allow(unused))]
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "ios"))]
 use api::LoopMode;
 use api::PlayerCommand;
 
@@ -139,6 +139,77 @@ pub fn spawn(session: &SessionHandle) {
                 SystemEvent::Seek(seconds) => seek_command(seconds),
             };
             command(&session, mapped).await;
+        }
+    });
+}
+
+/// The lock screen, Control Center, CarPlay and headphone remotes reach the
+/// session through the remote command center; an audio interruption (a call, a
+/// Siri request) and an unplugged route arrive the same way, as a pause. The
+/// queue's modes flow back so CarPlay's shuffle and repeat buttons show them.
+#[cfg(target_os = "ios")]
+pub fn spawn(session: &SessionHandle) {
+    use api::ApiEvent;
+    use player::systemint::{RepeatMode, SystemEvent};
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SystemEvent>();
+    player::systemint::set_background_handler(move |event| {
+        let _ = tx.send(event);
+    });
+    let session = session.clone();
+    let mut events = session.subscribe();
+    tokio::spawn(async move {
+        let mut last_modes: Option<(bool, LoopMode)> = None;
+        loop {
+            tokio::select! {
+                event = rx.recv() => {
+                    let Some(event) = event else {
+                        return;
+                    };
+                    let mapped = match event {
+                        SystemEvent::Play => PlayerCommand::Play,
+                        SystemEvent::Pause => PlayerCommand::Pause,
+                        SystemEvent::Toggle => PlayerCommand::Toggle,
+                        SystemEvent::Next => PlayerCommand::Next,
+                        SystemEvent::Prev => PlayerCommand::Previous,
+                        SystemEvent::Seek(seconds) => seek_command(seconds),
+                        SystemEvent::SetShuffle(on) => PlayerCommand::SetMode {
+                            shuffle: Some(on),
+                            loop_mode: None,
+                        },
+                        SystemEvent::SetRepeat(mode) => PlayerCommand::SetMode {
+                            shuffle: None,
+                            loop_mode: Some(match mode {
+                                RepeatMode::Off => LoopMode::None,
+                                RepeatMode::Playlist => LoopMode::Queue,
+                                RepeatMode::Track => LoopMode::Track,
+                            }),
+                        },
+                    };
+                    command(&session, mapped).await;
+                }
+                received = events.recv() => {
+                    match received {
+                        Ok(ApiEvent::PlayerState(state)) => {
+                            let modes = (state.queue.shuffle, state.queue.loop_mode);
+                            if last_modes != Some(modes) {
+                                last_modes = Some(modes);
+                                player::systemint::update_modes(
+                                    modes.0,
+                                    match modes.1 {
+                                        LoopMode::None => RepeatMode::Off,
+                                        LoopMode::Queue => RepeatMode::Playlist,
+                                        LoopMode::Track => RepeatMode::Track,
+                                    },
+                                );
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                    }
+                }
+            }
         }
     });
 }

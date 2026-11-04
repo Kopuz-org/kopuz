@@ -4,7 +4,7 @@
 pub mod activity;
 pub mod album;
 pub mod artist;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod downloader;
 pub mod favorites;
 pub mod favorites_body;
@@ -19,7 +19,7 @@ pub mod search;
 pub mod server;
 pub mod settings;
 pub mod settings_actions;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod theme_editor;
 
 /// A panel the app supplies through context, for surfaces that need something

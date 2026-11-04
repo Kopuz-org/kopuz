@@ -3,13 +3,13 @@
 //! only, so it never starts, signals or locks a running browser.
 
 use std::path::{Path, PathBuf};
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use config::{Browser, BrowserEngine};
 
 use super::store::Cookie;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use super::store::host_matches_domain;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,7 +77,7 @@ pub fn browser_profiles() -> Vec<BrowserProfile> {
         .collect()
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "android")))]
+#[cfg(not(any(target_os = "windows", target_os = "android", target_os = "ios")))]
 /// Data directories holding a Chromium `Local State` or a Gecko
 /// `profiles.ini`, relative to the platform's application data directory.
 fn data_dirs(browser: Browser, mac: bool) -> &'static [&'static str] {
@@ -102,7 +102,12 @@ fn data_dirs(browser: Browser, mac: bool) -> &'static [&'static str] {
     }
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "android")))]
+#[cfg(not(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android",
+    target_os = "ios"
+)))]
 /// Gecko browsers still default to a dot directory in `$HOME` on Linux.
 fn home_dirs(browser: Browser) -> &'static [&'static str] {
     match browser {
@@ -114,7 +119,12 @@ fn home_dirs(browser: Browser) -> &'static [&'static str] {
     }
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "android")))]
+#[cfg(not(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android",
+    target_os = "ios"
+)))]
 fn flatpak_id(browser: Browser) -> Option<&'static str> {
     match browser {
         Browser::Chrome => Some("com.google.Chrome"),
@@ -162,12 +172,17 @@ fn roots(browser: Browser, dirs: &directories::BaseDirs) -> Vec<PathBuf> {
 }
 
 /// Android has no desktop browser profile to read.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 fn roots(_browser: Browser, _dirs: &directories::BaseDirs) -> Vec<PathBuf> {
     Vec::new()
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "android")))]
+#[cfg(not(any(
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android",
+    target_os = "ios"
+)))]
 fn roots(browser: Browser, dirs: &directories::BaseDirs) -> Vec<PathBuf> {
     let (home, config) = (dirs.home_dir(), dirs.config_dir());
     let mut roots: Vec<PathBuf> = data_dirs(browser, false)
@@ -299,13 +314,13 @@ fn gecko_profiles(browser: Browser, root: &Path) -> Vec<BrowserProfile> {
         .collect()
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 /// Removed with its contents when dropped: it holds a copy of someone's cookies.
 struct Scratch {
     dir: PathBuf,
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl Scratch {
     fn new(parent: &Path) -> Result<Self, String> {
         static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -325,14 +340,14 @@ impl Scratch {
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl Drop for Scratch {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 /// The `-shm` stays behind: SQLite rebuilds it from the log.
 fn copy_store(from: &Path, to: &Path) -> std::io::Result<()> {
     if let Some(parent) = to.parent() {
@@ -348,7 +363,7 @@ fn copy_store(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn copy_error(store: &Path, error: std::io::Error) -> ProfileError {
     if held_open(&error) {
         ProfileError::BrowserOpen
@@ -364,19 +379,19 @@ fn held_open(error: &std::io::Error) -> bool {
     matches!(error.raw_os_error(), Some(32 | 33))
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "android")))]
+#[cfg(not(any(target_os = "windows", target_os = "android", target_os = "ios")))]
 fn held_open(_error: &std::io::Error) -> bool {
     false
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(suffix);
     path.with_file_name(name)
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 /// A Gecko `expiry`, which moved from seconds to milliseconds, in seconds.
 pub(crate) fn gecko_expiry_secs(expiry: i64) -> i64 {
     if expiry > 100_000_000_000 {
@@ -386,7 +401,7 @@ pub(crate) fn gecko_expiry_secs(expiry: i64) -> i64 {
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn now_unix() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -394,7 +409,7 @@ pub(crate) fn now_unix() -> i64 {
         .unwrap_or_default()
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 /// Expiry is Chromium's microseconds since 1601 or Gecko's Unix time; 0 is a
 /// session cookie, which lives as long as the browser does.
 fn holds_all(
@@ -415,7 +430,7 @@ fn holds_all(
     })
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 /// Host and name columns are never encrypted, so this reads a copy without decrypting.
 pub async fn holds_cookies(
     profile: &BrowserProfile,
@@ -471,7 +486,7 @@ pub async fn holds_cookies(
     ))
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 /// A Chromium profile's store and `Local State` are copied under `scratch` and
 /// read like a profile kopuz made itself. Firefox's store is unencrypted.
 pub async fn read_cookies(
@@ -507,7 +522,7 @@ pub async fn read_cookies(
     .await?)
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn read_cookies(
     profile: &BrowserProfile,
     _scratch: &Path,
@@ -583,7 +598,7 @@ mod tests {
         assert_eq!(profiles[0].dir, root.join("Profiles/a.default"));
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     #[test]
     fn a_session_needs_every_cookie_unexpired_on_the_domain() {
         let now = 1_800_000_000;
@@ -652,7 +667,7 @@ mod tests {
         ));
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     #[tokio::test]
     async fn a_session_is_found_in_a_copy_of_the_store() {
         use sqlx::{ConnectOptions, Executor};

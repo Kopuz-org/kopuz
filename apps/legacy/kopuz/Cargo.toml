@@ -20,8 +20,8 @@ category = "public.app-category.music"
 [package.metadata.bundle.macos]
 info_plist_path = "Info.plist"
 
-# Desktop only. Android uses the mobile renderer, logs to logcat, and has no Discord IPC.
-[target.'cfg(not(target_os = "android"))'.dependencies]
+# Desktop only. A phone uses the mobile renderer, logs to the system log, and has no Discord IPC.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 dioxus = { workspace = true, features = ["desktop"] }
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
@@ -42,6 +42,9 @@ axum = { version = "0.7.9", default-features = false, features = ["http1", "toki
 rustls-platform-verifier = "0.7"
 jni = "0.22"
 ndk-context = { workspace = true }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+dioxus = { workspace = true, features = ["mobile"] }
 
 [dependencies]
 api = { workspace = true }

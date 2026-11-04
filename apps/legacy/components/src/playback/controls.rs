@@ -363,7 +363,7 @@ pub fn SeekSlider(
                         }
                         if !is_loading {
                             div {
-                                class: if cfg!(target_os = "android") {
+                                class: if cfg!(any(target_os = "android", target_os = "ios")) {
                                     "playback-seek-handle absolute top-1 w-3 h-3 bg-white rounded-full pointer-events-none"
                                 } else {
                                     "playback-seek-handle absolute top-1 w-3 h-3 bg-white rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
@@ -452,7 +452,7 @@ pub fn VolumeSlider(
                         style: "width: {volume_percent}%;"
                     }
                     div {
-                        class: if cfg!(target_os = "android") {
+                        class: if cfg!(any(target_os = "android", target_os = "ios")) {
                             "playback-seek-handle absolute top-1 w-3 h-3 bg-white rounded-full pointer-events-none"
                         } else {
                             "playback-seek-handle absolute top-1 w-3 h-3 bg-white rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"

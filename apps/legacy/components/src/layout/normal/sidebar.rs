@@ -12,7 +12,7 @@ struct SidebarItem {
     icon: &'static str,
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const TOP_MENU: &[SidebarItem] = &[
     SidebarItem {
         key: "home",
@@ -71,7 +71,7 @@ const TOP_MENU: &[SidebarItem] = &[
     },
 ];
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 const TOP_MENU: &[SidebarItem] = &[
     SidebarItem {
         key: "home",
@@ -139,7 +139,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
     let mut is_collapsed = use_signal(|| false);
     let mut is_resizing = use_signal(|| false);
 
-    let is_android = cfg!(target_os = "android");
+    let is_android = cfg!(any(target_os = "android", target_os = "ios"));
     let fallback_collapse = use_signal(|| true);
     let mut mobile_collapsed = try_consume_context::<crate::sidebar::SidebarCollapsed>()
         .map(|c| c.0)

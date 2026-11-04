@@ -8,7 +8,7 @@
 
 use dioxus::prelude::*;
 
-#[cfg(all(debug_assertions, not(target_os = "android")))]
+#[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
 pub fn debug_db_section() -> Element {
     let db = crate::backend::core()
         .map(|core| core.db.clone())
@@ -129,7 +129,7 @@ pub fn debug_db_section() -> Element {
     }
 }
 
-#[cfg(not(all(debug_assertions, not(target_os = "android"))))]
+#[cfg(not(all(debug_assertions, not(any(target_os = "android", target_os = "ios")))))]
 pub fn debug_db_section() -> Element {
     rsx! {}
 }

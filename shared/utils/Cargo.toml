@@ -43,7 +43,7 @@ ndk-context = { workspace = true }
 [target.'cfg(not(target_os = "android"))'.dependencies]
 reqwest = { workspace = true, optional = true, features = ["native-tls"] }
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(target_vendor = "apple")'.dependencies]
 objc2-foundation = { workspace = true, features = ["NSLocale", "NSString"] }
 
 [target.'cfg(windows)'.dependencies]

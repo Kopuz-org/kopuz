@@ -65,6 +65,7 @@ fn owning_tab(route: Route) -> Option<Route> {
         | Route::Activity
         | Route::Radio => Some(Route::Library),
         Route::Settings => Some(Route::Settings),
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         _ => None,
     }
 }
