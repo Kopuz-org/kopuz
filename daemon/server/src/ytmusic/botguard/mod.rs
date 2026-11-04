@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 
 use tokio::sync::{mpsc, oneshot};
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod runtime;
 
 /// One mint job: the `video_id` to bind the pot to, and a one-shot for the result.
@@ -37,7 +37,7 @@ pub fn is_available() -> bool {
 
 /// Spawn the BotGuard runtime thread once. The channel is registered before the
 /// (slow) V8 boot so racing callers can enqueue immediately. No-op on Android.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn ensure_started() {
     use std::sync::Once;
     static START: Once = Once::new();
@@ -54,10 +54,10 @@ pub fn ensure_started() {
     });
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn ensure_started() {}
 
-#[cfg(all(test, not(target_os = "android")))]
+#[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
 mod tests {
 
     #[tokio::test]

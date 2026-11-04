@@ -101,7 +101,7 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
         "w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors {}",
         props.button_class
     );
-    let sheet = cfg!(target_os = "android");
+    let sheet = cfg!(any(target_os = "android", target_os = "ios"));
     let panel_style = match *panel_geometry.read() {
         _ if sheet => String::new(),
         Some((left, top, width, height)) => format!(

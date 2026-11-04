@@ -6,10 +6,10 @@ fn main() {
 ///
 /// Android is excluded: it has no loadable `libwidevinecdm`, exposing Widevine
 /// only through the `MediaDrm` Java API, so that target takes a separate path
-/// and never links this shim.
+/// and never links this shim. iOS has no Widevine to host at all.
 fn build_widevine_shim() {
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    if target_os == "android" {
+    if target_os == "android" || target_os == "ios" {
         return;
     }
 
@@ -25,7 +25,7 @@ fn build_widevine_shim() {
         .compile("widevine_shim");
 
     match target_os.as_str() {
-        "macos" | "ios" => println!("cargo:rustc-link-lib=dylib=c++"),
+        "macos" => println!("cargo:rustc-link-lib=dylib=c++"),
         "windows" => {}
         _ => {
             println!("cargo:rustc-link-lib=dylib=stdc++");

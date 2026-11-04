@@ -686,7 +686,7 @@ fn listenbrainz(credentials: &Credentials) -> IntegrationInfo {
         icon: Icon::Class("fa-solid fa-compact-disc".into()),
         configured: !credentials.musicbrainz_token.trim().is_empty(),
         // Android has no desktop browser profile to take a session from.
-        connect: if cfg!(target_os = "android") {
+        connect: if cfg!(any(target_os = "android", target_os = "ios")) {
             ConnectKind::None
         } else {
             ConnectKind::BrowserProfile
@@ -738,7 +738,7 @@ fn librefm(credentials: &Credentials) -> IntegrationInfo {
 fn all(config: &config::Settings, credentials: &Credentials, paused: bool) -> Vec<IntegrationInfo> {
     let mut published = Vec::new();
 
-    if !cfg!(target_os = "android") {
+    if !cfg!(any(target_os = "android", target_os = "ios")) {
         published.push(discord(config, paused));
     }
     published.push(listenbrainz(credentials));
@@ -1109,7 +1109,7 @@ const PRESENCE_KEYS: [config::SettingKey; 2] = [
 
 /// Open the approval page, then poll for the session key. The person has to
 /// click through in a browser, so the wait is generous and bounded.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 async fn web_sign_in(id: &str, api_key: &str, api_secret: &str) -> Result<String, ApiError> {
     let librefm = id == LIBREFM;
     let token = if librefm {
@@ -1145,10 +1145,10 @@ async fn web_sign_in(id: &str, api_key: &str, api_secret: &str) -> Result<String
         .because(ErrorReason::SignInTimedOut))
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 async fn web_sign_in(_id: &str, _api_key: &str, _api_secret: &str) -> Result<String, ApiError> {
     Err(
-        ApiError::unsupported("web sign-in runs in the app on Android")
+        ApiError::unsupported("web sign-in runs in the app on a phone")
             .because(ErrorReason::ConnectNotOffered),
     )
 }

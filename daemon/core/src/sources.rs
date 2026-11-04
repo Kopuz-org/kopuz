@@ -24,6 +24,7 @@ use crate::recovery::{Recovery, once_more};
 use crate::session::SessionHandle;
 
 /// How long a browser sign-in may sit waiting for a person.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const SIGNIN_TIMEOUT: Duration = Duration::from_secs(300);
 
 const LOCAL_SOURCES: [config::SettingKey; 1] = [config::SettingKey::Library(
@@ -109,12 +110,12 @@ impl Upstream for Network {
         if let Some(cookies) = try_resume_ytmusic(stored).await {
             return Some(cookies);
         }
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             let _ = id;
             None
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             let browser = server::cookies::resolve_browser(server.yt_browser).await;
             resume_from_profiles(browser, id, server.yt_profile.as_deref()).await
@@ -591,11 +592,11 @@ impl SourceService {
     /// no host access cannot spawn one, and a client should say so before
     /// offering a source whose only sign-in is a browser one.
     pub async fn can_open_browser(&self) -> bool {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             true
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             server::cookies::has_host_spawn().await
         }
@@ -1063,7 +1064,7 @@ impl SourceService {
             self.session.invalidate(Table::Servers);
         }
 
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         match service {
             Some(config::MusicService::YtMusic) => {
                 let _ = server::ytmusic::isolated_profile::delete_profile(id);
@@ -1076,7 +1077,7 @@ impl SourceService {
             }
             _ => {}
         }
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         let _ = service;
         Ok(())
     }
@@ -1244,7 +1245,7 @@ impl SourceService {
     /// The secret never leaves this process: the caller learns only that the
     /// source is now authenticated.
     pub async fn authenticate_source(&self, id: &str) -> Result<SourceInfo, ApiError> {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             let source = self
                 .db
@@ -1252,7 +1253,7 @@ impl SourceService {
                 .await
                 .map_err(db_error)?
                 .ok_or_else(|| ApiError::not_found("no such server"))?;
-            let (secret, user_id) = crate::android_signin::sign_in(source.service, source.url)
+            let (secret, user_id) = crate::webview_signin::sign_in(source.service, source.url)
                 .await
                 .map_err(ApiError::internal)?;
             self.provision_credentials(CredentialProvision {
@@ -1263,7 +1264,7 @@ impl SourceService {
             })
             .await
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             let server = self
                 .db
@@ -1349,11 +1350,11 @@ impl SourceService {
         if config::MusicService::from_id(service) != Some(config::MusicService::YtMusic) {
             return Ok(Vec::new());
         }
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             Ok(Vec::new())
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             let scratch = server::cookies::scratch_dir();
             Ok(server::ytmusic::browser_sessions::signed_in(&scratch)
@@ -1386,14 +1387,14 @@ impl SourceService {
                 "this source cannot take a session from a browser profile",
             ));
         }
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             let _ = session;
             Err(ApiError::unsupported(
                 "there are no browser profiles to take a session from here",
             ))
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             let scratch = server::cookies::scratch_dir();
             let (browser, cookies) = server::ytmusic::browser_sessions::import(session, &scratch)
@@ -1419,6 +1420,7 @@ impl SourceService {
         }
     }
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     async fn store_import(
         &self,
         id: &str,
@@ -2118,7 +2120,7 @@ async fn try_resume_ytmusic(seed: Option<String>) -> Option<String> {
 /// only then force a full sign-in -- which must validate before it is
 /// trusted. Skipping the resume steps would demand a password and 2FA on
 /// every transient network error. The flag is true when a new sign-in ran.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 async fn ensure_ytmusic_signed_in(
     stored: Option<String>,
     browser: config::Browser,
@@ -2152,7 +2154,7 @@ async fn ensure_ytmusic_signed_in(
 }
 
 /// The isolated sign-in profile first, else the imported browser profile.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 async fn resume_from_profiles(
     browser: config::Browser,
     server_id: &str,

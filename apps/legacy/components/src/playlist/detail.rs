@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use hooks::use_db_queries::{use_playlists, use_tracks_by_keys};
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use rfd::AsyncFileDialog;
 #[component]
 #[tracing::instrument(name = "render.playlist_detail", skip_all)]
@@ -95,7 +95,7 @@ pub fn PlaylistDetail(
             enable_metadata: caps.edit_tags,
             on_cover_click: move |_| {
                 let _ = &pid_for_cover;
-                #[cfg(not(target_os = "android"))]
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 {
                     let pid = pid_for_cover.clone();
 

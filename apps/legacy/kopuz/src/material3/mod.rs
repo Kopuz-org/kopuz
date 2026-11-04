@@ -14,7 +14,7 @@ use utils::color::Color;
 
 #[cfg(any(target_os = "android", test))]
 mod android;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod desktop;
 
 const SELECTOR: &str = ".theme-system[data-ui-style]";
@@ -28,6 +28,7 @@ fn roles(seed: Argb, variant: &Variant, dark: bool) -> BTreeMap<String, Argb> {
         .collect()
 }
 
+#[cfg(any(not(target_os = "ios"), test))]
 fn tonal_roles(seed: Argb, dark: bool) -> BTreeMap<String, Argb> {
     roles(seed, &Variant::TonalSpot, dark)
 }
@@ -115,18 +116,21 @@ pub fn SystemColors(settings: Signal<Settings>, artwork: Signal<Option<Vec<Color
         async move {
             #[cfg(target_os = "android")]
             android::set_enabled(enabled);
-            // macOS gives no reliable read of the wallpaper on screen, so there
-            // System colors follows the album art (the fallback below).
-            if !enabled || cfg!(target_os = "macos") {
+            // macOS gives no reliable read of the wallpaper on screen and iOS
+            // gives none at all, so there System colors follows the album art
+            // (the fallback below).
+            if !enabled || cfg!(any(target_os = "macos", target_os = "ios")) {
                 system_css.set(None);
+                #[cfg(not(target_os = "ios"))]
                 return;
             }
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             let mut wallpaper = desktop::Wallpaper::default();
+            #[cfg(not(target_os = "ios"))]
             loop {
                 #[cfg(target_os = "android")]
                 let next = android::read().await;
-                #[cfg(not(target_os = "android"))]
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 let next = {
                     let path = desktop::wallpaper_path().await;
                     let live_path = settings.peek().ui.live_theme_path.clone();

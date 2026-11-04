@@ -48,7 +48,7 @@ pub fn Album(
 
             if album_id.read().is_empty() {
                 div { class: "flex-1 min-h-0 flex flex-col",
-                    if !cfg!(target_os = "android") {
+                    if !cfg!(any(target_os = "android", target_os = "ios")) {
                         h1 { class: "text-3xl font-semibold tracking-tight text-white mb-6 shrink-0", "{i18n::t(\"all_albums\")}" }
                     }
 
@@ -492,7 +492,7 @@ fn AlbumDetail(
                 on_cover_click: cap.edit_tags.then(|| EventHandler::new(move |_| {
                     let aid = aid_cover.clone();
                     let _ = &aid;
-                    #[cfg(not(target_os = "android"))]
+                    #[cfg(not(any(target_os = "android", target_os = "ios")))]
                     spawn(async move {
                         let Some(file) = rfd::AsyncFileDialog::new()
                             .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
@@ -623,7 +623,7 @@ fn RemoteAlbumDetail(
 
     rsx! {
         div { class: "w-full max-w-[1600px] mx-auto select-none flex-1 min-h-0 flex flex-col",
-            if !cfg!(target_os = "android") {
+            if !cfg!(any(target_os = "android", target_os = "ios")) {
                 components::back_button::BackButton {
                     on_click: move |_| on_close.call(()),
                 }

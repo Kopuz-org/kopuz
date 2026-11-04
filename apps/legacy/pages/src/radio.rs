@@ -79,7 +79,7 @@ pub fn Radio(props: RadioProps) -> Element {
     let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
     // A phone has no room for the description column, so a row is the
     // station and its play controls.
-    let phone = cfg!(target_os = "android");
+    let phone = cfg!(any(target_os = "android", target_os = "ios"));
     let station_cols = if phone {
         "40px minmax(0, 1fr) auto"
     } else {
@@ -142,7 +142,7 @@ pub fn Radio(props: RadioProps) -> Element {
 
     rsx! {
             div {
-                class: if cfg!(target_os = "android") {
+                class: if cfg!(any(target_os = "android", target_os = "ios")) {
                     "px-4 pt-2 pb-6 w-full h-full overflow-y-auto"
                 } else if is_vaxry {
                     "px-6 pt-6 pb-24 w-full h-full overflow-y-auto"
@@ -152,7 +152,7 @@ pub fn Radio(props: RadioProps) -> Element {
 
                 if is_vaxry {
                     div { class: "mb-6 flex items-end justify-between",
-                        if !cfg!(target_os = "android") {
+                        if !cfg!(any(target_os = "android", target_os = "ios")) {
                             div {
                                 p {
                                     class: "text-[10px] font-bold mb-1",
@@ -165,7 +165,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                 }
                             }
                         }
-                        div { class: if cfg!(target_os = "android") { "relative w-full" } else { "relative w-64" },
+                        div { class: if cfg!(any(target_os = "android", target_os = "ios")) { "relative w-full" } else { "relative w-64" },
                             i {
                                 class: "fa-solid fa-magnifying-glass absolute top-1/2 -translate-y-1/2 text-xs",
                                 style: "left: 12px; color: rgba(255,255,255,0.3);",

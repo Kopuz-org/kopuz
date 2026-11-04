@@ -80,7 +80,7 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
 
     rsx! {
         div { class: "w-full max-w-[1600px] mx-auto select-none flex-1 min-h-0 flex flex-col",
-            if !cfg!(target_os = "android") {
+            if !cfg!(any(target_os = "android", target_os = "ios")) {
                 div { class: "flex items-center mb-8 shrink-0",
                     crate::back_button::BackButton {
                         class: "",

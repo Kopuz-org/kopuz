@@ -1,12 +1,12 @@
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use components::settings_items::{SettingItem, SettingsSection, ToggleSetting};
 use config::Settings;
 use dioxus::prelude::*;
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::theme_editor::ThemeEditorPage;
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(super) fn theme_editor_section(settings: Signal<Settings>) -> Element {
     rsx! {
         SettingsSection { title: i18n::t("theme_editor").to_string(),
@@ -17,17 +17,17 @@ pub(super) fn theme_editor_section(settings: Signal<Settings>) -> Element {
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub(super) fn theme_editor_section(_config: Signal<Settings>) -> Element {
     rsx! {}
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn trigger_test_crash() {
     panic!("manual crash trigger from settings (debug build)");
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(super) fn logs_section(settings: Signal<Settings>) -> Element {
     rsx! {
         SettingsSection { title: i18n::t("logs").to_string(),
@@ -97,7 +97,7 @@ pub(super) fn logs_section(settings: Signal<Settings>) -> Element {
 /// Debug-build-only database panel: reset / load release DB / seed / re-run
 /// import / vacuum / info, all against the disposable debug DB with a live
 /// pool swap (no restart). English-only by design (dev tool).
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub(super) fn logs_section(_config: Signal<Settings>) -> Element {
     rsx! {}
 }

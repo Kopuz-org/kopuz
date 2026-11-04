@@ -114,7 +114,7 @@ pub fn Activity(settings: Signal<Settings>) -> Element {
     rsx! {
         div { class: crate::layout::page_container_class(&settings.read().ui.ui_style),
             // The app header names the page and a phone has no room for the columns.
-            if !cfg!(target_os = "android") {
+            if !cfg!(any(target_os = "android", target_os = "ios")) {
                 div { class: "max-w-[1600px] mx-auto w-full shrink-0",
                     div { class: "mb-8 flex items-end justify-between",
                         div {
@@ -246,11 +246,11 @@ pub fn Activity(settings: Signal<Settings>) -> Element {
                                                 }
                                             }
 
-                                            div { class: if cfg!(target_os = "android") { "hidden" } else { "{COL_TIME} text-slate-400 text-sm tabular-nums group-hover:text-slate-300 transition-colors" },
+                                            div { class: if cfg!(any(target_os = "android", target_os = "ios")) { "hidden" } else { "{COL_TIME} text-slate-400 text-sm tabular-nums group-hover:text-slate-300 transition-colors" },
                                                 "{track.duration_secs().filter(|secs| *secs > 0).map(format_duration).unwrap_or_default()}"
                                             }
 
-                                            div { class: if cfg!(target_os = "android") { "w-14 shrink-0 text-right text-slate-400 text-sm tabular-nums flex items-center justify-end gap-2" } else { "{COL_PLAYS} text-slate-400 text-sm tabular-nums group-hover:text-slate-300 transition-colors flex items-center justify-end gap-2" },
+                                            div { class: if cfg!(any(target_os = "android", target_os = "ios")) { "w-14 shrink-0 text-right text-slate-400 text-sm tabular-nums flex items-center justify-end gap-2" } else { "{COL_PLAYS} text-slate-400 text-sm tabular-nums group-hover:text-slate-300 transition-colors flex items-center justify-end gap-2" },
                                                 if plays > 0 {
                                                     i { class: "fa-solid fa-fire text-orange-500/80 text-[10px]" }
                                                 }

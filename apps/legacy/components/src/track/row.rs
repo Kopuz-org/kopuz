@@ -121,7 +121,7 @@ pub fn TrackRow(
         COLUMNS_VAXRY
     };
 
-    if cfg!(target_os = "android") {
+    if cfg!(any(target_os = "android", target_os = "ios")) {
         return rsx! {
             div {
                 class: "track-row flex items-center gap-3 px-2 h-14 rounded-lg active:bg-white/10 transition-colors select-none",
@@ -239,7 +239,7 @@ pub fn TrackRow(
                     }
                     if is_selection_mode {
                         handle_select_click(is_selected, is_selection_mode, on_select);
-                    } else if cfg!(target_os = "android") {
+                    } else if cfg!(any(target_os = "android", target_os = "ios")) {
                         on_play.call(());
                     }
                 },
@@ -334,7 +334,7 @@ pub fn TrackRow(
                             move |evt: MouseEvent| {
                                 evt.stop_propagation();
                                 if !is_selection_mode {
-                                    if cfg!(target_os = "android") || !has_album {
+                                    if cfg!(any(target_os = "android", target_os = "ios")) || !has_album {
                                         on_play.call(());
                                     } else {
                                         nav_ctrl.navigate_to_album(album_id.clone());
@@ -469,7 +469,7 @@ pub fn TrackRow(
     } else {
         "-my-2 -ms-2 -me-3"
     };
-    let column_gap = if cfg!(target_os = "android") {
+    let column_gap = if cfg!(any(target_os = "android", target_os = "ios")) {
         "0.5rem"
     } else {
         "1.5rem"
@@ -490,7 +490,7 @@ pub fn TrackRow(
                     long_press_occurred.set(false);
                     return;
                 }
-                if !is_selection_mode && cfg!(target_os = "android") {
+                if !is_selection_mode && cfg!(any(target_os = "android", target_os = "ios")) {
                     on_play.call(());
                 } else {
                     handle_select_click(is_selected, is_selection_mode, on_select);
@@ -599,7 +599,7 @@ pub fn TrackRow(
                         move |evt: MouseEvent| {
                             evt.stop_propagation();
                             if !is_selection_mode {
-                                if cfg!(target_os = "android") {
+                                if cfg!(any(target_os = "android", target_os = "ios")) {
                                     on_play.call(());
                                 } else {
                                     nav_ctrl.navigate_to_album(album_id.clone());

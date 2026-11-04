@@ -51,7 +51,7 @@ pub fn SearchGenreDetail(
             div {
                 class: "flex-1 min-h-0 flex flex-col w-full max-w-[1600px] mx-auto select-none",
                 div { class: "shrink-0 mb-6",
-                if !cfg!(target_os = "android") {
+                if !cfg!(any(target_os = "android", target_os = "ios")) {
                     button {
                         class: "mb-4 flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
                          onclick: move |_| on_back.call(()),

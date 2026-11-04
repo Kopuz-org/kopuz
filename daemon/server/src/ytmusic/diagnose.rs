@@ -72,8 +72,8 @@ pub(crate) async fn run(client: &YouTubeMusicClient) -> Vec<Check> {
     ));
 
     // The minter boots on its first request, so asking is the test.
-    checks.push(if cfg!(target_os = "android") {
-        Check::skipped(CheckStep::PlaybackToken, "no token minter on Android")
+    checks.push(if cfg!(any(target_os = "android", target_os = "ios")) {
+        Check::skipped(CheckStep::PlaybackToken, "no token minter on a phone")
     } else {
         Check::of(
             CheckStep::PlaybackToken,

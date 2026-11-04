@@ -45,7 +45,7 @@ pub fn unpack_token(packed: &str) -> (String, String) {
 
 /// Open the consent screen, catch the loopback redirect, and exchange the code
 /// for tokens. `client_id` is the user's own Spotify app id.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn launch_signin_and_extract(client_id: String) -> Result<SpotifyAuth, String> {
     authorize_with(client_id, |url| {
         webbrowser::open(url).map_err(|error| format!("couldn't open the browser: {error}"))

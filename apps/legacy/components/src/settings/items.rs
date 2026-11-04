@@ -89,7 +89,7 @@ fn cite_lock(by: &config::store::LockSource) -> String {
 pub fn SettingsSection(title: String, children: Element) -> Element {
     let mut expanded = use_signal(|| true);
 
-    if cfg!(target_os = "android") {
+    if cfg!(any(target_os = "android", target_os = "ios")) {
         return rsx! {
             section { class: "settings-section rounded-xl overflow-visible",
                 div { class: "settings-section-body divide-y divide-white/[0.07]", {children} }
@@ -155,7 +155,7 @@ pub fn AppSelect(
         .map(|(_, label)| label.as_str())
         .unwrap_or(value.as_str());
     let open_class = if open() { "z-[70]" } else { "z-0" };
-    let (backdrop_class, menu_class) = if cfg!(target_os = "android") {
+    let (backdrop_class, menu_class) = if cfg!(any(target_os = "android", target_os = "ios")) {
         (
             "app-select-sheet-backdrop",
             "app-select-menu app-select-sheet kopuz-sheet-in",
@@ -167,7 +167,7 @@ pub fn AppSelect(
     let mut placement = use_signal(|| None::<(bool, u32)>);
     let measure_trigger_id = trigger_id.clone();
     use_effect(move || {
-        if !open() || cfg!(target_os = "android") {
+        if !open() || cfg!(any(target_os = "android", target_os = "ios")) {
             placement.set(None);
             return;
         }
@@ -444,7 +444,7 @@ pub fn ThemeSelector(current_theme: String, on_change: EventHandler<String>) -> 
         ("gruvbox-light".into(), i18n::t("gruvbox_light_soft")),
     ];
 
-    if cfg!(target_os = "android") {
+    if cfg!(any(target_os = "android", target_os = "ios")) {
         options.retain(|(id, _)| id != utils::live_theme::THEME_ID);
     }
     options.extend(custom);

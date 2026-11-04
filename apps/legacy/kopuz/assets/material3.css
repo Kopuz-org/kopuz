@@ -1158,23 +1158,23 @@
     display: none;
 }
 
-[data-ui-style="material3"][data-platform="android"] .app-content {
+[data-ui-style="material3"][data-phone] .app-content {
     padding: 0;
     gap: 0;
 }
 
-[data-ui-style="material3"][data-platform="android"] #main-scroll-area {
+[data-ui-style="material3"][data-phone] #main-scroll-area {
     border-radius: 0;
 }
 
-[data-ui-style="material3"][data-platform="android"] .app-sidebar {
+[data-ui-style="material3"][data-phone] .app-sidebar {
     border-radius: 0 var(--md-sys-shape-corner-large) var(--md-sys-shape-corner-large) 0;
     margin-inline-start: 0;
     background: var(--md-sys-color-surface-container-low);
     box-shadow: var(--md-sys-elevation-level1);
 }
 
-[data-ui-style="material3"][data-platform="android"][dir="rtl"] .app-sidebar {
+[data-ui-style="material3"][data-phone][dir="rtl"] .app-sidebar {
     border-radius: var(--md-sys-shape-corner-large) 0 0 var(--md-sys-shape-corner-large);
 }
 
@@ -1186,11 +1186,11 @@
     border-radius: var(--md-sys-shape-corner-large);
 }
 
-[data-ui-style="material3"][data-platform="android"] .showcase-hero {
+[data-ui-style="material3"][data-phone] .showcase-hero {
     padding: 16px;
 }
 
-[data-ui-style="material3"][data-platform="android"] .showcase-cover {
+[data-ui-style="material3"][data-phone] .showcase-cover {
     width: 176px;
     height: 176px;
 }

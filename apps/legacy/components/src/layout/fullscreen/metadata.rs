@@ -35,7 +35,7 @@ pub(crate) fn TrackMetadata(
     let actions_track = current_track_snapshot.clone();
     // The picture is desktop-only: Android's webview reaches the daemon over
     // loopback HTTP, which serves covers and not video ranges.
-    let version = if cfg!(target_os = "android") {
+    let version = if cfg!(any(target_os = "android", target_os = "ios")) {
         None
     } else {
         super::video::current_version(&ctrl)

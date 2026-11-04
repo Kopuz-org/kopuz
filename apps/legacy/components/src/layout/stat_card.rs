@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 
 #[component]
 pub fn StatCard(label: String, value: String, icon: &'static str) -> Element {
-    if cfg!(target_os = "android") {
+    if cfg!(any(target_os = "android", target_os = "ios")) {
         return rsx! {
             div {
                 class: "border border-white/5 px-1.5 py-2 rounded-lg flex flex-col items-center justify-center gap-0.5 min-w-0",

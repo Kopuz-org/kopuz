@@ -28,3 +28,33 @@ identifier = "moe.kopuz.legacy"
 
 [linux]
 identifier = "moe.kopuz.legacy"
+
+# Keeps playing with the screen locked; the audio session itself is set up in ios-src.
+[background]
+audio = true
+
+# iOS keeps the Android identity. The Swift half of the platform integration
+# lives in apps/legacy/kopuz/ios-src, which build.rs compiles and links.
+[ios]
+identifier = "moe.kopuz.kopuz"
+deployment_target = "16.0"
+
+# Documents is the local library: the Files app shows it as "On My iPhone › Kopuz".
+[ios.plist]
+CFBundleDisplayName = "Kopuz"
+MinimumOSVersion = "16.0"
+UIFileSharingEnabled = true
+LSSupportsOpeningDocumentsInPlace = true
+
+# A LAN Jellyfin or Navidrome is almost always plain http://, which App
+# Transport Security blocks by default, as Android's cleartext policy did.
+[ios.raw]
+info_plist = """
+<key>NSAppTransportSecurity</key>
+<dict>
+    <key>NSAllowsArbitraryLoads</key>
+    <true/>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+</dict>
+"""

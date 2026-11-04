@@ -390,7 +390,7 @@ pub fn LibraryPage(
             }
 
             div {
-                class: if cfg!(target_os = "android") { "grid grid-cols-4 gap-2 mb-4" } else { "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-12" },
+                class: if cfg!(any(target_os = "android", target_os = "ios")) { "grid grid-cols-4 gap-2 mb-4" } else { "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-12" },
                 {
                     let album_count = albums_res
                         .read()
@@ -465,7 +465,7 @@ pub fn LibraryPage(
             Header { is_vaxry: is_vaxry, is_album: false, sort_state: Some(header_sort) }
             VirtualScrollView {
                 id: "library-scroll".to_string(),
-                class: if cfg!(target_os = "android") { "flex-1 overflow-y-auto overflow-x-hidden pb-20".to_string() } else { "flex-1 overflow-y-auto pb-20".to_string() },
+                class: if cfg!(any(target_os = "android", target_os = "ios")) { "flex-1 overflow-y-auto overflow-x-hidden pb-20".to_string() } else { "flex-1 overflow-y-auto pb-20".to_string() },
                 scroll_stat,
                 container_height,
                 item_height: ITEM_HEIGHT,

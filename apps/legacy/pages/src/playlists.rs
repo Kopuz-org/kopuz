@@ -143,8 +143,8 @@ pub fn PlaylistsPage(
                     }
                 }
             } else {
-                div { class: if cfg!(target_os = "android") { "flex items-center justify-end mb-2" } else if is_vaxry { "flex items-center justify-between mb-6" } else { "flex items-center justify-between mb-8" },
-                    if !cfg!(target_os = "android") {
+                div { class: if cfg!(any(target_os = "android", target_os = "ios")) { "flex items-center justify-end mb-2" } else if is_vaxry { "flex items-center justify-between mb-6" } else { "flex items-center justify-between mb-8" },
+                    if !cfg!(any(target_os = "android", target_os = "ios")) {
                         if is_vaxry {
                             div {
                                 p {

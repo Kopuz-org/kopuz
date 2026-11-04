@@ -16,7 +16,7 @@ const EXCEPTIONS = [
   [apps/legacy/kopuz daemon/db normal null]
   [apps/legacy/kopuz daemon/server normal null]
   [apps/legacy/kopuz daemon/player normal null]
-  [apps/legacy/kopuz daemon/kopuzd normal 'cfg(not(target_os = "android"))']
+  [apps/legacy/kopuz daemon/kopuzd normal 'cfg(not(any(target_os = "android", target_os = "ios")))']
   # On Android the Dioxus frontend drives the platform player directly.
   [apps/legacy/hooks daemon/player normal 'cfg(target_os = "android")']
   [apps/legacy/components daemon/player normal 'cfg(target_os = "android")']

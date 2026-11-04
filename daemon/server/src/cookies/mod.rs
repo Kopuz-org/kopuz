@@ -1,6 +1,6 @@
 pub(crate) mod browser;
 pub(crate) mod cdp;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) mod mozilla;
 pub(crate) mod profile;
 pub mod profiles;

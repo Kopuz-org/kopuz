@@ -21,7 +21,7 @@ pub fn Home(
     rsx! {
         div { class: "{crate::layout::page_inset_class(&settings.read().ui.ui_style)} w-full",
         div {
-            class: if cfg!(target_os = "android") {
+            class: if cfg!(any(target_os = "android", target_os = "ios")) {
                 "{crate::layout::PAGE_CONTENT} pb-6 space-y-8"
             } else if is_vaxry {
                 "{crate::layout::PAGE_CONTENT} pb-24"

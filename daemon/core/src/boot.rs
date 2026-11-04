@@ -80,7 +80,7 @@ async fn open_database(path: &Path) -> Result<db::Db, Box<dyn std::error::Error>
 /// has to descend from the one that initialised it, and the runtime's workers
 /// are the ancestors of everything the core spawns.
 pub fn prepare_thread() {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     server::ytmusic::ensure_v8_platform();
 }
 

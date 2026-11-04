@@ -1,4 +1,5 @@
-//! Android provider authentication through the app's own login activity.
+//! Phone provider authentication through the app's own sign-in WebView:
+//! `LoginActivity` on Android, a `WKWebView` sheet on iOS.
 
 use config::MusicService;
 
@@ -20,7 +21,7 @@ fn credential(service: MusicService, header: &str) -> Option<String> {
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn sign_in(
     service: MusicService,
     client_id: String,
@@ -99,7 +100,7 @@ pub async fn sign_in(
     Ok((secret, user))
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 async fn wait_for_close() -> String {
     let started = tokio::time::Instant::now();
     let mut seen_open = false;

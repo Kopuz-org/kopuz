@@ -18,6 +18,7 @@ use daemon::boot::{Core, CoreArgs};
 static CORE: OnceLock<Core> = OnceLock::new();
 
 /// What the app was launched with that the core it hosts takes: `--offline` starts it in offline mode.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn core_args(argv: impl IntoIterator<Item = String>) -> CoreArgs {
     CoreArgs {
         offline: argv.into_iter().any(|arg| arg == "--offline"),
@@ -103,7 +104,7 @@ pub fn start(args: CoreArgs) -> Result<&'static Core, String> {
 /// UI is already attached in-process, so a socket that cannot be bound or
 /// stops serving costs external clients, not playback: the core stays up on
 /// this runtime either way.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 async fn serve_socket(core: &Core) {
     match kopuzd::default_socket_path() {
         Some(socket) => match kopuzd::listen(core, &socket) {
@@ -124,7 +125,7 @@ async fn serve_socket(core: &Core) {
 }
 
 /// The socket this process bound, while it still serves it.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn bound_socket() -> std::sync::MutexGuard<'static, Option<std::path::PathBuf>> {
     static BOUND: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
     BOUND
@@ -133,7 +134,7 @@ fn bound_socket() -> std::sync::MutexGuard<'static, Option<std::path::PathBuf>> 
 }
 
 /// The process exits without unwinding the core thread, so the listener never drops and its path has to be unlinked here; a named pipe leaves no file.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn release_socket() {
     if let Some(path) = bound_socket().take()
         && cfg!(unix)
@@ -144,11 +145,11 @@ fn release_socket() {
     }
 }
 
-/// Android hosts the core without serving it: `kopuzd` is a desktop-only
+/// A phone hosts the core without serving it: `kopuzd` is a desktop-only
 /// dependency, and nothing on the device attaches to the app's core the way
 /// `kopuzctl` does. The thread still parks here, because the runtime it owns
 /// has to outlive every service the core spawned on it.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 async fn serve_socket(_core: &Core) {
     std::future::pending::<()>().await;
 }
@@ -186,7 +187,7 @@ pub fn shutdown() {
         });
     });
     let _ = flush.join();
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     release_socket();
 }
 

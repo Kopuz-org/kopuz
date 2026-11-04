@@ -65,7 +65,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
     /// the normal skin uses. Android drops the grid for the shared `h-14` phone
     /// row instead. Misstating this drifts the spacer pads out of step with the
     /// real rows as you scroll.
-    const ITEM_HEIGHT: f64 = if cfg!(target_os = "android") {
+    const ITEM_HEIGHT: f64 = if cfg!(any(target_os = "android", target_os = "ios")) {
         56.0
     } else {
         44.0
@@ -91,7 +91,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
         }
     }
 
-    let phone = cfg!(target_os = "android");
+    let phone = cfg!(any(target_os = "android", target_os = "ios"));
     let cover_size = if phone { "w-32 h-32" } else { "w-44 h-44" };
     let cover_cursor = if props.on_cover_click.is_some() {
         "cursor-pointer transition-[filter] hover:brightness-110 active:brightness-95"
