@@ -642,9 +642,10 @@ mod tests {
         let reach = server::plugins::Reach::from_parts(
             false,
             plugin_host::manifest::Permissions {
-                network: vec!["127.0.0.1".into()],
+                network: vec!["$server".into()],
             },
-            "https://music.example",
+            // An address on this network is reachable only as the plugin's server.
+            &allowed,
         );
         let http = utils::http::client();
         let unredirected = unredirected_client();

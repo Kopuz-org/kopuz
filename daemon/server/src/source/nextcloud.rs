@@ -255,6 +255,7 @@ impl MediaSource for NextcloudSource {
         _: config::StreamQuality,
     ) -> Result<StreamInfo, SourceError> {
         Ok(StreamInfo {
+            guard: None,
             url: self.client()?.stream_url(item_id),
             format: None,
             user_agent: None,

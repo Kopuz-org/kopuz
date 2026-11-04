@@ -192,9 +192,10 @@ impl Reach {
         Self {
             trusted,
             permissions,
-            server_host: reqwest::Url::parse(server_url)
-                .ok()
-                .and_then(|url| url.host_str().map(str::to_string)),
+            server_host: reqwest::Url::parse(server_url).ok().and_then(|url| {
+                url.host_str()
+                    .map(|host| host.trim_end_matches('.').to_ascii_lowercase())
+            }),
         }
     }
 
@@ -222,25 +223,16 @@ impl Reach {
         keep.then_some(raw)
     }
 
-    /// Hold every later fetch of `url` to this plugin's hosts: its redirects,
-    /// the segments it lists and where their names lead.
-    pub(crate) fn guard_stream(&self, url: &str) {
-        if !self.trusted {
-            utils::http::guard(url, Arc::new(self.clone()));
-        }
+    /// What every fetch of this plugin's streams is held to: their redirects,
+    /// the segments they list and where their names lead. Nothing for one
+    /// kopuz ships.
+    pub(crate) fn stream_guard(&self) -> Option<utils::http::Guard> {
+        (!self.trusted).then(|| Arc::new(self.clone()) as utils::http::Guard)
     }
 
     /// Whether the host may fetch `url` for this plugin.
     pub fn allows(&self, url: &str) -> bool {
-        let Ok(url) = reqwest::Url::parse(url) else {
-            return false;
-        };
-        matches!(url.scheme(), "http" | "https")
-            && url.username().is_empty()
-            && url.password().is_none()
-            && url.host_str().is_some_and(|host| {
-                self.trusted || self.permissions.allows(host, self.server_host.as_deref())
-            })
+        reqwest::Url::parse(url).is_ok_and(|url| utils::http::within(self, &url))
     }
 }
 
@@ -250,6 +242,9 @@ impl utils::http::Reach for Reach {
     }
 
     fn may_be_local(&self, host: &str) -> bool {
+        if self.trusted {
+            return true;
+        }
         let normal = |host: &str| host.trim_end_matches('.').to_ascii_lowercase();
         self.server_host
             .as_deref()

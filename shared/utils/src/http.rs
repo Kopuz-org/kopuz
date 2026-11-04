@@ -1,10 +1,9 @@
 //! Every HTTP client starts here, because reqwest prefers native-tls whenever any crate compiles it in.
 #![allow(clippy::disallowed_methods)]
 
-use std::collections::VecDeque;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
 static OFFLINE: AtomicBool = AtomicBool::new(false);
 
@@ -19,9 +18,7 @@ pub fn offline() -> bool {
 
 /// A client builder on rustls, kept off the internet in offline mode.
 pub fn builder() -> reqwest::ClientBuilder {
-    internet_builder()
-        .dns_resolver(Arc::new(OfflineGate))
-        .redirect(redirects())
+    internet_builder().dns_resolver(Arc::new(OfflineGate))
 }
 
 /// A client builder on rustls that reaches the internet in offline mode too, for the connectivity checks that tell when it is back.
@@ -42,7 +39,6 @@ pub fn blocking_builder() -> reqwest::blocking::ClientBuilder {
     reqwest::blocking::Client::builder()
         .tls_backend_rustls()
         .dns_resolver(Arc::new(OfflineGate))
-        .redirect(redirects())
 }
 
 /// A client builder on the platform's TLS (OpenSSL on Linux), for servers that reset rustls's handshake.
@@ -51,7 +47,6 @@ pub fn native_tls_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .tls_backend_native()
         .dns_resolver(Arc::new(OfflineGate))
-        .redirect(redirects())
 }
 
 /// The hosts a URL someone else named may lead to. The daemon fetches a
@@ -64,87 +59,87 @@ pub trait Reach: Send + Sync {
     fn may_be_local(&self, host: &str) -> bool;
 }
 
-/// Enough for the streams open or queued at once.
-const MAX_GUARDED: usize = 256;
+/// A plugin's [`Reach`], carried with each stream it hands out.
+pub type Guard = Arc<dyn Reach>;
 
-static GUARDED: Mutex<VecDeque<(String, Arc<dyn Reach>)>> = Mutex::new(VecDeque::new());
-
-fn guarded() -> std::sync::MutexGuard<'static, VecDeque<(String, Arc<dyn Reach>)>> {
-    GUARDED
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-/// Hold every client built here to `reach` when it fetches `url`: each
-/// redirect from it, and every name those lead to.
-pub fn guard(url: &str, reach: Arc<dyn Reach>) {
-    let mut guarded = guarded();
-    guarded.retain(|(held, _)| held != url);
-    if guarded.len() >= MAX_GUARDED {
-        guarded.pop_front();
-    }
-    guarded.push_back((url.to_string(), reach));
-}
-
-fn guard_of(url: &str) -> Option<Arc<dyn Reach>> {
-    guarded()
-        .iter()
-        .find(|(held, _)| held == url)
-        .map(|(_, reach)| Arc::clone(reach))
-}
-
-/// Whether `reach` lets `url` be fetched at all.
-fn within(reach: &dyn Reach, url: &reqwest::Url) -> bool {
+/// Whether `reach` lets `url` be fetched. A host written as an address is
+/// held to the local-network rule here, since no lookup sees it.
+pub fn within(reach: &dyn Reach, url: &reqwest::Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let address = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<IpAddr>()
+        .ok();
     matches!(url.scheme(), "http" | "https")
         && url.username().is_empty()
         && url.password().is_none()
-        && url.host_str().is_some_and(|host| reach.allows_host(host))
+        && reach.allows_host(host)
+        && address.is_none_or(|ip| !local_or_unspecified(ip) || reach.may_be_local(host))
 }
 
-/// Whether `next`, found while fetching `from`, may be fetched too; if so it
-/// is held to the same reach. Unguarded URLs lead anywhere.
-pub fn follows(from: &str, next: &str) -> bool {
-    let Some(reach) = guard_of(from) else {
-        return true;
-    };
-    let allowed = reqwest::Url::parse(next).is_ok_and(|url| within(reach.as_ref(), &url));
-    if allowed {
-        guard(next, reach);
+fn local_or_unspecified(ip: IpAddr) -> bool {
+    ip.is_unspecified() || local_ip(ip)
+}
+
+/// [`builder`], or with `guard` one whose every redirect and every name it
+/// looks up is held to that plugin's reach.
+pub fn guarded_builder(guard: Option<Guard>) -> reqwest::ClientBuilder {
+    match guard {
+        None => builder(),
+        Some(guard) => internet_builder()
+            .dns_resolver(Arc::new(GuardedGate(Arc::clone(&guard))))
+            .redirect(held_to(guard)),
     }
-    allowed
 }
 
-/// Reqwest's limit, and each hop from a guarded URL held to its reach.
-fn redirects() -> reqwest::redirect::Policy {
-    reqwest::redirect::Policy::custom(|attempt| {
+/// [`blocking_builder`], held to `guard` as [`guarded_builder`] is.
+pub fn guarded_blocking_builder(guard: Option<Guard>) -> reqwest::blocking::ClientBuilder {
+    match guard {
+        None => blocking_builder(),
+        Some(guard) => reqwest::blocking::Client::builder()
+            .tls_backend_rustls()
+            .dns_resolver(Arc::new(GuardedGate(Arc::clone(&guard))))
+            .redirect(held_to(guard)),
+    }
+}
+
+fn held_to(guard: Guard) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |attempt| {
         if attempt.previous().len() >= 10 {
-            return attempt.error("too many redirects");
-        }
-        let Some(from) = attempt.previous().first() else {
-            return attempt.follow();
-        };
-        match guard_of(from.as_str()) {
-            Some(reach) if !within(reach.as_ref(), attempt.url()) => {
-                attempt.error("redirected to a host its plugin may not reach")
-            }
-            Some(reach) => {
-                guard(attempt.url().as_str(), reach);
-                attempt.follow()
-            }
-            None => attempt.follow(),
+            attempt.error("too many redirects")
+        } else if within(guard.as_ref(), attempt.url()) {
+            attempt.follow()
+        } else {
+            attempt.error("redirected to a host its plugin may not reach")
         }
     })
 }
 
-/// Whether a guarded fetch could have led to `host`, which then may not lead
-/// to this machine or its network unless every reach naming it allows that.
-fn kept_public(host: &str) -> bool {
-    let guarded = guarded();
-    let naming: Vec<_> = guarded
-        .iter()
-        .filter(|(_, reach)| reach.allows_host(host))
-        .collect();
-    !naming.is_empty() && naming.iter().any(|(_, reach)| !reach.may_be_local(host))
+/// [`OfflineGate`], and a name may lead to this machine or its network only
+/// where the plugin may reach it there: its configured server.
+struct GuardedGate(Guard);
+
+impl reqwest::dns::Resolve for GuardedGate {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        let local_allowed = self.0.may_be_local(&host);
+        Box::pin(async move {
+            if offline() && !local_host(&host) {
+                return Err(Box::new(KeptOffline) as Box<dyn std::error::Error + Send + Sync>);
+            }
+            let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
+                .await?
+                .filter(|addr| local_allowed || !local_or_unspecified(addr.ip()))
+                .collect();
+            if addrs.is_empty() {
+                return Err(Box::new(KeptPublic) as Box<dyn std::error::Error + Send + Sync>);
+            }
+            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
 }
 
 /// Whether `host` is this machine or on its network: loopback, private and link-local addresses, `localhost` and `.local` names.
@@ -188,14 +183,8 @@ impl reqwest::dns::Resolve for OfflineGate {
                 tracing::debug!(host, "offline mode kept a request off the internet");
                 return Err(Box::new(KeptOffline) as Box<dyn std::error::Error + Send + Sync>);
             }
-            let public_only = kept_public(&host);
-            let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
-                .await?
-                .filter(|addr| !public_only || !(addr.ip().is_unspecified() || local_ip(addr.ip())))
-                .collect();
-            if addrs.is_empty() && public_only {
-                return Err(Box::new(KeptPublic) as Box<dyn std::error::Error + Send + Sync>);
-            }
+            let addrs: Vec<SocketAddr> =
+                tokio::net::lookup_host((host.as_str(), 0)).await?.collect();
             Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
         })
     }
@@ -263,63 +252,50 @@ mod tests {
         (format!("http://{address}"), hits)
     }
 
+    fn only(allowed: &'static str, server: Option<&'static str>) -> Guard {
+        Arc::new(Only { allowed, server })
+    }
+
     #[tokio::test]
-    async fn a_guarded_url_never_redirects_off_its_hosts() {
+    async fn a_guarded_fetch_never_redirects_off_its_hosts() {
         let (elsewhere, elsewhere_hits) = redirecting("127.0.0.2", "/".into());
         let (start, _) = redirecting("127.0.0.1", format!("{elsewhere}/x"));
-        guard(
-            &format!("{start}/stream"),
-            Arc::new(Only {
-                allowed: "127.0.0.1",
-                server: None,
-            }),
-        );
-        let refused = client().get(format!("{start}/stream")).send().await;
+        let client = guarded_builder(Some(only("127.0.0.1", Some("127.0.0.1"))))
+            .build()
+            .expect("client");
+        let refused = client.get(format!("{start}/stream")).send().await;
         assert!(refused.is_err(), "{refused:?}");
         assert_eq!(elsewhere_hits.load(Ordering::SeqCst), 0);
     }
 
     #[test]
-    fn what_a_guarded_url_lists_is_held_to_its_hosts() {
-        let reach = Arc::new(Only {
-            allowed: "cdn.test",
-            server: None,
-        });
-        guard("https://cdn.test/list.m3u8", reach);
-        assert!(follows(
-            "https://cdn.test/list.m3u8",
-            "https://cdn.test/0.m4s"
-        ));
-        assert!(!follows(
-            "https://cdn.test/list.m3u8",
-            "http://192.168.1.1/0.m4s"
-        ));
-        assert!(!follows("https://cdn.test/list.m3u8", "file:///etc/passwd"));
-        assert!(follows(
-            "https://other.test/list.m3u8",
-            "http://192.168.1.1/"
-        ));
+    fn what_a_plugin_may_fetch() {
+        let reach = only("cdn.test", None);
+        let url = |raw: &str| reqwest::Url::parse(raw).expect("a URL");
+        assert!(within(reach.as_ref(), &url("https://cdn.test:443/0.m4s")));
+        assert!(!within(reach.as_ref(), &url("https://other.test/0.m4s")));
+        assert!(!within(reach.as_ref(), &url("https://user:pw@cdn.test/")));
+        assert!(!within(reach.as_ref(), &url("file:///etc/passwd")));
+
+        let listed_address = only("192.168.1.1", None);
+        assert!(
+            !within(listed_address.as_ref(), &url("http://192.168.1.1/")),
+            "an address on this network is refused unless it is the server"
+        );
+        let server = only("192.168.1.1", Some("192.168.1.1"));
+        assert!(within(server.as_ref(), &url("http://192.168.1.1/")));
     }
 
-    #[test]
-    fn a_plugins_name_may_lead_here_only_for_its_server() {
-        guard(
-            "https://stream.plugin.test/a",
-            Arc::new(Only {
-                allowed: "stream.plugin.test",
-                server: None,
-            }),
-        );
-        guard(
-            "http://nas.plugin.test/a",
-            Arc::new(Only {
-                allowed: "nas.plugin.test",
-                server: Some("nas.plugin.test"),
-            }),
-        );
-        assert!(kept_public("stream.plugin.test"));
-        assert!(!kept_public("nas.plugin.test"));
-        assert!(!kept_public("unguarded.plugin.test"));
+    #[tokio::test]
+    async fn a_plugins_name_may_lead_here_only_for_its_server() {
+        use reqwest::dns::Resolve;
+        let name = || "localhost".parse().expect("a name");
+        let refused = GuardedGate(only("localhost", None)).resolve(name()).await;
+        assert!(refused.is_err(), "a plugin's name may not lead here");
+        let server = GuardedGate(only("localhost", Some("localhost")))
+            .resolve(name())
+            .await;
+        assert!(server.is_ok_and(|mut addrs| addrs.next().is_some()));
     }
 
     #[test]

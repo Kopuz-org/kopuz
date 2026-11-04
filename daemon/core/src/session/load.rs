@@ -762,9 +762,12 @@ impl ClassifiedLoad {
                             .block_on(source.resolve_stream(&item_id, quality))
                             .map_err(source_io_error)?;
                         network_factory(
-                            info.url,
-                            info.format,
-                            info.user_agent,
+                            NetworkStream {
+                                url: info.url,
+                                format: info.format,
+                                user_agent: info.user_agent,
+                                guard: info.guard,
+                            },
                             false,
                             None,
                             rt_handle.clone(),
@@ -775,37 +778,41 @@ impl ClassifiedLoad {
                 })
             }
             ClassifiedSource::Remote { stream_ref, source } => {
-                let (stream_url, format, user_agent) = match ResolvedStreamRef::parse(&stream_ref) {
-                    ResolvedStreamRef::Pending(item_id) => {
-                        let source = source.ok_or_else(|| LoadFailure {
-                            token: self.token,
-                            code: api::ErrorCode::Internal,
-                            message: "no active source for remote track".to_string(),
-                        })?;
-                        let info = source
-                            .resolve_stream(item_id, self.stream_quality)
-                            .await
-                            .map_err(|error| {
-                                tracing::error!(error = %error, "stream URL resolve failed");
-                                LoadFailure::from_source(self.token, &error)
+                let (stream_url, format, user_agent, guard) =
+                    match ResolvedStreamRef::parse(&stream_ref) {
+                        ResolvedStreamRef::Pending(item_id) => {
+                            let source = source.ok_or_else(|| LoadFailure {
+                                token: self.token,
+                                code: api::ErrorCode::Internal,
+                                message: "no active source for remote track".to_string(),
                             })?;
-                        duration_secs = info.duration_secs;
-                        bitrate = info.bitrate;
-                        loudness_db = info.loudness_db;
-                        (info.url, info.format, info.user_agent)
-                    }
-                    ResolvedStreamRef::SoundCloudHls(_)
-                    | ResolvedStreamRef::AppleMusicFmp4(_)
-                    | ResolvedStreamRef::Direct(_) => (stream_ref, None, None),
-                };
+                            let info = source
+                                .resolve_stream(item_id, self.stream_quality)
+                                .await
+                                .map_err(|error| {
+                                    tracing::error!(error = %error, "stream URL resolve failed");
+                                    LoadFailure::from_source(self.token, &error)
+                                })?;
+                            duration_secs = info.duration_secs;
+                            bitrate = info.bitrate;
+                            loudness_db = info.loudness_db;
+                            (info.url, info.format, info.user_agent, info.guard)
+                        }
+                        ResolvedStreamRef::SoundCloudHls(_)
+                        | ResolvedStreamRef::AppleMusicFmp4(_)
+                        | ResolvedStreamRef::Direct(_) => (stream_ref, None, None, None),
+                    };
 
                 // The factory runs on the decode worker (no runtime), so hand
                 // every blocking stream/decrypt path this task's handle.
                 let rt_handle = tokio::runtime::Handle::current();
                 network_factory(
-                    stream_url,
-                    format,
-                    user_agent,
+                    NetworkStream {
+                        url: stream_url,
+                        format,
+                        user_agent,
+                        guard,
+                    },
                     self.is_radio,
                     icy_tx,
                     rt_handle,

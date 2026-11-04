@@ -19,7 +19,7 @@ use server::source::RadioPage;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
-use crate::playback::network_factory;
+use crate::playback::{NetworkStream, network_factory};
 use crate::queue_model::{NextOutcome, QueueModel};
 
 mod load;

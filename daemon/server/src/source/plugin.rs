@@ -352,8 +352,8 @@ impl MediaSource for PluginSource {
                 "the plugin's stream is on a host its manifest does not allow".into(),
             ));
         }
-        self.artwork.guard_stream(&stream.url);
         Ok(StreamInfo {
+            guard: self.artwork.stream_guard(),
             url: if stream.hls {
                 format!("__SC_HLS:{}", stream.url)
             } else {

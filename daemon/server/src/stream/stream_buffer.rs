@@ -62,6 +62,19 @@ pub fn stream_client(user_agent: Option<String>) -> reqwest::Client {
     configured(utils::http::builder(), user_agent).unwrap_or_else(|_| utils::http::client())
 }
 
+/// [`stream_client`], held to a plugin's hosts where it names the stream. A
+/// guarded client that fails to build is no reason to fetch unguarded.
+pub fn guarded_stream_client(
+    user_agent: Option<String>,
+    guard: Option<utils::http::Guard>,
+) -> std::io::Result<reqwest::Client> {
+    match guard {
+        None => Ok(stream_client(user_agent)),
+        Some(guard) => configured(utils::http::guarded_builder(Some(guard)), user_agent)
+            .map_err(std::io::Error::other),
+    }
+}
+
 /// The client a radio stream is fetched with: native TLS on desktop, since some broadcaster CDNs reset rustls's handshake.
 pub fn radio_client(user_agent: Option<String>) -> reqwest::Client {
     #[cfg(not(target_os = "android"))]

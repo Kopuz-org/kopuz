@@ -648,6 +648,7 @@ impl MediaSource for YtSource {
             player::AudioFormat::M4a => crate::stream::AudioFormat::M4a,
         };
         Ok(StreamInfo {
+            guard: None,
             url: info.url,
             format: Some((format, info.range_safe)),
             user_agent: Some(info.user_agent),

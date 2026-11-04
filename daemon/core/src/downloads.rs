@@ -288,7 +288,8 @@ impl DownloadsService {
                     .format
                     .map(|(format, _)| format.extension())
                     .unwrap_or("m4a");
-                self.fetch_to_cache(ctx, &item_id, &info.url, hint).await?
+                self.fetch_to_cache(ctx, &item_id, &info.url, hint, info.guard)
+                    .await?
             }
             Err(error) => {
                 return Err(ApiError::internal(format!("download failed: {error}")));
@@ -338,11 +339,12 @@ impl DownloadsService {
         item_id: &str,
         url: &str,
         extension_hint: &str,
+        guard: Option<utils::http::Guard>,
     ) -> Result<PathBuf, ApiError> {
         let http = |error: reqwest::Error| {
             ApiError::internal(format!("download request failed: {}", error.without_url()))
         };
-        let client = utils::http::builder()
+        let client = utils::http::guarded_builder(guard)
             .read_timeout(Duration::from_secs(15))
             .build()
             .map_err(http)?;
