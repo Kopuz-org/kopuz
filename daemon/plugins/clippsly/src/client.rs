@@ -99,13 +99,23 @@ pub fn validate_upload(filename: &str, length: usize) -> Result<(), SourceError>
 fn multipart(field: &str, filename: &str, mut content: Vec<u8>) -> (Vec<u8>, String) {
     // The boundary only has to be absent from the payload; a validated name
     // never holds quotes or line breaks, and the length check is cheap.
-    let mut boundary = String::from("kopuz-clippsly-upload");
-    while content
-        .windows(boundary.len())
-        .any(|window| window == boundary.as_bytes())
-    {
-        boundary.push('x');
-    }
+    const BASE: &[u8] = b"kopuz-clippsly-upload";
+    // One more `x` than the payload ever puts after the base, found in one
+    // pass, so the boundary cannot occur in it.
+    let padding = content
+        .windows(BASE.len())
+        .enumerate()
+        .filter(|(_, window)| *window == BASE)
+        .map(|(at, _)| {
+            content[at + BASE.len()..]
+                .iter()
+                .take_while(|byte| **byte == b'x')
+                .count()
+                + 1
+        })
+        .max()
+        .unwrap_or(0);
+    let boundary = format!("kopuz-clippsly-upload{}", "x".repeat(padding));
     let head = format!(
         "--{boundary}\r\nContent-Disposition: form-data; name=\"{field}\"; filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
     );
@@ -354,6 +364,14 @@ mod tests {
 
         let (_, avoiding) = multipart("audio", "a.flac", b"--kopuz-clippsly-upload--".to_vec());
         assert!(avoiding.ends_with("kopuz-clippsly-uploadx"));
+
+        let crafted = [&b"kopuz-clippsly-upload"[..], &[b'x'; 5000]].concat();
+        let (body, longer) = multipart("audio", "a.flac", crafted.clone());
+        let boundary = longer
+            .strip_prefix("multipart/form-data; boundary=")
+            .unwrap();
+        assert_eq!(boundary.len(), "kopuz-clippsly-upload".len() + 5001);
+        assert!(body.windows(crafted.len()).any(|window| window == crafted));
     }
 
     #[test]
