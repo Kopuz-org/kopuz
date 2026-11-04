@@ -304,6 +304,13 @@ impl SourceService {
                 "audio files must be between 1 byte and 500 MiB",
             ));
         }
+        // A plugin holds an upload in its sandbox, which can grow to hold the
+        // largest; one at a time keeps several from adding up.
+        static ONE_AT_A_TIME: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+        let _turn = ONE_AT_A_TIME
+            .acquire()
+            .await
+            .map_err(|_| ApiError::internal("uploads have stopped"))?;
         let (_, source) = self.resolve(&upload.source_id).await?;
         source
             .upload_track(upload.filename, upload.content)
