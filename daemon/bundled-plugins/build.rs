@@ -44,7 +44,12 @@ fn main() {
 
     let plugins = plugin_crates(&plugins_dir);
     let wasm_dir = match std::env::var_os("KOPUZ_PLUGIN_WASM_DIR") {
-        Some(dir) => PathBuf::from(dir),
+        Some(dir) => std::fs::canonicalize(&dir).unwrap_or_else(|error| {
+            panic!(
+                "KOPUZ_PLUGIN_WASM_DIR {}: {error}",
+                PathBuf::from(&dir).display()
+            )
+        }),
         None => build(&workspace, &plugins),
     };
 
