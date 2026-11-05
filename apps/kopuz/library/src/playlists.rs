@@ -6,7 +6,7 @@ use std::rc::Rc;
 use api::{PlaylistCapability, PlaylistFolderInfo, PlaylistInfo};
 use components::dialogs::FormDialog;
 use components::dialogs::FormFooter;
-use components::format::t;
+use components::format::{t, t_with};
 use components::{ErrorBanner, IconButton, icons, motion};
 use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -135,8 +135,7 @@ fn folder_tile(folder: &PlaylistFolderInfo, playlists: &[PlaylistInfo]) -> Tile 
     Tile {
         id: SharedString::from(folder.id.clone()),
         title: SharedString::from(folder.name.clone()),
-        // TODO(i18n): the Dioxus card spells this count out in English too.
-        subtitle: SharedString::from(format!("{count} playlists")),
+        subtitle: t_with("playlist_folder_count", &[("count", count.into())]),
         artwork: cover,
         sort_key: folder.name.to_lowercase(),
         sort_rank: count as u64,

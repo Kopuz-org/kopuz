@@ -28,7 +28,7 @@ impl Library {
     pub(crate) fn chrome(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let count = self.total();
         // Favorites is one facet, so there is nothing to switch between.
-        let switch = (!self.is_liked()).then(|| self.facet_switch(cx));
+        let switch = (!self.standalone()).then(|| self.facet_switch(cx));
         let controls = self.controls(cx);
         let filter_bar = self.filter_bar(cx);
         let capabilities = SourcesModel::global(cx).read(cx).capabilities();
@@ -54,7 +54,7 @@ impl Library {
                     .on_refresh(|_, _, cx| start(JobKind::PlaylistSync, cx))
             });
         let stats = self.stat_cards(cx);
-        let refreshing = (!self.is_liked())
+        let refreshing = (!self.standalone())
             .then(|| {
                 let jobs = JobsModel::global(cx).read(cx);
                 jobs.progress(JobKind::Scan)
@@ -63,9 +63,9 @@ impl Library {
             })
             .flatten();
         let mut header = PageHeader::new(self.title())
-            .count(t_with("library_count", &[("count", count.into())]))
+            .count(self.count_label(count, cx))
             .flush()
-            .when(self.most_played(), |header| {
+            .when(self.is_activity(), |header| {
                 header.subtitle(t("most_played_tracks"))
             })
             .action(controls);
@@ -86,6 +86,26 @@ impl Library {
             .child(filter_bar)
             .into_any_element()
             .tap(window)
+    }
+
+    /// The header's count, in the facet's own unit; the playlists facet counts playlists, not the folders beside them.
+    fn count_label(&self, count: usize, cx: &App) -> SharedString {
+        match self.filters().facet {
+            Facet::Tracks => t_with("track_count", &[("count", count.into())]),
+            Facet::Playlists => {
+                let query = self.filters().search.trim().to_lowercase();
+                let playlists = store::PlaylistsModel::global(cx)
+                    .read(cx)
+                    .playlists()
+                    .iter()
+                    .filter(|playlist| {
+                        query.is_empty() || playlist.name.to_lowercase().contains(&query)
+                    })
+                    .count();
+                t_with("playlist_folder_count", &[("count", playlists.into())])
+            }
+            _ => t_with("library_count", &[("count", count.into())]),
+        }
     }
 
     /// Tracks, Albums, Artists, Playlists: the same listing, presented four ways.
@@ -272,6 +292,9 @@ impl Library {
         capabilities: &SourceCapabilities,
         cx: &mut Context<Self>,
     ) -> Vec<IconButton> {
+        if self.is_activity() {
+            return Vec::new();
+        }
         if self.is_liked() {
             let Some(id) = capabilities.favorites_playlist.clone() else {
                 return Vec::new();
@@ -304,7 +327,7 @@ impl Library {
 
     /// Tracks, albums, artists and playlists held, the four cards over the Dioxus library.
     fn stat_cards(&self, cx: &App) -> Option<AnyElement> {
-        if self.is_liked() {
+        if self.standalone() {
             return None;
         }
         let counts = self.counts.read(cx).value().copied()?;

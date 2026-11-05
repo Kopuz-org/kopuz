@@ -91,8 +91,7 @@ impl Route {
     /// Where a route that is no longer a place now lands, so an old link never reaches a 404.
     pub fn redirect(self) -> Route {
         match self {
-            // The listings are facets of one library now, and most-played is a sort of it.
-            Route::Activity => Route::Library,
+            // The listings are facets of one library now.
             Route::Albums | Route::Artists | Route::Playlists => Route::Library,
             // Search and Discover are one destination; two keys would cache two of it.
             Route::Search => Route::Discover,
@@ -105,7 +104,6 @@ impl Route {
     /// What a redirected route was asking for, for the view that has to honour it instead.
     pub fn intent(&self) -> Option<&'static str> {
         match self {
-            Route::Activity => Some("activity"),
             Route::Downloader => Some("downloads"),
             _ => None,
         }
@@ -302,8 +300,7 @@ mod tests {
 
     #[test]
     fn a_route_that_is_no_longer_a_place_lands_somewhere() {
-        // Most-played is an order over the library, not a page of its own.
-        for route in [Route::Activity, Route::Albums, Route::Artists] {
+        for route in [Route::Albums, Route::Artists] {
             assert_eq!(route.redirect(), Route::Library);
         }
         assert_eq!(Route::Playlists.redirect(), Route::Library);
@@ -317,6 +314,7 @@ mod tests {
             Route::Home,
             Route::Library,
             Route::Favorites,
+            Route::Activity,
             Route::Discover,
             Route::Radio,
         ] {
@@ -326,7 +324,8 @@ mod tests {
 
     #[test]
     fn a_redirect_says_what_it_was_after() {
-        assert_eq!(Route::Activity.intent(), Some("activity"));
+        assert_eq!(Route::Downloader.intent(), Some("downloads"));
+        assert_eq!(Route::Activity.intent(), None);
         assert_eq!(Route::Favorites.intent(), None);
         assert_eq!(Route::Library.intent(), None);
     }
@@ -337,7 +336,12 @@ mod tests {
             let route = Route::from_name(name).expect("a name the smoke script uses");
             assert!(matches!(
                 route.redirect(),
-                Route::Home | Route::Library | Route::Favorites | Route::Discover | Route::Radio
+                Route::Home
+                    | Route::Library
+                    | Route::Favorites
+                    | Route::Activity
+                    | Route::Discover
+                    | Route::Radio
             ));
         }
     }

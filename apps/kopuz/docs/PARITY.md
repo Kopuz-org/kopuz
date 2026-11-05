@@ -176,7 +176,7 @@ Data: `api.favorites()` inv:Favorites → `api.tracks_by_keys(refs)` inv:Tracks;
 
 ### 2.11 Activity (`pages/activity.rs`)
 Data: windowed `api.tracks(TrackFilter{sort: PlayCount})` + count; genre per album from `api.albums(all)`; play counts read from `cfg.listen_counts[source.listen_count_key(uid)]` (not `api.stats()`, see §6)
-- [x] "listening_logs" / "most_played_tracks" header while the tracks run by plays, most first; the activity intent shows the plays and genre columns; genre is the album's, read from the whole album catalog once the column or a year grouping needs it
+- [x] "listening_logs" / "most_played_tracks" header on an Activity page of its own (no facets or stat cards, its own layout, by plays most first); columns # title artist album genre time plays; genre is the album's, read for the album ids the loaded rows reference
 - [x] Row click → fetch all with same filter → PLAY_LIST(all, idx); virtualized; scroll persisted
 - [x] Spinner / "no_tracks_in_library"
 

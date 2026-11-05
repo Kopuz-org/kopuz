@@ -17,8 +17,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use api::{
-    AlbumInfo, AlbumPage, ArtistPage, ArtworkRef, KopuzApi, Page, StatsView, Table, TrackInfo,
-    TrackPage,
+    AlbumInfo, AlbumPage, AlbumQuery, ArtistPage, ArtworkRef, KopuzApi, Page, StatsView, Table,
+    TrackInfo, TrackPage,
 };
 use components::format::t;
 use components::{skeleton, style};
@@ -172,6 +172,8 @@ pub struct Library {
     filters: Filters,
     /// The Favorites page: tracks only, liked only, and none of it written to the library's route.
     liked: bool,
+    /// The Activity page: tracks only, in a layout of its own, and none of it written to the library's route.
+    activity: bool,
     // What the route last said, so adopting a route change cannot fight the page's own edit.
     encoded: String,
     columns: Vec<Column>,
@@ -193,9 +195,8 @@ pub struct Library {
     genres: Entity<Query<Vec<String>>>,
     stats: Entity<Query<StatsView>>,
     counts: Entity<Query<Counts>>,
-    // Every album, read only once a genre column or a year grouping needs what a track row lacks.
-    catalog: Entity<Query<Vec<AlbumInfo>>>,
-    catalog_asked: bool,
+    // Album ids already read for their genre and year; a page of rows asks only about the new ones.
+    meta_asked: HashSet<String>,
 
     // Derived on change, never in render: a notify from the playhead would otherwise rebuild these.
     rows: Vec<TrackInfo>,
@@ -256,22 +257,29 @@ impl Focusable for Library {
 
 impl Library {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::build(false, window, cx)
+        Self::build(false, false, window, cx)
     }
 
     /// The Favorites page.
     pub fn favorites(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::build(true, window, cx)
+        Self::build(true, false, window, cx)
     }
 
-    fn build(liked: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let opening = match liked {
+    /// The Activity page: the library's tracks, most played first.
+    pub fn activity(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::build(false, true, window, cx)
+    }
+
+    fn build(liked: bool, activity: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let standalone = liked || activity;
+        let opening = match standalone {
             true => String::new(),
             false => opening_view(cx),
         };
-        let filters = match liked {
-            true => Filters::default().held_to_liked(),
-            false => Filters::decode(&opening),
+        let filters = match (liked, activity) {
+            (true, _) => Filters::default().held_to_liked(),
+            (_, true) => Filters::on(Facet::Tracks),
+            _ => Filters::decode(&opening),
         };
         let search = cx.new(|cx| {
             InputState::new(window, cx)
@@ -327,12 +335,10 @@ impl Library {
                 cx,
             )
         });
-        let counts = cx.new(|cx| match liked {
+        let counts = cx.new(|cx| match standalone {
             true => Query::new(&[], |_| async move { Ok(Counts::default()) }, cx),
             false => Query::new(&[Table::Tracks, Table::Albums, Table::Artists], counts, cx),
         });
-        let catalog =
-            cx.new(|cx| Query::new(&[Table::Albums], |_| async move { Ok(Vec::new()) }, cx));
 
         let navigator = Navigator::global(cx);
         let playlists = PlaylistsModel::global(cx);
@@ -356,7 +362,21 @@ impl Library {
                 this.auto_sync(cx);
                 cx.notify();
             }),
-            cx.observe(&catalog, |this, _, cx| this.adopt_catalog(cx)),
+            // A retag can move an album's genre; only the albums on screen are asked again.
+            cx.subscribe(
+                &Link::connection(cx),
+                |this, _, event: &api::ApiEvent, cx| {
+                    if matches!(
+                        event,
+                        api::ApiEvent::LibraryInvalidated {
+                            table: Table::Albums
+                        }
+                    ) {
+                        this.meta_asked.clear();
+                        this.request_meta(cx);
+                    }
+                },
+            ),
             cx.observe(&playlists, |this, _, cx| {
                 this.rekey_offline(cx);
                 this.rebuild(cx);
@@ -378,6 +398,7 @@ impl Library {
         let mut page = Self {
             filters,
             liked,
+            activity,
             encoded: opening,
             columns: Vec::new(),
             sort: Sort::default(),
@@ -395,8 +416,7 @@ impl Library {
             genres,
             stats,
             counts,
-            catalog,
-            catalog_asked: false,
+            meta_asked: HashSet::new(),
             rows: Vec::new(),
             lines: Vec::new(),
             tiles: Vec::new(),
@@ -423,32 +443,30 @@ impl Library {
         };
         page.read_layout(cx);
         page.rekey_offline(cx);
-        if !liked {
-            page.adopt_intent(cx);
-        }
         page.refetch(cx);
         page
     }
 
     /// The page's title.
     pub(crate) fn title(&self) -> SharedString {
-        match (self.liked, self.most_played()) {
+        match (self.liked, self.activity) {
             (true, _) => t("favorites"),
-            (false, true) => t("listening_logs"),
-            (false, false) => t("your_library"),
+            (_, true) => t("listening_logs"),
+            _ => t("your_library"),
         }
     }
 
-    /// The tracks by plays, most first: what the Dioxus Activity page was, so it keeps that page's heading.
-    pub(crate) fn most_played(&self) -> bool {
-        !self.liked
-            && self.filters.facet == Facet::Tracks
-            && self.sort.field == "plays"
-            && self.sort.descending
+    pub(crate) fn is_activity(&self) -> bool {
+        self.activity
     }
 
     pub(crate) fn is_liked(&self) -> bool {
         self.liked
+    }
+
+    /// Favorites or Activity: a page of its own, with no facets and nothing written to the library's route.
+    pub(crate) fn standalone(&self) -> bool {
+        self.liked || self.activity
     }
 
     /// How this facet was left: its columns, its order, its density.
@@ -473,50 +491,17 @@ impl Library {
             return;
         }
         if held != (self.columns.clone(), self.mode, self.density, self.tile) {
-            self.want_catalog(cx);
+            self.request_meta(cx);
             cx.notify();
         }
-    }
-
-    /// `Route::Activity` is no longer a place; it arrives as an intent.
-    fn adopt_intent(&mut self, cx: &mut Context<Self>) {
-        let intent = Navigator::global(cx).update(cx, |navigator, _| navigator.take_intent());
-        match intent {
-            // The most-played page was a listing of the library, which is a sort, not a place.
-            Some("activity") => {
-                self.filters.facet = Facet::Tracks;
-                self.read_layout(cx);
-                self.sort = Sort {
-                    field: "plays".into(),
-                    descending: true,
-                };
-                let sort = self.sort.to_layout();
-                let mut columns = self.columns.clone();
-                // The Dioxus Activity table carried a genre column beside the plays.
-                for column in columns
-                    .iter_mut()
-                    .filter(|column| matches!(column.id.as_str(), "plays" | "genre"))
-                {
-                    column.visible = true;
-                }
-                self.columns = columns.clone();
-                self.write_facet(cx, move |facet| {
-                    facet.sort = sort;
-                    facet.columns = columns;
-                });
-            }
-            _ => return,
-        }
-        self.publish(false, cx);
     }
 
     /// Back, forward, or a command that named a view: take what the route says and show it.
     fn adopt_route(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let route = Navigator::global(cx).read(cx).current().clone();
-        if self.liked || !matches!(route, Route::Library | Route::LibraryView(_)) {
+        if self.standalone() || !matches!(route, Route::Library | Route::LibraryView(_)) {
             return;
         }
-        self.adopt_intent(cx);
         let encoded = route
             .library_view()
             .map(|view| view.to_string())
@@ -540,8 +525,8 @@ impl Library {
 
     /// Put the current view in the route, so back, forward and a restart all land back on it.
     fn publish(&mut self, push: bool, cx: &mut Context<Self>) {
-        // Favorites has a route of its own; its search must not become the library's view.
-        if self.liked {
+        // Favorites and Activity have routes of their own; their search must not become the library's view.
+        if self.standalone() {
             return;
         }
         let encoded = self.filters.encode();
@@ -562,9 +547,13 @@ impl Library {
 
     /// Change the filter set: a chip or a facet is a place to come back to, a keystroke is not.
     pub(crate) fn set_filters(&mut self, filters: Filters, push: bool, cx: &mut Context<Self>) {
-        let filters = match self.liked {
-            true => filters.held_to_liked(),
-            false => filters,
+        let filters = match (self.liked, self.activity) {
+            (true, _) => filters.held_to_liked(),
+            (_, true) => Filters {
+                facet: Facet::Tracks,
+                ..filters
+            },
+            _ => filters,
         };
         if filters == self.filters {
             return;
@@ -600,9 +589,10 @@ impl Library {
 
     /// Where this page keeps its columns and order.
     fn layout_name(&self) -> &'static str {
-        match self.liked {
-            true => store::layout::FAVORITES,
-            false => self.filters.facet.name(),
+        match (self.liked, self.activity) {
+            (true, _) => store::layout::FAVORITES,
+            (_, true) => store::layout::ACTIVITY,
+            _ => self.filters.facet.name(),
         }
     }
 
@@ -642,53 +632,49 @@ impl Library {
             Facet::Artists => self.fetch_artists(page, false, cx),
             Facet::Playlists => self.rebuild(cx),
         }
-        self.want_catalog(cx);
+        self.request_meta(cx);
         self.auto_sync(cx);
     }
 
-    /// Read every album once the table shows something only an album knows: its genre, or its year.
-    fn want_catalog(&mut self, cx: &mut Context<Self>) {
+    /// Read the albums the loaded rows belong to, once the table shows something only an album knows.
+    fn request_meta(&mut self, cx: &mut Context<Self>) {
         let genre = self
             .columns
             .iter()
             .any(|column| column.id == "genre" && column.visible);
         let year = self.group_by.as_deref() == Some("year");
-        if self.catalog_asked || self.filters.facet != Facet::Tracks || !(genre || year) {
+        if self.filters.facet != Facet::Tracks || !(genre || year) {
             return;
         }
-        self.catalog_asked = true;
-        self.catalog.update(cx, |query, cx| {
-            query.set_fetch(
-                |api| async move { Ok(api.albums(Default::default(), store::all()).await?.albums) },
-                cx,
-            )
-        });
-    }
-
-    fn adopt_catalog(&mut self, cx: &mut Context<Self>) {
-        let Some(albums) = self.catalog.read(cx).value() else {
-            return;
-        };
-        if albums.is_empty() {
-            return;
-        }
-        self.albums_meta = albums
-            .iter()
-            .map(|album| {
-                let meta = AlbumMeta {
-                    year: album.year,
-                    genre: album.genre.clone(),
+        for batch in unasked_albums(&self.rows, &self.meta_asked) {
+            self.meta_asked.extend(batch.iter().cloned());
+            let query = AlbumQuery {
+                ids: Some(batch),
+                ..Default::default()
+            };
+            let call = Link::global(cx)
+                .call(move |api| async move { api.albums(query, store::all()).await });
+            cx.spawn(async move |this, cx| {
+                let page = match call.await {
+                    Ok(page) => page,
+                    Err(error) => {
+                        tracing::debug!(%error, "could not read the rows' albums");
+                        return;
+                    }
                 };
-                (album.id.clone(), meta)
+                this.update(cx, |this, cx| {
+                    this.albums_meta.extend(page.albums.iter().map(album_meta));
+                    this.rebuild(cx);
+                })
+                .ok();
             })
-            .collect();
-        self.year_span = span_of(albums);
-        self.rebuild(cx);
+            .detach();
+        }
     }
 
     /// An empty library on a source that syncs fills itself once, and a flat playlist catalog asks the source on sight.
     fn auto_sync(&mut self, cx: &mut Context<Self>) {
-        if self.liked || self.frozen {
+        if self.standalone() || self.frozen {
             return;
         }
         let sources = SourcesModel::global(cx).read(cx);
@@ -832,6 +818,7 @@ impl Library {
         let loaded: HashSet<String> = self.rows.iter().map(|row| row.key.clone()).collect();
         self.selection.retain_loaded(&loaded, self.whole);
         self.queued = self.listing_queued(cx);
+        self.request_meta(cx);
         self.rebuild(cx);
     }
 
@@ -858,17 +845,7 @@ impl Library {
         };
         // A window or a narrowed set is not the whole catalog, so the chip menus only learn from a whole read.
         if !page.narrowed && page.albums.len() as u32 >= page.total {
-            self.albums_meta = page
-                .albums
-                .iter()
-                .map(|album| {
-                    let meta = AlbumMeta {
-                        year: album.year,
-                        genre: album.genre.clone(),
-                    };
-                    (album.id.clone(), meta)
-                })
-                .collect();
+            self.albums_meta.extend(page.albums.iter().map(album_meta));
             self.year_span = span_of(&page.albums);
         }
         if self.filters.facet == Facet::Albums {
@@ -1137,7 +1114,7 @@ impl Library {
     }
 
     fn cycle_facet(&mut self, step: isize, cx: &mut Context<Self>) {
-        if self.liked {
+        if self.standalone() {
             return;
         }
         let at = Facet::ALL
@@ -1307,6 +1284,29 @@ fn opening_view(cx: &App) -> String {
     store::layout(cx).library_view.clone().unwrap_or_default()
 }
 
+/// How many album ids one read asks for, so a reply stays far under the client's message limit.
+const META_BATCH: usize = 200;
+
+/// The album ids `rows` reference that nobody has asked about yet, deduplicated, in batches.
+fn unasked_albums(rows: &[TrackInfo], asked: &HashSet<String>) -> Vec<Vec<String>> {
+    let mut seen = HashSet::new();
+    let fresh: Vec<String> = rows
+        .iter()
+        .map(|row| row.album_id.as_str())
+        .filter(|id| !id.is_empty() && !asked.contains(*id) && seen.insert(*id))
+        .map(str::to_string)
+        .collect();
+    fresh.chunks(META_BATCH).map(<[String]>::to_vec).collect()
+}
+
+fn album_meta(album: &AlbumInfo) -> (String, AlbumMeta) {
+    let meta = AlbumMeta {
+        year: album.year,
+        genre: album.genre.clone(),
+    };
+    (album.id.clone(), meta)
+}
+
 /// The widest span of years a whole albums read turned up, for the year chip's menu.
 fn span_of(albums: &[AlbumInfo]) -> Option<(u16, u16)> {
     let first = albums
@@ -1349,6 +1349,30 @@ fn text(left: &str, right: &str) -> std::cmp::Ordering {
 #[cfg(test)]
 mod paging_tests {
     use super::*;
+
+    #[test]
+    fn a_large_listing_asks_for_each_new_album_once_in_small_batches() {
+        let rows: Vec<TrackInfo> = (0..50_000)
+            .map(|index| TrackInfo {
+                album_id: match index % 7 {
+                    0 => String::new(),
+                    _ => format!("album-{}", index % 5_000),
+                },
+                ..Default::default()
+            })
+            .collect();
+        let asked: HashSet<String> = (0..1_000).map(|index| format!("album-{index}")).collect();
+        let batches = unasked_albums(&rows, &asked);
+        assert!(batches.iter().all(|batch| batch.len() <= META_BATCH));
+        let ids: Vec<&String> = batches.iter().flatten().collect();
+        let unique: HashSet<&String> = ids.iter().copied().collect();
+        assert_eq!(ids.len(), 4_000);
+        assert_eq!(unique.len(), ids.len());
+        assert!(ids.iter().all(|id| !asked.contains(*id)));
+
+        let all: HashSet<String> = unique.into_iter().cloned().chain(asked).collect();
+        assert!(unasked_albums(&rows, &all).is_empty());
+    }
 
     #[test]
     fn catalog_windows_keep_the_same_indexes_in_both_scroll_directions() {

@@ -62,12 +62,9 @@ pub fn empty_library(facet: Facet, active: &Active) -> EmptyState {
                 store::sign_in_again(&source, window, cx)
             });
     }
-    // Playlists are made, not scanned, so the way out is making one where the source allows it.
+    // Playlists are made, not scanned, so the way out is making one where the source allows it; "Add songs" would contradict the button.
     if facet == Facet::Playlists {
-        let state = match capabilities.folders {
-            true => EmptyState::new(t("no_playlists_yet")).icon(icons::FOLDER),
-            false => EmptyState::new(t("no_playlists_found")).icon(icons::LIST),
-        };
+        let state = EmptyState::new(t("no_playlists_found")).icon(icons::LIST);
         return match capabilities.playlists {
             api::PlaylistCapability::None => state,
             _ => state.action(t("add_playlist"), |_, window, cx| {
