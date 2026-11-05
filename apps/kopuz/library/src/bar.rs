@@ -242,7 +242,7 @@ impl Library {
                 }
             }
             Chip::Years => {
-                for (from, to) in decades(self.year_span()) {
+                for (from, to) in decades(self.year_span(cx)) {
                     let checked = filters.years == Some((from, to));
                     entries.push(entry(
                         Some(format!("{from}-{to}")),

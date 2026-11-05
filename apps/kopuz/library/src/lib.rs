@@ -22,6 +22,7 @@ use api::{
 };
 use components::format::t;
 use components::{skeleton, style};
+use config::{AlbumSortField, SortCriterion, SortDirection};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -195,8 +196,8 @@ pub struct Library {
     genres: Entity<Query<Vec<String>>>,
     stats: Entity<Query<StatsView>>,
     counts: Entity<Query<Counts>>,
-    // Album ids already read for their genre and year; a page of rows asks only about the new ones.
-    meta_asked: HashSet<String>,
+    years: Entity<Query<Option<(u16, u16)>>>,
+    meta_asked: MetaAsks,
 
     // Derived on change, never in render: a notify from the playhead would otherwise rebuild these.
     rows: Vec<TrackInfo>,
@@ -205,7 +206,6 @@ pub struct Library {
     // The letters the tiles start with, only while every tile is held: a paged window cannot say.
     rail_letters: Option<std::collections::HashSet<char>>,
     albums_meta: HashMap<String, AlbumMeta>,
-    year_span: Option<(u16, u16)>,
     plays: HashMap<String, u64>,
     playlist_offline: HashMap<String, (Rc<[String]>, store::Offline)>,
     // Artists already sent for a photo; the daemon remembers its misses, this saves the round trip.
@@ -335,6 +335,7 @@ impl Library {
                 cx,
             )
         });
+        let years = cx.new(|cx| Query::new(&[Table::Albums], year_span, cx));
         let counts = cx.new(|cx| match standalone {
             true => Query::new(&[], |_| async move { Ok(Counts::default()) }, cx),
             false => Query::new(&[Table::Tracks, Table::Albums, Table::Artists], counts, cx),
@@ -362,17 +363,13 @@ impl Library {
                 this.auto_sync(cx);
                 cx.notify();
             }),
+            cx.observe(&years, |_, _, cx| cx.notify()),
             // A retag can move an album's genre; only the albums on screen are asked again.
             cx.subscribe(
-                &Link::connection(cx),
-                |this, _, event: &api::ApiEvent, cx| {
-                    if matches!(
-                        event,
-                        api::ApiEvent::LibraryInvalidated {
-                            table: Table::Albums
-                        }
-                    ) {
-                        this.meta_asked.clear();
+                &store::Invalidation::global(cx),
+                |this, _, event: &store::TablesChanged, cx| {
+                    if meta_stale(event) {
+                        this.meta_asked.invalidate();
                         this.request_meta(cx);
                     }
                 },
@@ -416,13 +413,13 @@ impl Library {
             genres,
             stats,
             counts,
-            meta_asked: HashSet::new(),
+            years,
+            meta_asked: MetaAsks::default(),
             rows: Vec::new(),
             lines: Vec::new(),
             tiles: Vec::new(),
             rail_letters: None,
             albums_meta: HashMap::new(),
-            year_span: None,
             plays: HashMap::new(),
             playlist_offline: HashMap::new(),
             asked_artwork: HashSet::new(),
@@ -573,8 +570,8 @@ impl Library {
         &self.filters
     }
 
-    pub(crate) fn year_span(&self) -> Option<(u16, u16)> {
-        self.year_span
+    pub(crate) fn year_span(&self, cx: &App) -> Option<(u16, u16)> {
+        self.years.read(cx).value().copied().flatten()
     }
 
     pub(crate) fn known_genres(&self, cx: &App) -> Vec<String> {
@@ -646,25 +643,24 @@ impl Library {
         if self.filters.facet != Facet::Tracks || !(genre || year) {
             return;
         }
-        for batch in unasked_albums(&self.rows, &self.meta_asked) {
-            self.meta_asked.extend(batch.iter().cloned());
+        for batch in self.meta_asked.take(&self.rows, Instant::now()) {
             let query = AlbumQuery {
-                ids: Some(batch),
+                ids: Some(batch.clone()),
                 ..Default::default()
             };
             let call = Link::global(cx)
                 .call(move |api| async move { api.albums(query, store::all()).await });
             cx.spawn(async move |this, cx| {
-                let page = match call.await {
-                    Ok(page) => page,
+                let reply = call.await;
+                this.update(cx, |this, cx| match reply {
+                    Ok(page) => {
+                        merge_meta(&mut this.albums_meta, &batch, &page.albums);
+                        this.rebuild(cx);
+                    }
                     Err(error) => {
                         tracing::debug!(%error, "could not read the rows' albums");
-                        return;
+                        this.meta_asked.failed(&batch, Instant::now());
                     }
-                };
-                this.update(cx, |this, cx| {
-                    this.albums_meta.extend(page.albums.iter().map(album_meta));
-                    this.rebuild(cx);
                 })
                 .ok();
             })
@@ -846,7 +842,6 @@ impl Library {
         // A window or a narrowed set is not the whole catalog, so the chip menus only learn from a whole read.
         if !page.narrowed && page.albums.len() as u32 >= page.total {
             self.albums_meta.extend(page.albums.iter().map(album_meta));
-            self.year_span = span_of(&page.albums);
         }
         if self.filters.facet == Facet::Albums {
             let total = page.total.max(page.albums.len() as u32) as usize;
@@ -1307,15 +1302,73 @@ fn album_meta(album: &AlbumInfo) -> (String, AlbumMeta) {
     (album.id.clone(), meta)
 }
 
-/// The widest span of years a whole albums read turned up, for the year chip's menu.
-fn span_of(albums: &[AlbumInfo]) -> Option<(u16, u16)> {
-    let first = albums
-        .iter()
-        .map(|album| album.year)
-        .filter(|year| *year > 0)
-        .min()?;
-    let last = albums.iter().map(|album| album.year).max()?;
-    Some((first, last))
+/// The catalog's first and last year, for the year chip's menu, from one album at each end.
+async fn year_span(api: Arc<dyn KopuzApi>) -> Result<Option<(u16, u16)>, api::ApiError> {
+    let one = store::paging::page(0, 1);
+    let first = api.albums(year_end(SortDirection::Asc), one).await?;
+    let last = api.albums(year_end(SortDirection::Desc), one).await?;
+    Ok(first
+        .albums
+        .first()
+        .zip(last.albums.first())
+        .map(|(first, last)| (first.year, last.year)))
+}
+
+fn year_end(direction: SortDirection) -> AlbumQuery {
+    AlbumQuery {
+        // An album with no year has year 0 and would otherwise open the span.
+        year_from: Some(1),
+        sort: vec![SortCriterion::new(AlbumSortField::Year, direction)],
+        ..Default::default()
+    }
+}
+
+/// Album ids already read for their genre and year; a page of rows asks only about the new ones.
+#[derive(Debug, Default)]
+struct MetaAsks {
+    asked: HashSet<String>,
+    // A failed read gives its ids back, and the next page-in after this asks for them again.
+    retry_at: Option<Instant>,
+}
+
+impl MetaAsks {
+    fn take(&mut self, rows: &[TrackInfo], now: Instant) -> Vec<Vec<String>> {
+        if self.retry_at.is_some_and(|at| now < at) {
+            return Vec::new();
+        }
+        let batches = unasked_albums(rows, &self.asked);
+        for batch in &batches {
+            self.asked.extend(batch.iter().cloned());
+        }
+        batches
+    }
+
+    fn failed(&mut self, batch: &[String], now: Instant) {
+        for id in batch {
+            self.asked.remove(id);
+        }
+        self.retry_at = Some(now + META_BACKOFF);
+    }
+
+    fn invalidate(&mut self) {
+        self.asked.clear();
+        self.retry_at = None;
+    }
+}
+
+const META_BACKOFF: Duration = Duration::from_secs(5);
+
+/// A resync reports every table changed, so it lands here as well as a retag does.
+fn meta_stale(event: &store::TablesChanged) -> bool {
+    event.touches(&[Table::Albums])
+}
+
+/// A reply answers for every id it was asked about: one it leaves out has no album any more.
+fn merge_meta(meta: &mut HashMap<String, AlbumMeta>, asked: &[String], albums: &[AlbumInfo]) {
+    for id in asked {
+        meta.remove(id);
+    }
+    meta.extend(albums.iter().map(album_meta));
 }
 
 /// The order a column the daemon cannot sort by is put in here.
@@ -1372,6 +1425,72 @@ mod paging_tests {
 
         let all: HashSet<String> = unique.into_iter().cloned().chain(asked).collect();
         assert!(unasked_albums(&rows, &all).is_empty());
+    }
+
+    fn rows_on(albums: &[&str]) -> Vec<TrackInfo> {
+        albums
+            .iter()
+            .map(|album| TrackInfo {
+                album_id: album.to_string(),
+                ..Default::default()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_failed_read_gives_its_albums_back_after_a_backoff() {
+        let rows = rows_on(&["a", "b"]);
+        let mut asks = MetaAsks::default();
+        let now = Instant::now();
+        let batch = asks.take(&rows, now).concat();
+        assert_eq!(batch.len(), 2);
+        asks.failed(&batch, now);
+        assert!(asks.take(&rows, now + Duration::from_secs(1)).is_empty());
+        assert_eq!(asks.take(&rows, now + META_BACKOFF).concat().len(), 2);
+        assert!(asks.take(&rows, now + META_BACKOFF).is_empty());
+    }
+
+    #[test]
+    fn a_resync_asks_every_album_again_without_waiting_out_a_failure() {
+        assert!(meta_stale(&store::TablesChanged::everything()));
+        assert!(!meta_stale(&store::TablesChanged::default()));
+        let rows = rows_on(&["a", "b", "c"]);
+        let mut asks = MetaAsks::default();
+        let now = Instant::now();
+        let batch = asks.take(&rows, now).concat();
+        asks.failed(&batch[..1], now);
+        asks.invalidate();
+        assert_eq!(asks.take(&rows, now).concat().len(), 3);
+    }
+
+    #[test]
+    fn the_year_span_reads_one_dated_album_from_each_end() {
+        for (direction, first) in [(SortDirection::Asc, true), (SortDirection::Desc, false)] {
+            let query = year_end(direction);
+            assert_eq!(query.year_from, Some(1));
+            assert_eq!(query.sort.len(), 1);
+            assert_eq!(query.sort[0].field, AlbumSortField::Year);
+            assert_eq!(query.sort[0].direction == SortDirection::Asc, first);
+        }
+    }
+
+    #[test]
+    fn a_reply_drops_the_albums_it_no_longer_has() {
+        let album = |id: &str, genre: &str| AlbumInfo {
+            id: id.to_string(),
+            genre: genre.to_string(),
+            ..Default::default()
+        };
+        let mut meta = HashMap::from([
+            album_meta(&album("a", "Rock")),
+            album_meta(&album("b", "Jazz")),
+        ]);
+        meta.insert("c".to_string(), album_meta(&album("c", "Folk")).1);
+        let asked = ["a".to_string(), "b".to_string()];
+        merge_meta(&mut meta, &asked, &[album("a", "Folk")]);
+        assert_eq!(meta.get("a").map(|meta| meta.genre.as_str()), Some("Folk"));
+        assert!(!meta.contains_key("b"));
+        assert!(meta.contains_key("c"));
     }
 
     #[test]
