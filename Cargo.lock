@@ -6443,6 +6443,7 @@ dependencies = [
  "discover",
  "futures",
  "gpui-kit",
+ "image",
  "kopuz-api",
  "kopuz-config",
  "kopuz-i18n",
@@ -6471,6 +6472,7 @@ dependencies = [
  "topbar",
  "tracing",
  "tracing-subscriber",
+ "tray-icon",
  "winres",
 ]
 
@@ -13091,6 +13093,7 @@ version = "0.1.0"
 dependencies = [
  "gpui-kit",
  "kopuz-config",
+ "kopuz-utils",
  "material-colors",
  "serde_json",
  "store",
@@ -13572,6 +13575,7 @@ dependencies = [
  "components",
  "gpui-kit",
  "kopuz-api",
+ "kopuz-config",
  "kopuz-i18n",
  "link",
  "profile",

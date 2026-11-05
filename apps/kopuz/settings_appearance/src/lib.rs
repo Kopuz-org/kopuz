@@ -494,6 +494,14 @@ pub fn theme_options(cfg: &Settings) -> Vec<ThemeOption> {
         label: t("system_colors"),
         colors: theme::system_colors(None, true),
     });
+    // Album art keeps the default's colours under the cover's light, so the default is what its example shows.
+    if let Some(palette) = theme::palette("default") {
+        options.push(ThemeOption {
+            id: theme::ALBUM_ART.to_string(),
+            label: t("album_art_gradient"),
+            colors: palette.into(),
+        });
+    }
     // A generator's palette recolours the default, so the default is what its example shows.
     if cfg!(not(target_os = "android"))
         && let Some(palette) = theme::palette("default")

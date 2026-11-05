@@ -2,6 +2,7 @@
 
 mod accent;
 mod contrast;
+mod live;
 mod palettes;
 mod system;
 
@@ -16,8 +17,12 @@ pub use accent::{
     ACCENT_TWEEN, Surface, accent_for, accent_from, ambient, ground, swatches, wash_for,
 };
 pub use contrast::{AA, AA_LARGE, contrast, luminance, readable, readable_at, readable_on};
+pub use live::{LIVE, live_colors};
 pub use palettes::{BUILT_IN, palette};
 pub use system::{SYSTEM, system_colors};
+
+/// The theme id for the default palette under a gradient cast by the playing cover.
+pub const ALBUM_ART: &str = "album-art";
 
 /// A built-in Kopuz theme: the same thirteen colors the themes and the editor use.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,9 +206,18 @@ pub fn apply_named(name: &str, window: Option<&mut Window>, cx: &mut App) {
     apply(palette.name, &palette.into(), window, cx);
 }
 
-/// Apply whatever `Ui::theme` names: a built-in, or one of `custom_themes`.
+/// Apply whatever `Ui::theme` names: a built-in, one of `custom_themes`, or a palette drawn from elsewhere.
 pub fn apply_config(config: &Ui, window: Option<&mut Window>, cx: &mut App) {
     let name = config.theme.as_str();
+    if name == LIVE {
+        // Already following means its colours are up; otherwise the default shows until the file is read.
+        if !live::following(cx) {
+            apply_named("default", window, cx);
+            live::follow(cx);
+        }
+        return;
+    }
+    live::stop(cx);
     if let Some(palette) = palette(name) {
         apply(palette.name, &palette.into(), window, cx);
         return;
@@ -224,7 +238,7 @@ pub fn apply_config(config: &Ui, window: Option<&mut Window>, cx: &mut App) {
         }
         return;
     }
-    // "album-art" and "live" recolor the default from a picture; until that lands they are it.
+    // Album art keeps the default's colours; the cover's light behind the window is `ambient`'s.
     apply_named("default", window, cx);
 }
 

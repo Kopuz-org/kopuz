@@ -1,6 +1,7 @@
 //! The navigation bar: history, the destination tabs, the palette field and the right-hand cluster.
 
 mod bounds;
+pub mod frame;
 mod offline;
 mod settings;
 mod switcher;
@@ -30,6 +31,8 @@ pub const COMPACT_BELOW: Pixels = px(700.);
 pub const CONTENT_MAX: Pixels = px(1400.);
 
 const CHROME_GLYPH: Pixels = px(15.);
+/// Room above the rail's first row for macOS's window buttons, which sit over it.
+const RAIL_TRAFFIC_LIGHTS: Pixels = px(28.);
 // `bg-black/40` and `border-white/5`: the chrome's own scrim, as the rail wore it.
 const SCRIM: f32 = 0.40;
 
@@ -242,7 +245,7 @@ impl TopBar {
 }
 
 impl Render for TopBar {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _timing = profile::render("topbar");
         let artists_remote = store::SourcesModel::global(cx)
             .read(cx)
@@ -258,34 +261,57 @@ impl Render for TopBar {
         let history = self.history(cx);
         let cluster = self.cluster(cx);
 
+        let traffic_lights = frame::traffic_lights(window, cx);
+        let rtl = i18n::is_rtl();
+
         match self.position {
             NavPosition::Top => h_flex()
                 .w_full()
                 .h(style::chrome().bar_height)
                 .flex_shrink_0()
                 .items_center()
-                .gap_2()
-                .px_2()
                 .bg(style::black(SCRIM, cx))
                 .border_b_1()
                 .border_color(style::white(style::BORDER_SOFT, cx))
+                // The window buttons stay at the left whichever way the bar reads.
+                .when_some(traffic_lights, |bar, inset| {
+                    bar.child(
+                        frame::drag_region("nav-traffic-lights", cx)
+                            .h_full()
+                            .w(inset)
+                            .flex_shrink_0(),
+                    )
+                })
                 .child(
                     h_flex()
                         .h_full()
-                        .items_center()
-                        .gap_2()
-                        .child(history)
-                        .child(strip),
-                )
-                .child(
-                    h_flex()
                         .flex_1()
                         .min_w_0()
-                        .justify_center()
+                        .items_center()
+                        .gap_2()
                         .px_2()
-                        .child(search),
+                        .when(rtl, |bar| bar.flex_row_reverse())
+                        .child(
+                            h_flex()
+                                .h_full()
+                                .items_center()
+                                .gap_2()
+                                .when(rtl, |group| group.flex_row_reverse())
+                                .child(history)
+                                .child(strip),
+                        )
+                        .child(
+                            h_flex()
+                                .h_full()
+                                .flex_1()
+                                .min_w_0()
+                                .items_center()
+                                .child(frame::drag_region("nav-drag-start", cx).h_full().flex_1())
+                                .child(search)
+                                .child(frame::drag_region("nav-drag-end", cx).h_full().flex_1()),
+                        )
+                        .child(cluster),
                 )
-                .child(cluster)
                 .into_any_element(),
             NavPosition::Left => v_flex()
                 .h_full()
@@ -294,8 +320,19 @@ impl Render for TopBar {
                 .gap_2()
                 .p_2()
                 .bg(style::black(SCRIM, cx))
-                .border_r_1()
+                .map(|rail| match rtl {
+                    true => rail.border_l_1(),
+                    false => rail.border_r_1(),
+                })
                 .border_color(style::white(style::BORDER_SOFT, cx))
+                .when(traffic_lights.is_some(), |rail| {
+                    rail.child(
+                        frame::drag_region("nav-rail-drag", cx)
+                            .w_full()
+                            .h(RAIL_TRAFFIC_LIGHTS)
+                            .flex_shrink_0(),
+                    )
+                })
                 .child(history)
                 .child(search)
                 .child(strip)
