@@ -1,4 +1,4 @@
-use api::{ApiEvent, QueueEdit, QueueSnapshot, TrackInfo};
+use api::{ApiEvent, QueueContext, QueueEdit, QueueSnapshot, TrackInfo};
 use gpui_kit::{App, Context, Entity, Subscription, Task};
 use link::Link;
 
@@ -116,6 +116,40 @@ impl QueueModel {
 
     pub fn contains_key(&self, key: &str) -> bool {
         self.snapshot.items.iter().any(|item| item.key == key)
+    }
+
+    /// What the daemon built the queue from, which a windowed listing compares against its own filter.
+    pub fn context(&self) -> Option<&QueueContext> {
+        self.snapshot.context.as_ref()
+    }
+
+    /// Whether the queue is exactly `keys`, in the listing's own order however shuffle has played it.
+    pub fn holds(&self, keys: &[String]) -> bool {
+        holds_by(&self.snapshot, keys.len(), |at| {
+            keys.get(at).map(String::as_str)
+        })
+    }
+
+    /// The same for a list of rows.
+    pub fn holds_tracks(&self, rows: &[TrackInfo]) -> bool {
+        holds_by(&self.snapshot, rows.len(), |at| {
+            rows.get(at).map(|row| row.key.as_str())
+        })
+    }
+
+    /// Play the row at `index` of the unshuffled queue; under shuffle the rest re-pins around it.
+    pub fn jump_physical(&mut self, index: u32, cx: &mut Context<Self>) {
+        let order = &self.snapshot.shuffle_order;
+        let position = match order.is_empty() {
+            true => Some(index),
+            false => order.iter().position(|at| *at == index).map(|at| at as u32),
+        };
+        if position.is_some() {
+            self.snapshot.position = position;
+            self.resummarize();
+            crate::notify(cx);
+        }
+        edit(QueueEdit::JumpPhysical { index }, cx);
     }
 
     pub fn jump(&mut self, index: u32, cx: &mut Context<Self>) {
@@ -247,6 +281,28 @@ fn reindex(at: u32, from: u32, to: u32) -> u32 {
     }
 }
 
+fn holds_by<'a>(
+    snapshot: &QueueSnapshot,
+    len: usize,
+    key_at: impl Fn(usize) -> Option<&'a str>,
+) -> bool {
+    let items = &snapshot.items;
+    if items.is_empty() || items.len() != len {
+        return false;
+    }
+    let order = &snapshot.shuffle_order;
+    match order.len() == items.len() {
+        true => items
+            .iter()
+            .zip(order)
+            .all(|(item, at)| key_at(*at as usize) == Some(item.key.as_str())),
+        false => items
+            .iter()
+            .enumerate()
+            .all(|(at, item)| key_at(at) == Some(item.key.as_str())),
+    }
+}
+
 fn edit(edit: QueueEdit, cx: &App) {
     Link::global(cx).fire(cx, "queue edit", move |api| async move {
         api.queue_edit(edit).await
@@ -255,7 +311,46 @@ fn edit(edit: QueueEdit, cx: &App) {
 
 #[cfg(test)]
 mod tests {
-    use super::reindex;
+    use super::{QueueSnapshot, TrackInfo, holds_by, reindex};
+
+    fn snapshot(keys: &[&str], shuffle_order: Vec<u32>) -> QueueSnapshot {
+        QueueSnapshot {
+            items: keys
+                .iter()
+                .map(|key| TrackInfo {
+                    key: key.to_string(),
+                    ..TrackInfo::default()
+                })
+                .collect(),
+            shuffle_order,
+            ..QueueSnapshot::default()
+        }
+    }
+
+    fn holds(snapshot: &QueueSnapshot, keys: &[&str]) -> bool {
+        holds_by(snapshot, keys.len(), |at| keys.get(at).copied())
+    }
+
+    #[test]
+    fn a_queue_holds_the_listing_it_was_built_from() {
+        let queue = snapshot(&["a", "b", "c"], Vec::new());
+        assert!(holds(&queue, &["a", "b", "c"]));
+        assert!(!holds(&queue, &["a", "c", "b"]));
+        assert!(!holds(&queue, &["a", "b"]));
+    }
+
+    #[test]
+    fn a_shuffled_queue_still_holds_its_listing() {
+        // Play order c, a, b: positions map back to unshuffled indices 2, 0, 1.
+        let queue = snapshot(&["c", "a", "b"], vec![2, 0, 1]);
+        assert!(holds(&queue, &["a", "b", "c"]));
+        assert!(!holds(&queue, &["c", "a", "b"]));
+    }
+
+    #[test]
+    fn an_empty_queue_holds_nothing() {
+        assert!(!holds(&snapshot(&[], Vec::new()), &[]));
+    }
 
     #[test]
     fn the_moved_row_carries_the_playhead_with_it() {

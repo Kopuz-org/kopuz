@@ -31,8 +31,6 @@ const ROW_NAME: f32 = 0.85;
 /// A source the internet being down leaves out of reach still answers a click, with the daemon's refusal.
 const CUT_OFF: f32 = 0.45;
 
-const MANAGE_ICON: &str = "icons/sliders-horizontal.svg";
-
 /// The active source, and a popover to pick another.
 #[derive(IntoElement)]
 pub struct SourceSwitcher {
@@ -126,7 +124,7 @@ fn build(
         );
     crate::offline::item(menu.separator(), cx).item(
         PopupMenuItem::new(t("manage_sources"))
-            .icon(Icon::default().path(MANAGE_ICON).size(GLYPH))
+            .icon(Icon::default().path(icons::SLIDERS).size(GLYPH))
             .on_click(|_, _, cx| {
                 Navigator::navigate(
                     Route::Settings {

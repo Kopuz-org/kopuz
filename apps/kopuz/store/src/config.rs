@@ -26,6 +26,7 @@ pub struct ConfigModel {
     _tick: Option<Task<()>>,
     _fetch: Option<Task<()>>,
     _subscription: Subscription,
+    _quit: Subscription,
 }
 
 impl ConfigModel {
@@ -42,6 +43,8 @@ impl ConfigModel {
             }
             _ => {}
         });
+        // An edit still inside the save delay would otherwise die with the process.
+        let quit = cx.on_app_quit(|this, cx| this.flush(cx));
         Self {
             view: ConfigView::default(),
             loaded: false,
@@ -52,6 +55,7 @@ impl ConfigModel {
             _tick: None,
             _fetch: None,
             _subscription: subscription,
+            _quit: quit,
         }
     }
 
@@ -91,9 +95,14 @@ impl ConfigModel {
             .map(|lock| &lock.by)
     }
 
-    /// A settings layer pins `name`; its control renders locked.
+    /// A settings layer pins `name`, spelled as `SettingKey::name` spells it (`cover_art_blur`); its control renders locked.
     pub fn is_locked(&self, name: &str) -> bool {
         self.lock_of(name).is_some()
+    }
+
+    /// The same, by the typed key, so a misspelt name cannot silently read as unlocked.
+    pub fn is_pinned(&self, key: SettingKey) -> bool {
+        self.view.locks.iter().any(|lock| lock.key == key)
     }
 
     pub fn reload(&mut self, cx: &mut Context<Self>) {
@@ -130,13 +139,6 @@ impl ConfigModel {
 
     /// Apply `edit` to the copy now and queue it; the daemon hears it once edits settle.
     pub fn update(&mut self, cx: &mut Context<Self>, edit: SettingsEdit) {
-        if !self.loaded {
-            tracing::warn!(
-                key = SettingKey::of(&edit).name(),
-                "config edit before the daemon config loaded; ignored"
-            );
-            return;
-        }
         let key = SettingKey::of(&edit);
         self.saved.retain(|held| *held != key);
         let language = self.view.settings.ui.language.clone();
@@ -146,7 +148,33 @@ impl ConfigModel {
         }
         queue(&mut self.pending, edit);
         crate::notify(cx);
-        self.schedule_save(cx);
+        // Held until the daemon's config is read, so a defaulted copy is never what gets written.
+        if self.loaded {
+            self.schedule_save(cx);
+        }
+    }
+
+    /// Send every queued edit now instead of after the settle delay; the task ends once the daemon answers.
+    pub fn flush(&mut self, cx: &mut Context<Self>) -> Task<()> {
+        if !self.loaded || self.pending.is_empty() {
+            return Task::ready(());
+        }
+        self._save = None;
+        let edits = std::mem::take(&mut self.pending);
+        self.in_flight.extend(edits.iter().cloned());
+        let sent = edits.clone();
+        let call = Link::global(cx).call(move |api| async move { api.edit_config(sent).await });
+        cx.spawn(async move |this, cx| {
+            let result = call.await;
+            this.update(cx, |this, cx| {
+                this.in_flight.retain(|held| !edits.contains(held));
+                match result {
+                    Ok(report) => this.answer(&edits, report, cx),
+                    Err(error) => tracing::warn!(%error, "flushing the config failed"),
+                }
+            })
+            .ok();
+        })
     }
 
     fn schedule_save(&mut self, cx: &mut Context<Self>) {
@@ -250,8 +278,12 @@ impl ConfigModel {
             locks: view.locks,
             revision: view.revision,
         };
+        let first = !self.loaded;
         self.loaded = true;
         crate::notify(cx);
+        if first && !self.pending.is_empty() {
+            self.schedule_save(cx);
+        }
     }
 }
 

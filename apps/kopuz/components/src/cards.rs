@@ -3,7 +3,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use api::{AlbumInfo, ArtistInfo, ArtworkRef, PlaylistInfo};
+use api::{AlbumInfo, ArtistInfo, ArtworkRef, CatalogItemKind, PlaylistInfo};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -11,11 +11,12 @@ use gpui_kit::{
     ParentElement as _, Pixels, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled,
     Window, div, px,
 };
-use store::{Navigator, Pictured, Route, Target};
+use store::{CatalogCache, Navigator, Pictured, Route, Target};
 
 use crate::cover::Cover;
 use crate::cover_overlay::CoverOverlay;
 pub use crate::cover_overlay::PlayState;
+use crate::explicit::ExplicitBadge;
 use crate::icons;
 use crate::menu_button::{MenuButton, MenuVariant};
 use crate::menus::{self, Picture, WithContextMenu as _};
@@ -30,6 +31,7 @@ const WASH: u64 = 2;
 const COVER: u64 = 3;
 const TITLE: u64 = 4;
 const PLAY: u64 = 5;
+const EXPLICIT: u64 = 6;
 
 /// What a click on a card or row does.
 pub type OnClick = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
@@ -65,6 +67,8 @@ pub struct Tile {
     tint: bool,
     zoom_speed: Duration,
     pictured: Option<Pictured>,
+    explicit: bool,
+    prefetch: Option<(CatalogItemKind, SharedString)>,
 }
 
 impl Tile {
@@ -88,12 +92,26 @@ impl Tile {
             tint: false,
             zoom_speed: motion::SLOW,
             pictured: None,
+            explicit: false,
+            prefetch: None,
         }
     }
 
     pub fn subtitle(mut self, subtitle: impl Into<SharedString>) -> Self {
         let subtitle = subtitle.into();
         self.subtitle = (!subtitle.is_empty()).then_some(subtitle);
+        self
+    }
+
+    /// The source marks it explicit, which the title line says with a badge.
+    pub fn explicit(mut self, explicit: bool) -> Self {
+        self.explicit = explicit;
+        self
+    }
+
+    /// A catalog tile whose first page is fetched once the pointer rests on it, so playing it starts at once.
+    pub fn prefetch(mut self, kind: CatalogItemKind, id: impl Into<SharedString>) -> Self {
+        self.prefetch = Some((kind, id.into()));
         self
     }
 
@@ -273,16 +291,25 @@ impl RenderOnce for Tile {
             .when(!framed, |lines| lines.px_1().gap_1())
             .when(self.round, |lines| lines.items_center())
             .child(
-                div()
+                h_flex()
                     .w_full()
-                    .truncate()
-                    .when(self.round, |line| line.text_center())
-                    .map(|line| match framed {
-                        true => line.font_weight(FontWeight::MEDIUM),
-                        false => line.font_weight(FontWeight::BOLD),
-                    })
-                    .text_color(title_ink)
-                    .child(self.title),
+                    .gap_1p5()
+                    .when(self.round, |line| line.justify_center())
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .when(self.round, |line| line.text_center())
+                            .map(|line| match framed {
+                                true => line.font_weight(FontWeight::MEDIUM),
+                                false => line.font_weight(FontWeight::BOLD),
+                            })
+                            .text_color(title_ink)
+                            .child(self.title),
+                    )
+                    .when(self.explicit, |line| {
+                        line.child(ExplicitBadge::new(motion::channel(&id, EXPLICIT)))
+                    }),
             )
             .when_some(self.subtitle, |lines, subtitle| {
                 lines.child(
@@ -321,7 +348,19 @@ impl RenderOnce for Tile {
             false => tile.gap_4(),
         })
         .when(click.is_some(), |tile| tile.cursor_pointer())
-        .on_hover(motion::track(pointer))
+        .on_hover({
+            let track = motion::track(pointer);
+            let prefetch = self.prefetch;
+            move |over, window, cx| {
+                track(over, window, cx);
+                if let Some((kind, id)) = &prefetch {
+                    match *over {
+                        true => CatalogCache::arm(*kind, id.to_string(), cx),
+                        false => CatalogCache::disarm(id, cx),
+                    }
+                }
+            }
+        })
         .when_some(click, |tile, click| {
             tile.on_click(move |event, window, cx| click(event, window, cx))
         })

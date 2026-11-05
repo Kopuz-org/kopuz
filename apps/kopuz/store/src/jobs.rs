@@ -21,6 +21,20 @@ pub struct JobEvent {
     pub automatic: bool,
 }
 
+/// A job moved, for an observer that only cares about one kind and should not wake for the rest.
+#[derive(Debug, Clone)]
+pub struct JobProgressed(JobProgress);
+
+impl JobProgressed {
+    pub fn progress(&self) -> &JobProgress {
+        &self.0
+    }
+
+    pub fn kind(&self) -> JobKind {
+        self.0.kind
+    }
+}
+
 /// A job that has just stopped, kept on the list for [`LINGER`] so its outcome can be read.
 #[derive(Debug, Clone)]
 pub struct Finished {
@@ -62,6 +76,7 @@ pub struct JobsModel {
 }
 
 impl EventEmitter<JobEvent> for JobsModel {}
+impl EventEmitter<JobProgressed> for JobsModel {}
 
 impl JobsModel {
     pub fn global(cx: &App) -> Entity<Self> {
@@ -81,6 +96,7 @@ impl JobsModel {
                     None => this.running.push(progress.clone()),
                 }
                 crate::notify(cx);
+                cx.emit(JobProgressed(progress.clone()));
             }
             ApiEvent::JobFinished {
                 id,

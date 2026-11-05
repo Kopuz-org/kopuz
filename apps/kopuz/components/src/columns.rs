@@ -54,6 +54,14 @@ pub const SPECS: &[Spec] = &[
         required: false,
     },
     Spec {
+        id: "genre",
+        label_key: "genre",
+        grow: 1.,
+        base: 120.,
+        align_end: false,
+        required: false,
+    },
+    Spec {
         id: "plays",
         label_key: "library_column_plays",
         grow: 0.,

@@ -6,8 +6,10 @@ mod artwork;
 mod artwork_edit;
 mod backdrop;
 mod catalog_cache;
+mod catalog_marks;
 mod chrome;
 mod config;
+mod debounce;
 mod downloads;
 mod favorites;
 mod for_you;
@@ -39,14 +41,16 @@ pub use artwork::{Arrival, ArtworkBytes, ArtworkKey, Residents, artwork_source};
 pub use artwork_edit::{content_type_for, pick_and_upload, pick_image, remove_artwork};
 pub use backdrop::{blurred_backdrop, resolve_backdrop};
 pub use catalog_cache::{Cached, CatalogCache};
+pub use catalog_marks::CatalogMarks;
 pub use chrome::{Chrome, SidePanel, register_mini_player, toggle_mini_player};
 pub use config::{ConfigModel, lock_cause};
+pub use debounce::Debounce;
 pub use downloads::{BatchFinished, DownloadItem, DownloadsModel, ItemState, Offline};
 pub use favorites::FavoritesModel;
 pub use for_you::{ForYouModel, ForYouState};
 pub use freeze::Freeze;
 pub use invalidation::{Invalidation, TablesChanged};
-pub use jobs::{Finished, JobEvent, JobsModel, kind_key, kind_label};
+pub use jobs::{Finished, JobEvent, JobProgressed, JobsModel, kind_key, kind_label};
 pub use layout::{Layout, LayoutModel};
 pub use link::{Link, api};
 pub use nav::{Navigator, Route};
@@ -69,7 +73,7 @@ pub use signin::{
     sign_in_again, sign_in_wait, start_sign_in,
 };
 pub use sources::{NetworkNotice, SourceStatus, SourcesModel, SwitchStarted};
-pub use target::{Kind, RowEdit, RowScope, Target, TrackActions};
+pub use target::{CatalogEntry, Kind, RowEdit, RowScope, Target, TrackActions};
 pub use updates::UpdateModel;
 
 /// `cx.notify()`, counted: a shared model's notify dirties every ancestor, so the profiler wants it.
@@ -144,6 +148,7 @@ pub fn init(cx: &mut App) {
     register(cx, QueueModel::new);
     register(cx, FavoritesModel::new);
     register(cx, PlaylistsModel::new);
+    register(cx, CatalogMarks::new);
     register(cx, ForYouModel::new);
     register(cx, JobsModel::new);
     register(cx, DownloadsModel::new);

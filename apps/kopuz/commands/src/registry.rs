@@ -1,11 +1,12 @@
 //! The list. Order here is the order a menu draws and the order the palette falls back to.
 
-use api::PlaylistCapability;
+use api::{PlaylistCapability, Rating};
 use components::format::t;
 use components::icons;
 use gpui_kit::App;
 use store::{Kind, Navigator, Route, Target, actions};
 
+use crate::catalog;
 use crate::ops;
 use crate::{Binding, Command, Group, Section};
 
@@ -17,6 +18,8 @@ const PLAYLIST: &[Kind] = &[Kind::Playlist];
 const FOLDER: &[Kind] = &[Kind::Folder];
 const QUEUE_ITEM: &[Kind] = &[Kind::QueueItem];
 const NOTHING: &[Kind] = &[Kind::None];
+const CATALOG: &[Kind] = &[Kind::Catalog, Kind::Tracks];
+const CATALOG_PAGE: &[Kind] = &[Kind::Catalog];
 const NO_KEYS: &[Binding] = &[];
 
 const SHELL: &str = "Shell";
@@ -171,6 +174,75 @@ static COMMANDS: &[Command] = &[
         applies: TRACKS,
         available: |target, cx| has_tracks(target, cx) && ops::caps(cx).downloads,
         run: |target, _, cx| ops::toggle_download(&target, cx),
+        action: None,
+    },
+    // Catalog verbs, for a source item or a track row its listing handed refs for.
+    Command {
+        id: "catalog.like",
+        labels: &["catalog_like", "catalog_unlike"],
+        label: |target, cx| match catalog::rating(target, cx) {
+            Rating::Like => t("catalog_unlike"),
+            _ => t("catalog_like"),
+        },
+        icon: Some(icons::THUMBS_UP),
+        group: Group::Library,
+        section: Section::Act,
+        keys: NO_KEYS,
+        danger: false,
+        applies: CATALOG,
+        available: catalog::can_rate,
+        run: |target, _, cx| catalog::rate(&target, Rating::Like, cx),
+        action: None,
+    },
+    Command {
+        id: "catalog.dislike",
+        labels: &["catalog_dislike", "catalog_undislike"],
+        label: |target, cx| match catalog::rating(target, cx) {
+            Rating::Dislike => t("catalog_undislike"),
+            _ => t("catalog_dislike"),
+        },
+        icon: Some(icons::THUMBS_DOWN),
+        group: Group::Library,
+        section: Section::Act,
+        keys: NO_KEYS,
+        danger: false,
+        applies: CATALOG,
+        available: catalog::can_rate,
+        run: |target, _, cx| catalog::rate(&target, Rating::Dislike, cx),
+        action: None,
+    },
+    Command {
+        id: "catalog.save",
+        labels: &["catalog_save", "catalog_unsave"],
+        label: |target, cx| match catalog::is_saved(target, cx) {
+            true => t("catalog_unsave"),
+            false => t("catalog_save"),
+        },
+        icon: Some(icons::BOOKMARK),
+        group: Group::Library,
+        section: Section::Act,
+        keys: NO_KEYS,
+        danger: false,
+        applies: CATALOG,
+        available: catalog::can_save,
+        run: |target, _, cx| catalog::toggle_save(&target, cx),
+        action: None,
+    },
+    Command {
+        id: "catalog.follow",
+        labels: &["catalog_follow", "catalog_unfollow"],
+        label: |target, cx| match catalog::is_followed(target, cx) {
+            true => t("catalog_unfollow"),
+            false => t("catalog_follow"),
+        },
+        icon: Some(icons::FOLLOW),
+        group: Group::Library,
+        section: Section::Act,
+        keys: NO_KEYS,
+        danger: false,
+        applies: CATALOG,
+        available: catalog::can_follow,
+        run: |target, _, cx| catalog::toggle_follow(&target, cx),
         action: None,
     },
     Command {
@@ -341,6 +413,49 @@ static COMMANDS: &[Command] = &[
         action: Some(|| Box::new(components::track_list::RemoveSelection)),
     },
     // Albums.
+    Command {
+        id: "catalog.edit_details",
+        labels: &["playlist_edit_details"],
+        label: |_, _| t("playlist_edit_details"),
+        icon: Some(icons::EDIT),
+        group: Group::Library,
+        section: Section::Edit,
+        keys: NO_KEYS,
+        danger: false,
+        applies: CATALOG_PAGE,
+        available: catalog::can_edit_details,
+        run: |target, window, cx| catalog::edit_details(&target, window, cx),
+        action: None,
+    },
+    Command {
+        id: "catalog.remove_from_history",
+        labels: &["catalog_remove_history"],
+        label: |_, _| t("catalog_remove_history"),
+        icon: Some(icons::HISTORY),
+        group: Group::Library,
+        section: Section::Remove,
+        keys: NO_KEYS,
+        danger: false,
+        applies: CATALOG,
+        available: catalog::can_remove_from_history,
+        run: |target, _, cx| catalog::remove_from_history(&target, cx),
+        action: None,
+    },
+    Command {
+        id: "catalog.delete_playlist",
+        labels: &["delete_playlist", "catalog_unsave"],
+        label: |target, _| catalog::delete_label(target),
+        icon: Some(icons::TRASH),
+        group: Group::Library,
+        section: Section::Remove,
+        keys: NO_KEYS,
+        // It asks with the source named, so the generic confirm stays out of the way.
+        danger: false,
+        applies: CATALOG_PAGE,
+        available: catalog::can_delete_at_source,
+        run: |target, window, cx| catalog::delete_at_source(&target, window, cx),
+        action: None,
+    },
     Command {
         id: "album.play",
         labels: &["play"],

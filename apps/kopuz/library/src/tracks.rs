@@ -68,12 +68,20 @@ impl Library {
     pub(crate) fn play_from(&mut self, index: usize, cx: &mut Context<Self>) {
         // The daemon materializes a filter itself, so a 40,000-row queue never crosses the wire.
         if !self.whole && self.filters().folder.is_none() {
-            let filter = self.filters().track_filter(self.sort());
-            actions::play_context(QueueContext::Filter { filter }, Some(index as u32), cx);
+            let context = QueueContext::Filter {
+                filter: self.filters().track_filter(self.sort()),
+            };
+            let queue = store::QueueModel::global(cx);
+            let same =
+                queue.read(cx).context() == Some(&context) && queue.read(cx).len() == self.total();
+            match same {
+                true => queue.update(cx, |queue, cx| queue.jump_physical(index as u32, cx)),
+                false => actions::play_context(context, Some(index as u32), cx),
+            }
             return;
         }
         let keys: Vec<String> = self.rows.iter().map(|row| row.key.clone()).collect();
-        actions::play_tracks(keys, Some(index as u32), cx);
+        actions::play_listing(keys, index, cx);
     }
 
     /// The table: its header and the rows under it, of which only a screenful is ever built.
@@ -228,6 +236,7 @@ impl Library {
             .cover(covers)
             .stored(store::DownloadsModel::global(cx).read(cx).is_stored(&key))
             .plays(self.plays_for(track))
+            .genre(self.genre_of(track).to_string())
             .playing(self.is_playing(&key))
             .selected(selected)
             .picking(self.selection.is_active())
@@ -263,6 +272,18 @@ impl Library {
                     cx.notify();
                 }
             }))
+            .on_long_press({
+                let (page, key) = (cx.weak_entity(), key.clone());
+                move |_, cx| {
+                    page.update(cx, |this, cx| {
+                        if !this.selection.is_active() {
+                            this.selection.toggle(&key, index);
+                            cx.notify();
+                        }
+                    })
+                    .ok();
+                }
+            })
             .on_pick(cx.listener(move |this, _: &bool, _, cx| {
                 this.selection.toggle(&key, index);
                 cx.notify();

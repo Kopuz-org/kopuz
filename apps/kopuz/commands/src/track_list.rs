@@ -2,7 +2,7 @@
 
 use components::track_list::{TrackList, TrackListEvent};
 use gpui_kit::{App, Entity};
-use store::{ConfigModel, DownloadsModel, PlayerModel, Target};
+use store::{ConfigModel, DownloadsModel, PlayerModel, QueueModel, Target};
 
 use crate::ops;
 
@@ -40,9 +40,15 @@ pub fn bind(list: &Entity<TrackList>, cx: &mut App) {
             .update(cx, |list, cx| list.set_stored(stored, cx))
             .ok();
     });
+    let on_queue = cx.observe(&QueueModel::global(cx), {
+        let weak = list.downgrade();
+        move |_, cx| {
+            weak.update(cx, |list, cx| list.refresh_queued(cx)).ok();
+        }
+    });
     let on_event = cx.subscribe(list, |_, event: &TrackListEvent, cx| perform(event, cx));
     list.update(cx, |list, _| {
-        list.hold([on_player, on_config, on_downloads, on_event])
+        list.hold([on_player, on_config, on_downloads, on_queue, on_event])
     });
 }
 

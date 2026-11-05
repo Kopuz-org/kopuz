@@ -91,15 +91,15 @@ Data: `api.catalog(continuation)` · `api.catalog_detail(CatalogDetailRequest)`
 - [x] Infinite scroll: sentinel + IntersectionObserver (600 px margin) → `api.catalog(Some(token))`, "discover_more_loading"
 - [x] Tile kinds: Album/Playlist card (click → Album route / DiscoverPlaylist), Artist card (round; click → DiscoverArtistPage with channel id), Mood/Unknown (inert), Track = SongCard
 - [x] Card hover play button: `play_catalog(kind,id)` pages `catalog_detail` until `continuation` is None; first page → `set_queue{Replace, Tracks}`, rest `Append`; dedup keys; sets `browse_loading`; caches full list only when complete
-- [ ] Hover prefetch after 250 ms dwell (disarmed on mouseleave) into `DiscoverPrefetchCache` (app-wide), used by play_catalog (missing: the hover prefetch cache; `TODO(prefetch)` in discover/src/shelves.rs)
+- [x] Hover prefetch after 250 ms dwell (disarmed on mouseleave) into `DiscoverPrefetchCache` (app-wide), used by play_catalog
 - [x] `DiscoverNowPlaying` (app-wide): tile whose id started playback shows pause/loading; click toggles instead of refetching
 - [x] SongCard click: RADIO_T(key) if `caps.track_radio`, else `set_queue{Replace, Tracks{[key]}}`
 - [x] List shelves (`shelf.list`): TrackRow list, play = `set_queue{Replace, Tracks{keys}, start_index:i}`, "discover_show_all" → DiscoverPlaylist(more_ref, title)
 - [x] Failure while appending pages sets `playback_error` banner
-- [ ] Explicit badge on catalog tiles and song rows (`CatalogItem.explicit`)
-- [ ] Rate a song or catalog item (`caps.rate` → `api.rate(ref, Rating)`) from the track and catalog menus
-- [ ] Save an album or playlist to the source's library (`caps.save` → `api.save(ref, on)`)
-- [ ] Remove an entry from the source's history (`caps.remove_from_history` → `api.remove_from_history(token)`)
+- [x] Explicit badge on catalog tiles and song rows (`CatalogItem.explicit`)
+- [ ] Rate a song or catalog item (`caps.rate` → `api.rate(ref, Rating)`) from the track and catalog menus (missing: album and artist tiles still carry library menus)
+- [ ] Save an album or playlist to the source's library (`caps.save` → `api.save(ref, on)`) (missing: album tiles still carry library menus; playlists are done)
+- [x] Remove an entry from the source's history (`caps.remove_from_history` → `api.remove_from_history(token)`)
 - [x] Pages the source declares (`caps.pages`) open as their own route, read with `CatalogDetailRequest::page(id)`
 
 ### 2.4 DiscoverPlaylist (`DiscoverPlaylistDetail`)
@@ -110,7 +110,7 @@ Data: `api.catalog(continuation)` · `api.catalog_detail(CatalogDetailRequest)`
 - [x] `catalog_detail{Artist, id = channel id or name}`; generation guard; "artist_none_selected"
 - [x] Banner (artwork bg), title, subtitle, description (3-line clamp), Shuffle button → `play_catalog(Playlist, playback_id)`
 - [x] Shelves rendered with the same ShelfRow/tiles as Discover; artist tiles re-open this page; back button
-- [ ] Follow / unfollow the artist (`caps.follow` → `api.follow(ref, on)`, "catalog_follow" / "catalog_unfollow")
+- [x] Follow / unfollow the artist (`caps.follow` → `api.follow(ref, on)`, "catalog_follow" / "catalog_unfollow")
 - [x] Shuffle and radio buttons from the ids the profile carries
 
 ### 2.6 Library (`pages/library.rs`)
@@ -122,7 +122,7 @@ Data: windowed `api.tracks(TrackFilter{sort: Fields(cfg.library_sort)}, Page{off
 - [x] SortControl (stacked criteria) over Title/Artist/Album/Duration/DateAdded → `cfg.library_sort`
 - [x] Virtualized list (60 px rows, 10-row buffer), scroll persisted per route; column header
 - [x] Row click play: fetch whole filtered list `api.tracks(filter, all)` → PLAY_LIST(all, idx)
-- [ ] Now-playing row highlight (only when queue length == total) (missing: the highlight follows the playing key whatever the queue holds)
+- [x] Now-playing row highlight (only when queue length == total)
 - [x] Track row menu (§3.9) with: metadata edit (`caps.edit_tags`), delete (`DELETE([key], caps.delete_from_disk)`, hidden unless `caps.delete_from_disk`), download toggle (`caps.downloads`), radio
 - [x] Multi-select (long-press / checkbox) → SelectionBar: Add to queue (fetch all, filter selected, APPEND), Add to playlist (ADD_TO_PL), Delete (if `caps.delete_from_disk`), Cancel
 - [x] States: spinner while total unknown or syncing; "no_tracks_found"; trailing spinner while syncing
@@ -162,7 +162,7 @@ Data: `api.playlists()` → `PlaylistCatalog` inv:Playlists+Folders; detail trac
 - [ ] Flat remote layout (`!caps.folders`): JOB(PlaylistSync) on mount when `caps.sync`; if `caps.albums == Remote` sync status row ("Loading tracks — done/total", "N playlists synced", Refresh → JOB(PlaylistSync)) from JobProgress(PlaylistSync); card with "Server • N tracks", radio dots menu, hover download/remove-downloads button (`caps.downloads`, spinner while any key active) (missing: built in the unrouted `page_playlists::Playlists`; the library facet has no PlaylistSync, sync row or per-card download toggle)
 - [ ] Empty: anonymous source → "source_anon_playlists" else "no_playlists_found" (missing: the library facet shows `no_playlists_yet` only; `source_anon_playlists` lives in the unrouted page)
 - [x] PlaylistDetail: on mount `api.refresh_playlist(id)` when `caps.sync`; TrackListView with Start radio (RADIO_P), cover click → `upload_artwork{Playlist(id)}`, metadata (`caps.edit_tags`), row "Remove from playlist" → `api.remove_playlist_track(id, index)`, reorder ▲▼ buttons when `caps.playlists == Reorder` → `api.reorder_playlist(id, {from,to})`, delete track (`DELETE([key], caps.delete_from_disk)`), download all/one/remove (`caps.downloads`), "playlist_not_found"
-- [ ] Source playlist menu when `caps.playlist_details`: edit name and description (`api.edit_playlist`), rate, delete on the source
+- [ ] Source playlist menu when `caps.playlist_details`: edit name and description (`api.edit_playlist`), rate, delete on the source (missing: on the catalog playlist page only, and the details dialog edits description and privacy, not the name)
 
 ### 2.10 Favorites (`pages/favorites.rs`, `favorites_body.rs`)
 Data: `api.favorites()` inv:Favorites → `api.tracks_by_keys(refs)` inv:Tracks; JobProgress(FavoritesSync)
@@ -176,7 +176,7 @@ Data: `api.favorites()` inv:Favorites → `api.tracks_by_keys(refs)` inv:Tracks;
 
 ### 2.11 Activity (`pages/activity.rs`)
 Data: windowed `api.tracks(TrackFilter{sort: PlayCount})` + count; genre per album from `api.albums(all)`; play counts read from `cfg.listen_counts[source.listen_count_key(uid)]` (not `api.stats()`, see §6)
-- [ ] "listening_logs" / "most_played_tracks" header; columns #, title (cover+artist), album, genre, time, plays (fire icon if >0) (missing: no genre column or fire icon; Activity is the library sorted by its plays column)
+- [ ] "listening_logs" / "most_played_tracks" header; columns #, title (cover+artist), album, genre, time, plays (fire icon if >0) (missing: Activity is the library sorted by its plays column, with no header of its own)
 - [x] Row click → fetch all with same filter → PLAY_LIST(all, idx); virtualized; scroll persisted
 - [x] Spinner / "no_tracks_in_library"
 
@@ -293,7 +293,7 @@ Data: `api.lyrics(key)` per track change (none for radio, stale answers dropped)
 
 ### 3.9 Track row (`track/row.rs`) — shared by every list
 - [ ] Columns: # (or track number in albums; play icon on hover), cover (`cfg.show_row_images`), title (+artist inline), artist (click → artist), album (click → album; hidden in album views), duration, dots menu; Normal and Vaxry column templates; disc headers in multi-disc albums (missing: no Vaxry column template)
-- [ ] Click → on_play; long-press (touch or mouse hold) → selection mode; checkbox in selection mode (missing: long-press and the row checkbox; a row enters selection with ctrl/cmd-click)
+- [x] Click → on_play; long-press (touch or mouse hold) → selection mode; checkbox in selection mode
 - [x] Right-click opens the same menu at the cursor
 - [x] Mouse-drag a row (or the selection) toward the queue (§3.7)
 - [x] Menu (entries gated by what the page wires): Play next (PLAY_NEXT), Add to queue (APPEND), Add to playlist (ADD_TO_PL), Remove from playlist, Download Offline / Remove Download / Downloading… (DL/UNDL), Delete (DELETE), Share (SHARE), Start radio (RADIO_T, `caps.track_radio`), View/Edit metadata
@@ -345,7 +345,7 @@ Shown only when active source has `caps.external_devices` and `authenticated`
 
 ### 3.17 Tray / close behavior (desktop)
 - [ ] `cfg.minimize_to_tray`: tray icon with "Show / Hide Kopuz" and "Quit Kopuz"; window close hides instead of quitting; Linux checks appindicator libs and warns/popups if missing (missing: no tray; `minimize_to_tray` is a settings row with no effect)
-- [ ] On quit: final `set_config` flush (volume folded in) on a fresh thread (missing: no flush on quit, so an edit inside the save debounce is lost)
+- [x] On quit: final `set_config` flush (volume folded in) on a fresh thread
 
 ---
 
@@ -444,7 +444,7 @@ Category → rows. **[H]** = hardcoded `Settings` field (applied to the local co
 - [x] Clock: `DaemonClock` maps daemon `now_ms` to local Instant; position anchor `{ms, at_ms, playing}` interpolated locally; 1 s ticker updates progress while playing; ev:PlayerPosition re-anchors; ev:PlayerBuffered updates ranges
 - [x] Queue mirror: `items` (play order), `shuffle_order` (unshuffled index per position), `position`, `shuffle`; displayed order applies shuffle permutation
 - [x] Optimistic writes: `is_playing` on Play/Pause/Toggle, `shuffle`, `loop_mode`, `volume`, seek progress + anchor; everything else waits for events
-- [ ] Row click semantics: `JumpPhysical{index}` for track-list clicks under shuffle; `Jump{index}` for queue view (missing: track-list clicks always rebuild the queue; nothing sends `JumpPhysical`)
+- [x] Row click semantics: `JumpPhysical{index}` for track-list clicks under shuffle; `Jump{index}` for queue view
 - [x] `CommandAck.rev` is never awaited anywhere in the Dioxus frontend; correctness relies on the resync-on-QueueChanged path (port may choose to wait for rev)
 - [x] ev:ConfigChanged, ev:SourceStatus, ev:Notice are not consumed by the Dioxus frontend
 
@@ -461,7 +461,7 @@ Category → rows. **[H]** = hardcoded `Settings` field (applied to the local co
 - [x] Any `cfg` change or persisted-volume change marks dirty; saver loop: 600 ms settle → `api.set_config(cfg with current volume)` → 2.5 s cooldown
 - [x] Locked keys read once from `ConfigView.locks`
 - [x] After `switch_source`, pull `api.config()` back into `cfg`
-- [ ] Final flush on window close/quit (missing: no flush on quit)
+- [x] Final flush on window close/quit
 
 ### 5.4 Artwork
 - [x] Every row carries `Option<ArtworkRef{target, version}>`; None → placeholder, never request

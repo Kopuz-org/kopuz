@@ -3,14 +3,17 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use api::CatalogDetail;
-use gpui_kit::{App, Global};
+use api::{CatalogDetail, CatalogDetailRequest, CatalogItemKind};
+use gpui_kit::{App, Global, Task};
+use link::Link;
 
 use crate::SourcesModel;
 
 /// Past this a held page still draws, but is fetched again behind it.
 const FRESH_FOR: Duration = Duration::from_secs(10 * 60);
 const MAX_PAGES: usize = 64;
+/// How long the pointer rests on a tile before its first page is fetched, so a play starts without the wait.
+const DWELL: Duration = Duration::from_millis(250);
 
 struct Entry {
     detail: CatalogDetail,
@@ -20,6 +23,8 @@ struct Entry {
 #[derive(Default)]
 pub struct CatalogCache {
     pages: HashMap<String, Entry>,
+    /// The tile the pointer rests on, and its dwell; dropping the task disarms it.
+    armed: Option<(String, Task<()>)>,
 }
 
 impl Global for CatalogCache {}
@@ -72,6 +77,39 @@ impl CatalogCache {
         {
             pages.remove(&oldest);
         }
+    }
+
+    /// The pointer came to rest on a tile: fetch its first page once it stays there a moment.
+    pub fn arm(kind: CatalogItemKind, id: String, cx: &mut App) {
+        if Self::get(&id, cx).is_some_and(|cached| cached.fresh) {
+            return;
+        }
+        let key = Self::key(&id, cx);
+        let dwell = cx.spawn(async move |cx| {
+            cx.background_executor().timer(DWELL).await;
+            cx.update(|cx| Self::prefetch(kind, id, cx));
+        });
+        cx.default_global::<Self>().armed = Some((key, dwell));
+    }
+
+    /// The pointer left before the dwell ran out; a fetch already under way still lands.
+    pub fn disarm(id: &str, cx: &mut App) {
+        let key = Self::key(id, cx);
+        let cache = cx.default_global::<Self>();
+        if cache.armed.as_ref().is_some_and(|(armed, _)| *armed == key) {
+            cache.armed = None;
+        }
+    }
+
+    fn prefetch(kind: CatalogItemKind, id: String, cx: &mut App) {
+        let request = CatalogDetailRequest::new(kind, id.clone());
+        let call =
+            Link::global(cx).call(move |api| async move { api.catalog_detail(request).await });
+        cx.spawn(async move |cx| match call.await {
+            Ok(detail) => cx.update(|cx| Self::put(&id, detail, cx)),
+            Err(error) => tracing::debug!(%error, "prefetching a catalog page failed"),
+        })
+        .detach();
     }
 
     /// A page grew by a continuation: keep what was loaded, without making it look newly fetched.

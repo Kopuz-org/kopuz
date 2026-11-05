@@ -4,6 +4,7 @@ use std::rc::Rc;
 use api::TrackInfo;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::v_flex;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, ClickEvent, Context, EventEmitter, FocusHandle, Focusable, InteractiveElement as _,
     IntoElement, ParentElement as _, Render, SharedString, Styled, UniformListScrollHandle,
@@ -18,6 +19,16 @@ use crate::selection::Selection;
 use crate::style;
 use crate::track_row::TrackRow;
 
+/// When a list lights the row now playing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum NowPlaying {
+    /// Whichever row has the playing track's key.
+    #[default]
+    ByKey,
+    /// Only while the queue is this listing, so the same song in another list stays dark.
+    WhenQueued,
+}
+
 /// Which columns a list draws; an album view numbers its rows and hides the album column.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TrackListOptions {
@@ -26,6 +37,7 @@ pub struct TrackListOptions {
     pub show_album: bool,
     pub track_numbers: bool,
     pub selectable: bool,
+    pub now_playing: NowPlaying,
 }
 
 impl Default for TrackListOptions {
@@ -36,6 +48,7 @@ impl Default for TrackListOptions {
             show_album: true,
             track_numbers: false,
             selectable: true,
+            now_playing: NowPlaying::ByKey,
         }
     }
 }
@@ -82,6 +95,8 @@ pub struct TrackList {
     focus: FocusHandle,
     scroll: UniformListScrollHandle,
     playing: Option<String>,
+    /// Whether the queue is exactly these rows, which `NowPlaying::WhenQueued` waits for.
+    queued: bool,
     row_images: bool,
     stored: HashSet<String>,
     bound: Vec<gpui_kit::Subscription>,
@@ -121,6 +136,7 @@ impl TrackList {
             focus: cx.focus_handle(),
             scroll: UniformListScrollHandle::new(),
             playing: None,
+            queued: false,
             row_images: true,
             stored: HashSet::new(),
             bound: Vec::new(),
@@ -133,6 +149,22 @@ impl TrackList {
             self.playing = playing;
             cx.notify();
         }
+    }
+
+    /// Look at the queue again; the owner's binding calls this whenever it changes.
+    pub fn refresh_queued(&mut self, cx: &mut Context<Self>) {
+        let queued = store::QueueModel::global(cx)
+            .read(cx)
+            .holds_tracks(&self.rows);
+        if self.queued != queued {
+            self.queued = queued;
+            cx.notify();
+        }
+    }
+
+    /// Whether the queue is this listing, row for row.
+    pub fn is_queued(&self) -> bool {
+        self.queued
     }
 
     /// The keys with an offline copy, which their rows mark.
@@ -166,6 +198,10 @@ impl TrackList {
         self
     }
 
+    pub fn options(&self) -> TrackListOptions {
+        self.options
+    }
+
     pub fn set_options(&mut self, options: TrackListOptions, cx: &mut Context<Self>) {
         self.options = options;
         cx.notify();
@@ -185,6 +221,9 @@ impl TrackList {
             self.selection.clear();
         }
         self.rows = rows;
+        self.queued = store::QueueModel::global(cx)
+            .read(cx)
+            .holds_tracks(&self.rows);
         cx.notify();
         if was_selecting != self.selection.is_active() {
             cx.emit(TrackListEvent::SelectionChanged);
@@ -321,6 +360,24 @@ impl TrackList {
             .scroll_to_item(index, gpui_kit::ScrollStrategy::Center);
     }
 
+    pub fn scroll_to_top(&self) {
+        self.scroll.scroll_to_item(0, gpui_kit::ScrollStrategy::Top);
+    }
+
+    /// How tall every row stacked is, for a page that embeds the list in its own scroller.
+    pub fn content_height(&self, window: &Window) -> gpui_kit::Pixels {
+        style::to_px(style::row_height(), window) * self.rows.len() as f32
+    }
+
+    /// A hold on a row starts a selection with that row in it.
+    fn long_press(&mut self, index: usize, cx: &mut Context<Self>) {
+        if !self.options.selectable || self.selection.is_active() {
+            return;
+        }
+        self.selection.set_cursor(Some(index));
+        self.toggle_selected(index, cx);
+    }
+
     // Select-all is held as a flag, so a single pick needs it spelled out first.
     fn resolve_everything(&mut self) {
         let keys = self.keys();
@@ -388,7 +445,11 @@ impl TrackList {
             return div().into_any_element();
         };
         let key = track.key.clone();
-        let playing = self.playing.as_deref() == Some(key.as_str());
+        let lit = match self.options.now_playing {
+            NowPlaying::ByKey => true,
+            NowPlaying::WhenQueued => self.queued,
+        };
+        let playing = lit && self.playing.as_deref() == Some(key.as_str());
         let selected = self.selection.contains(&key);
         let lead = self.options.show_index.then(|| {
             let number = match self.options.track_numbers {
@@ -440,6 +501,12 @@ impl TrackList {
                 }
             }))
             .on_pick(cx.listener(move |this, _: &bool, _, cx| this.toggle_selected(index, cx)))
+            .when(self.options.selectable, |row| {
+                let list = self.me.clone();
+                row.on_long_press(move |_, cx| {
+                    list.update(cx, |this, cx| this.long_press(index, cx)).ok();
+                })
+            })
             .menu(menu)
             .into_any_element()
     }

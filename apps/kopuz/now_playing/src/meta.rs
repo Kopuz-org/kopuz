@@ -182,7 +182,7 @@ impl NowPlaying {
             })
             .on_dont_recommend(move |_, cx| {
                 if let Some(key) = dislike.clone() {
-                    dont_recommend(key, cx);
+                    store::actions::dont_recommend(key, cx);
                 }
             })
     }
@@ -199,19 +199,6 @@ impl NowPlaying {
                 }
             })
     }
-}
-
-/// The signal is the source's, the skip is ours: it happens whether or not the daemon took it.
-pub(crate) fn dont_recommend(key: String, cx: &mut App) {
-    let call =
-        store::Link::global(cx).call(move |api| async move { api.dont_recommend(key).await });
-    cx.spawn(async move |cx| {
-        if let Err(error) = call.await {
-            cx.update(|cx| store::Notices::failed(&error, cx));
-        }
-        cx.update(|cx| store::PlayerModel::global(cx).update(cx, |player, cx| player.next(cx)));
-    })
-    .detach();
 }
 
 /// The one thing a `Target` is needed for here, kept out of the render so it allocates once.
