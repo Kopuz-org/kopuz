@@ -55,6 +55,23 @@ impl Route {
         }
     }
 
+    /// Where a catalog tile that is not a song opens; a song plays instead and has none.
+    pub fn catalog(item: &api::CatalogItem) -> Option<Route> {
+        use api::CatalogItemKind as Kind;
+        match item.kind {
+            Kind::Album => Some(Route::Album(item.id.clone().into())),
+            Kind::Playlist => Some(Route::DiscoverPlaylist {
+                id: item.id.clone().into(),
+                title: item.title.clone().into(),
+            }),
+            Kind::Artist => Some(Route::DiscoverArtist(item.id.clone())),
+            Kind::Mood | Kind::Page => Some(Route::CatalogPage {
+                id: item.id.clone().into(),
+            }),
+            Kind::Track | Kind::Video | Kind::Episode | Kind::Podcast | Kind::Unknown => None,
+        }
+    }
+
     /// The sidebar item this route lights up.
     pub fn root(&self) -> Route {
         match self {

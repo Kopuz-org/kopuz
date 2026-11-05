@@ -36,6 +36,10 @@ const HERO_CARD: Pixels = px(320.);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MoreOf(pub usize);
 
+/// On an "all" search, a shelf's "Show all" asks for the filter that lists every result of its kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShowFilter(pub String);
+
 /// What a Discover row says over itself, and where its "See all" goes.
 struct RowHead {
     title: SharedString,
@@ -59,12 +63,15 @@ pub struct Shelves {
     pending: Option<String>,
     // A page that pages its shelves offers "Show more" under one that has more.
     offer_more: bool,
+    // Search results: a song seeds a radio where the source asks for that, and "Show all" switches the filter.
+    searching: bool,
     topping_up: Option<usize>,
     _play: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<MoreOf> for Shelves {}
+impl EventEmitter<ShowFilter> for Shelves {}
 
 impl Shelves {
     pub fn new(cx: &mut Context<Self>) -> Self {
@@ -75,6 +82,7 @@ impl Shelves {
             now_playing: None,
             pending: None,
             offer_more: false,
+            searching: false,
             topping_up: None,
             _play: None,
             _subscriptions: vec![
@@ -114,6 +122,11 @@ impl Shelves {
         self
     }
 
+    pub fn searching(mut self, searching: bool) -> Self {
+        self.searching = searching;
+        self
+    }
+
     pub fn set(&mut self, shelves: Vec<CatalogShelf>, cx: &mut Context<Self>) {
         self.views.retain(|view| view.row.is_some());
         self.topping_up = None;
@@ -144,6 +157,7 @@ impl Shelves {
         continuation: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        CatalogMarks::global(cx).update(cx, |marks, _| marks.note(&items));
         let Some(view) = self.page_view_mut(index) else {
             return;
         };
@@ -172,6 +186,7 @@ impl Shelves {
         cx: &mut Context<Self>,
     ) {
         let key = key.into();
+        CatalogMarks::global(cx).update(cx, |marks, _| marks.note(&shelf.items));
         let head = Some(RowHead { title, see_all });
         match self.views.iter_mut().find(|view| view.key == key) {
             Some(view) => {
@@ -233,7 +248,17 @@ impl Shelves {
             cx.subscribe(&list, |this, list, event: &TrackListEvent, cx| {
                 if let TrackListEvent::Play(index) = event {
                     let keys = list.read(cx).keys();
-                    actions::play_listing(keys, *index, cx);
+                    let seed = this
+                        .views
+                        .iter()
+                        .find(|view| view.list.as_ref() == Some(&list))
+                        .and_then(|view| view.shelf.items.get(*index))
+                        .filter(|item| this.seeds_radio(item, cx))
+                        .and_then(|_| keys.get(*index).cloned());
+                    match seed {
+                        Some(key) => actions::start_track_radio(key, cx),
+                        None => actions::play_listing(keys, *index, cx),
+                    }
                     // A song preview is nobody's tile, so no card keeps the pause overlay.
                     this.now_playing = None;
                     cx.notify();
@@ -346,6 +371,33 @@ impl Shelves {
         self.play(kind, id, cx);
     }
 
+    /// A song in a search list seeds a radio where the source asks for that, rather than queueing the matches around it.
+    fn seeds_radio(&self, item: &CatalogItem, cx: &App) -> bool {
+        self.searching
+            && item.kind != CatalogItemKind::Episode
+            && SourcesModel::global(cx)
+                .read(cx)
+                .capabilities()
+                .search_radio
+    }
+
+    /// A shelf's "Show all": on a search that names a filter for it, that filter, else the shelf's own page.
+    fn more_link(&self, index: usize, cx: &mut Context<Self>) -> Option<components::Link> {
+        let view = &self.views[index];
+        if self.searching
+            && let Some(filter) = view.shelf.search_filter.clone()
+        {
+            let link = heading_link(
+                SharedString::from(format!("{}-show-all", view.key)),
+                t("discover_show_all"),
+            );
+            return Some(
+                link.on_click(cx.listener(move |_, _, _, cx| cx.emit(ShowFilter(filter.clone())))),
+            );
+        }
+        more_route(&view.shelf).map(|route| show_all(&view.key, route))
+    }
+
     /// A song starts a radio where the source runs one, else plays alone; pressing it again pauses.
     fn start_song(&mut self, key: String, radio: bool, cx: &mut Context<Self>) {
         if self.now_playing.as_deref() == Some(key.as_str()) {
@@ -371,21 +423,28 @@ impl Shelves {
             (None, ShelfLayout::Hero) => self.hero(index, cx),
             (None, ShelfLayout::List) => self.item_rows(index, &view.shelf.items, cx),
         };
+        // A search's top result comes untitled, and an empty heading only leaves a gap over it.
+        let shelf = &view.shelf;
+        let titled = !shelf.title.is_empty()
+            || shelf.strapline.is_some()
+            || shelf.more_ref.is_some()
+            || (self.searching && shelf.search_filter.is_some());
+        let heading = titled.then(|| self.heading(index, cx));
         v_flex()
             .w_full()
             .gap_6()
-            .child(self.heading(index))
+            .children(heading)
             .child(body)
             .children(self.show_more(index, cx))
             .into_any_element()
     }
 
-    fn heading(&self, index: usize) -> SectionHeading {
+    fn heading(&self, index: usize, cx: &mut Context<Self>) -> SectionHeading {
         let view = &self.views[index];
         let title = SharedString::from(view.shelf.title.clone());
         let mut heading = SectionHeading::new(title).strapline(view.shelf.strapline.clone());
-        if let Some(route) = more_route(&view.shelf) {
-            heading = heading.trailing(show_all(&view.key, route));
+        if let Some(link) = self.more_link(index, cx) {
+            heading = heading.trailing(link);
         }
         heading
     }
@@ -445,7 +504,7 @@ impl Shelves {
             None => (
                 view.shelf.title.clone().into(),
                 view.shelf.strapline.clone(),
-                more_route(&view.shelf).map(|route| show_all(&view.key, route)),
+                self.more_link(index, cx),
             ),
         };
         Carousel::new(
@@ -481,8 +540,8 @@ impl Shelves {
             TrackSection::new(SharedString::from(format!("catalog-{}", view.key)), list).heading(
                 SectionHeading::new(SharedString::from(view.shelf.title.clone())),
             );
-        if let Some(route) = more_route(&view.shelf) {
-            section = section.trailing(show_all(&view.key, route));
+        if let Some(link) = self.more_link(index, cx) {
+            section = section.trailing(link);
         }
         v_flex()
             .w_full()
@@ -497,6 +556,7 @@ impl Shelves {
         let view = &self.views[index];
         let page = cx.entity();
         let columns = view.shelf.items.len().div_ceil(TRACK_GRID_ROWS);
+        let link = self.more_link(index, cx);
         Carousel::new(
             SharedString::from(format!("catalog-{}", view.key)),
             SharedString::from(view.shelf.title.clone()),
@@ -518,9 +578,7 @@ impl Shelves {
         .strapline(view.shelf.strapline.clone())
         .arrows(Arrows::Always)
         .handle(view.scroll.clone())
-        .when_some(more_route(&view.shelf), |carousel, route| {
-            carousel.action(show_all(&view.key, route))
-        })
+        .when_some(link, |carousel, link| carousel.action(link))
         .into_any_element()
     }
 
@@ -577,7 +635,7 @@ impl Shelves {
         let round = item.kind == CatalogItemKind::Artist;
         let radio = radio_on(item, cx);
         let song = item.track.as_ref().map(|track| track.key.clone());
-        let route = open_route(item);
+        let route = Route::catalog(item);
         let playing = song
             .as_deref()
             .is_some_and(|song| self.play_state(song, cx) == PlayState::Playing);
@@ -633,7 +691,7 @@ impl Shelves {
                 .into_any_element();
         }
         let row = row.menu(menu_of(item, cx));
-        match open_route(item) {
+        match Route::catalog(item) {
             Some(route) => row.route(route).into_any_element(),
             None => row.into_any_element(),
         }
@@ -763,40 +821,12 @@ fn radio_on(item: &CatalogItem, cx: &App) -> bool {
         && SourcesModel::global(cx).read(cx).capabilities().track_radio
 }
 
-/// Where a tile that is not a song goes when clicked.
-pub(crate) fn open_route(item: &CatalogItem) -> Option<Route> {
-    match item.kind {
-        CatalogItemKind::Album => Some(Route::Album(item.id.clone().into())),
-        CatalogItemKind::Playlist => Some(Route::DiscoverPlaylist {
-            id: item.id.clone().into(),
-            title: item.title.clone().into(),
-        }),
-        CatalogItemKind::Artist => Some(Route::DiscoverArtist(item.id.clone())),
-        CatalogItemKind::Mood | CatalogItemKind::Page => Some(Route::CatalogPage {
-            id: item.id.clone().into(),
-        }),
-        CatalogItemKind::Track
-        | CatalogItemKind::Video
-        | CatalogItemKind::Episode
-        | CatalogItemKind::Podcast
-        | CatalogItemKind::Unknown => None,
-    }
-}
-
-/// A catalog playlist is nobody's saved list, so its menu holds only the source's own verbs.
+/// A catalog album, playlist or artist is not the library's, so its menu holds only the source's own verbs.
 fn menu_of(item: &CatalogItem, cx: &App) -> Option<Target> {
     match item.kind {
-        CatalogItemKind::Playlist => {
+        CatalogItemKind::Album | CatalogItemKind::Playlist | CatalogItemKind::Artist => {
             Some(Target::catalog(item)).filter(|target| commands::has_menu(target, cx))
         }
-        CatalogItemKind::Album => Some(Target::Album {
-            id: item.id.clone().into(),
-            title: item.title.clone().into(),
-        }),
-        CatalogItemKind::Artist => Some(Target::Artist {
-            key: item.id.clone(),
-            name: item.title.clone().into(),
-        }),
         _ => None,
     }
 }
@@ -1040,7 +1070,7 @@ mod tests {
     fn a_mood_or_page_tile_opens_its_page() {
         for kind in [CatalogItemKind::Mood, CatalogItemKind::Page] {
             assert_eq!(
-                open_route(&item(kind, "FEmusic_moods_and_genres_category?params=x")),
+                Route::catalog(&item(kind, "FEmusic_moods_and_genres_category?params=x")),
                 Some(Route::CatalogPage {
                     id: "FEmusic_moods_and_genres_category?params=x".into()
                 })
