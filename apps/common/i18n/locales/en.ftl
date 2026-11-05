@@ -196,6 +196,7 @@ share_link_copied = MusicBrainz link copied
 share = Share
 share_copied = Copied link
 share_no_page = Couldn't find a page for this track
+share_no_album_page = Couldn't find a page for this album
 explicit = Explicit
 go_to_artist = Go to artist
 go_to_album = Go to album
@@ -926,6 +927,7 @@ discover_genre_count =
     }
 discover_read_failed = Couldn't load your library: { $error }
 palette_all_results = All results for "{ $query }" in Discover
+palette_suggestions = Suggestions
 
 library_count =
     { $count ->
@@ -993,9 +995,6 @@ discard_changes = Discard
 downloader_add_url = Add a URL…
 downloader_url_title = Download from a URL
 downloader_history = URL downloads
-
-interface_skin = Skin
-interface_skin_description = The shape of the interface: how round things are, how tall a row sits.
 
 home_plays =
     { $count ->

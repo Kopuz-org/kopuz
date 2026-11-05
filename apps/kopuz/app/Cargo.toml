@@ -58,6 +58,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 futures = { workspace = true }
+image = { workspace = true }
 
 library = { path = "../library" }
 discover = { path = "../discover" }
@@ -80,6 +81,10 @@ status = { path = "../status" }
 metadata_dialog = { path = "../metadata_dialog" }
 shortcuts = { path = "../shortcuts" }
 profile = { path = "../profile" }
+
+# Linux is left out: appindicator needs a GTK main loop, and GPUI runs none.
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+tray-icon = { version = "0.21", default-features = false }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"

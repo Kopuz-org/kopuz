@@ -3,11 +3,14 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use api::{AlbumInfo, CatalogShelf, DiscoverRows, PageEntry, SourceCapabilities, TrackInfo};
+use api::{
+    AlbumInfo, AlbumPage, ArtworkRef, CatalogShelf, DiscoverRows, PageEntry, SourceCapabilities,
+    Table, TrackInfo,
+};
 use components::format::{t, text};
 use components::{
-    Carousel, EmptyState, PageHeader, PlayState, SearchTrigger, Tile, TriggerSize, icons, motion,
-    skeleton, style,
+    Carousel, EmptyState, GENRE_TILE_GAP, GenreCard, PageHeader, PlayState, SearchTrigger,
+    SectionHeading, Tile, TriggerSize, icons, motion, skeleton, style,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Sizable as _, v_flex};
@@ -18,9 +21,11 @@ use gpui_kit::{
     pulsating_between,
 };
 use store::{
-    Chrome, Invalidation, Link, Pictured, Route, SourcesModel, TablesChanged, Target, actions,
+    Chrome, Invalidation, Link, Pictured, Query, Route, SourcesModel, TablesChanged, Target,
+    actions,
 };
 
+use crate::genres::genres_of;
 use crate::page::placeholder_bands;
 use crate::rows::{self, Fetch, Fill, Row};
 use crate::shelves::{GAP, Shelves, TILE};
@@ -46,6 +51,10 @@ pub struct Landing {
     scroll: ScrollHandle,
     // The source's capabilities as the last frame read them, none before the list loads; frozen pages keep them.
     caps: Option<SourceCapabilities>,
+    // The library's albums, read only while the source's search is the library's, as the genre grid sits beside it.
+    albums: Option<Entity<Query<AlbumPage>>>,
+    genres: Vec<(SharedString, Option<ArtworkRef>)>,
+    _albums: Option<Subscription>,
     frozen: bool,
     _rows: Option<Task<()>>,
     _pages: Vec<Task<()>>,
@@ -77,6 +86,9 @@ impl Landing {
             forgotten: ScrollHandle::new(),
             scroll: ScrollHandle::new(),
             caps: None,
+            albums: None,
+            genres: Vec::new(),
+            _albums: None,
             frozen: false,
             _rows: None,
             _pages: Vec::new(),
@@ -90,6 +102,7 @@ impl Landing {
     pub(crate) fn freeze(&mut self, _: &mut Context<Self>) {
         self.frozen = true;
         self._subscriptions.clear();
+        self._albums = None;
         self._rows = None;
         self._pages.clear();
     }
@@ -99,7 +112,9 @@ impl Landing {
         if !sources.read(cx).is_loaded() {
             return;
         }
-        let pages = rows::row_pages(&sources.read(cx).capabilities().pages);
+        let caps = sources.read(cx).capabilities();
+        self.browse_genres(caps.search_filters.is_empty(), cx);
+        let pages = rows::row_pages(&caps.pages);
         if !self.started {
             self.started = true;
             self.pages = pages;
@@ -108,6 +123,65 @@ impl Landing {
             self.pages = pages;
             self.ask_pages(cx);
         }
+    }
+
+    fn browse_genres(&mut self, on: bool, cx: &mut Context<Self>) {
+        if on == self.albums.is_some() {
+            return;
+        }
+        if !on {
+            self.albums = None;
+            self._albums = None;
+            self.genres.clear();
+            return;
+        }
+        let albums = cx.new(|cx| {
+            Query::new(
+                &[Table::Albums],
+                |api| async move { api.albums(Default::default(), store::all()).await },
+                cx,
+            )
+        });
+        self._albums = Some(cx.observe(&albums, |this, albums, cx| {
+            this.genres = albums
+                .read(cx)
+                .value()
+                .map(|page| genres_of(&page.albums))
+                .unwrap_or_default();
+            cx.notify();
+        }));
+        self.albums = Some(albums);
+    }
+
+    /// "Browse genres": a card per genre the library's albums are filed under, once the albums are in.
+    fn genre_grid(&self, cx: &App) -> Option<AnyElement> {
+        let albums = self.albums.as_ref()?.read(cx);
+        albums.value()?;
+        let body = match self.genres.is_empty() {
+            true => div()
+                .text_sm()
+                .text_color(style::white(style::TEXT_MUTED, cx))
+                .child(t("no_genres_found"))
+                .into_any_element(),
+            false => div()
+                .flex()
+                .flex_wrap()
+                .gap(GENRE_TILE_GAP)
+                .children(
+                    self.genres
+                        .iter()
+                        .map(|(name, cover)| GenreCard::new(name.clone(), cover.clone())),
+                )
+                .into_any_element(),
+        };
+        Some(
+            v_flex()
+                .w_full()
+                .gap_4()
+                .child(SectionHeading::new(t("browse_genres")))
+                .child(body)
+                .into_any_element(),
+        )
     }
 
     /// Ask for every row again; `fresh` has the daemon build its rows anew rather than hand back what it holds.
@@ -312,6 +386,8 @@ impl Render for Landing {
                 )
                 .into_any_element(),
             rows::Landing::Waiting => placeholder_bands(cx),
+            // The genres are something to browse, so an empty landing above them says nothing.
+            rows::Landing::Empty if !self.genres.is_empty() => div().into_any_element(),
             rows::Landing::Empty => div()
                 .pt_16()
                 .child(
@@ -341,7 +417,8 @@ impl Render for Landing {
                     .pb_10()
                     .gap_8()
                     .child(self.header(cx))
-                    .child(body),
+                    .child(body)
+                    .children(self.genre_grid(cx)),
             )
     }
 }
@@ -453,6 +530,8 @@ mod tests {
             "discover_your_mixes",
             "discover_never_played",
             "discover_forgotten_favorites",
+            "browse_genres",
+            "no_genres_found",
         ] {
             assert_ne!(i18n::t(key), *key, "{key} is missing from en.ftl");
         }

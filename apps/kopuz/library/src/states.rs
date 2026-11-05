@@ -1,15 +1,12 @@
 //! What the library shows instead of rows, and the one button that gets you out of it.
 
 use api::ApiError;
-use components::format::t;
+use components::format::{t, t_with};
 use components::{EmptyState, icons};
 use gpui_kit::{App, ClickEvent, SharedString, Window};
 use store::{Navigator, Route, SourcesModel};
 
 use crate::facet::Facet;
-
-/// The shared icon set has no sign-in glyph, which is the one an anonymous source wants.
-pub const SIGN_IN: &str = "icons/log-in.svg";
 
 /// A read that failed says so, and offers the one thing worth trying: asking again.
 pub fn failed(
@@ -51,20 +48,29 @@ pub fn empty_library(facet: Facet, active: &Active) -> EmptyState {
     if active.offline {
         return EmptyState::offline();
     }
+    if facet == Facet::Playlists && anonymous {
+        return EmptyState::new(t("source_anon_playlists")).icon(icons::LIST);
+    }
     if signed_out || anonymous {
         let Some(source) = source else {
             return EmptyState::new(t("no_tracks_found")).icon(icons::LIBRARY);
         };
         return EmptyState::new(t("library_empty_signed_out"))
-            .icon(SIGN_IN)
+            .icon(icons::SIGN_IN)
             .detail(SharedString::from(source.name.clone()))
             .action(t("library_sign_in"), move |_, window, cx| {
                 store::sign_in_again(&source, window, cx)
             });
     }
-    // Playlists are made, not scanned or synced, so no folder or sync would fill this facet.
+    // Playlists are made, not scanned, so the way out is making one where the source allows it; "Add songs" would contradict the button.
     if facet == Facet::Playlists {
-        return EmptyState::new(t("no_playlists_yet")).icon(icons::LIST);
+        let state = EmptyState::new(t("no_playlists_found")).icon(icons::LIST);
+        return match capabilities.playlists {
+            api::PlaylistCapability::None => state,
+            _ => state.action(t("add_playlist"), |_, window, cx| {
+                crate::playlists::open_add_playlist(window, cx)
+            }),
+        };
     }
     let has_folders = source
         .as_ref()
@@ -102,9 +108,34 @@ pub fn empty_library(facet: Facet, active: &Active) -> EmptyState {
     EmptyState::new(t("no_tracks_found")).icon(icons::LIBRARY)
 }
 
-/// The Favorites page before anything has been liked.
-pub fn no_favorites() -> EmptyState {
-    EmptyState::new(t("no_favorites")).icon(icons::HEART)
+/// The Favorites page before anything has been liked; an anonymous source has no likes to show.
+pub fn no_favorites(active: &Active) -> EmptyState {
+    if active.offline {
+        return EmptyState::offline();
+    }
+    if active
+        .source
+        .as_ref()
+        .is_some_and(|source| source.anonymous)
+    {
+        return EmptyState::new(t("source_anon_favorites")).icon(icons::HEART);
+    }
+    EmptyState::new(t("no_favorites"))
+        .icon(icons::HEART)
+        .detail(t("heart_track_to_add"))
+}
+
+/// Favorites searched for something it does not hold.
+pub fn no_results(
+    query: &str,
+    clear: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> EmptyState {
+    EmptyState::new(t_with(
+        "no_results_found",
+        &[("query", query.to_string().into())],
+    ))
+    .icon(icons::SEARCH)
+    .action(t("clear"), clear)
 }
 
 /// Everything is there, the chips simply exclude it: the button takes the chips off.

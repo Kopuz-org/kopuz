@@ -3,6 +3,7 @@
 use components::format::{t, t_with};
 use components::marker::Along;
 use components::{Bar, Callout, EmptyState, PageHeader, SearchField, Tab, TabStrip, icons, style};
+use config::{SettingsLayout, UiStyle};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -218,12 +219,11 @@ impl Settings {
 }
 
 impl Settings {
-    /// The category fan, as its top-bar branch: the CD disc is rotated clip-paths GPUI cannot draw.
-    fn rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn fan(&self, along: Along, bar: Bar, cx: &mut Context<Self>) -> TabStrip {
         let tabs = Category::ALL.iter().map(|category| {
             Tab::new(category.slug(), category.icon()).label(Some(category.label()))
         });
-        let strip = TabStrip::new("settings-fan", Along::Row, Bar::Rule)
+        TabStrip::new("settings-fan", along, bar)
             .roving("SettingsRail")
             .current(Some(self.category.slug()))
             .tabs(tabs)
@@ -231,7 +231,12 @@ impl Settings {
                 if let Some(category) = Category::ALL.get(*index).copied() {
                     this.choose(category, window, cx);
                 }
-            }));
+            }))
+    }
+
+    /// The category fan, as its top-bar branch.
+    fn rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let strip = self.fan(Along::Row, Bar::Rule, cx);
         h_flex()
             .id("settings-fan-scroll")
             .w_full()
@@ -243,6 +248,22 @@ impl Settings {
             .border_color(style::white(FAN_BORDER, cx))
             .bg(components::settings::panel_background(FAN_BG, cx))
             .child(strip)
+    }
+
+    /// The CD branch: the fan held beside the panel, centred on the window; the disc is rotated clip-paths GPUI cannot draw.
+    fn disc(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .id("settings-fan-disc")
+            .flex_none()
+            .w(rems(15.))
+            .h_full()
+            .px_3()
+            .justify_center()
+            .overflow_y_scroll()
+            .border_r_1()
+            .border_color(style::white(FAN_BORDER, cx))
+            .bg(components::settings::panel_background(FAN_BG, cx))
+            .child(self.fan(Along::Column, Bar::Pill, cx))
     }
 
     /// The box that filters every category at once.
@@ -285,12 +306,15 @@ impl Render for Settings {
         let config = ConfigModel::global(cx);
         let loaded = config.read(cx).is_loaded();
         let locks = config.read(cx).locks().to_vec();
+        let disc = loaded && {
+            let ui = &config.read(cx).config().ui;
+            ui.settings_layout == SettingsLayout::Cd && ui.ui_style != UiStyle::Material3
+        };
         let empty = self.searching && components::settings::nothing_matched(cx);
         let typed = SharedString::from(self.search.read(cx).value().to_string());
-        // The page root is the scroller: a nested `flex_1 min_h_0` child measured no height here.
-        v_flex()
+        // The scroller sits at the root, or beside the disc: a nested `flex_1 min_h_0` child of a column measured no height here.
+        let page = v_flex()
             .id("settings-panel")
-            .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
             .child(
@@ -309,7 +333,7 @@ impl Render for Settings {
                             .when(!locks.is_empty(), |page| {
                                 page.child(self.managed_notice(&locks))
                             })
-                            .child(self.rail(cx))
+                            .when(!disc, |page| page.child(self.rail(cx)))
                             .when(empty, |page| {
                                 page.child(EmptyState::new(t_with(
                                     "no_results_found",
@@ -318,7 +342,15 @@ impl Render for Settings {
                             })
                             .child(self.panel())
                     }),
-            )
+            );
+        if !disc {
+            return page.size_full().into_any_element();
+        }
+        h_flex()
+            .size_full()
+            .child(self.disc(cx))
+            .child(page.flex_1().min_w_0().h_full())
+            .into_any_element()
     }
 }
 

@@ -9,6 +9,7 @@ mod plugins;
 mod reauth;
 mod registries;
 mod schedule;
+mod source_tools;
 mod sources;
 pub mod ui;
 

@@ -55,6 +55,23 @@ impl Route {
         }
     }
 
+    /// Where a catalog tile that is not a song opens; a song plays instead and has none.
+    pub fn catalog(item: &api::CatalogItem) -> Option<Route> {
+        use api::CatalogItemKind as Kind;
+        match item.kind {
+            Kind::Album => Some(Route::Album(item.id.clone().into())),
+            Kind::Playlist => Some(Route::DiscoverPlaylist {
+                id: item.id.clone().into(),
+                title: item.title.clone().into(),
+            }),
+            Kind::Artist => Some(Route::DiscoverArtist(item.id.clone())),
+            Kind::Mood | Kind::Page => Some(Route::CatalogPage {
+                id: item.id.clone().into(),
+            }),
+            Kind::Track | Kind::Video | Kind::Episode | Kind::Podcast | Kind::Unknown => None,
+        }
+    }
+
     /// The sidebar item this route lights up.
     pub fn root(&self) -> Route {
         match self {
@@ -91,8 +108,7 @@ impl Route {
     /// Where a route that is no longer a place now lands, so an old link never reaches a 404.
     pub fn redirect(self) -> Route {
         match self {
-            // The listings are facets of one library now, and most-played is a sort of it.
-            Route::Activity => Route::Library,
+            // The listings are facets of one library now.
             Route::Albums | Route::Artists | Route::Playlists => Route::Library,
             // Search and Discover are one destination; two keys would cache two of it.
             Route::Search => Route::Discover,
@@ -105,7 +121,6 @@ impl Route {
     /// What a redirected route was asking for, for the view that has to honour it instead.
     pub fn intent(&self) -> Option<&'static str> {
         match self {
-            Route::Activity => Some("activity"),
             Route::Downloader => Some("downloads"),
             _ => None,
         }
@@ -302,8 +317,7 @@ mod tests {
 
     #[test]
     fn a_route_that_is_no_longer_a_place_lands_somewhere() {
-        // Most-played is an order over the library, not a page of its own.
-        for route in [Route::Activity, Route::Albums, Route::Artists] {
+        for route in [Route::Albums, Route::Artists] {
             assert_eq!(route.redirect(), Route::Library);
         }
         assert_eq!(Route::Playlists.redirect(), Route::Library);
@@ -317,6 +331,7 @@ mod tests {
             Route::Home,
             Route::Library,
             Route::Favorites,
+            Route::Activity,
             Route::Discover,
             Route::Radio,
         ] {
@@ -326,7 +341,8 @@ mod tests {
 
     #[test]
     fn a_redirect_says_what_it_was_after() {
-        assert_eq!(Route::Activity.intent(), Some("activity"));
+        assert_eq!(Route::Downloader.intent(), Some("downloads"));
+        assert_eq!(Route::Activity.intent(), None);
         assert_eq!(Route::Favorites.intent(), None);
         assert_eq!(Route::Library.intent(), None);
     }
@@ -337,7 +353,12 @@ mod tests {
             let route = Route::from_name(name).expect("a name the smoke script uses");
             assert!(matches!(
                 route.redirect(),
-                Route::Home | Route::Library | Route::Favorites | Route::Discover | Route::Radio
+                Route::Home
+                    | Route::Library
+                    | Route::Favorites
+                    | Route::Activity
+                    | Route::Discover
+                    | Route::Radio
             ));
         }
     }

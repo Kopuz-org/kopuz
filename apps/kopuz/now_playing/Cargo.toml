@@ -22,5 +22,17 @@ components = { path = "../components" }
 gpui-kit = { workspace = true }
 tracing = { workspace = true }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = { workspace = true }
+core-foundation = { workspace = true }
+core-video = { workspace = true }
+dispatch2 = { workspace = true }
+futures = { workspace = true }
+objc2 = { workspace = true }
+objc2-av-foundation = { workspace = true, features = ["objc2-core-media"] }
+objc2-core-media = { workspace = true }
+objc2-core-video = { workspace = true }
+objc2-foundation = { workspace = true }
+
 [dev-dependencies]
 gpui-kit = { workspace = true, features = ["test-support"] }

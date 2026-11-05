@@ -6,7 +6,7 @@ use gpui_kit::{App, Context, Entity, EventEmitter, SharedString, Subscription, T
 use link::Link;
 
 use crate::invalidation::{Invalidation, TablesChanged};
-use crate::jobs::{JobEvent, JobsModel};
+use crate::jobs::{JobEvent, JobProgressed, JobsModel};
 use crate::notices::Notices;
 
 /// Where one row of the download queue has got to; `Done` is this client's, since the daemon forgets a finished item.
@@ -82,14 +82,11 @@ impl DownloadsModel {
                     this.refetch(cx);
                 }
             }),
-            cx.observe(&jobs, |this, jobs, cx| {
-                let Some(id) = jobs
-                    .read(cx)
-                    .progress(JobKind::Download)
-                    .map(|job| job.id.clone())
-                else {
+            cx.subscribe(&jobs, |this, _, event: &JobProgressed, cx| {
+                if event.kind() != JobKind::Download {
                     return;
-                };
+                }
+                let id = event.progress().id.clone();
                 // A new job is a new batch: the rows of the last one stop being the answer.
                 if this.job.as_ref() != Some(&id) {
                     this.job = Some(id);
@@ -266,9 +263,7 @@ impl DownloadsModel {
             self.download(keys, cx);
             return;
         }
-        for key in keys {
-            self.remove(key, cx);
-        }
+        self.remove_many(keys, cx);
     }
 
     pub fn stored(&self) -> &HashSet<String> {
@@ -334,9 +329,27 @@ impl DownloadsModel {
     }
 
     pub fn remove(&mut self, key: String, cx: &mut Context<Self>) {
-        self.stored.remove(&key);
+        self.remove_many(vec![key], cx);
+    }
+
+    /// Give back many offline copies: one task, one refetch and at most one toast, however many keys.
+    pub fn remove_many(&mut self, keys: Vec<String>, cx: &mut Context<Self>) {
+        if keys.is_empty() {
+            return;
+        }
+        for key in &keys {
+            self.stored.remove(key);
+        }
         crate::notify(cx);
-        let call = Link::global(cx).call(move |api| async move { api.remove_download(key).await });
+        let call = Link::global(cx).call(move |api| async move {
+            let mut failure = None;
+            for key in keys {
+                if let Err(error) = api.remove_download(key).await {
+                    failure.get_or_insert(error);
+                }
+            }
+            failure.map_or(Ok(()), Err)
+        });
         cx.spawn(async move |this, cx| {
             if let Err(error) = call.await {
                 cx.update(|cx| Notices::failed(&error, cx));

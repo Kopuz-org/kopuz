@@ -1,8 +1,8 @@
 //! One shelf card: the shared tile, sized for a shelf, with what its play button starts.
 
 use api::QueueContext;
-use components::PlayState;
-use gpui_kit::{AnyElement, App, IntoElement, Pixels, px};
+use components::{PlayState, TileRow, style};
+use gpui_kit::{AnyElement, App, IntoElement, ParentElement as _, Pixels, Styled as _, div, px};
 use store::{PlayerModel, QueueModel, actions};
 
 use crate::data::{Play, Tile};
@@ -72,6 +72,37 @@ pub(crate) fn card(tile: &Tile, now: &Now) -> AnyElement {
         card = card.play(state, move |_, _, cx| start(&play, current, cx));
     }
     card.into_any_element()
+}
+
+/// The same card as a raised row, for a shelf laid out as a list.
+pub(crate) fn row(tile: &Tile, now: &Now, cx: &App) -> AnyElement {
+    let current = now.is(&tile.play);
+    let mut row = TileRow::new(tile.key.clone(), tile.title.clone())
+        .subtitle(tile.subtitle.clone())
+        .artwork(tile.artwork.as_ref())
+        .placeholder(tile.placeholder)
+        .pictured(tile.pictured.clone())
+        .playing(current)
+        .menu(Some(tile.target.clone()));
+    if let Some(route) = tile.route.clone() {
+        row = row.route(route);
+    }
+    if !matches!(tile.play, Play::None) {
+        let state = match current && now.playing {
+            true => PlayState::Playing,
+            false => PlayState::Idle,
+        };
+        let play = tile.play.clone();
+        row = row.play(state, move |_, _, cx| start(&play, current, cx));
+    }
+    div()
+        .min_w_0()
+        .rounded(style::radius_xl())
+        .border_1()
+        .border_color(style::white(style::BORDER_SOFT, cx))
+        .bg(style::white(style::RAISED, cx))
+        .child(row)
+        .into_any_element()
 }
 
 fn start(play: &Play, current: bool, cx: &mut App) {

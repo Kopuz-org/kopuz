@@ -3,8 +3,9 @@
 use std::rc::Rc;
 
 use api::{AlbumInfo, AlbumPage, ArtworkTarget, SourceCapabilities, Table, TrackInfo, TrackPage};
-use components::album_collection::{available_fields, compare_text};
+use components::album_collection::available_fields;
 use components::format::{t, t_with, total_duration};
+use components::track_sort::{Column, next_sort, sort_tracks};
 use components::{
     AlbumCollection, DetailActions, DetailHeader, EmptyState, GridMode, Loading, Picture,
     TrackActions, TrackHeader, TrackList, TrackListEvent, TrackListOptions, icons, menus,
@@ -13,8 +14,8 @@ use config::{AlbumSortField, AlbumViewMode, SortCriterion, SortDirection};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Pixels,
-    Render, SharedString, Styled as _, Subscription, Window, div, px, rems,
+    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
+    SharedString, Styled as _, Subscription, Window, div, rems,
 };
 use store::{
     ConfigModel, DownloadsModel, LayoutModel, Offline, Pictured, PlayerModel, Query, SourcesModel,
@@ -22,36 +23,6 @@ use store::{
 };
 
 use crate::controls::{self, ViewModeKey};
-
-/// `w-64 h-64`: the showcase photo.
-const PHOTO: Pixels = px(256.);
-
-/// A sortable column of the tracks view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Column {
-    Title,
-    Artist,
-    Album,
-    Duration,
-}
-
-impl Column {
-    /// The table column it sorts, by the id the shared header names it with.
-    fn id(self) -> &'static str {
-        match self {
-            Self::Title => "title",
-            Self::Artist => "artist",
-            Self::Album => "album",
-            Self::Duration => "duration",
-        }
-    }
-
-    fn parse(id: &str) -> Option<Self> {
-        [Self::Title, Self::Artist, Self::Album, Self::Duration]
-            .into_iter()
-            .find(|column| column.id() == id)
-    }
-}
 
 /// One artist from the library: tracks and albums.
 pub struct ArtistDetail {
@@ -150,7 +121,7 @@ impl ArtistDetail {
         match event {
             TrackListEvent::Play(index) => {
                 let keys = list.read(cx).keys();
-                actions::play_tracks(keys, Some(*index as u32), cx);
+                actions::play_listing(keys, *index, cx);
             }
             TrackListEvent::Delete(keys) => delete_tracks(keys.clone(), cx),
             _ => cx.notify(),
@@ -164,6 +135,7 @@ impl ArtistDetail {
             show_album: true,
             track_numbers: false,
             selectable: true,
+            ..TrackListOptions::default()
         };
         let row_actions = TrackActions {
             remove_from_playlist: false,
@@ -212,13 +184,16 @@ impl ArtistDetail {
     }
 
     fn rows(&self, cx: &App) -> Vec<TrackInfo> {
-        // TODO(offline): filter to downloaded tracks when offline.
         let mut rows = self
             .tracks
             .read(cx)
             .value()
             .map(|page| page.items.clone())
             .unwrap_or_default();
+        // The daemon's re-read lands after offline mode switches, so the rows held until then are kept to copies here too.
+        if SourcesModel::global(cx).read(cx).offline_reads() {
+            rows.retain(|row| row.offline || row.cached);
+        }
         if let Some((column, direction)) = self.column {
             sort_tracks(&mut rows, column, direction);
         }
@@ -226,13 +201,7 @@ impl ArtistDetail {
     }
 
     fn toggle_column(&mut self, column: Column, cx: &mut Context<Self>) {
-        self.column = match self.column {
-            Some((current, SortDirection::Asc)) if current == column => {
-                Some((column, SortDirection::Desc))
-            }
-            Some((current, SortDirection::Desc)) if current == column => None,
-            _ => Some((column, SortDirection::Asc)),
-        };
+        self.column = next_sort(self.column, column);
         self.sync_rows(cx);
     }
 
@@ -332,7 +301,6 @@ impl ArtistDetail {
             .artwork(artwork.as_ref())
             .placeholder(icons::MIC)
             .cover_menu(menu, picture)
-            .size(PHOTO)
             .when(capabilities.edit_tags, |header| {
                 header.on_cover("artist-photo", Some(t("change_photo")), move |_, cx| {
                     store::pick_and_upload(ArtworkTarget::Artist(artist.clone()), cx)
@@ -487,34 +455,4 @@ fn delete_tracks(keys: Vec<String>, cx: &mut App) {
 fn capabilities(cx: &App) -> SourceCapabilities {
     let model = SourcesModel::global(cx);
     model.read(cx).capabilities()
-}
-
-fn sort_tracks(tracks: &mut [TrackInfo], column: Column, direction: SortDirection) {
-    tracks.sort_by(|left, right| {
-        let ordering = match column {
-            Column::Title => compare_text(&left.title, &right.title),
-            Column::Artist => compare_text(&left.artist, &right.artist),
-            Column::Album => compare_text(&left.album, &right.album),
-            Column::Duration => left.duration_ms.cmp(&right.duration_ms),
-        };
-        let ordering = match direction {
-            SortDirection::Asc => ordering,
-            SortDirection::Desc => ordering.reverse(),
-        };
-        match column {
-            Column::Album => ordering
-                .then_with(|| {
-                    left.disc_number
-                        .unwrap_or(0)
-                        .cmp(&right.disc_number.unwrap_or(0))
-                })
-                .then_with(|| {
-                    left.track_number
-                        .unwrap_or(0)
-                        .cmp(&right.track_number.unwrap_or(0))
-                })
-                .then_with(|| compare_text(&left.title, &right.title)),
-            _ => ordering,
-        }
-    });
 }

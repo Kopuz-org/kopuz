@@ -673,6 +673,7 @@ settings_tools = Tools
 share = Share
 share_copied = Link kopiert
 share_no_page = Für diesen Titel wurde keine Seite gefunden
+share_no_album_page = Für dieses Album wurde keine Seite gefunden
 explicit = Explizit
 
 first_run_title = Welcome to Kopuz
@@ -905,6 +906,7 @@ discover_genre_count =
     }
 discover_read_failed = Couldn't load your library: { $error }
 palette_all_results = All results for "{ $query }" in Discover
+palette_suggestions = Suggestions
 
 library_count =
     { $count ->
@@ -972,9 +974,6 @@ discard_changes = Discard
 downloader_add_url = Add a URL…
 downloader_url_title = Download from a URL
 downloader_history = URL downloads
-
-interface_skin = Skin
-interface_skin_description = The shape of the interface: how round things are, how tall a row sits.
 
 home_plays =
     { $count ->

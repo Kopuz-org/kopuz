@@ -3,6 +3,7 @@
 use std::fmt;
 use std::rc::Rc;
 
+use api::{CatalogActions, CatalogDetail, CatalogItem, CatalogItemKind, PlaylistPrivacy};
 use gpui_kit::{App, SharedString};
 
 /// Row-menu entries only the owning page can carry out.
@@ -84,6 +85,20 @@ impl PartialEq for RowScope {
 
 impl Eq for RowScope {}
 
+/// Something a source serves, with the refs its rate, save, follow and history verbs hand back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogEntry {
+    pub kind: CatalogItemKind,
+    pub id: SharedString,
+    pub title: SharedString,
+    pub actions: CatalogActions,
+    /// Set only for a playlist the account owns, which is what editing or deleting it at the source needs.
+    pub privacy: Option<PlaylistPrivacy>,
+    pub description: Option<SharedString>,
+    /// Built from an opened page, whose menu also edits and deletes it rather than only saving it.
+    pub opened: bool,
+}
+
 /// The thing under the pointer, the keyboard, or the selection, named well enough to talk about.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Target {
@@ -116,6 +131,8 @@ pub enum Target {
         id: SharedString,
         name: SharedString,
     },
+    /// A tile, a header or a history row from the source's catalog.
+    Catalog(Box<CatalogEntry>),
 }
 
 /// What kind of thing a target is, for a command to say what it applies to.
@@ -129,6 +146,7 @@ pub enum Kind {
     Folder,
     QueueItem,
     Source,
+    Catalog,
 }
 
 impl Target {
@@ -162,6 +180,32 @@ impl Target {
         }
     }
 
+    /// A catalog tile or row, as its listing handed it out.
+    pub fn catalog(item: &CatalogItem) -> Self {
+        Target::Catalog(Box::new(CatalogEntry {
+            kind: item.kind,
+            id: item.id.clone().into(),
+            title: item.title.clone().into(),
+            actions: item.actions.clone(),
+            privacy: None,
+            description: None,
+            opened: false,
+        }))
+    }
+
+    /// A catalog page's own header: the same verbs, plus the details only an opened page carries.
+    pub fn catalog_page(detail: &CatalogDetail) -> Self {
+        Target::Catalog(Box::new(CatalogEntry {
+            kind: detail.kind,
+            id: detail.id.clone().into(),
+            title: detail.title.clone().into(),
+            actions: detail.actions.clone(),
+            privacy: detail.privacy,
+            description: detail.description.clone().map(Into::into),
+            opened: true,
+        }))
+    }
+
     /// Mark these tracks as coming from a list row.
     pub fn with_row(mut self, scope: RowScope) -> Self {
         if let Target::Tracks { row, .. } = &mut self {
@@ -188,6 +232,7 @@ impl Target {
             Target::Folder { .. } => Kind::Folder,
             Target::QueueItem { .. } => Kind::QueueItem,
             Target::Source { .. } => Kind::Source,
+            Target::Catalog(_) => Kind::Catalog,
         }
     }
 
@@ -223,6 +268,7 @@ impl Target {
             Target::Folder { name, .. } => name.clone(),
             Target::QueueItem { key, .. } => key.clone(),
             Target::Source { name, .. } => name.clone(),
+            Target::Catalog(entry) => entry.title.clone(),
         }
     }
 }

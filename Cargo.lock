@@ -6711,6 +6711,7 @@ dependencies = [
  "discover",
  "futures",
  "gpui-kit",
+ "image",
  "kopuz-api",
  "kopuz-config",
  "kopuz-i18n",
@@ -6739,6 +6740,7 @@ dependencies = [
  "topbar",
  "tracing",
  "tracing-subscriber",
+ "tray-icon",
  "winres",
 ]
 
@@ -8495,12 +8497,22 @@ dependencies = [
 name = "now_playing"
 version = "0.1.0"
 dependencies = [
+ "block2 0.6.2",
  "components",
+ "core-foundation 0.10.1",
+ "core-video",
+ "dispatch2",
+ "futures",
  "gpui-kit",
  "kopuz-api",
  "kopuz-config",
  "kopuz-i18n",
  "link",
+ "objc2 0.6.4",
+ "objc2-av-foundation",
+ "objc2-core-media",
+ "objc2-core-video",
+ "objc2-foundation 0.3.2",
  "profile",
  "settings_interface",
  "store",
@@ -8827,6 +8839,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-core-image 0.3.2",
+ "objc2-core-media",
  "objc2-core-video",
  "objc2-foundation 0.3.2",
  "objc2-image-io",
@@ -8970,6 +8983,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05ec576860167a15dd9fce7fbee7512beb4e31f532159d3482d1f9c6caedf31d"
 dependencies = [
  "bitflags 2.13.0",
+ "block2 0.6.2",
  "dispatch2",
  "objc2 0.6.4",
  "objc2-core-audio",
@@ -8997,10 +9011,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d425caf1df73233f29fd8a5c3e5edbc30d2d4307870f802d18f00d83dc5141a6"
 dependencies = [
  "bitflags 2.13.0",
+ "block2 0.6.2",
  "objc2 0.6.4",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-io-surface",
+ "objc2-metal 0.3.2",
 ]
 
 [[package]]
@@ -9477,6 +9493,7 @@ dependencies = [
  "components",
  "gpui-kit",
  "kopuz-api",
+ "kopuz-config",
  "profile",
  "settings_interface",
  "store",
@@ -12063,6 +12080,7 @@ dependencies = [
  "kopuz-api",
  "kopuz-config",
  "kopuz-i18n",
+ "kopuz-utils",
  "link",
  "store",
  "theme",
@@ -12077,6 +12095,7 @@ dependencies = [
  "components",
  "fontdb",
  "gpui-kit",
+ "kopuz-config",
  "kopuz-i18n",
  "store",
 ]
@@ -12086,10 +12105,12 @@ name = "settings_playback"
 version = "0.1.0"
 dependencies = [
  "components",
+ "directories",
  "gpui-kit",
  "kopuz-api",
  "kopuz-config",
  "kopuz-i18n",
+ "kopuz-utils",
  "link",
  "store",
  "theme",
@@ -12105,6 +12126,7 @@ dependencies = [
  "kopuz-api",
  "kopuz-config",
  "kopuz-i18n",
+ "kopuz-utils",
  "link",
  "store",
  "theme",
@@ -13557,6 +13579,7 @@ version = "0.1.0"
 dependencies = [
  "gpui-kit",
  "kopuz-config",
+ "kopuz-utils",
  "material-colors",
  "serde_json",
  "store",
@@ -14038,6 +14061,7 @@ dependencies = [
  "components",
  "gpui-kit",
  "kopuz-api",
+ "kopuz-config",
  "kopuz-i18n",
  "link",
  "profile",

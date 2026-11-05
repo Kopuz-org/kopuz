@@ -206,11 +206,18 @@ pub fn open_log_dir() -> io::Result<()> {
 /// version/commit/OS header) into a single file at `dest`, for the user to attach to
 /// a bug report. Triggered by the settings "Export logs" button.
 pub fn export_logs(dest: &Path) -> io::Result<()> {
+    export_logs_named(dest, &[LATEST])
+}
+
+/// As [`export_logs`], with each of `logs` in turn; one that is missing says so in its place.
+pub fn export_logs_named(dest: &Path, logs: &[&str]) -> io::Result<()> {
     let dir =
         log_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "log dir not set"))?;
+    write_export(&dir, dest, logs)
+}
 
-    let latest = std::fs::read_to_string(dir.join(LATEST));
-    let crash = newest_crash(&dir).map(|p| {
+fn write_export(dir: &Path, dest: &Path, logs: &[&str]) -> io::Result<()> {
+    let crash = newest_crash(dir).map(|p| {
         let name = p
             .file_name()
             .and_then(|n| n.to_str())
@@ -230,10 +237,12 @@ pub fn export_logs(dest: &Path) -> io::Result<()> {
         std::env::consts::ARCH
     )?;
 
-    writeln!(out, "\n=== {LATEST} ===")?;
-    match latest {
-        Ok(s) => out.write_all(s.as_bytes())?,
-        Err(e) => writeln!(out, "(unavailable: {e})")?,
+    for log in logs {
+        writeln!(out, "\n=== {log} ===")?;
+        match std::fs::read_to_string(dir.join(log)) {
+            Ok(s) => out.write_all(s.as_bytes())?,
+            Err(e) => writeln!(out, "(unavailable: {e})")?,
+        }
     }
 
     if let Some((name, body)) = crash {
@@ -251,6 +260,19 @@ mod tests {
 
     fn tmp(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("kopuz-logtest-{}-{name}", std::process::id()))
+    }
+
+    #[test]
+    fn export_bundles_each_named_log_and_says_which_are_missing() {
+        let dir = tmp("export");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(APP_LATEST), "app line\n").unwrap();
+        let dest = dir.join("bundle.txt");
+        write_export(&dir, &dest, &[APP_LATEST, DAEMON_LATEST]).unwrap();
+        let bundle = std::fs::read_to_string(&dest).unwrap();
+        assert!(bundle.contains(&format!("=== {APP_LATEST} ===\napp line")));
+        assert!(bundle.contains(&format!("=== {DAEMON_LATEST} ===\n(unavailable:")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

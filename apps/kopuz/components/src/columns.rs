@@ -8,8 +8,10 @@ use store::layout::Column;
 
 use crate::format::t;
 
-/// The index column: the number, the play glyph, or the selection box.
-pub const INDEX: Pixels = px(20.);
+/// The index column, as wide as the skin draws it: the number, the play glyph, or the selection box.
+pub fn index() -> Pixels {
+    crate::skin::arrangement().rows.lead
+}
 /// The row-menu column, which the header keeps clear for the rows' dots.
 pub const MENU: Pixels = px(40.);
 
@@ -50,6 +52,14 @@ pub const SPECS: &[Spec] = &[
         label_key: "album",
         grow: 1.,
         base: 150.,
+        align_end: false,
+        required: false,
+    },
+    Spec {
+        id: "genre",
+        label_key: "genre",
+        grow: 1.,
+        base: 120.,
         align_end: false,
         required: false,
     },
@@ -120,9 +130,16 @@ pub fn standard(album: bool) -> Layout {
         .collect()
 }
 
-/// The frame a row and a header share: `items-center p-2` with the `1.5rem` column gap.
+/// The frame a row and a header share: `items-center px-2` with the skin's column gap and row padding.
 pub fn frame() -> Div {
-    div().flex().w_full().items_center().p_2().gap_6()
+    let rows = crate::skin::arrangement().rows;
+    div()
+        .flex()
+        .w_full()
+        .items_center()
+        .px_2()
+        .py(rows.pad_y)
+        .gap(rows.gap)
 }
 
 /// A fixed column: the index, the menu, or one whose width is set.

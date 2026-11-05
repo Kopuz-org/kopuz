@@ -5,8 +5,8 @@ use std::rc::Rc;
 use api::{CatalogDetail, CatalogDetailRequest, CatalogItemKind};
 use components::format::t;
 use components::{
-    DetailActions, DetailHeader, EmptyState, HeaderLayout, Loading, Look, PageHeader, TrackActions,
-    TrackList, TrackListEvent, TrackListOptions, icons,
+    DetailActions, DetailHeader, EmptyState, HeaderLayout, Loading, Look, MenuButton, MenuVariant,
+    PageHeader, TrackActions, TrackList, TrackListEvent, TrackListOptions, icons, menus,
 };
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -15,7 +15,7 @@ use gpui_kit::{
     ParentElement as _, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
     Styled, Subscription, Task, Window, div,
 };
-use store::{Link, PlayerModel, actions};
+use store::{Link, PlayerModel, Target, actions};
 
 use crate::shelves::Shelves;
 use crate::states;
@@ -27,6 +27,8 @@ pub struct CatalogPlaylist {
     list: Entity<TrackList>,
     // The rows' keys, taken once per answer rather than per frame.
     keys: Rc<[String]>,
+    // The opened playlist's own menu: save, rate, edit details or delete at the source.
+    target: Option<Target>,
     loading: bool,
     error: Option<SharedString>,
     // Bumped per load; a slow answer for one id must not land after the user moved to another.
@@ -55,7 +57,7 @@ impl CatalogPlaylist {
             cx.subscribe(&list, |_, list, event: &TrackListEvent, cx| {
                 if let TrackListEvent::Play(index) = event {
                     let keys = list.read(cx).keys();
-                    actions::play_tracks(keys, Some(*index as u32), cx);
+                    actions::play_listing(keys, *index, cx);
                 }
             }),
             // The shuffle button reads the player at render.
@@ -66,6 +68,7 @@ impl CatalogPlaylist {
             title,
             list,
             keys: Rc::from([]),
+            target: None,
             loading: false,
             error: None,
             generation: 0,
@@ -82,6 +85,7 @@ impl CatalogPlaylist {
         let id = self.id.to_string();
         self.loading = true;
         self.error = None;
+        self.target = None;
         cx.notify();
         let call = Link::global(cx).call(move |api| async move {
             let request = CatalogDetailRequest::new(CatalogItemKind::Playlist, id.clone());
@@ -104,6 +108,7 @@ impl CatalogPlaylist {
                 match result {
                     Ok(detail) => {
                         this.keys = detail.tracks.iter().map(|row| row.key.clone()).collect();
+                        this.target = Some(Target::catalog_page(&detail));
                         this.list
                             .update(cx, |list, cx| list.set_rows(detail.tracks, cx));
                     }
@@ -120,17 +125,28 @@ impl Render for CatalogPlaylist {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _timing = profile::render("catalog-playlist");
         let empty = !self.loading && self.error.is_none() && self.keys.is_empty();
+        let menu = self
+            .target
+            .clone()
+            .filter(|target| commands::has_menu(target, cx));
         components::page()
             .pb_8()
             .child(
-                PageHeader::new(self.title.clone()).when(!self.keys.is_empty(), |header| {
-                    header.action(
-                        DetailActions::new("catalog-playlist", self.keys.clone())
-                            .look(Look::Compact)
-                            .play(commands::play_all)
-                            .shuffle(commands::set_shuffle),
-                    )
-                }),
+                PageHeader::new(self.title.clone())
+                    .when(!self.keys.is_empty(), |header| {
+                        header.action(
+                            DetailActions::new("catalog-playlist", self.keys.clone())
+                                .look(Look::Compact)
+                                .play(commands::play_all)
+                                .shuffle(commands::set_shuffle),
+                        )
+                    })
+                    .when_some(menu, |header, target| {
+                        header.action(MenuButton::new(
+                            "catalog-playlist-menu",
+                            menus::menu_for(target),
+                        ))
+                    }),
             )
             .map(|page| {
                 if self.loading {
@@ -240,6 +256,8 @@ impl CatalogArtist {
             }
             bar
         });
+        let menu =
+            Some(Target::catalog_page(detail)).filter(|target| commands::has_menu(target, cx));
         DetailHeader::new(detail.title.clone())
             .layout(HeaderLayout::Banner)
             .artwork(detail.artwork.as_ref())
@@ -248,6 +266,12 @@ impl CatalogArtist {
             })
             .description(detail.description.clone())
             .when_some(bar, |header, bar| header.action(bar))
+            .when_some(menu, |header, target| {
+                header.action(
+                    MenuButton::new("catalog-artist-menu", menus::menu_for(target))
+                        .variant(MenuVariant::Scrim),
+                )
+            })
             .into_any_element()
     }
 }
