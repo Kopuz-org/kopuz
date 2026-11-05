@@ -281,7 +281,11 @@ impl Library {
                 Some((sort.field.as_str(), sort.descending)),
                 |id| filters::is_server_sortable(id) || id == "format",
                 cx.listener(|this, id: &str, _, cx| {
-                    let next = this.sort().toggled(id).to_layout();
+                    let next = match this.is_liked() {
+                        true => this.sort().toggled_or_unsorted(id),
+                        false => this.sort().toggled(id),
+                    }
+                    .to_layout();
                     this.write_facet(cx, move |facet| facet.sort = next);
                 }),
             )

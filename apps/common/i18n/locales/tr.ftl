@@ -1058,6 +1058,7 @@ error_browser_not_opened = Oturum açmak için tarayıcı açılamadı.
 error_sign_in_timed_out = Oturum açma zamanında onaylanmadı.
 error_browser_profile_gone = Bu tarayıcı profili artık yok.
 error_browser_cookies_unreadable = Bu tarayıcı profilinin çerezleri okunamadı.
+error_browser_open = Tarayıcıyı kapatıp tekrar deneyin. Tarayıcı açıkken çerezlerini kilitli tutar.
 error_browser_profile_signed_out = Bu tarayıcı profili servise giriş yapmamış. Orada giriş yapın ya da token'ınızı yapıştırın.
 error_browser_profile_no_token = Servis bu profil için token göstermedi. Token'ı kendiniz yapıştırın.
 error_integration_unreachable = Servise ulaşılamadı. Bağlantınızı kontrol edin.

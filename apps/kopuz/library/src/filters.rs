@@ -264,6 +264,17 @@ impl Sort {
         }
     }
 
+    /// The same, but a third click on a column hands the order back to the listing's own.
+    pub fn toggled_or_unsorted(&self, field: &str) -> Self {
+        match self.field == field && self.descending {
+            true => Self {
+                field: String::new(),
+                descending: false,
+            },
+            false => self.toggled(field),
+        }
+    }
+
     fn direction(&self) -> SortDirection {
         match self.descending {
             true => SortDirection::Desc,
@@ -302,7 +313,7 @@ pub fn track_sort_field(id: &str) -> Option<TrackSortField> {
 
 /// Whether the daemon can order by this column at all; anything else sorts what is held.
 pub fn is_server_sortable(id: &str) -> bool {
-    id == "plays" || track_sort_field(id).is_some()
+    id.is_empty() || id == "plays" || track_sort_field(id).is_some()
 }
 
 fn non_empty(value: &str) -> Option<String> {
@@ -502,6 +513,21 @@ mod tests {
         let moved = flipped.toggled("artist");
         assert_eq!(moved.field, "artist");
         assert!(!moved.descending);
+    }
+
+    #[test]
+    fn a_third_click_on_favorites_goes_back_to_the_liked_order() {
+        let unsorted = Sort {
+            field: String::new(),
+            descending: false,
+        };
+        let up = unsorted.toggled_or_unsorted("title");
+        let down = up.toggled_or_unsorted("title");
+        assert!(down.descending);
+        let back = down.toggled_or_unsorted("title");
+        assert_eq!(back, unsorted);
+        assert_eq!(back.to_track_sort(), TrackSort::Default);
+        assert!(is_server_sortable(&back.field));
     }
 
     #[test]

@@ -300,6 +300,7 @@ impl Library {
             cx.observe(&layout, |this, _, cx| this.adopt_layout(cx)),
             cx.observe(&store::ConfigModel::global(cx), |_, _, cx| cx.notify()),
             cx.observe(&sources, |_, _, cx| cx.notify()),
+            cx.observe(&store::JobsModel::global(cx), |_, _, cx| cx.notify()),
             cx.observe_in(&navigator, window, |this, _, window, cx| {
                 this.adopt_route(window, cx)
             }),
@@ -368,7 +369,7 @@ impl Library {
 
     /// How this facet was left: its columns, its order, its density.
     fn read_layout(&mut self, cx: &App) {
-        let held = store::layout(cx).library_facet(self.filters.facet.name());
+        let held = store::layout(cx).library_facet(self.layout_name());
         self.columns = columns::resolve(&held.columns);
         self.sort = Sort::from_layout(&held.sort);
         self.group_by = held.group_by.clone();
@@ -504,8 +505,16 @@ impl Library {
 
     /// Edit this facet's remembered layout; everything the page draws follows from it.
     pub(crate) fn write_facet(&self, cx: &mut App, edit: impl FnOnce(&mut store::layout::Facet)) {
-        let name = self.filters.facet.name().to_string();
+        let name = self.layout_name().to_string();
         LayoutModel::edit(cx, move |layout| layout.edit_library_facet(&name, edit));
+    }
+
+    /// Where this page keeps its columns and order.
+    fn layout_name(&self) -> &'static str {
+        match self.liked {
+            true => store::layout::FAVORITES,
+            false => self.filters.facet.name(),
+        }
     }
 
     fn delay_filter(&mut self, typed: String, cx: &mut Context<Self>) {

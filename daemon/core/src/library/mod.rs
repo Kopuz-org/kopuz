@@ -342,6 +342,7 @@ impl LibraryService {
         };
         let sort = match filter.sort {
             api::TrackSort::Default if filter.album.is_some() => db::TrackSort::TrackNumber,
+            api::TrackSort::Default if filter.favorite == Some(true) => db::TrackSort::Liked,
             sort => map_sort(sort),
         };
         let db_filter = db::TrackFilter {

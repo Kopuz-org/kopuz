@@ -251,6 +251,10 @@ impl MediaSource for YtSource {
         Ok(radio_page(page))
     }
 
+    fn favorites_playlist(&self) -> Option<&str> {
+        self.client.is_authenticated().then_some(LIKED_MUSIC_ID)
+    }
+
     async fn more_radio(&self, cursor: &str) -> Result<RadioPage, SourceError> {
         let (playlist_id, token) = cursor
             .split_once(RADIO_CURSOR_SEPARATOR)
