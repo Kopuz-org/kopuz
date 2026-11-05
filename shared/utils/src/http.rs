@@ -272,6 +272,35 @@ mod tests {
         assert_eq!(elsewhere_hits.load(Ordering::SeqCst), 0);
     }
 
+    #[tokio::test]
+    async fn a_guarded_fetch_follows_a_redirect_that_stays_on_its_hosts() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let target = format!("http://{}", listener.local_addr().expect("address"));
+        let target_hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = Arc::clone(&target_hits);
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                seen.fetch_add(1, Ordering::SeqCst);
+                let _ = stream.read(&mut [0u8; 2048]);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                );
+            }
+        });
+        let (start, _) = redirecting("127.0.0.1", format!("{target}/x"));
+        let client = guarded_builder(Some(only("127.0.0.1", Some("127.0.0.1"))))
+            .build()
+            .expect("client");
+        let response = client
+            .get(format!("{start}/stream"))
+            .send()
+            .await
+            .expect("an allowed redirect is followed");
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert_eq!(target_hits.load(Ordering::SeqCst), 1);
+    }
+
     #[test]
     fn what_a_plugin_may_fetch() {
         let reach = only("cdn.test", None);

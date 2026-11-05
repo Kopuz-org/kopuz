@@ -414,7 +414,7 @@ impl Reach {
     /// What every fetch of this plugin's streams is held to: their redirects,
     /// the segments they list and where their names lead. Nothing for one
     /// kopuz ships.
-    pub(crate) fn stream_guard(&self) -> Option<utils::http::Guard> {
+    pub fn stream_guard(&self) -> Option<utils::http::Guard> {
         (!self.trusted).then(|| Arc::new(self.clone()) as utils::http::Guard)
     }
 
