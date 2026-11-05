@@ -2,12 +2,12 @@
 
 use api::{AlbumInfo, ArtistInfo, PlaylistInfo};
 use components::format::t_with;
-use components::{Frame, GridMode, JumpRail, TileRow, rail_letter};
+use components::{DownloadToggle, Frame, GridMode, JumpRail, TileRow, ToggleSize, rail_letter};
 use gpui_kit::{
     AnyElement, App, ClickEvent, Context, IntoElement, Pixels, SharedString, Window, px,
 };
 use store::layout::ViewMode;
-use store::{Navigator, Pictured, PlaylistsModel, Route, Target};
+use store::{Navigator, Pictured, Route, Target};
 
 use crate::facet::Facet;
 use crate::{Library, Tile};
@@ -33,10 +33,12 @@ impl Library {
                     "tracks" => left.sort_rank.cmp(&right.sort_rank),
                     _ => left.sort_key.cmp(&right.sort_key),
                 };
-                match descending {
+                let order = match descending {
                     true => order.reverse(),
                     false => order,
-                }
+                };
+                // Folders lead whichever way the playlists run, the way the Dioxus page laid them out.
+                right.folder.cmp(&left.folder).then(order)
             });
         }
         self.rail_letters = self.whole.then(|| {
@@ -73,10 +75,13 @@ impl Library {
                 title: album.title.clone().into(),
             },
             route: Route::Album(album.id.clone().into()),
-            pictured: Pictured::Album {
+            pictured: Some(Pictured::Album {
                 artist: album.artist.clone().into(),
                 title: album.title.clone().into(),
-            },
+            }),
+            placeholder: Facet::Albums.placeholder(),
+            folder: false,
+            offline: None,
         }
     }
 
@@ -109,20 +114,11 @@ impl Library {
                 name: artist.name.clone().into(),
             },
             route: Route::Artist(artist.key.clone()),
-            pictured: Pictured::Artist(artist.name.clone().into()),
+            pictured: Some(Pictured::Artist(artist.name.clone().into())),
+            placeholder: Facet::Artists.placeholder(),
+            folder: false,
+            offline: None,
         }
-    }
-
-    fn playlist_tiles(&self, cx: &Context<Self>) -> Vec<Tile> {
-        let query = self.filters().search.trim().to_lowercase();
-        let playing = self.playing.track();
-        PlaylistsModel::global(cx)
-            .read(cx)
-            .playlists()
-            .iter()
-            .filter(|playlist| query.is_empty() || playlist.name.to_lowercase().contains(&query))
-            .map(|playlist| playlist_tile(playlist, playing))
-            .collect()
     }
 
     /// The grid itself: bands of tiles, or one row per entry, beside the jump rail.
@@ -181,20 +177,30 @@ impl Library {
         facet: Facet,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        components::Tile::new(tile.id.clone(), tile.title.clone())
+        let corner = tile.offline.clone().map(|(keys, offline)| {
+            DownloadToggle::new(format!("download-{}", tile.id), keys)
+                .size(ToggleSize::Corner)
+                .offline(offline)
+                .on_toggle(commands::set_offline)
+        });
+        let card = components::Tile::new(tile.id.clone(), tile.title.clone())
             .subtitle(tile.subtitle.clone())
             .artwork(tile.artwork.as_ref())
             .size(width - px(32.))
             .round(facet.round_tiles())
-            .placeholder(facet.placeholder())
+            .placeholder(tile.placeholder)
             .frame(Frame::Card)
             .playing(tile.playing)
             .selected(self.selection.contains(&tile.id))
             .cursor(self.selection.cursor() == Some(index))
             .on_click(self.click_listener(tile.clone(), index, cx))
-            .pictured(tile.pictured.clone())
-            .menu(Some(tile.target.clone()))
-            .into_any_element()
+            .corner(corner)
+            .menu(Some(tile.target.clone()));
+        match tile.pictured.clone() {
+            Some(pictured) => card.pictured(pictured),
+            None => card,
+        }
+        .into_any_element()
     }
 
     fn line_of(
@@ -204,18 +210,21 @@ impl Library {
         facet: Facet,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        TileRow::new(tile.id.clone(), tile.title.clone())
+        let row = TileRow::new(tile.id.clone(), tile.title.clone())
             .thumb(store::ConfigModel::global(cx).read(cx).row_images())
             .subtitle(tile.subtitle.clone())
             .artwork(tile.artwork.as_ref())
             .round(facet.round_tiles())
-            .placeholder(facet.placeholder())
+            .placeholder(tile.placeholder)
             .playing(tile.playing)
             .selected(self.selection.contains(&tile.id))
             .on_click(self.click_listener(tile.clone(), index, cx))
-            .pictured(tile.pictured.clone())
-            .menu(Some(tile.target.clone()))
-            .into_any_element()
+            .menu(Some(tile.target.clone()));
+        match tile.pictured.clone() {
+            Some(pictured) => row.pictured(pictured),
+            None => row,
+        }
+        .into_any_element()
     }
 
     /// A plain click opens; ctrl and shift build a selection, the same as in the table.
@@ -280,7 +289,7 @@ impl Library {
     }
 }
 
-fn playlist_tile(playlist: &PlaylistInfo, playing: Option<&str>) -> Tile {
+pub(crate) fn playlist_tile(playlist: &PlaylistInfo, playing: Option<&str>) -> Tile {
     let playing = playing.is_some_and(|key| playlist.track_keys.iter().any(|held| held == key));
     Tile {
         id: SharedString::from(playlist.id.clone()),
@@ -298,6 +307,9 @@ fn playlist_tile(playlist: &PlaylistInfo, playing: Option<&str>) -> Tile {
             name: playlist.name.clone().into(),
         },
         route: Route::Playlist(playlist.id.clone().into()),
-        pictured: Pictured::Playlist(playlist.name.clone().into()),
+        pictured: Some(Pictured::Playlist(playlist.name.clone().into())),
+        placeholder: Facet::Playlists.placeholder(),
+        folder: false,
+        offline: None,
     }
 }

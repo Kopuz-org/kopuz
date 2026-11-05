@@ -157,8 +157,9 @@ impl Cover {
                         .absolute()
                         .top(relative(bleed))
                         .left(relative(bleed))
-                        .right(relative(bleed))
-                        .bottom(relative(bleed))
+                        // Insets alone leave an image at its pixel width, so a wide frame showed a strip of it.
+                        .w(relative(1. - 2. * bleed))
+                        .h(relative(1. - 2. * bleed))
                         .object_fit(ObjectFit::Cover),
                 )
             })

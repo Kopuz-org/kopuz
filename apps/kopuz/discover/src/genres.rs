@@ -21,15 +21,28 @@ use store::{Query, SourcesModel, actions, all};
 
 use crate::states;
 
+/// The genre names one album's genre field holds.
+fn names_in(field: &str) -> impl Iterator<Item = &str> {
+    field
+        .split(['/', ';', ','])
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+}
+
+/// The genre fields, as the daemon stores them, that file an album under `name`.
+fn fields_naming<'a>(name: &str, fields: &'a [String]) -> Vec<&'a str> {
+    fields
+        .iter()
+        .map(String::as_str)
+        .filter(|field| names_in(field).any(|each| each == name))
+        .collect()
+}
+
 /// Every genre the albums are filed under, by name, each with the first cover filed under it.
 pub(crate) fn genres_of(albums: &[AlbumInfo]) -> Vec<(SharedString, Option<ArtworkRef>)> {
     let mut covers: HashMap<&str, Option<&ArtworkRef>> = HashMap::new();
     for album in albums {
-        for genre in album.genre.split(['/', ';', ',']) {
-            let genre = genre.trim();
-            if genre.is_empty() {
-                continue;
-            }
+        for genre in names_in(&album.genre) {
             let cover = covers.entry(genre).or_default();
             if cover.is_none() {
                 *cover = album.artwork.as_ref();
@@ -85,10 +98,20 @@ impl Genre {
         let genre = name.to_string();
         let tracks = cx.new(|cx| {
             Query::new(
-                &[Table::Tracks],
+                &[Table::Tracks, Table::Albums],
                 move |api| {
                     let genre = genre.clone();
-                    async move { api.genre_tracks(genre, all()).await }
+                    // The daemon matches a genre field whole, and a card names one part of a field.
+                    async move {
+                        let fields = api.genres().await?;
+                        let mut tracks = TrackPage::default();
+                        for field in fields_naming(&genre, &fields) {
+                            let page = api.genre_tracks(field.to_string(), all()).await?;
+                            tracks.total += page.total;
+                            tracks.items.extend(page.items);
+                        }
+                        Ok(tracks)
+                    }
                 },
                 cx,
             )
@@ -233,6 +256,22 @@ mod tests {
             names,
             ["Ambient", "Electronic", "Trip Hop", "electronic"].map(SharedString::from)
         );
+    }
+
+    #[test]
+    fn a_genre_page_asks_for_every_field_that_names_it() {
+        let fields = [
+            "Ambient",
+            "Ambient / Electronic",
+            "Electronic, Trip Hop",
+            "Electronica",
+        ]
+        .map(String::from);
+        assert_eq!(
+            fields_naming("Electronic", &fields),
+            ["Ambient / Electronic", "Electronic, Trip Hop"]
+        );
+        assert_eq!(fields_naming("Jazz", &fields), Vec::<&str>::new());
     }
 
     #[test]

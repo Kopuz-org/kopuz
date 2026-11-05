@@ -467,6 +467,9 @@ impl HeroSize {
 /// The Favorites page's layout, kept apart from the library's tracks.
 pub const FAVORITES: &str = "favorites";
 
+/// The Activity page's layout, so its order by plays never becomes the library tracks' order.
+pub const ACTIVITY: &str = "activity";
+
 /// The library's per-facet state, keyed by facet name.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default, transparent)]
@@ -560,6 +563,19 @@ impl Layout {
                     field: String::new(),
                     descending: false,
                 },
+                ..self.library.facet("tracks")
+            };
+        }
+        // Until Activity is arranged on its own it is the Dioxus most-played table.
+        if name == ACTIVITY && !self.library.0.contains_key(ACTIVITY) {
+            return Facet {
+                sort: Sort {
+                    field: "plays".into(),
+                    descending: true,
+                },
+                columns: ["title", "artist", "album", "genre", "duration", "plays"]
+                    .map(Column::new)
+                    .to_vec(),
                 ..self.library.facet("tracks")
             };
         }
@@ -1207,6 +1223,21 @@ mod tests {
         assert!(arranged.contains(&"top_artists"));
         assert!(!home.visible().contains(&"top_artists"));
         assert_eq!(arranged.len(), SHELVES.len());
+    }
+
+    #[test]
+    fn activity_opens_by_plays_and_never_moves_the_tracks_order() {
+        let mut layout = Layout::default();
+        let activity = layout.library_facet(ACTIVITY);
+        assert_eq!(activity.sort.field, "plays");
+        assert!(activity.sort.descending);
+        assert!(activity.columns.iter().any(|column| column.id == "genre"));
+
+        layout.edit_library_facet("tracks", |facet| facet.sort.field = "artist".into());
+        assert_eq!(layout.library_facet(ACTIVITY).sort.field, "plays");
+        layout.edit_library_facet(ACTIVITY, |facet| facet.sort.field = "album".into());
+        assert_eq!(layout.library_facet("tracks").sort.field, "artist");
+        assert_eq!(layout.library_facet(ACTIVITY).sort.field, "album");
     }
 
     #[test]
