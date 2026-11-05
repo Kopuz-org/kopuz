@@ -9083,6 +9083,7 @@ dependencies = [
  "components",
  "gpui-kit",
  "kopuz-api",
+ "kopuz-config",
  "profile",
  "settings_interface",
  "store",

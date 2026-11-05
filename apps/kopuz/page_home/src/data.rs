@@ -16,6 +16,10 @@ pub(crate) const RECENT_TRACKS_WINDOW: u32 = 50;
 /// How far a shelf reaches. Only the tiles in view are built, so this is reach, not cost.
 const SHELF: usize = 18;
 
+/// Listen Now holds ten albums as cards; its list layout shows the first [`LISTEN_NOW_ROWS`].
+const LISTEN_NOW: usize = 10;
+pub(crate) const LISTEN_NOW_ROWS: usize = 8;
+
 /// What a tile's play button starts; an artist has no button of its own.
 #[derive(Clone)]
 pub(crate) enum Play {
@@ -45,6 +49,8 @@ pub(crate) struct Tile {
 /// How a shelf is drawn, which follows from what it holds rather than from where it sits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Form {
+    /// One album across the page, the one the last session was in.
+    Featured,
     /// A flat list of equals: a row that glides sideways.
     Row,
     /// The newest session leads, because it is the one most likely wanted back.
@@ -64,6 +70,7 @@ pub(crate) struct Shelf {
 impl Shelf {
     fn new(name: &'static str, tiles: Vec<Tile>) -> Self {
         let form = match name {
+            "hero" => Form::Featured,
             "jump_back_in" => Form::Mosaic,
             "top_artists" => Form::Ranked,
             _ => Form::Row,
@@ -79,6 +86,8 @@ impl Shelf {
 pub(crate) struct Inputs<'a> {
     pub albums: Option<&'a AlbumPage>,
     pub recently_added: Option<&'a AlbumPage>,
+    /// Newest year first, as the daemon sorted them.
+    pub new_releases: Option<&'a AlbumPage>,
     pub artists: Option<&'a ArtistPage>,
     pub recents: Option<&'a TrackPage>,
     /// The most-played tracks, in the daemon's own play order, so an artist can be ranked.
@@ -145,14 +154,43 @@ pub(crate) fn build(inputs: Inputs<'_>) -> Vec<Shelf> {
     shuffle(&mut made_for_you, inputs.seed);
     made_for_you.truncate(SHELF);
 
+    let mut listen_now: Vec<&AlbumInfo> = albums.iter().filter(|album| named(album)).collect();
+    // Its own stream, so Listen Now and Made For You do not open on the same albums.
+    shuffle(&mut listen_now, inputs.seed.rotate_left(17));
+    listen_now.truncate(LISTEN_NOW);
+
+    let new_releases = take_named(
+        inputs
+            .new_releases
+            .map(|page| page.albums.clone())
+            .unwrap_or_default()
+            .into_iter(),
+        SHELF,
+    );
+
     vec![
         Shelf::new("for_you", for_you(inputs.for_you)),
+        Shelf::new("hero", hero(recents, &by_id).into_iter().collect()),
         Shelf::new("jump_back_in", jump_back_in(recents, &by_id)),
+        Shelf::new(
+            "listen_now",
+            listen_now
+                .into_iter()
+                .map(|album| album_tile("listen-now", album))
+                .collect(),
+        ),
         Shelf::new(
             "recently_added",
             recently_added
                 .iter()
                 .map(|album| album_tile("recently-added", album))
+                .collect(),
+        ),
+        Shelf::new(
+            "new_releases",
+            new_releases
+                .iter()
+                .map(|album| album_tile("new-releases", album))
                 .collect(),
         ),
         Shelf::new(
@@ -201,6 +239,46 @@ fn album_tile(scope: &str, album: &AlbumInfo) -> Tile {
     }
 }
 
+/// The album of the newest recent track filed under one, billed to the album's artist where it names one.
+fn hero(recents: &[TrackInfo], by_id: &HashMap<&str, &AlbumInfo>) -> Option<Tile> {
+    recents.iter().find_map(|track| {
+        if track.album_id.trim().is_empty() {
+            return None;
+        }
+        let album = by_id.get(track.album_id.as_str()).copied();
+        let title = album.map_or(track.album.as_str(), |album| album.title.as_str());
+        if is_unknown_album(title) {
+            return None;
+        }
+        let artist = album
+            .map(|album| album.artist.as_str())
+            .filter(|artist| !is_unknown_artist(artist))
+            .unwrap_or(track.artist.as_str());
+        // The albums read lags the recents one, and not every album row has art of its own.
+        let artwork = album
+            .and_then(|album| album.artwork.clone())
+            .or_else(|| track.artwork.clone());
+        Some(Tile {
+            key: SharedString::from(format!("hero-{}", track.album_id)),
+            title: title.to_string().into(),
+            subtitle: artist.to_string().into(),
+            artwork,
+            route: Some(Route::Album(track.album_id.clone().into())),
+            target: Target::Album {
+                id: track.album_id.clone().into(),
+                title: title.to_string().into(),
+            },
+            play: Play::Album(track.album_id.clone()),
+            round: false,
+            placeholder: icons::DISC,
+            pictured: Pictured::Album {
+                artist: artist.to_string().into(),
+                title: title.to_string().into(),
+            },
+        })
+    })
+}
+
 /// The albums the last listening session was in, newest first, one tile per album.
 fn jump_back_in(recents: &[TrackInfo], by_id: &HashMap<&str, &AlbumInfo>) -> Vec<Tile> {
     let mut seen = HashSet::new();
@@ -217,7 +295,11 @@ fn jump_back_in(recents: &[TrackInfo], by_id: &HashMap<&str, &AlbumInfo>) -> Vec
             _ => {}
         }
         out.push(match album {
-            Some(album) => album_tile("jump-back-in", album),
+            // The menu is the track's that put the album here, so it can start a radio or be shared.
+            Some(album) => Tile {
+                target: Target::track(track.key.clone(), track.title.clone()),
+                ..album_tile("jump-back-in", album)
+            },
             // A single, or anything the library holds no album row for, stands as the track it is.
             None => track_tile("jump-back-in", track),
         });
@@ -425,6 +507,67 @@ mod tests {
         let tiles = jump_back_in(&recents, &by_id);
         assert_eq!(tiles.len(), 1);
         assert_eq!(tiles[0].title, "Pixel Down");
+        assert!(matches!(&tiles[0].target, Target::Tracks { keys, .. } if keys[0] == "key-t1"));
+    }
+
+    #[test]
+    fn the_hero_is_the_newest_recent_album_billed_to_its_artist() {
+        let first = album("a1", "Kyougen", "Ado");
+        let by_id = HashMap::from([("a1", &first)]);
+        let recents = vec![
+            track("t0", "Loose", "Someone", ""),
+            track("t1", "Usseewa", "Ado feat. X", "a1"),
+        ];
+        let hero = hero(&recents, &by_id).expect("an album");
+        assert_eq!(hero.title, "Kyougen");
+        assert_eq!(hero.subtitle, "Ado");
+        assert!(matches!(&hero.play, Play::Album(id) if id == "a1"));
+    }
+
+    #[test]
+    fn the_hero_names_the_track_album_before_the_albums_arrive() {
+        let mut played = track("t1", "Usseewa", "Ado", "a1");
+        played.album = "Kyougen".into();
+        let hero = hero(&[played], &HashMap::new()).expect("an album");
+        assert_eq!(hero.title, "Kyougen");
+    }
+
+    #[test]
+    fn a_track_under_no_known_album_is_never_the_hero() {
+        let mut unknown = track("t1", "Link", "Ado", "dir1");
+        unknown.album = "Unknown Album".into();
+        assert!(hero(&[track("t0", "Link", "Ado", ""), unknown], &HashMap::new()).is_none());
+    }
+
+    #[test]
+    fn listen_now_and_new_releases_hold_only_named_albums() {
+        let albums = AlbumPage {
+            total: 3,
+            albums: vec![
+                album("a1", "Kyougen", "Ado"),
+                album("a2", "Unknown Album", "Ado"),
+                album("a3", "Zanmu", "Unknown Artist"),
+            ],
+        };
+        let shelves = build(Inputs {
+            albums: Some(&albums),
+            recently_added: None,
+            new_releases: Some(&albums),
+            artists: None,
+            recents: None,
+            played: None,
+            plays: None,
+            genre: None,
+            playlists: &[],
+            for_you: &[],
+            seed: 1,
+        });
+        let titles = |name: &str| -> Vec<SharedString> {
+            let shelf = shelves.iter().find(|shelf| shelf.name == name).expect(name);
+            shelf.tiles.iter().map(|tile| tile.title.clone()).collect()
+        };
+        assert_eq!(titles("listen_now"), ["Kyougen"]);
+        assert_eq!(titles("new_releases"), ["Kyougen"]);
     }
 
     #[test]
@@ -464,6 +607,7 @@ mod tests {
         let shelves = build(Inputs {
             albums: None,
             recently_added: None,
+            new_releases: None,
             artists: None,
             recents: None,
             played: None,
@@ -479,6 +623,7 @@ mod tests {
 
     #[test]
     fn a_shelf_is_drawn_the_way_its_contents_ask_to_be() {
+        assert_eq!(Shelf::new("hero", Vec::new()).form, Form::Featured);
         assert_eq!(Shelf::new("jump_back_in", Vec::new()).form, Form::Mosaic);
         assert_eq!(Shelf::new("top_artists", Vec::new()).form, Form::Ranked);
         assert_eq!(Shelf::new("recently_added", Vec::new()).form, Form::Row);
