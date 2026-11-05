@@ -43,6 +43,7 @@ impl RenderOnce for GenreCard {
         let route = Route::Genre(self.name.clone());
         profile::elements::built();
         let (hovered, pointer) = motion::hovered(motion::channel(&key, HOVER), window, cx);
+        let radius = style::to_px(style::radius_xl(), window);
         let wash = motion::color(
             motion::channel(&key, WASH),
             style::white(if hovered { style::HOVER } else { style::RAISED }, cx),
@@ -59,7 +60,7 @@ impl RenderOnce for GenreCard {
             .h(TILE_HEIGHT)
             .flex_shrink_0()
             .p_4()
-            .rounded(style::radius_xl())
+            .rounded(radius)
             .border_1()
             .border_color(style::white(style::BORDER, cx))
             .bg(wash)
@@ -70,6 +71,7 @@ impl RenderOnce for GenreCard {
                 tile.child(
                     Cover::new(Some(&artwork))
                         .fill()
+                        .rounded(radius)
                         .zoom(motion::channel(&key, COVER), hovered)
                         .zoom_factor(motion::ZOOM_LG)
                         .scrim(Scrim {

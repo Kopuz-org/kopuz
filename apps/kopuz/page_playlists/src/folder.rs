@@ -43,9 +43,10 @@ impl Render for PlaylistFolder {
             return components::page().child(if loaded {
                 EmptyState::new(t("no_playlists_yet"))
                     .icon(icons::FOLDER)
+                    .flex()
                     .into_any_element()
             } else {
-                Loading::new().into_any_element()
+                Loading::new().flex().into_any_element()
             });
         };
         let inside: Vec<_> = folder

@@ -135,6 +135,7 @@ impl CatalogPage {
         self.loading = !held;
         cx.notify();
         let showing = self.showing.clone();
+        let ticket = CatalogCache::ticket(&showing, cx);
         let call = Link::global(cx).call(move |api| async move {
             match showing.is_empty() {
                 true => api.catalog(None).await.map(feed_detail),
@@ -153,7 +154,7 @@ impl CatalogPage {
                 this.loading = false;
                 match result {
                     Ok(detail) => {
-                        CatalogCache::put(&this.showing, detail.clone(), cx);
+                        CatalogCache::put(&this.showing, ticket, detail.clone(), cx);
                         this.show(detail, cx);
                     }
                     // A stale page on screen beats an error over it.
@@ -273,6 +274,7 @@ impl CatalogPage {
             .update(cx, |shelves, cx| shelves.set_topping_up(held, cx));
         let generation = self.generation;
         let feed = self.is_feed();
+        let ticket = CatalogCache::ticket(&self.showing, cx);
         let request = CatalogDetailRequest {
             continuation: Some(token.clone()),
             ..CatalogDetailRequest::page(self.showing.clone())
@@ -297,7 +299,7 @@ impl CatalogPage {
                     Ok(answer) => {
                         this.extend(paging, answer, cx);
                         if let Some(detail) = this.detail.clone() {
-                            CatalogCache::update(&this.showing, detail, cx);
+                            CatalogCache::update(&this.showing, ticket, detail, cx);
                         }
                     }
                     Err(error) => {

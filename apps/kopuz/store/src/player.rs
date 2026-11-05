@@ -21,6 +21,8 @@ pub struct PlayerModel {
     resynced_for: Option<u64>,
     // A seek asked for and not yet seen land; positions from before it are the old place.
     seeking: Option<Seek>,
+    // The failure the user closed, keyed with its track so the next failure still shows.
+    dismissed_error: Option<String>,
     _fetch: Option<Task<()>>,
     _subscription: Subscription,
 }
@@ -62,6 +64,7 @@ impl PlayerModel {
             revision: None,
             resynced_for: None,
             seeking: None,
+            dismissed_error: None,
             _fetch: None,
             _subscription: subscription,
         }
@@ -227,8 +230,25 @@ impl PlayerModel {
         self.state.queue.context.as_ref()
     }
 
+    /// The playback failure to show, unless it was dismissed.
     pub fn error(&self) -> Option<&api::ErrorBody> {
-        self.state.error.as_ref()
+        let error = self.state.error.as_ref()?;
+        match self.dismissed_error == self.occurrence() {
+            true => None,
+            false => Some(error),
+        }
+    }
+
+    /// Close the failure now showing; a different one, or the same one on another track, shows again.
+    pub fn dismiss_error(&mut self, cx: &mut Context<Self>) {
+        self.dismissed_error = self.occurrence();
+        crate::notify(cx);
+    }
+
+    fn occurrence(&self) -> Option<String> {
+        let message = &self.state.error.as_ref()?.message;
+        let track = self.track().map_or("", |track| track.key.as_str());
+        Some(format!("{track}\u{1}{message}"))
     }
 
     pub fn external(&self) -> Option<&ExternalPlayback> {

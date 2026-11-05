@@ -51,22 +51,22 @@ Shared verbs used below:
 
 ### 2.1 Home (`pages/home.rs`, `home_body.rs`, `home_body_sections.rs`)
 Data: `api.albums(all)` inv:Albums · `api.albums_recently_added({0,64})` inv:Albums+Tracks · `api.artists(all)` inv:Tracks · `api.playlists()` inv:Playlists+Folders · `api.recent_tracks({0,50})` inv:Recents · `api.top_genre()` inv:Tracks · `api.artist_sample_tracks({0,30})` inv:Tracks · `api.tracks_by_keys(offline keys)` · hero `api.album_tracks(id, all)` · `api.favorites()` inv:Favorites
-- [ ] Header "home" title (hidden in Vaxry), "Customize home" button → edit mode (missing: a Customize home button on the page; shelf order and visibility are in Settings → Interface → Home)
-- [ ] Edit mode: per-section row with label, move up/down (swap in `cfg.home_sections`), show/hide toggle (`enabled`), Listen Now layout toggle (`cfg.listen_now_style` List⇄Cards); "Reset home" → `config::default_home_sections()`; "Done" (missing: the in-page edit mode and the Listen Now layout toggle; move, show/hide and reset are in Settings → Interface → Home)
+- [x] Header "home" title (hidden in Vaxry), "Customize home" button → edit mode
+- [x] Edit mode: per-section row with label, move up/down (swap in `cfg.home_sections`), show/hide toggle (`enabled`), Listen Now layout toggle (`cfg.listen_now_style` List⇄Cards); "Reset home" → `config::default_home_sections()`; "Done" (the same order, visibility and reset are also in Settings → Interface → Home)
 - [x] Sections rendered in `cfg.home_sections` order, disabled ones hidden (shown at 40% opacity in edit mode). Keys: `hero, continue_listening, listen_now, top_artists, new_releases, made_for_you, recently_added, playlists`
-- [ ] Hero ("featured_album"): newest recent track; cover = album Full art else track Full art; gradient overlay; title + "by_artist_full"; "Start listening" → `set_queue{Replace, Album{id}, start_index:0}`; heart = all album tracks favorited → `api.set_favorite(key,on)` for each track not already in target state (reads `api.favorites()` first), toast "Couldn't update some favorites" on partial failure (missing: no hero shelf)
-- [ ] Hero height resizable by drag handle in edit mode (140–800 px) → `cfg.hero_height` (missing: no hero shelf)
-- [ ] Hero empty state when no recents (blank block) (missing: no hero shelf)
-- [ ] Continue Listening: up to 10 recent tracks, one per album, skipping unknown artist/album; horizontal scroller with ‹ › buttons (scrollBy ±300); card click → album; hover play button (AlbumPlayButton); card dots menu: Play next (PLAY_NEXT), Add to queue (APPEND), Start radio (RADIO_T, `caps.track_radio`), Share (SHARE) (missing: the Jump back in tiles carry the album menu, so no Start radio or Share)
-- [ ] Listen Now: shuffled albums (dedup by lowercased title, drop unknown artist/album), skip first; Cards (10) or List grid (8); click → album; play button (missing: no Listen Now shelf)
+- [x] Hero ("featured_album"): newest recent track; cover = album Full art else track Full art; gradient overlay; title + "by_artist_full"; "Start listening" → `set_queue{Replace, Album{id}, start_index:0}`; heart = all album tracks favorited → `api.set_favorite(key,on)` for each track not already in target state (reads `api.favorites()` first), toast "Couldn't update some favorites" on partial failure (each refused track is reverted and toasted with its error)
+- [x] Hero height resizable by drag handle in edit mode (140–800 px) → `cfg.hero_height`
+- [x] Hero empty state when no recents (blank block, drawn in edit mode only, as upstream)
+- [x] Continue Listening: up to 10 recent tracks, one per album, skipping unknown artist/album; horizontal scroller with ‹ › buttons (scrollBy ±300); card click → album; hover play button (AlbumPlayButton); card dots menu: Play next (PLAY_NEXT), Add to queue (APPEND), Start radio (RADIO_T, `caps.track_radio`), Share (SHARE) (as Jump back in, whose tiles carry the menu of the track that put the album there)
+- [x] Listen Now: shuffled albums (dedup by lowercased title, drop unknown artist/album), skip first; Cards (10) or List grid (8); click → album; play button (upstream no longer dedups or skips the first)
 - [x] AlbumPlayButton semantics (everywhere): shows pause if current track's `album_id` == card id and playing; click toggles (`player_command(Toggle)`) when current, else `set_queue{Replace, Album{id}, 0}`
 - [x] Top Artists: up to 10 distinct artists from `artist_sample_tracks` (or offline tracks), photo from `ArtistInfo.artwork`; click → Artist page (by name)
-- [ ] New Releases: 12 albums sorted by year desc, dedup title (missing: no New Releases shelf)
+- [x] New Releases: 12 albums sorted by year desc, dedup title (as long as the other album shelves, from `api.albums` sorted by Year desc)
 - [x] Made For You: 12 random albums whose `genre == top_genre`; title uses genre
 - [x] Recently Added: 12 from `albums_recently_added`, dedup title
 - [x] Playlists: last 10 playlists (reverse order), cover from `PlaylistInfo.artwork`, "music_playlist_count"; click → playlist detail; dots menu with only Start radio (RADIO_P) when `caps.playlist_radio`
 - [x] Offline mode (`caps.downloads && is_offline`): albums/artists/playlists filtered to fully-downloaded content (see §6 seam note)
-- [ ] Auto-sync: if `caps.sync` and albums empty on first load → JOB(LibrarySync) (missing: no automatic sync; the empty library offers a refresh button instead)
+- [x] Auto-sync: if `caps.sync` and albums empty on first load → JOB(LibrarySync) (upstream left this to the daemon in 4f357f79: it syncs a never-synced source the first time it is active, `daemon/core/src/auto_sync.rs`)
 - [x] Each empty section renders nothing
 - [x] For you shelf: `api.for_you()` (a mix from radios of liked tracks), rebuilt by `api.refresh_for_you()`; hidden in offline mode
 - [x] Catalog home: a source with a catalog (`caps.pages`) gets its own feed and chips on Home, read with `api.catalog_detail(CatalogDetailRequest::page(id))`
@@ -74,14 +74,14 @@ Data: `api.albums(all)` inv:Albums · `api.albums_recently_added({0,64})` inv:Al
 ### 2.2 Search (`pages/search.rs`, `components/search/*`)
 Data: `api.search(query)` (lowercased, re-run on inv:Tracks/Albums; `None` when blank) · genres derived client-side from `api.albums(all)` (split `genre` on `/;,`, first album cover per genre) · `api.genre_tracks(genre, all)` inv:Tracks
 - [x] Search bar, 150 ms debounce, keydown stops propagation (so Space doesn't toggle playback)
-- [ ] Blank query → "Browse genres" grid (genre tiles with cover); empty → "no_genres_found" (missing: nothing draws a genre grid; `components::GenreCard` has no caller, so `Route::Genre` opens only from the player's genre link)
+- [x] Blank query → "Browse genres" grid (genre tiles with cover); empty → "no_genres_found" (on the Discover landing while the source's search is the library one, as `LocalSearch` draws it)
 - [x] Results: Tracks list (virtualized TrackRow, full track-row menu, play = PLAY_LIST(results, i)); Albums grid (click → Album). Layout differs if only albums. "no_results_found{query}"
-- [ ] Genre detail: back, genre title, track count, Play (PLAY_ALL), Shuffle (toggle shuffle + play shuffled), virtualized TrackRow list with column sort (missing: column sort on the genre track list)
+- [x] Genre detail: back, genre title, track count, Play (PLAY_ALL), Shuffle (toggle shuffle + play shuffled), virtualized TrackRow list with column sort
 - [x] Track-row delete in Search/Genre detail always `DELETE([key], true)` (not caps-gated; parity bug to decide)
 - [x] Add to playlist via PlaylistModal (ADD_TO_PL([key]))
-- [ ] Search filters (`caps.search_filters`): chips narrow `api.search` to one result kind
-- [ ] Search suggestions: `api.search_suggestions(query)` listed under the box while typing
-- [ ] A song played from catalog search starts RADIO_T when `caps.track_radio` (missing: results play the result list)
+- [x] Search filters (`caps.search_filters`): chips narrow `api.search` to one result kind; shelves page on scroll, a shelf's "Show all" picks its `search_filter`, the source's correction shows over the results
+- [x] Search suggestions: `api.search_suggestions(query)` listed while typing (in the palette, which is the search box)
+- [x] A song played from search starts RADIO_T when `caps.search_radio` (catalog search lists, Discover's library results and palette hits)
 
 ### 2.3 Discover (`pages/server/discover.rs`, only when `caps.discover`)
 Data: `api.catalog(continuation)` · `api.catalog_detail(CatalogDetailRequest)`
@@ -91,15 +91,15 @@ Data: `api.catalog(continuation)` · `api.catalog_detail(CatalogDetailRequest)`
 - [x] Infinite scroll: sentinel + IntersectionObserver (600 px margin) → `api.catalog(Some(token))`, "discover_more_loading"
 - [x] Tile kinds: Album/Playlist card (click → Album route / DiscoverPlaylist), Artist card (round; click → DiscoverArtistPage with channel id), Mood/Unknown (inert), Track = SongCard
 - [x] Card hover play button: `play_catalog(kind,id)` pages `catalog_detail` until `continuation` is None; first page → `set_queue{Replace, Tracks}`, rest `Append`; dedup keys; sets `browse_loading`; caches full list only when complete
-- [ ] Hover prefetch after 250 ms dwell (disarmed on mouseleave) into `DiscoverPrefetchCache` (app-wide), used by play_catalog (missing: the hover prefetch cache; `TODO(prefetch)` in discover/src/shelves.rs)
+- [x] Hover prefetch after 250 ms dwell (disarmed on mouseleave) into `DiscoverPrefetchCache` (app-wide), used by play_catalog
 - [x] `DiscoverNowPlaying` (app-wide): tile whose id started playback shows pause/loading; click toggles instead of refetching
 - [x] SongCard click: RADIO_T(key) if `caps.track_radio`, else `set_queue{Replace, Tracks{[key]}}`
 - [x] List shelves (`shelf.list`): TrackRow list, play = `set_queue{Replace, Tracks{keys}, start_index:i}`, "discover_show_all" → DiscoverPlaylist(more_ref, title)
 - [x] Failure while appending pages sets `playback_error` banner
-- [ ] Explicit badge on catalog tiles and song rows (`CatalogItem.explicit`)
-- [ ] Rate a song or catalog item (`caps.rate` → `api.rate(ref, Rating)`) from the track and catalog menus
-- [ ] Save an album or playlist to the source's library (`caps.save` → `api.save(ref, on)`)
-- [ ] Remove an entry from the source's history (`caps.remove_from_history` → `api.remove_from_history(token)`)
+- [x] Explicit badge on catalog tiles and song rows (`CatalogItem.explicit`)
+- [x] Rate a song or catalog item (`caps.rate` → `api.rate(ref, Rating)`) from the track and catalog menus
+- [x] Save an album or playlist to the source's library (`caps.save` → `api.save(ref, on)`)
+- [x] Remove an entry from the source's history (`caps.remove_from_history` → `api.remove_from_history(token)`)
 - [x] Pages the source declares (`caps.pages`) open as their own route, read with `CatalogDetailRequest::page(id)`
 
 ### 2.4 DiscoverPlaylist (`DiscoverPlaylistDetail`)
@@ -110,26 +110,26 @@ Data: `api.catalog(continuation)` · `api.catalog_detail(CatalogDetailRequest)`
 - [x] `catalog_detail{Artist, id = channel id or name}`; generation guard; "artist_none_selected"
 - [x] Banner (artwork bg), title, subtitle, description (3-line clamp), Shuffle button → `play_catalog(Playlist, playback_id)`
 - [x] Shelves rendered with the same ShelfRow/tiles as Discover; artist tiles re-open this page; back button
-- [ ] Follow / unfollow the artist (`caps.follow` → `api.follow(ref, on)`, "catalog_follow" / "catalog_unfollow")
+- [x] Follow / unfollow the artist (`caps.follow` → `api.follow(ref, on)`, "catalog_follow" / "catalog_unfollow")
 - [x] Shuffle and radio buttons from the ids the profile carries
 
 ### 2.6 Library (`pages/library.rs`)
 Data: windowed `api.tracks(TrackFilter{sort: Fields(cfg.library_sort)}, Page{offset,limit})` + count query `{0,1}` for total, both inv:Tracks · `api.albums/artists/playlists` for stat cards · `api.downloads()` + JobProgress(Download)
 - [x] Title "your_library"; refresh button: `caps.scan_folders` → trigger local rescan (shell), else `caps.sync` → JOB(LibrarySync)
-- [ ] Auto-sync once when `caps.sync` and total == 0 (missing: no automatic sync; the empty library offers a refresh button instead)
-- [ ] Stat cards: tracks (total), albums (distinct lowercased titles), artists, playlists (missing: stat cards; the header shows only the current facet's count)
+- [x] Auto-sync once when `caps.sync` and total == 0 (once per source per run, skipped for folder-scanning, signed-out and offline sources)
+- [x] Stat cards: tracks, albums, artists (the daemon's catalog totals), playlists
 - [x] Select-all checkbox (fetches all rows via `api.tracks(filter, all)`, selects keys)
 - [x] SortControl (stacked criteria) over Title/Artist/Album/Duration/DateAdded → `cfg.library_sort`
 - [x] Virtualized list (60 px rows, 10-row buffer), scroll persisted per route; column header
 - [x] Row click play: fetch whole filtered list `api.tracks(filter, all)` → PLAY_LIST(all, idx)
-- [ ] Now-playing row highlight (only when queue length == total) (missing: the highlight follows the playing key whatever the queue holds)
+- [x] Now-playing row highlight (only when queue length == total)
 - [x] Track row menu (§3.9) with: metadata edit (`caps.edit_tags`), delete (`DELETE([key], caps.delete_from_disk)`, hidden unless `caps.delete_from_disk`), download toggle (`caps.downloads`), radio
 - [x] Multi-select (long-press / checkbox) → SelectionBar: Add to queue (fetch all, filter selected, APPEND), Add to playlist (ADD_TO_PL), Delete (if `caps.delete_from_disk`), Cancel
 - [x] States: spinner while total unknown or syncing; "no_tracks_found"; trailing spinner while syncing
 
 ### 2.7 Albums (`pages/album.rs`)
 Grid data: `api.albums(all)` inv:Albums; detail: `api.album(id)` inv:Albums, `api.album_tracks(id, all)` for every same-titled album inv:Tracks, `api.catalog_detail(Album,id)` when `caps.albums == Remote` (online) or DB miss
-- [ ] Grid title "all_albums"; auto JOB(LibrarySync) once if empty and `caps.sync` (missing: no automatic sync; the empty library offers a refresh button instead)
+- [x] Grid title "all_albums"; auto JOB(LibrarySync) once if empty and `caps.sync` (the daemon syncs a never-synced source itself, as in §2.1)
 - [x] ViewModeToggle Grid/List → `cfg.album_view_mode`; SortControl over available fields (Title, Artist, +Year if any year, +Genre if any genre) → `cfg.album_sort`; client-side sort
 - [x] Grid dedups by lowercased title; offline filter to downloaded albums
 - [x] Card: click → detail; right-click (contextmenu) or dots → menu: Add all to queue (`album_tracks` sorted → APPEND), Add all to playlist (ADD_TO_PL(album keys)), Delete album (`caps.delete_from_disk` → `api.delete_album(id, true)`) / Remove from cache (else `delete_album(id,false)` for every same-titled album)
@@ -139,30 +139,30 @@ Grid data: `api.albums(all)` inv:Albums; detail: `api.album(id)` inv:Albums, `ap
 - [x] Detail cover click (`caps.edit_tags`): native file picker (jpg/png/webp) → `api.upload_artwork{Album(id), content_type, bytes}`; trash button (if artwork) → `api.remove_artwork(Album(id))`
 - [x] Detail: per-track delete + selection delete (`caps.delete_from_disk`, from_disk=true); per-track download toggle, Download all / Remove all (`caps.downloads`); download-all disabled while any track active
 - [x] Detail (Remote, `caps.albums == Remote`) "YtAlbumDetail": left meta column (cover, artist link, title, "Album • N songs • M min • year"), buttons: download-all/remove-all toggle, go to artist, Play (PLAY_ALL), Shuffle toggle, Share (`api.album_web_url(browse_id)` fallback `api.track_web_url(first key)` → clipboard); track list of TrackRows (radio, queue, playlist, download toggle; no delete)
-- [ ] Offline: detail tracks filtered to downloaded (missing: the offline filter; `TODO(offline)` in page_albums/src/detail.rs)
-- [ ] Rip an audio CD to FLAC (`caps.rip_audio` → `api.rip_audio`), progress from JobProgress
+- [x] Offline: detail tracks filtered to downloaded (and no catalog read while offline)
+- [x] Rip an audio CD to FLAC (`caps.rip_audio` → `api.rip_audio`), progress from JobProgress
 
 ### 2.8 Artists (`pages/artist.rs`, library presentation)
 Data: `api.albums(all)`, `api.artists(all)` (counts + photos), `api.artist_sample_tracks({0,MAX})`, `api.artist_tracks(name, all)`; `api.refresh_artist_artwork(names)` fired when the grid's name set changes (results arrive as inv:Tracks)
-- [ ] Grid: artist set = album artists ∪ sample-track `artists`, normalized, dropping joined collab credits whose primary exists; photo = `ArtistInfo.artwork`; placeholder mic icon (missing: `api.refresh_artist_artwork` is never called)
+- [x] Grid: artist set = album artists ∪ sample-track `artists`, normalized, dropping joined collab credits whose primary exists; photo = `ArtistInfo.artwork`; placeholder mic icon; `api.refresh_artist_artwork` fired for each loaded window's artists without a photo
 - [x] ViewModeToggle → `cfg.artists_view_mode`; SortControl Name/Tracks/Albums → `cfg.artist_sort` (name breaks ties)
 - [x] Grid scroll persisted (key "artists")
 - [x] Detail: back button; Tracks⇄Albums toggle → `cfg.artist_view_order`
 - [x] Detail Tracks (Showcase): header w/ photo (click → pick file → `upload_artwork{Artist(name)}`), Play all, shuffle, download all/remove all, select all, sortable columns, full row menu, metadata edit, selection bar (queue / playlist / delete)
 - [x] Detail Albums: ViewModeToggle → `cfg.artist_album_view_mode`, SortControl (no Artist field) → `cfg.artist_album_sort`; card menu: Add all to queue, Add all to playlist (`caps.playlists != None`), Delete album (`caps.delete_from_disk`), Download/Remove downloads (`caps.downloads`, uses `with_album_keys`)
-- [ ] States: "no_tracks_found", "no_albums_found"; offline filter (missing: the offline filter; `TODO(offline)` in page_artists/src/detail.rs)
+- [x] States: "no_tracks_found", "no_albums_found"; offline filter
 
 ### 2.9 Playlists (`pages/playlists.rs`, `components/playlist/*`)
 Data: `api.playlists()` → `PlaylistCatalog` inv:Playlists+Folders; detail tracks `api.tracks_by_keys(track_keys)` inv:Tracks
-- [ ] Header: New folder (`caps.folders` → `api.create_playlist_folder(t("new_folder"))`), Add playlist (popup) (missing: `Route::Playlists` redirects to the library facet, so `page_playlists::Playlists`, which holds these buttons, is never built)
-- [ ] AddPlaylistPopup: name input, Save → `api.create_playlist(name, [])` (refused with "error_server_not_configured" if `caps.playlists == None`), inline error; "Add folder" (desktop, `caps.folders`): pick directory → `api.folder_tracks(prefix, all)` → `create_playlist(dirname, keys)` (missing: reachable only from the unrouted `page_playlists::Playlists`; the add-to-playlist picker can still create a playlist)
-- [ ] Folder layout (`caps.folders`): folders grid (cover = first playlist's), open folder view with breadcrumb/back, root playlists grid under "playlists" heading; empty "no_playlists_yet" (missing: the library Playlists facet lists playlists flat; folders show only in the optional playlists panel)
+- [x] Header: New folder (`caps.folders` → `api.create_playlist_folder(t("new_folder"))`), Add playlist (popup), on the library's Playlists facet
+- [x] AddPlaylistPopup: name input, Save → `api.create_playlist(name, [])` (refused with "error_server_not_configured" if `caps.playlists == None`), inline error; "Add folder" (desktop, `caps.folders`): pick directory → `api.folder_tracks(prefix, all)` → `create_playlist(dirname, keys)`
+- [x] Folder layout (`caps.folders`): folder tiles (cover = first playlist's) lead the Playlists facet and open the folder view with breadcrumb/back, then the playlists outside any folder; a search reaches into folders; empty "no_playlists_yet" (no "playlists" heading: the facet is one virtualized grid)
 - [x] Folder card menu: Rename (RenameTextModal, Enter saves → `api.rename_playlist_folder`), Delete (`api.delete_playlist_folder`)
 - [x] Playlist card menu: Move to folder (FolderPickerModal: pick folder → `api.move_playlist(pid, Some(fid))`; "new folder" inline create → `create_playlist_folder` then `move_playlist`), Remove from folder (`move_playlist(pid, None)`, only inside a folder), Rename (`api.rename_playlist`), Start radio (RADIO_P, `caps.playlist_radio`), Delete (`api.delete_playlist`)
-- [ ] Flat remote layout (`!caps.folders`): JOB(PlaylistSync) on mount when `caps.sync`; if `caps.albums == Remote` sync status row ("Loading tracks — done/total", "N playlists synced", Refresh → JOB(PlaylistSync)) from JobProgress(PlaylistSync); card with "Server • N tracks", radio dots menu, hover download/remove-downloads button (`caps.downloads`, spinner while any key active) (missing: built in the unrouted `page_playlists::Playlists`; the library facet has no PlaylistSync, sync row or per-card download toggle)
-- [ ] Empty: anonymous source → "source_anon_playlists" else "no_playlists_found" (missing: the library facet shows `no_playlists_yet` only; `source_anon_playlists` lives in the unrouted page)
+- [x] Flat remote layout (`!caps.folders`): JOB(PlaylistSync) once per source when `caps.sync`; if `caps.albums == Remote` sync status row from JobProgress(PlaylistSync) with Refresh; card "Server Playlist • N tracks", menu, corner download/remove-downloads toggle (`caps.downloads`)
+- [x] Empty: anonymous source → "source_anon_playlists" else "no_playlists_found" (flat) / "no_playlists_yet" (folders), with Add playlist unless `caps.playlists == None`
 - [x] PlaylistDetail: on mount `api.refresh_playlist(id)` when `caps.sync`; TrackListView with Start radio (RADIO_P), cover click → `upload_artwork{Playlist(id)}`, metadata (`caps.edit_tags`), row "Remove from playlist" → `api.remove_playlist_track(id, index)`, reorder ▲▼ buttons when `caps.playlists == Reorder` → `api.reorder_playlist(id, {from,to})`, delete track (`DELETE([key], caps.delete_from_disk)`), download all/one/remove (`caps.downloads`), "playlist_not_found"
-- [ ] Source playlist menu when `caps.playlist_details`: edit name and description (`api.edit_playlist`), rate, delete on the source
+- [ ] Source playlist menu when `caps.playlist_details`: edit name and description (`api.edit_playlist`), rate, delete on the source (missing: on the catalog playlist page only, and the details dialog edits description and privacy, not the name)
 
 ### 2.10 Favorites (`pages/favorites.rs`, `favorites_body.rs`)
 Data: `api.favorites()` inv:Favorites → `api.tracks_by_keys(refs)` inv:Tracks; JobProgress(FavoritesSync)
@@ -171,12 +171,12 @@ Data: `api.favorites()` inv:Favorites → `api.tracks_by_keys(refs)` inv:Tracks;
 - [x] Select-all, selection bar (queue / playlist / delete)
 - [x] Virtualized rows (60 px), play = PLAY_LIST(sorted filtered list, i); full row menu incl. radio, download, metadata, delete
 - [x] Sync UI: `caps.favorites_sync == Instant` + running → "syncing_with_server" spinner; `Paginated` → status row ("yt_syncing_progress{count}" / "yt_synced_total{count}") + Refresh → JOB(FavoritesSync)
-- [ ] Empty states: loading spinner; "no_results_found{query}"; anonymous source → "source_anon_favorites"; else "no_favorites" + "heart_track_to_add" (missing: `source_anon_favorites` and the `heart_track_to_add` hint)
+- [x] Empty states: loading skeleton; "no_results_found{query}" for a search; anonymous source → "source_anon_favorites"; else "no_favorites" + "heart_track_to_add"
 - [x] Start radio from the source's liked playlist (`caps.favorites_playlist` → RADIO_P)
 
 ### 2.11 Activity (`pages/activity.rs`)
 Data: windowed `api.tracks(TrackFilter{sort: PlayCount})` + count; genre per album from `api.albums(all)`; play counts read from `cfg.listen_counts[source.listen_count_key(uid)]` (not `api.stats()`, see §6)
-- [ ] "listening_logs" / "most_played_tracks" header; columns #, title (cover+artist), album, genre, time, plays (fire icon if >0) (missing: no genre column or fire icon; Activity is the library sorted by its plays column)
+- [x] "listening_logs" / "most_played_tracks" header on an Activity page of its own (no facets or stat cards, its own layout, by plays most first); columns # title artist album genre time plays; genre is the album's, read for the album ids the loaded rows reference
 - [x] Row click → fetch all with same filter → PLAY_LIST(all, idx); virtualized; scroll persisted
 - [x] Spinner / "no_tracks_in_library"
 
@@ -197,12 +197,12 @@ Data: `api.download_formats()`, `api.downloader_settings()`, `api.downloader_his
 - [x] Active row: phase "processing"/"downloading {percent}"/waiting, title = job message or shortened URL, progress bar
 - [x] History rows (finished/failed + error, format label); "Clear history" → `api.clear_downloader_history()`; history reloads when job stops running
 - [x] Empty state "downloader_empty_state"
-- [ ] Search to download: `api.search_downloads(query)` results, each with a download button
+- [x] Search to download: search button in the URL dialog → `api.search_downloads(query)` results, each with its own download button (placeholder covers: the app reads pictures only through the daemon)
 
 ### 2.14 Settings (see §4 for fields)
-- [ ] Category navigation "fan" (8 categories; Tools hidden on Android); `cfg.settings_layout` Cd (fan) vs TopBar (missing: the `cfg.settings_layout` Cd/TopBar choice; there is one rail layout)
+- [x] Category navigation "fan" (8 categories; Tools hidden on Android); `cfg.settings_layout` Cd (fan) vs TopBar (Cd draws the fan as a rail beside the panel: GPUI cannot rotate the disc's clip-paths; Material 3 always uses TopBar, as the Dioxus app did)
 - [x] Managed-settings notice per lock kind when `ConfigView.locks` is non-empty; locked rows show lock + disabled control, citing the pinning file or env var
-- [ ] Build info card (version + commit, copy to clipboard) (missing: no build info card)
+- [x] Build info card (version + commit, copy to clipboard)
 
 ### 2.15 Theme editor (desktop; embedded in Settings → Appearance)
 - [x] Saved custom themes list (sorted by name), "+ New theme"
@@ -215,13 +215,13 @@ Data: `api.download_formats()`, `api.downloader_settings()`, `api.downloader_his
 ## 3. Global chrome
 
 ### 3.1 App shell / window (`kopuz/src/main.rs`)
-- [ ] Window 1350×800, title "Kopuz", app icon; decorations = `cfg.titlebar_mode == System` (Linux/Windows), updated live (missing: decorations ignore `cfg.titlebar_mode`)
-- [ ] macOS: hidden title, transparent titlebar, fullsize content; 40 px drag region atop sidebar; app menu (Window: fullscreen/hide/hide others/show all/maximize/close/quit; Edit: undo/redo/cut/copy/paste/select all) (missing: the title is not hidden and the titlebar is not transparent; the app menu is there)
-- [ ] Custom titlebar (`TitlebarMode::Custom`, Linux/Windows): drag area, "Kopuz", minimize/maximize-toggle/close; Windows WM_NCHITTEST subclass for snap (missing: no custom titlebar)
-- [ ] Linux resize handles (8 edges/corners) when not System titlebar and not maximized (missing: no resize handles)
+- [x] Window 1350×800, title "Kopuz", app icon; decorations = `cfg.titlebar_mode == System` (Linux/Windows), updated live (Linux redecorates in place; macOS and Windows reopen the window at the same bounds)
+- [x] macOS: hidden title, transparent titlebar, fullsize content; 40 px drag region atop sidebar; app menu (Window: fullscreen/hide/hide others/show all/maximize/close/quit; Edit: undo/redo/cut/copy/paste/select all) (the top bar's empty stretches and the rail's top drag; `titlebar_mode = System` in the settings file brings the system titlebar back)
+- [x] Custom titlebar (`TitlebarMode::Custom`, Linux/Windows): drag area, "Kopuz", minimize/maximize-toggle/close; Windows WM_NCHITTEST subclass for snap (GPUI's own hit test, from `window_control_area`)
+- [x] Linux resize handles (8 edges/corners) when not System titlebar and not maximized
 - [x] Top-of-content banners: scan progress (local source, "Scanning library…"/current file, from ev:JobProgress{Scan}/JobFinished{Scan}); playback error (`PlayerState.error.message`, dismissable); offline banner (connectivity probe, "Keep server mode" switches back); update banner (GitHub latest release check if `cfg.auto_check_updates`, "View release" opens browser)
 - [x] Player bar placed Top or Bottom per `cfg.player_bar_position`
-- [ ] RTL support: `dir=rtl` from `i18n::is_rtl()`; transport/sliders forced LTR; sidebar border/resize handle mirrored (missing: `i18n::is_rtl` is never read)
+- [ ] RTL support: `dir=rtl` from `i18n::is_rtl()`; transport/sliders forced LTR; sidebar border/resize handle mirrored (missing: the shell, top bar, rail and playlists panel mirror, but GPUI has no text direction, so rows inside pages still read left to right)
 - [x] Global image error fallback → default cover SVG
 - [x] Fade-in after stylesheets load (cosmetic)
 - [x] Offline mode: enter and leave with `api.set_offline(on)`; a banner says so while it is on and offers the way out; the library shows the offline empty state
@@ -238,9 +238,9 @@ Data: `api.download_formats()`, `api.downloader_settings()`, `api.downloader_his
 ### 3.3 Sidebar (`layout/{normal,vaxry}/sidebar.rs`)
 - [x] Normal style: flat list Home, Search, Discover, Library, Albums, Artists, Playlists, Favorites, Radio, Activity, Downloader (desktop) + separator + Settings
 - [x] Normal: order from `cfg.sidebar_order`, hover ▲▼ reorder buttons per item (writes `cfg.sidebar_order`)
-- [ ] Vaxry style: sections "discover" (Home, Search, Discover, Radio) and "library" (Library, Albums, Artists, Favorites, Activity, Playlists), then Downloader + Settings; no reorder (missing: no Vaxry skin)
+- [x] Vaxry style: sections "discover" (Home, Search, Discover, Radio) and "library" (Library, Albums, Artists, Favorites, Activity, Playlists), then Downloader + Settings; no reorder (Search folds into Discover, as the GPUI routes do)
 - [x] Discover item hidden unless `caps.discover`
-- [ ] Drag-to-resize width (Normal default 240, Vaxry 200; collapse to 72 px icon rail under 150 px, expand over 180; max 450); collapsed items show tooltips (missing: the sidebar is gone; the optional playlists panel resizes but never collapses to an icon rail)
+- [x] Drag-to-resize width (Normal default 240, Vaxry 200; collapse to 72 px icon rail under 150 px, expand over 180; max 450); collapsed items show tooltips (the playlists panel, up to 420 px)
 - [x] Active item indicator bar
 - [x] Source switcher at top when `cfg.show_source_toggle` (§3.4)
 
@@ -261,7 +261,7 @@ Mirrors PlayerController signals (§5.1)
 - [x] Volume: mute toggle (remembers pre-mute level), slider (`SetVolume` live on input), wheel step = `cfg.volume_scroll_step`; persisted volume saved with config
 - [x] Queue/lyrics panel toggle (rightbar), External devices button (§3.10), Share current (SHARE), Mini player toggle (desktop), Fullscreen button
 - [x] `cfg.fullscreen_use_player_bar`: bar stays on top of fullscreen view (cover/title hidden in bar)
-- [ ] Vaxry variant: same actions, different layout (missing: no Vaxry skin)
+- [x] Vaxry variant: same actions, different layout
 
 ### 3.6 Right bar: queue + lyrics (`layout/rightbar.rs`)
 - [x] Tabs "up_next" / "lyrics", close button; resizable width 280–600 px (drag left edge); mutually exclusive with devices panel
@@ -274,7 +274,7 @@ Data: full mirror from `api.queue_snapshot()` (§5.1)
 - [x] Click row → `queue_edit(Jump{index})` (play-order index)
 - [x] Reorder by mouse drag (6 px threshold, drop above/below split at 23 px) → `queue_edit(Move{from,to})`; ▲▼ ReorderButtons per row → Move
 - [x] Drop tracks dragged from any TrackRow (single or multi-selection, custom drag preview with count) into the queue at a position or at the end → `queue_edit(Insert{index, keys})`; auto-scroll near edges; drag only enabled while rightbar open
-- [ ] Summary line "current/total • total duration" (hidden for radio), click = jump-scroll to current (missing: no summary line)
+- [x] Summary line "current/total • total duration" (hidden for radio), click = jump-scroll to current
 - [x] Auto-follow current item; user scroll disarms; "jump_to_current_song" button re-arms
 - [x] Empty "no_more_songs"
 - [x] No remove-from-queue action exists (`QueueEdit::Remove` unused)
@@ -286,14 +286,14 @@ Data: `api.lyrics(key)` per track change (none for radio, stale answers dropped)
 - [x] Word/syllable karaoke fill per chunk (gradient sweep + glow), chunk end = next chunk start
 - [x] Background vocal lines (dimmer, indented), opposite-turn (duet) lines right-aligned/italic, parent_line_index linkage; secondary lines stay lit while overlapping
 - [x] Instrumental interludes (gaps ≥5 s incl. intro) rendered as a note glyph that fills over the gap
-- [ ] Depth blur of non-active lines (`cfg.lyrics_depth_blur`, strength `cfg.lyrics_depth_blur_strength`) (missing: drawn as opacity, since GPUI paints no blur over text)
+- [x] Depth blur of non-active lines (`cfg.lyrics_depth_blur`, strength `cfg.lyrics_depth_blur_strength`) (sampled: GPUI filters no text, so the words are redrawn faintly around two rings)
 - [x] Offset: `cfg.lyrics_offset_auto` → `PlayerState.output_latency_ms`, else `cfg.lyrics_offset_ms`
 - [x] Auto-sync disarmed by wheel/touch/scroll keys/scrollbar; "sync" button re-arms; new track re-arms
 - [x] Two layouts (rightbar, fullscreen) with separate sizing
 
 ### 3.9 Track row (`track/row.rs`) — shared by every list
-- [ ] Columns: # (or track number in albums; play icon on hover), cover (`cfg.show_row_images`), title (+artist inline), artist (click → artist), album (click → album; hidden in album views), duration, dots menu; Normal and Vaxry column templates; disc headers in multi-disc albums (missing: no Vaxry column template)
-- [ ] Click → on_play; long-press (touch or mouse hold) → selection mode; checkbox in selection mode (missing: long-press and the row checkbox; a row enters selection with ctrl/cmd-click)
+- [x] Columns: # (or track number in albums; play icon on hover), cover (`cfg.show_row_images`), title (+artist inline), artist (click → artist), album (click → album; hidden in album views), duration, dots menu; Normal and Vaxry column templates; disc headers in multi-disc albums
+- [x] Click → on_play; long-press (touch or mouse hold) → selection mode; checkbox in selection mode
 - [x] Right-click opens the same menu at the cursor
 - [x] Mouse-drag a row (or the selection) toward the queue (§3.7)
 - [x] Menu (entries gated by what the page wires): Play next (PLAY_NEXT), Add to queue (APPEND), Add to playlist (ADD_TO_PL), Remove from playlist, Download Offline / Remove Download / Downloading… (DL/UNDL), Delete (DELETE), Share (SHARE), Start radio (RADIO_T, `caps.track_radio`), View/Edit metadata
@@ -308,16 +308,16 @@ Shown only when active source has `caps.external_devices` and `authenticated`
 ### 3.11 Fullscreen player (`layout/fullscreen/*`)
 - [x] Opened from bar button; closed by chevron or Escape
 - [x] Background: `cfg.cover_art_background` (blurred cover, `cover_art_blur`, `cover_art_darkening`), custom image `cfg.custom_background_path`, or "album-art" theme palette gradient (palette from `api.artwork` bytes)
-- [ ] Left: large Full cover, title, artist (→ artist, closes fullscreen), album (→ album), heart, don't-recommend, actions menu (Play next, Add to queue, Add to playlist if `caps.playlists != None`, Share, Start radio if `caps.track_radio`, View metadata read-only), bitrate "N kbps" (missing: the bitrate line)
+- [x] Left: large Full cover, title, artist (→ artist, closes fullscreen), album (→ album), heart, don't-recommend, actions menu (Play next, Add to queue, Add to playlist if `caps.playlists != None`, Share, Start radio if `caps.track_radio`, View metadata read-only), bitrate "N kbps"
 - [x] Seek / transport / volume (fullscreen variants) unless `cfg.fullscreen_use_player_bar`
-- [ ] Right tabs Up next / Lyrics; collapse/expand side panel → `cfg.fullscreen_tabs_collapsed` (missing: no collapse or expand of the side panel)
+- [x] Right tabs Up next / Lyrics; collapse/expand side panel → `cfg.fullscreen_tabs_collapsed`
 - [ ] Custom titlebar also rendered inside fullscreen (Linux/Windows) (missing: no custom titlebar)
-- [ ] Song / music video switch and video playback (`caps.music_videos`)
+- [x] Song / music video switch and video playback (`caps.music_videos`) (macOS: a muted AVPlayer fed by `api.video`, drawn as a GPUI surface; elsewhere the switch is hidden, as on the Dioxus Android build)
 
 ### 3.12 Compact mini-player (desktop)
 - [x] Toggled by bar button / Ctrl+M; window shrinks to 380×148 (170 on macOS), always-on-top, restores previous size on exit
 - [x] Whole surface drags window; blurred cover bg; title, artist, "mm:ss / mm:ss" or "LIVE"; restore button; prev/play-pause/next; thin seek bar with buffer indicator
-- [ ] UI-style skins (Normal/Vaxry) (missing: no Vaxry skin)
+- [x] UI-style skins (Normal/Vaxry)
 
 ### 3.13 Quick Search (Ctrl/Cmd+K overlay)
 - [x] Modal input (autofocus), 150 ms debounce → `api.search`; shows top results (cover, title, artist)
@@ -336,16 +336,16 @@ Shown only when active source has `caps.external_devices` and `authenticated`
 - [x] Download overlay (bottom-right): "Downloading done/total", Stop → `api.cancel_job(id)` for running Download jobs, collapsible, progress bar, "{n} failed", per-item rows from `api.download_statuses()` + titles via `api.tracks_by_keys` (Queued/Downloading/Failed icons)
 
 ### 3.16 Theme application
-- [ ] `#app-root` class `theme-<cfg.theme>`; "album-art" → `theme-default` + palette gradient background; "live" → `theme-default theme-live` (missing: `album-art` and `live` render as the default theme (theme/src/lib.rs))
+- [x] `#app-root` class `theme-<cfg.theme>`; "album-art" → `theme-default` + palette gradient background; "live" → `theme-default theme-live` (album art casts the cover's light at full spread whatever the ambient setting)
 - [x] Custom themes (`cfg.custom_themes`) injected as `.theme-<id>` CSS
-- [ ] Live theme (`cfg.theme == "live"`, desktop): matugen/pywal JSON at `cfg.live_theme_path` (or default) polled every 400 ms (2 s idle), recolors in place (missing: no live theme)
+- [x] Live theme (`cfg.theme == "live"`, desktop): matugen/pywal JSON at `cfg.live_theme_path` (or default) polled every 400 ms, recolors in place (polled only while selected; a half-written file keeps the colours up)
 - [x] Custom UI font `cfg.custom_font_path` (ttf/otf/woff/woff2, ≤32 MB) applied app-wide
 - [x] `cfg.reduce_animations` → reduced-animation stylesheet
-- [ ] `cfg.ui_style` Normal vs Vaxry switches sidebar, bar, showcase, headers, compact skin, page paddings (missing: no Vaxry layout; `TODO(parity)` in settings_appearance/src/lib.rs)
+- [x] `cfg.ui_style` Normal vs Vaxry switches sidebar, bar, showcase, headers, compact skin, page paddings
 
 ### 3.17 Tray / close behavior (desktop)
-- [ ] `cfg.minimize_to_tray`: tray icon with "Show / Hide Kopuz" and "Quit Kopuz"; window close hides instead of quitting; Linux checks appindicator libs and warns/popups if missing (missing: no tray; `minimize_to_tray` is a settings row with no effect)
-- [ ] On quit: final `set_config` flush (volume folded in) on a fresh thread (missing: no flush on quit, so an edit inside the save debounce is lost)
+- [ ] `cfg.minimize_to_tray`: tray icon with "Show / Hide Kopuz" and "Quit Kopuz"; window close hides instead of quitting; Linux checks appindicator libs and warns/popups if missing (missing: Linux has no tray, since appindicator needs a GTK main loop and GPUI runs none; macOS and Windows have it)
+- [x] On quit: final `set_config` flush (volume folded in) on a fresh thread
 
 ---
 
@@ -357,12 +357,12 @@ Category → rows. **[H]** = hardcoded `Settings` field (applied to the local co
 - [x] [H] `auto_check_updates` toggle
 - [x] [H] `minimize_to_tray` toggle (desktop)
 - [x] [H] `back_behavior` RewindThenPrev / AlwaysPrev
-- [ ] Build info card (missing: no build info card)
+- [x] Build info card
 
 ### 4.2 Appearance (Customization)
 - [x] [H] `language` selector (`i18n::available_languages()`, applies `i18n::set_locale` immediately)
 - [x] [H] `theme` selector: album-art, default, amoled, live (desktop), gruvbox, gruvbox-classic, gruvbox-dark-soft, dracula, nord, catppuccin, ef-night, ayu-dark, ayu-mirage, vague, onedarkpro, osmium, kanagawa-dragon, everforest, rosepine, kettek16, default-light, catppuccin-latte, rosepine-dawn, everforest-light, ayu-light, one-light, gruvbox-light, + custom themes
-- [ ] [H] `live_theme_path` (only when theme = live): shows resolved path, Remove, "Choose palette" (JSON file picker) (missing: no live theme)
+- [x] [H] `live_theme_path` (only when theme = live): shows resolved path, Remove, "Choose palette" (JSON file picker)
 - [x] [H] `cover_art_background` toggle
 - [x] [H] `custom_background_path` image picker + Remove (desktop)
 - [x] [H] `custom_font_path` font picker + Remove (desktop)
@@ -372,10 +372,10 @@ Category → rows. **[H]** = hardcoded `Settings` field (applied to the local co
 - [x] [H] `fullscreen_use_player_bar` toggle (desktop)
 - [x] [H] `show_source_toggle` toggle
 - [x] [H] `show_row_images` toggle
-- [ ] [H] `titlebar_mode` Custom/System/Off (Linux/Windows) (missing: `TODO(parity)` in settings_appearance/src/lib.rs)
-- [ ] [H] `ui_style` Normal/Vaxry (missing: no Vaxry layout; Material 3 is the other skin)
+- [x] [H] `titlebar_mode` Custom/System/Off (Linux/Windows)
+- [x] [H] `ui_style` Normal/Vaxry (Material 3 is the third choice)
 - [x] [H] `player_bar_position` Bottom/Top
-- [ ] [H] `settings_layout` Cd/TopBar (missing: `TODO(parity)` in settings_appearance/src/lib.rs)
+- [x] [H] `settings_layout` Cd/TopBar
 - [x] Theme editor section (§2.15) → `custom_themes`
 - [x] [H] `ui_style` Material 3, and dynamic system colors (`system_colors`)
 
@@ -390,16 +390,16 @@ Category → rows. **[H]** = hardcoded `Settings` field (applied to the local co
 - [x] [A] LoginPopup ("login_to_service{service}", username/password, "logging_in") → `api.login_source{server_id, username, password}`; "username_and_password_required", "login_failed{error}"
 - [x] Sign-in errors "signin_failed{error}" also surface in the playback-error banner
 - [x] [A] Browser sign-in: `api.browser_sessions()` → `api.import_browser_session`
-- [ ] [A] Brand accounts (`caps.accounts`): `api.accounts(id)` list, `api.switch_account`
-- [ ] [A] Test connection: `api.test_source_connection`
-- [ ] [A] Uploads (`caps.uploads`): upload a track with `api.upload_track`; storage quota (`caps.storage_quota` → `api.storage_quota`)
+- [x] [A] Brand accounts (`caps.accounts`): `api.accounts(id)` list, `api.switch_account`
+- [x] [A] Test connection: `api.test_source_connection`
+- [x] [A] Uploads (`caps.uploads`): upload a track with `api.upload_track`; storage quota (`caps.storage_quota` → `api.storage_quota`)
 - [x] [H]+[A] Offline cache: `offline_cache_enabled`, `offline_cache_max_bytes`, `api.offline_cache_status()`, `api.clear_offline_cache()`
 - [x] [H] `sync_interval_minutes`
 
 ### 4.4 Connectivity (integrations)
 - [x] [S] For each `api.integrations()` (refetched on inv:Servers or after change): SchemaForm over `IntegrationInfo.fields` → `api.set_integration_settings(id, [value])`
 - [x] [A] `ConnectKind::WebSignIn` → button "integration_connect{name}" / "integration_connected{name}" → `api.authenticate_integration(id)`
-- [ ] [A] Connect an integration from a browser profile (`api.browser_profiles()`, `api.connect_integration_from_browser`)
+- [x] [A] Connect an integration from a browser profile (`api.browser_profiles()`, `api.connect_integration_from_browser`)
 
 ### 4.5 Offline downloads
 - [x] [H] `offline_quality` select (`OfflineQuality::ALL`, value_str/label)
@@ -416,16 +416,17 @@ Category → rows. **[H]** = hardcoded `Settings` field (applied to the local co
 - [x] [H] `device_change_behavior` Resume/Pause
 - [x] [H] `sample_rate_mode` System/Source
 - [x] [H]+[A] Equalizer panel (`equalizer`): enable/disable, preset (Flat, BassBoost, TrebleBoost, VocalBoost, Loudness, Custom; animated band interpolation; preset preamp default), preamp slider, 10 band sliders on a curve graph; every change → `api.preview_equalizer(eq)` live, commit writes `cfg.equalizer`
-- [ ] [H] `autoplay_radio` toggle
-- [ ] [H] `skip_explicit` toggle (`caps.explicit_flags`)
-- [ ] [H] `stream_quality` select (`caps.stream_quality`)
-- [ ] [H] `pause_watch_history` toggle (`caps.watch_history`) (missing: only in onboarding, not in Settings)
-- [ ] [H]+[A] ReplayGain (`replay_gain`): mode, YouTube loudness, prevent clipping, previewed live with `api.preview_replay_gain`
+- [x] [H] `autoplay_radio` toggle
+- [x] [H] `skip_explicit` toggle (`caps.explicit_flags`)
+- [x] [H] `stream_quality` select (`caps.stream_quality`)
+- [x] [H] `pause_watch_history` toggle (`caps.watch_history`)
+- [x] [H]+[A] ReplayGain (`replay_gain`): mode, YouTube loudness, prevent clipping, previewed live with `api.preview_replay_gain`
 
 ### 4.8 Tools / Logs (desktop)
 - [x] [H] `tracing_enabled` toggle + warning
-- [ ] Open logs folder (`utils::logs::open_log_dir`), Export logs (save dialog → `utils::logs::export_logs`) — local filesystem, not API (missing: `TODO(logs)` in settings_playback/src/lib.rs)
-- [ ] Debug build: "Trigger crash" button; DebugPanel (app-supplied, direct DB handle, debug only) (missing: no Trigger crash button; the debug DB panel cannot cross the socket)
+- [x] Open logs folder (`utils::logs::open_log_dir`), Export logs (save dialog → `utils::logs::export_logs_named`, the app's and the daemon's logs), local filesystem, not API
+- [x] Debug build: "Trigger crash" button
+- [ ] DebugPanel (app-supplied, direct DB handle, debug only) (missing: the debug DB panel cannot cross the socket)
 
 ### 4.9 SchemaForm renderer (`forms/schema_form.rs`) — must match exactly
 - [x] `FieldKind`: Text, Secret (password input, never prefilled), Url, Toggle ("true"/"false"), Directory (text + folder picker), Choice{options, custom} (select + "custom_manual" free-text when value not in list), Radio{options}, Note (help text only)
@@ -444,7 +445,7 @@ Category → rows. **[H]** = hardcoded `Settings` field (applied to the local co
 - [x] Clock: `DaemonClock` maps daemon `now_ms` to local Instant; position anchor `{ms, at_ms, playing}` interpolated locally; 1 s ticker updates progress while playing; ev:PlayerPosition re-anchors; ev:PlayerBuffered updates ranges
 - [x] Queue mirror: `items` (play order), `shuffle_order` (unshuffled index per position), `position`, `shuffle`; displayed order applies shuffle permutation
 - [x] Optimistic writes: `is_playing` on Play/Pause/Toggle, `shuffle`, `loop_mode`, `volume`, seek progress + anchor; everything else waits for events
-- [ ] Row click semantics: `JumpPhysical{index}` for track-list clicks under shuffle; `Jump{index}` for queue view (missing: track-list clicks always rebuild the queue; nothing sends `JumpPhysical`)
+- [x] Row click semantics: `JumpPhysical{index}` for track-list clicks under shuffle; `Jump{index}` for queue view
 - [x] `CommandAck.rev` is never awaited anywhere in the Dioxus frontend; correctness relies on the resync-on-QueueChanged path (port may choose to wait for rev)
 - [x] ev:ConfigChanged, ev:SourceStatus, ev:Notice are not consumed by the Dioxus frontend
 
@@ -461,7 +462,7 @@ Category → rows. **[H]** = hardcoded `Settings` field (applied to the local co
 - [x] Any `cfg` change or persisted-volume change marks dirty; saver loop: 600 ms settle → `api.set_config(cfg with current volume)` → 2.5 s cooldown
 - [x] Locked keys read once from `ConfigView.locks`
 - [x] After `switch_source`, pull `api.config()` back into `cfg`
-- [ ] Final flush on window close/quit (missing: no flush on quit)
+- [x] Final flush on window close/quit
 
 ### 5.4 Artwork
 - [x] Every row carries `Option<ArtworkRef{target, version}>`; None → placeholder, never request

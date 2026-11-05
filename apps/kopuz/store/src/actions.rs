@@ -43,6 +43,16 @@ pub fn play_tracks(keys: Vec<String>, start: Option<u32>, cx: &mut App) {
     );
 }
 
+/// A row click: jump within the queue when it already is this listing, so shuffle re-pins instead of starting over.
+pub fn play_listing(keys: Vec<String>, index: usize, cx: &mut App) {
+    let queue = crate::QueueModel::global(cx);
+    if queue.read(cx).holds(&keys) {
+        queue.update(cx, |queue, cx| queue.jump_physical(index as u32, cx));
+    } else {
+        play_tracks(keys, Some(index as u32), cx);
+    }
+}
+
 /// Start at `key` with the whole library queued around it, or over `fallback` from `at` when the library lacks it.
 pub fn play_in_library(key: String, fallback: Vec<String>, at: u32, cx: &mut App) {
     let filter = api::TrackFilter::default();
@@ -155,6 +165,45 @@ pub fn share_track(key: String, cx: &mut App) {
             Ok(None) => Notices::error(i18n::t("share_no_page"), cx),
             Err(error) => Notices::failed(&error, cx),
         });
+    })
+    .detach();
+}
+
+/// Copy an album's public page, falling back to its first track's; the daemon knows which sources have one.
+pub fn share_album(browse_id: Option<String>, first_key: Option<String>, cx: &mut App) {
+    let call = Link::global(cx).call(move |api| async move {
+        if let Some(id) = browse_id
+            && let Some(url) = api.album_web_url(id).await?
+        {
+            return Ok(Some(url));
+        }
+        match first_key {
+            Some(key) => api.track_web_url(key).await,
+            None => Ok(None),
+        }
+    });
+    cx.spawn(async move |cx| {
+        let url = call.await;
+        cx.update(|cx| match url {
+            Ok(Some(url)) => {
+                cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(url));
+                Notices::info(i18n::t("share_copied"), cx);
+            }
+            Ok(None) => Notices::error(i18n::t("share_no_album_page"), cx),
+            Err(error) => Notices::failed(&error, cx),
+        });
+    })
+    .detach();
+}
+
+/// Tell the source to stop suggesting this track, then move on from it whether or not it listened.
+pub fn dont_recommend(key: String, cx: &mut App) {
+    let call = Link::global(cx).call(move |api| async move { api.dont_recommend(key).await });
+    cx.spawn(async move |cx| {
+        if let Err(error) = call.await {
+            cx.update(|cx| Notices::failed(&error, cx));
+        }
+        cx.update(|cx| PlayerModel::global(cx).update(cx, |player, cx| player.next(cx)));
     })
     .detach();
 }

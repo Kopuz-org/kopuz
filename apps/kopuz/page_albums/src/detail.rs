@@ -12,6 +12,8 @@ use components::{
     IconTone, Link, Loading, Look, Picture, SectionHeading, Tone, TrackActions, TrackList,
     TrackListEvent, TrackListOptions, TrackSection, icons, menus, style,
 };
+use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -23,12 +25,9 @@ use store::{
     DownloadsModel, Offline, Pictured, PlayerModel, Query, Route, SourcesModel, Target, actions,
 };
 
-use crate::ops;
+use crate::{ops, rip};
 
-// TODO(offline): filtering the listing to downloaded tracks waits on an offline seam the checklist flags as wrong.
-
-// `w-64 h-64` on the showcase, `max-w-[300px]` on the catalog-styled page.
-const HERO_COVER: Pixels = px(256.);
+// `max-w-[300px]` on the catalog-styled page.
 const REMOTE_COVER: Pixels = px(300.);
 // `w-12 h-12`, the outlined select-all beside the hero's play.
 const HERO_SECONDARY: Pixels = px(48.);
@@ -55,7 +54,10 @@ pub struct AlbumDetail {
     aggregated: Vec<String>,
     remote_id: Option<String>,
     capabilities: SourceCapabilities,
+    // Offline mode on a source across the internet: no catalog read, and only the tracks with a copy here.
+    offline_reads: bool,
     scroll: ScrollHandle,
+    reveal: components::scroll::Reveal,
     _subscriptions: Vec<Subscription>,
     _lists: Vec<Subscription>,
 }
@@ -108,6 +110,7 @@ impl AlbumDetail {
             cx.observe(&PlayerModel::global(cx), |_, _, cx| cx.notify()),
         ];
 
+        let scroll = ScrollHandle::new();
         Self {
             id,
             album,
@@ -122,7 +125,9 @@ impl AlbumDetail {
             remote_id: None,
             // Sources usually loaded before the page opened, so their observer would not fire again.
             capabilities: SourcesModel::global(cx).read(cx).capabilities(),
-            scroll: ScrollHandle::new(),
+            offline_reads: SourcesModel::global(cx).read(cx).offline_reads(),
+            scroll: scroll.clone(),
+            reveal: components::scroll::Reveal::new(scroll),
             _subscriptions: subscriptions,
             _lists: Vec::new(),
         }
@@ -131,6 +136,7 @@ impl AlbumDetail {
     /// Point the track and catalog reads at what the album turned out to be.
     fn sync(&mut self, cx: &mut Context<Self>) {
         let capabilities = SourcesModel::global(cx).read(cx).capabilities();
+        let offline_reads = SourcesModel::global(cx).read(cx).offline_reads();
         let album = self.album.read(cx).value().cloned().flatten();
         let settled = self.album.read(cx).is_settled();
 
@@ -144,7 +150,9 @@ impl AlbumDetail {
         }
 
         // A catalog-presented source stores only the saved subset; a miss means none of it is stored.
-        let remote_id = if capabilities.albums == AlbumPresentation::Remote {
+        let remote_id = if offline_reads {
+            None
+        } else if capabilities.albums == AlbumPresentation::Remote {
             Some(
                 album
                     .as_ref()
@@ -165,14 +173,22 @@ impl AlbumDetail {
             self.capabilities = capabilities;
             self.rebuild_groups(cx);
         }
+        if offline_reads != self.offline_reads {
+            self.offline_reads = offline_reads;
+            self.refresh_rows(cx);
+        }
         cx.notify();
     }
 
     fn refresh_rows(&mut self, cx: &mut Context<Self>) {
         let mut rows = match self.remote.read(cx).value().cloned().flatten() {
-            Some(detail) if !detail.tracks.is_empty() => detail.tracks,
+            Some(detail) if !detail.tracks.is_empty() && !self.offline_reads => detail.tracks,
             _ => self.tracks.read(cx).value().cloned().unwrap_or_default(),
         };
+        // The daemon's re-read lands after the switch, so the rows held until then are kept to copies here too.
+        if self.offline_reads {
+            rows.retain(|row| row.offline || row.cached);
+        }
         ops::in_album_order(&mut rows);
         if rows != self.rows {
             self.keys = ops::keys_of(&rows).into();
@@ -196,6 +212,7 @@ impl AlbumDetail {
             show_album: false,
             track_numbers: true,
             selectable: !remote,
+            ..TrackListOptions::default()
         };
         let row_actions = TrackActions {
             remove_from_playlist: false,
@@ -206,11 +223,13 @@ impl AlbumDetail {
         let mut groups = Vec::new();
         let mut subscriptions = Vec::new();
         let mut offset = 0;
+        let page = self.reveal.clone();
         for (disc, chunk) in by_disc(&self.rows) {
             let list = cx.new(|cx| {
                 TrackList::new(cx)
                     .with_options(options)
                     .with_actions(row_actions)
+                    .reveal_in(page.clone())
             });
             commands::bind_track_list(&list, cx);
             let count = chunk.len();
@@ -231,7 +250,7 @@ impl AlbumDetail {
         match event {
             TrackListEvent::Play(index) => {
                 let keys: Vec<String> = self.rows.iter().map(|row| row.key.clone()).collect();
-                actions::play_tracks(keys, Some((offset + index) as u32), cx);
+                actions::play_listing(keys, offset + index, cx);
             }
             TrackListEvent::Delete(keys) => ops::delete_tracks(keys.clone(), cx),
             _ => cx.notify(),
@@ -382,8 +401,20 @@ impl AlbumDetail {
             .on_click(cx.listener(|this, _, _, cx| this.select_all(cx)));
         let picture = picture(&album);
         let spot = picture.as_ref().map(Picture::spot);
+        let rip = self.capabilities.rip_audio.then(|| {
+            let keys = self.keys.to_vec();
+            Button::new("album-rip")
+                .rounded_full()
+                .custom(style::raised_button(cx.theme().foreground, cx))
+                .icon(icons::icon(icons::DISC))
+                .label(t("cd_rip_flac"))
+                .on_click(move |_, window, cx| rip::open(keys.clone(), window, cx))
+        });
         let mut header = DetailHeader::new(SharedString::from(album.title.clone()))
-            .cover(self.cover(&album, HERO_COVER, radius).spot(spot))
+            .cover(
+                self.cover(&album, components::skin::arrangement().pages.hero, radius)
+                    .spot(spot),
+            )
             .cover_menu(cover_menu(&album), picture)
             .eyebrow(Self::artist_link(
                 &album.artist,
@@ -398,6 +429,7 @@ impl AlbumDetail {
                     .shuffle(commands::set_shuffle)
                     .play(commands::play_all)
                     .extra(select_all)
+                    .when_some(rip, |actions, rip| actions.extra(rip))
                     .download(commands::set_offline),
             );
         if album.year > 0 {
@@ -447,7 +479,7 @@ impl AlbumDetail {
                     .play(commands::play_all)
                     .shuffle(commands::set_shuffle)
                     .share(move |_, _, cx| {
-                        ops::share_album(browse_id.clone(), first_key.clone(), cx)
+                        actions::share_album(browse_id.clone(), first_key.clone(), cx)
                     }),
             );
         if let Some(year) = view.year.clone() {
@@ -480,7 +512,7 @@ impl AlbumDetail {
 
 impl Render for AlbumDetail {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        components::scroll::smooth("album-detail-scroll", &self.scroll, window, cx);
+        components::scroll::smooth_revealing("album-detail-scroll", &self.reveal, window, cx);
         let album = self.album.read(cx).value().cloned().flatten();
         let remote = self.remote.read(cx).value().cloned().flatten();
 

@@ -1,4 +1,4 @@
-use api::{ApiEvent, QueueEdit, QueueSnapshot, TrackInfo};
+use api::{ApiEvent, QueueContext, QueueEdit, QueueSnapshot, TrackInfo};
 use gpui_kit::{App, Context, Entity, Subscription, Task};
 use link::Link;
 
@@ -116,6 +116,45 @@ impl QueueModel {
 
     pub fn contains_key(&self, key: &str) -> bool {
         self.snapshot.items.iter().any(|item| item.key == key)
+    }
+
+    /// Whether the daemon built the queue from `context` and it is still `len` long, as a windowed listing checks.
+    pub fn built_from(&self, context: &QueueContext, len: usize) -> bool {
+        built_from(&self.snapshot, context, len)
+    }
+
+    /// The key at unshuffled index `index`, the row `JumpPhysical` lands on.
+    pub fn physical_key(&self, index: usize) -> Option<&str> {
+        physical_key(&self.snapshot, index)
+    }
+
+    /// Whether the queue is exactly `keys`, in the listing's own order however shuffle has played it.
+    pub fn holds(&self, keys: &[String]) -> bool {
+        holds_by(&self.snapshot, keys.len(), |at| {
+            keys.get(at).map(String::as_str)
+        })
+    }
+
+    /// The same for a list of rows.
+    pub fn holds_tracks(&self, rows: &[TrackInfo]) -> bool {
+        holds_by(&self.snapshot, rows.len(), |at| {
+            rows.get(at).map(|row| row.key.as_str())
+        })
+    }
+
+    /// Play the row at `index` of the unshuffled queue; under shuffle the rest re-pins around it.
+    pub fn jump_physical(&mut self, index: u32, cx: &mut Context<Self>) {
+        let order = &self.snapshot.shuffle_order;
+        let position = match order.is_empty() {
+            true => Some(index),
+            false => order.iter().position(|at| *at == index).map(|at| at as u32),
+        };
+        if position.is_some() {
+            self.snapshot.position = position;
+            self.resummarize();
+            crate::notify(cx);
+        }
+        edit(QueueEdit::JumpPhysical { index }, cx);
     }
 
     pub fn jump(&mut self, index: u32, cx: &mut Context<Self>) {
@@ -247,6 +286,41 @@ fn reindex(at: u32, from: u32, to: u32) -> u32 {
     }
 }
 
+fn built_from(snapshot: &QueueSnapshot, context: &QueueContext, len: usize) -> bool {
+    snapshot.context.as_ref() == Some(context) && snapshot.items.len() == len
+}
+
+fn physical_key(snapshot: &QueueSnapshot, index: usize) -> Option<&str> {
+    let order = &snapshot.shuffle_order;
+    let at = match order.len() == snapshot.items.len() && !order.is_empty() {
+        true => order.iter().position(|at| *at as usize == index)?,
+        false => index,
+    };
+    snapshot.items.get(at).map(|item| item.key.as_str())
+}
+
+fn holds_by<'a>(
+    snapshot: &QueueSnapshot,
+    len: usize,
+    key_at: impl Fn(usize) -> Option<&'a str>,
+) -> bool {
+    let items = &snapshot.items;
+    if items.is_empty() || items.len() != len {
+        return false;
+    }
+    let order = &snapshot.shuffle_order;
+    match order.len() == items.len() {
+        true => items
+            .iter()
+            .zip(order)
+            .all(|(item, at)| key_at(*at as usize) == Some(item.key.as_str())),
+        false => items
+            .iter()
+            .enumerate()
+            .all(|(at, item)| key_at(at) == Some(item.key.as_str())),
+    }
+}
+
 fn edit(edit: QueueEdit, cx: &App) {
     Link::global(cx).fire(cx, "queue edit", move |api| async move {
         api.queue_edit(edit).await
@@ -255,7 +329,84 @@ fn edit(edit: QueueEdit, cx: &App) {
 
 #[cfg(test)]
 mod tests {
-    use super::reindex;
+    use api::{QueueContext, TrackFilter};
+
+    use super::{QueueSnapshot, TrackInfo, built_from, holds_by, physical_key, reindex};
+
+    fn snapshot(keys: &[&str], shuffle_order: Vec<u32>) -> QueueSnapshot {
+        QueueSnapshot {
+            items: keys
+                .iter()
+                .map(|key| TrackInfo {
+                    key: key.to_string(),
+                    ..TrackInfo::default()
+                })
+                .collect(),
+            shuffle_order,
+            ..QueueSnapshot::default()
+        }
+    }
+
+    fn holds(snapshot: &QueueSnapshot, keys: &[&str]) -> bool {
+        holds_by(snapshot, keys.len(), |at| keys.get(at).copied())
+    }
+
+    #[test]
+    fn a_queue_holds_the_listing_it_was_built_from() {
+        let queue = snapshot(&["a", "b", "c"], Vec::new());
+        assert!(holds(&queue, &["a", "b", "c"]));
+        assert!(!holds(&queue, &["a", "c", "b"]));
+        assert!(!holds(&queue, &["a", "b"]));
+    }
+
+    #[test]
+    fn a_shuffled_queue_still_holds_its_listing() {
+        // Play order c, a, b: positions map back to unshuffled indices 2, 0, 1.
+        let queue = snapshot(&["c", "a", "b"], vec![2, 0, 1]);
+        assert!(holds(&queue, &["a", "b", "c"]));
+        assert!(!holds(&queue, &["c", "a", "b"]));
+    }
+
+    #[test]
+    fn a_physical_index_names_the_row_jump_physical_plays() {
+        let straight = snapshot(&["a", "b", "c"], Vec::new());
+        assert_eq!(physical_key(&straight, 1), Some("b"));
+        // Play order c, a, b: unshuffled index 0 is a, which plays second.
+        let shuffled = snapshot(&["c", "a", "b"], vec![2, 0, 1]);
+        assert_eq!(physical_key(&shuffled, 0), Some("a"));
+        assert_eq!(physical_key(&shuffled, 2), Some("c"));
+        assert_eq!(physical_key(&shuffled, 3), None);
+    }
+
+    #[test]
+    fn two_filters_with_the_same_count_are_different_listings() {
+        let filter = |genre: &str| QueueContext::Filter {
+            filter: TrackFilter {
+                genre: Some(genre.into()),
+                ..TrackFilter::default()
+            },
+        };
+        let queue = QueueSnapshot {
+            context: Some(filter("Rock")),
+            ..snapshot(&["a", "b"], Vec::new())
+        };
+        assert!(built_from(&queue, &filter("Rock"), 2));
+        assert!(!built_from(&queue, &filter("Jazz"), 2));
+        assert!(!built_from(&queue, &filter("Rock"), 3));
+    }
+
+    #[test]
+    fn a_reordered_queue_no_longer_names_the_listing_row() {
+        // The listing has a, b, c; dragging c to the top leaves the same context and length.
+        let reordered = snapshot(&["c", "a", "b"], Vec::new());
+        assert_eq!(physical_key(&reordered, 0), Some("c"));
+        assert_ne!(physical_key(&reordered, 0), Some("a"));
+    }
+
+    #[test]
+    fn an_empty_queue_holds_nothing() {
+        assert!(!holds(&snapshot(&[], Vec::new()), &[]));
+    }
 
     #[test]
     fn the_moved_row_carries_the_playhead_with_it() {

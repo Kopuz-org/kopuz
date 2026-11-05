@@ -3,14 +3,17 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use api::CatalogDetail;
-use gpui_kit::{App, Global};
+use api::{CatalogDetail, CatalogDetailRequest, CatalogItemKind};
+use gpui_kit::{App, Global, Task};
+use link::Link;
 
 use crate::SourcesModel;
 
 /// Past this a held page still draws, but is fetched again behind it.
 const FRESH_FOR: Duration = Duration::from_secs(10 * 60);
 const MAX_PAGES: usize = 64;
+/// How long the pointer rests on a tile before its first page is fetched, so a play starts without the wait.
+const DWELL: Duration = Duration::from_millis(250);
 
 struct Entry {
     detail: CatalogDetail,
@@ -20,9 +23,18 @@ struct Entry {
 #[derive(Default)]
 pub struct CatalogCache {
     pages: HashMap<String, Entry>,
+    /// The tile the pointer rests on, and its dwell; dropping the task disarms it.
+    armed: Option<(String, Task<()>)>,
 }
 
 impl Global for CatalogCache {}
+
+/// The switch and source a page was asked under; an answer is held only while both still hold.
+#[derive(Clone, PartialEq)]
+pub struct Ticket {
+    epoch: u64,
+    key: String,
+}
 
 /// A held page, and whether it is recent enough to skip the fetch.
 pub struct Cached {
@@ -34,8 +46,24 @@ impl CatalogCache {
     /// Keyed by the active source as well: two sources can hand out the same id.
     fn key(id: &str, cx: &App) -> String {
         let sources = SourcesModel::global(cx);
-        let source = sources.read(cx).active().map(|source| source.id.as_str());
-        format!("{}\u{0}{id}", source.unwrap_or_default())
+        key_of(
+            sources.read(cx).active().map(|source| source.id.as_str()),
+            id,
+        )
+    }
+
+    /// Take before asking for a page and hand to `put`; `None` while a switch is settling.
+    pub fn ticket(id: &str, cx: &App) -> Option<Ticket> {
+        let epoch = SourcesModel::global(cx).read(cx).switch_epoch()?;
+        Some(Ticket {
+            epoch,
+            key: Self::key(id, cx),
+        })
+    }
+
+    /// Whether no switch began since `ticket` was taken, after which the daemon could answer for another source.
+    fn current(id: &str, ticket: &Ticket, cx: &App) -> bool {
+        Self::ticket(id, cx).as_ref() == Some(ticket)
     }
 
     pub fn get(id: &str, cx: &App) -> Option<Cached> {
@@ -54,8 +82,13 @@ impl CatalogCache {
         entry.detail.shelves.first()?.strapline.clone()
     }
 
-    pub fn put(id: &str, detail: CatalogDetail, cx: &mut App) {
-        let key = Self::key(id, cx);
+    pub fn put(id: &str, ticket: Option<Ticket>, detail: CatalogDetail, cx: &mut App) {
+        if let Some(ticket) = ticket.filter(|ticket| Self::current(id, ticket, cx)) {
+            Self::put_at(ticket.key, detail, cx);
+        }
+    }
+
+    fn put_at(key: String, detail: CatalogDetail, cx: &mut App) {
         let pages = &mut cx.default_global::<Self>().pages;
         pages.insert(
             key,
@@ -74,11 +107,98 @@ impl CatalogCache {
         }
     }
 
-    /// A page grew by a continuation: keep what was loaded, without making it look newly fetched.
-    pub fn update(id: &str, detail: CatalogDetail, cx: &mut App) {
+    /// The pointer came to rest on a tile: fetch its first page once it stays there a moment.
+    pub fn arm(kind: CatalogItemKind, id: String, cx: &mut App) {
+        if Self::get(&id, cx).is_some_and(|cached| cached.fresh) {
+            return;
+        }
+        let Some(ticket) = Self::ticket(&id, cx) else {
+            return;
+        };
+        let key = ticket.key.clone();
+        let dwell = cx.spawn(async move |cx| {
+            cx.background_executor().timer(DWELL).await;
+            cx.update(|cx| {
+                if Self::current(&id, &ticket, cx) {
+                    Self::prefetch(kind, id, ticket, cx);
+                }
+            });
+        });
+        cx.default_global::<Self>().armed = Some((key, dwell));
+    }
+
+    /// The pointer left before the dwell ran out; a fetch already under way still lands.
+    pub fn disarm(id: &str, cx: &mut App) {
         let key = Self::key(id, cx);
-        if let Some(entry) = cx.default_global::<Self>().pages.get_mut(&key) {
+        let cache = cx.default_global::<Self>();
+        if cache.armed.as_ref().is_some_and(|(armed, _)| *armed == key) {
+            cache.armed = None;
+        }
+    }
+
+    fn prefetch(kind: CatalogItemKind, id: String, ticket: Ticket, cx: &mut App) {
+        let request = CatalogDetailRequest::new(kind, id.clone());
+        let call =
+            Link::global(cx).call(move |api| async move { api.catalog_detail(request).await });
+        cx.spawn(async move |cx| match call.await {
+            Ok(detail) => cx.update(|cx| Self::put(&id, Some(ticket), detail, cx)),
+            Err(error) => tracing::debug!(%error, "prefetching a catalog page failed"),
+        })
+        .detach();
+    }
+
+    /// The active source changed, and a page held from before could be another source's answer under this one's key.
+    pub(crate) fn forget_all(cx: &mut App) {
+        cx.default_global::<Self>().forget();
+    }
+
+    fn forget(&mut self) {
+        self.pages.clear();
+        self.armed = None;
+    }
+
+    /// A page grew by a continuation: keep what was loaded, without making it look newly fetched.
+    pub fn update(id: &str, ticket: Option<Ticket>, detail: CatalogDetail, cx: &mut App) {
+        let Some(ticket) = ticket.filter(|ticket| Self::current(id, ticket, cx)) else {
+            return;
+        };
+        if let Some(entry) = cx.default_global::<Self>().pages.get_mut(&ticket.key) {
             entry.detail = detail;
         }
+    }
+}
+
+fn key_of(source: Option<&str>, id: &str) -> String {
+    format!("{}\u{0}{id}", source.unwrap_or_default())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use api::CatalogDetail;
+    use gpui_kit::Task;
+
+    use super::{CatalogCache, Entry, key_of};
+
+    #[test]
+    fn a_source_change_leaves_no_page_or_dwell_behind() {
+        let mut cache = CatalogCache::default();
+        let entry = Entry {
+            detail: CatalogDetail::default(),
+            fetched: Instant::now(),
+        };
+        cache.pages.insert(key_of(Some("a"), "MPREb_1"), entry);
+        cache.armed = Some((key_of(Some("a"), "MPREb_2"), Task::ready(())));
+        cache.forget();
+        assert!(cache.pages.is_empty() && cache.armed.is_none());
+    }
+
+    #[test]
+    fn the_same_id_from_two_sources_is_two_pages() {
+        // A dwell armed on source A finds a different key once B is active, so it never fetches.
+        let armed = key_of(Some("a"), "MPREb_1");
+        assert_ne!(armed, key_of(Some("b"), "MPREb_1"));
+        assert_eq!(armed, key_of(Some("a"), "MPREb_1"));
     }
 }

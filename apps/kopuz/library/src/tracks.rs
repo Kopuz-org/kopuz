@@ -65,15 +65,38 @@ impl Library {
     }
 
     /// Start playing at `index`, over whatever the filter set describes.
+    /// The queue a windowed listing plays: the daemon materializes the filter itself, so a 40,000-row queue never crosses the wire.
+    pub(crate) fn filter_context(&self) -> Option<QueueContext> {
+        (!self.whole && self.filters().folder.is_none()).then(|| QueueContext::Filter {
+            filter: self.filters().track_filter(self.sort()),
+        })
+    }
+
+    /// Whether the queue is this listing: the same filter for a windowed one, the same rows for a whole one.
+    pub(crate) fn listing_queued(&self, cx: &App) -> bool {
+        let queue = store::QueueModel::global(cx).read(cx);
+        match self.filter_context() {
+            Some(context) => queue.built_from(&context, self.total()),
+            None => queue.holds_tracks(&self.rows),
+        }
+    }
+
     pub(crate) fn play_from(&mut self, index: usize, cx: &mut Context<Self>) {
-        // The daemon materializes a filter itself, so a 40,000-row queue never crosses the wire.
-        if !self.whole && self.filters().folder.is_none() {
-            let filter = self.filters().track_filter(self.sort());
-            actions::play_context(QueueContext::Filter { filter }, Some(index as u32), cx);
+        if let Some(context) = self.filter_context() {
+            let queue = store::QueueModel::global(cx);
+            let key = self.track_at(index).map(|track| track.key.clone());
+            // A reordered queue keeps its context and length, so the clicked row must still sit at its index.
+            let same = queue.read(cx).built_from(&context, self.total())
+                && key.is_some()
+                && queue.read(cx).physical_key(index) == key.as_deref();
+            match same {
+                true => queue.update(cx, |queue, cx| queue.jump_physical(index as u32, cx)),
+                false => actions::play_context(context, Some(index as u32), cx),
+            }
             return;
         }
         let keys: Vec<String> = self.rows.iter().map(|row| row.key.clone()).collect();
-        actions::play_tracks(keys, Some(index as u32), cx);
+        actions::play_listing(keys, index, cx);
     }
 
     /// The table: its header and the rows under it, of which only a screenful is ever built.
@@ -228,6 +251,7 @@ impl Library {
             .cover(covers)
             .stored(store::DownloadsModel::global(cx).read(cx).is_stored(&key))
             .plays(self.plays_for(track))
+            .genre(self.genre_of(track).to_string())
             .playing(self.is_playing(&key))
             .selected(selected)
             .picking(self.selection.is_active())
@@ -263,6 +287,18 @@ impl Library {
                     cx.notify();
                 }
             }))
+            .on_long_press({
+                let (page, key) = (cx.weak_entity(), key.clone());
+                move |_, cx| {
+                    page.update(cx, |this, cx| {
+                        if !this.selection.is_active() {
+                            this.selection.toggle(&key, index);
+                            cx.notify();
+                        }
+                    })
+                    .ok();
+                }
+            })
             .on_pick(cx.listener(move |this, _: &bool, _, cx| {
                 this.selection.toggle(&key, index);
                 cx.notify();

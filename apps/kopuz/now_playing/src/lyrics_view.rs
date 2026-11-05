@@ -1,12 +1,12 @@
 //! The lyrics tab: plain words, or the synced view that follows the playhead line by line.
 
 use std::collections::HashMap;
-use std::ops::Range;
+use std::ops::{Range, RangeInclusive};
 use std::time::Instant;
 
 use api::{LyricLineView, LyricsView as LyricsSource};
 use components::format::t;
-use components::lyric_line::sung_ink;
+use components::lyric_line::{BLURRED_INK, sung_ink};
 use components::{LyricLine, style};
 use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::v_flex;
@@ -34,9 +34,16 @@ const BACKGROUND_ALPHA: f32 = 0.7;
 const SLIDE_MS: f64 = 720.0;
 // Past this the list has moved under us (a remount or a resize), so re-park rather than wait.
 const REPARK_DRIFT: Pixels = px(24.);
-// Depth of field as opacity, per line of distance and clamped: GPUI paints no blur over text.
-const DEPTH_STEP: f32 = 0.09;
-const DEPTH_MAX: f32 = 0.55;
+// Depth of field per line of distance and its clamp, in px, scaled to each layout's type.
+const SHEET_DEPTH: (f32, f32) = (1.5, 8.0);
+const PANEL_DEPTH: (f32, f32) = (1.1, 6.0);
+// Radii this close draw alike, so a line is not re-blurred for nothing.
+const DEPTH_QUANTUM: f32 = 0.5;
+// Each blurred line is several text copies, so only lines in view, and this many past it, blur.
+const VIEW_MARGIN: usize = 2;
+// The fade per line of distance, and the most it takes away at full strength.
+const FADE_STEP: f32 = 0.09;
+const FADE_MAX: f32 = 0.55;
 // `leading-relaxed` on unsynced words.
 const RELAXED: f32 = 1.625;
 
@@ -301,12 +308,17 @@ pub struct LyricsView {
     /// The lit lines that move with the playhead, each redrawing itself on a tick or a frame.
     clocks: HashMap<usize, Entity<LineClock>>,
     slide: Option<Slide>,
+    /// The step and clamp of the depth blur, which the sheet's larger type takes further.
+    depth: (f32, f32),
+    /// The lines the depth blur covered, as last drawn.
+    shown: Option<RangeInclusive<usize>>,
     _fetch: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl LyricsView {
-    pub fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// The lyrics tab, for the sheet when `sheet`, else for the docked panel.
+    pub fn new(sheet: bool, _: &mut Window, cx: &mut Context<Self>) -> Self {
         let player = PlayerModel::global(cx);
         let playhead = Playhead::global(cx);
         let config = ConfigModel::global(cx);
@@ -325,6 +337,8 @@ impl LyricsView {
             lit: Vec::new(),
             clocks: HashMap::new(),
             slide: None,
+            depth: if sheet { SHEET_DEPTH } else { PANEL_DEPTH },
+            shown: None,
             _fetch: None,
             _subscriptions: subscriptions,
         }
@@ -469,7 +483,16 @@ impl LyricsView {
     }
 
     fn scroller(&self, cx: &mut Context<Self>) -> gpui_kit::Stateful<gpui_kit::Div> {
+        let view = cx.entity().downgrade();
         div()
+            // The range drawn came from the last layout, so a resize can uncover lines it left sharp.
+            .on_children_prepainted(move |_, window, cx| {
+                let Some(view) = view.upgrade() else { return };
+                if view.update(cx, |this, _| this.reconcile_shown()) {
+                    // A notify while prepainting is dropped, so the redraw waits for the next frame.
+                    window.on_next_frame(move |_, cx| cx.notify(view.entity_id()));
+                }
+            })
             .id("lyrics-scroll")
             .flex_1()
             .min_h_0()
@@ -485,6 +508,23 @@ impl LyricsView {
                     cx.notify();
                 }
             }))
+    }
+
+    /// The lines in view and a margin past them, once the list has been laid out.
+    fn shown_lines(&self) -> Option<RangeInclusive<usize>> {
+        lines_in_view(
+            self.scroll.children_count(),
+            self.scroll.top_item(),
+            self.scroll.bottom_item(),
+        )
+    }
+
+    /// Takes the laid-out lines in view, saying whether they differ from the ones the blur covered.
+    fn reconcile_shown(&mut self) -> bool {
+        let shown = self.shown_lines();
+        let moved = shown != self.shown;
+        self.shown = shown;
+        moved
     }
 }
 
@@ -524,7 +564,6 @@ fn seek_to(ms: u64, _: &mut Window, cx: &mut App) {
 /// How a lit line sits among the others, which only the list can know.
 #[derive(Clone, Copy, PartialEq)]
 struct Look {
-    opacity: f32,
     paired: bool,
 }
 
@@ -564,7 +603,6 @@ impl Render for LineClock {
             .background(line.background)
             .opposite(line.opposite)
             .paired(self.look.paired)
-            .opacity(self.look.opacity)
             .on_seek(seek_to);
         if line.interlude {
             let span = line.end.unwrap_or(line.start) - line.start;
@@ -594,13 +632,61 @@ impl Render for LineClock {
     }
 }
 
-/// Every line but the lit ones recedes with distance from the anchor.
+/// The lines between the scroller's top and bottom items, and a margin past them; item 0 is the spacer above the first line.
+fn lines_in_view(items: usize, top: usize, bottom: usize) -> Option<RangeInclusive<usize>> {
+    (items > 0)
+        .then(|| top.saturating_sub(1 + VIEW_MARGIN)..=bottom.saturating_sub(1) + VIEW_MARGIN)
+}
+
+/// The lowest opacity the fade reaches at `strength`.
+fn fade_floor(strength: f32) -> f32 {
+    1.0 - FADE_MAX * strength.clamp(0.0, 1.0)
+}
+
+/// Every line but the lit ones fades with distance from the anchor, down to the floor.
 fn depth_opacity(index: usize, anchor: Option<usize>, lit: bool, strength: f32) -> f32 {
     let Some(anchor) = anchor.filter(|_| !lit && strength > 0.0) else {
         return 1.0;
     };
-    let distance = index.abs_diff(anchor) as f32;
-    1.0 - (distance * DEPTH_STEP * strength).min(DEPTH_MAX * strength)
+    let fade = index.abs_diff(anchor) as f32 * FADE_STEP * strength;
+    (1.0 - fade).max(fade_floor(strength))
+}
+
+/// Every line but the lit ones also blurs with distance from the anchor, up to the ramp's clamp.
+fn depth_blur(
+    index: usize,
+    anchor: Option<usize>,
+    lit: bool,
+    strength: f32,
+    (step, max): (f32, f32),
+) -> Pixels {
+    let Some(anchor) = anchor.filter(|_| !lit && strength > 0.0) else {
+        return px(0.);
+    };
+    let radius = (index.abs_diff(anchor) as f32 * step * strength).min(max * strength);
+    px((radius / DEPTH_QUANTUM).round() * DEPTH_QUANTUM)
+}
+
+/// A line's opacity and blur; out of view it skips the blur's copies and only dims as far as the most blurred line reads.
+fn depth(
+    index: usize,
+    anchor: Option<usize>,
+    lit: bool,
+    strength: f32,
+    ramp: (f32, f32),
+    shown: Option<&RangeInclusive<usize>>,
+) -> (f32, Pixels) {
+    if lit
+        || anchor.is_none()
+        || strength <= 0.0
+        || shown.is_none_or(|shown| shown.contains(&index))
+    {
+        return (
+            depth_opacity(index, anchor, lit, strength),
+            depth_blur(index, anchor, lit, strength, ramp),
+        );
+    }
+    (fade_floor(strength) * BLURRED_INK, px(0.))
 }
 
 impl Render for LyricsView {
@@ -650,12 +736,13 @@ impl Render for LyricsView {
             Lyrics::Synced { lines, .. } => {
                 let paired = lines.iter().any(|line| line.opposite);
                 let height = self.scroll.bounds().size.height;
+                let shown = self.shown_lines();
+                self.shown = shown.clone();
                 let mut children = Vec::with_capacity(lines.len());
                 for (index, line) in lines.iter().enumerate() {
                     let is_lit = Some(index) == active || lit.contains(&index);
-                    let opacity = depth_opacity(index, anchor, is_lit, strength);
                     if is_lit && (line.interlude || !line.chunks.is_empty()) {
-                        let look = Look { opacity, paired };
+                        let look = Look { paired };
                         let clock = self.clocks.entry(index).or_insert_with(|| {
                             cx.new(|cx| LineClock::new(index, line.clone(), look, cx))
                         });
@@ -663,6 +750,8 @@ impl Render for LyricsView {
                         children.push(clock.clone().into_any_element());
                         continue;
                     }
+                    let (opacity, blur) =
+                        depth(index, anchor, is_lit, strength, self.depth, shown.as_ref());
                     children.push(
                         LyricLine::new(index, start_ms(line), line.text.clone())
                             .ink(sung)
@@ -671,6 +760,7 @@ impl Render for LyricsView {
                             .opposite(line.opposite)
                             .paired(paired)
                             .opacity(opacity)
+                            .blur(blur)
                             .on_seek(seek_to)
                             .into_any_element(),
                     );
@@ -813,10 +903,78 @@ mod tests {
 
     #[test]
     fn depth_leaves_the_lit_lines_alone_and_clamps_the_far_ones() {
-        assert_eq!(depth_opacity(4, Some(4), true, 1.0), 1.0);
-        assert_eq!(depth_opacity(9, Some(4), false, 0.0), 1.0);
-        assert!(depth_opacity(5, Some(4), false, 1.0) > depth_opacity(9, Some(4), false, 1.0));
-        assert_eq!(depth_opacity(99, Some(4), false, 1.0), 1.0 - DEPTH_MAX);
+        assert_eq!(depth_blur(4, Some(4), true, 1.0, SHEET_DEPTH), px(0.));
+        assert_eq!(depth_blur(9, Some(4), false, 0.0, SHEET_DEPTH), px(0.));
+        assert!(
+            depth_blur(5, Some(4), false, 1.0, SHEET_DEPTH)
+                < depth_blur(8, Some(4), false, 1.0, SHEET_DEPTH)
+        );
+        assert_eq!(depth_blur(8, Some(4), false, 1.0, SHEET_DEPTH), px(6.));
+        assert_eq!(depth_blur(8, Some(4), false, 0.5, PANEL_DEPTH), px(2.));
+        assert_eq!(depth_blur(5, Some(4), false, 1.0, PANEL_DEPTH), px(1.));
+    }
+
+    const STRENGTHS: [f32; 3] = [0.5, 1.0, 2.0];
+
+    /// What a line reads as: its opacity, times the share of ink its blur leaves.
+    fn brightness((opacity, blur): (f32, Pixels)) -> f32 {
+        opacity * if blur > px(0.) { BLURRED_INK } else { 1.0 }
+    }
+
+    #[test]
+    fn brightness_falls_with_distance_at_every_strength() {
+        let shown = 0..=30;
+        for strength in STRENGTHS {
+            for ramp in [SHEET_DEPTH, PANEL_DEPTH] {
+                let read =
+                    |index| brightness(depth(index, Some(15), false, strength, ramp, Some(&shown)));
+                for index in 15..80 {
+                    assert!(read(index + 1) <= read(index), "{strength} {index}");
+                }
+                assert!(read(79) < read(16));
+            }
+        }
+    }
+
+    #[test]
+    fn opacity_stays_between_the_floor_and_one() {
+        for strength in [0.0, 0.5, 1.0, 2.0] {
+            let floor = fade_floor(strength);
+            assert!((0.0..=1.0).contains(&floor));
+            for index in 0..100 {
+                let opacity = depth_opacity(index, Some(4), false, strength);
+                assert!((floor..=1.0).contains(&opacity), "{strength} {index}");
+            }
+        }
+    }
+
+    #[test]
+    fn blur_grows_with_distance() {
+        for strength in STRENGTHS {
+            let blur = |index| depth_blur(index, Some(4), false, strength, SHEET_DEPTH);
+            for index in 4..40 {
+                assert!(blur(index + 1) >= blur(index));
+            }
+            assert!(blur(30) > blur(5));
+        }
+    }
+
+    #[test]
+    fn the_lines_in_view_skip_the_spacer_and_keep_a_margin() {
+        assert_eq!(lines_in_view(0, 0, 0), None);
+        assert_eq!(lines_in_view(42, 0, 12), Some(0..=11 + VIEW_MARGIN));
+        assert_eq!(
+            lines_in_view(42, 20, 35),
+            Some(19 - VIEW_MARGIN..=34 + VIEW_MARGIN)
+        );
+    }
+
+    #[test]
+    fn lines_out_of_view_skip_the_blur_at_the_floor() {
+        let (opacity, blur) = depth(99, Some(4), false, 1.0, SHEET_DEPTH, Some(&(0..=10)));
+        assert_eq!(blur, px(0.));
+        assert_eq!(opacity, fade_floor(1.0) * BLURRED_INK);
+        assert!(depth(9, Some(4), false, 1.0, SHEET_DEPTH, Some(&(0..=10))).1 > px(0.));
     }
 
     #[gpui_kit::test]
@@ -825,7 +983,7 @@ mod tests {
     ) {
         use crate::playhead_tests::{boot, counted};
         boot(cx);
-        let (view, cx) = cx.add_window_view(LyricsView::new);
+        let (view, cx) = cx.add_window_view(|window, cx| LyricsView::new(true, window, cx));
         let lines = vec![line(0.0, Some(5.0)), line(6.0, Some(9.0))];
         let main = main_indices(&lines);
         view.update(cx, |view, _| view.lyrics = Lyrics::Synced { lines, main });

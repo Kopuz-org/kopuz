@@ -1,6 +1,8 @@
 //! Settings: offline downloads, metadata, the player and the tools category.
 
 mod equalizer;
+mod logs;
+mod replay_gain;
 
 use api::schema::FieldSpec;
 use components::format::{t, t_with};
@@ -10,18 +12,19 @@ use components::settings::{
 use components::{Callout, CalloutTone, FieldChanged, Lockable as _, SchemaForm, icons};
 use config::{
     ChannelMode, DeviceChangeBehavior, LYRICS_OFFSET_LIMIT_MS, LibraryEdit, LyricsEdit,
-    OfflineQuality, PlaybackEdit, SampleRateMode, SettingsEdit, SystemEdit,
+    OfflineQuality, PlaybackEdit, ReplayGainMode, SampleRateMode, SettingsEdit, StreamQuality,
+    SystemEdit,
 };
 use equalizer::Equalizer;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, SharedString, Styled, Subscription, Window, div,
+    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, SharedString, Styled, Subscription, Window, div,
 };
 use link::Link;
-use store::{ConfigModel, Notices, PlayerModel, Query};
+use store::{ConfigModel, Notices, PlayerModel, Query, SourcesModel};
 
 const CROSSFADE_MAX_SECONDS: f32 = 12.0;
 const VOLUME_STEP_MIN_PERCENT: f32 = 1.0;
@@ -35,6 +38,8 @@ pub struct PlaybackSettings {
     volume_scroll: Entity<SliderState>,
     lyrics_offset: Entity<SliderState>,
     equalizer: Entity<Equalizer>,
+    preamp: Entity<SliderState>,
+    fallback_gain: Entity<SliderState>,
     section: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
 }
@@ -42,12 +47,13 @@ pub struct PlaybackSettings {
 impl PlaybackSettings {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let config = ConfigModel::global(cx);
-        let (crossfade_seconds, volume_step, lyrics_offset_ms) = {
+        let (crossfade_seconds, volume_step, lyrics_offset_ms, gain) = {
             let current = config.read(cx).config();
             (
                 current.playback.crossfade_seconds,
                 current.playback.volume_scroll_step,
                 current.lyrics.lyrics_offset_ms,
+                current.playback.replay_gain,
             )
         };
         let crossfade =
@@ -74,12 +80,23 @@ impl PlaybackSettings {
         let artwork_settings =
             cx.new(|cx| Query::new(&[], |api| async move { api.artwork_settings().await }, cx));
         let equalizer = cx.new(|cx| Equalizer::new(window, cx));
+        let (preamp, preamp_moved) =
+            replay_gain::gain_slider(gain.preamp_db, |gain, db| gain.preamp_db = db, cx);
+        let (fallback_gain, fallback_moved) = replay_gain::gain_slider(
+            gain.fallback_gain_db,
+            |gain, db| gain.fallback_gain_db = db,
+            cx,
+        );
 
         let player = PlayerModel::global(cx);
         let subscriptions = vec![
             cx.observe_in(&config, window, |this, _, window, cx| this.sync(window, cx)),
             // The auto-offset row reads the engine's measured output latency.
             cx.observe(&player, |_, _, cx| cx.notify()),
+            // Which player rows show is the active source's answer.
+            cx.observe(&SourcesModel::global(cx), |_, _, cx| cx.notify()),
+            preamp_moved,
+            fallback_moved,
             cx.observe_in(&artwork_settings, window, Self::adopt_artwork),
             cx.subscribe_in(&artwork, window, Self::save_artwork),
             on_slider_change(
@@ -119,6 +136,8 @@ impl PlaybackSettings {
             volume_scroll,
             lyrics_offset,
             equalizer,
+            preamp,
+            fallback_gain,
             _subscriptions: subscriptions,
         }
     }
@@ -126,17 +145,20 @@ impl PlaybackSettings {
     /// Follow the config, so a daemon-side change or a managed file moves the sliders too.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let model = ConfigModel::global(cx);
-        let (crossfade, volume, offset) = {
+        let (crossfade, volume, offset, gain) = {
             let config = model.read(cx).config();
             (
                 config.playback.crossfade_seconds as f32,
                 volume_percent(config.playback.volume_scroll_step),
                 config.lyrics.lyrics_offset_ms as f32,
+                config.playback.replay_gain,
             )
         };
         set_slider(&self.crossfade, crossfade, window, cx);
         set_slider(&self.volume_scroll, volume, window, cx);
         set_slider(&self.lyrics_offset, offset, window, cx);
+        set_slider(&self.preamp, gain.preamp_db, window, cx);
+        set_slider(&self.fallback_gain, gain.fallback_gain_db, window, cx);
         cx.notify();
     }
 
@@ -300,6 +322,12 @@ impl PlaybackSettings {
         let channel_mode = config.playback.channel_mode;
         let device_change = config.playback.device_change_behavior;
         let sample_rate = config.playback.sample_rate_mode;
+        let autoplay_radio = config.playback.autoplay_radio;
+        let skip_explicit = config.playback.skip_explicit;
+        let stream_quality = config.playback.stream_quality;
+        let pause_history = config.playback.pause_watch_history;
+        let gain = config.playback.replay_gain;
+        let caps = SourcesModel::global(cx).read(cx).capabilities();
 
         section(t("player_settings"))
             .children(
@@ -324,6 +352,72 @@ impl PlaybackSettings {
                     )
                     .shown(cx),
             )
+            .when(caps.track_radio, |section| {
+                section.children(
+                    toggle_row(
+                        "autoplay_radio",
+                        t("autoplay_radio"),
+                        autoplay_radio,
+                        ConfigModel::writer(|on| {
+                            SettingsEdit::Playback(PlaybackEdit::AutoplayRadio(on))
+                        }),
+                    )
+                    .bind("autoplay_radio", cx)
+                    .shown(cx),
+                )
+            })
+            .when(caps.explicit_flags, |section| {
+                section.children(
+                    toggle_row(
+                        "skip_explicit",
+                        t("skip_explicit"),
+                        skip_explicit,
+                        ConfigModel::writer(|on| {
+                            SettingsEdit::Playback(PlaybackEdit::SkipExplicit(on))
+                        }),
+                    )
+                    .bind("skip_explicit", cx)
+                    .shown(cx),
+                )
+            })
+            .when(caps.stream_quality || caps.watch_history, |section| {
+                section.children(group(t("settings_group_streaming"), cx))
+            })
+            .when(caps.stream_quality, |section| {
+                section.children(
+                    SettingRow::new(t("stream_quality"))
+                        .bind("stream_quality", cx)
+                        .setting(
+                            Choice::listed(
+                                "stream_quality",
+                                stream_quality,
+                                StreamQuality::ALL.iter().copied(),
+                                |quality| t(quality.i18n_key()),
+                            )
+                            .on_change(ConfigModel::writer(
+                                |quality| {
+                                    SettingsEdit::Playback(PlaybackEdit::StreamQuality(quality))
+                                },
+                            )),
+                        )
+                        .shown(cx),
+                )
+            })
+            .when(caps.watch_history, |section| {
+                section.children(
+                    toggle_row(
+                        "pause_watch_history",
+                        t("pause_watch_history"),
+                        pause_history,
+                        ConfigModel::writer(|on| {
+                            SettingsEdit::Playback(PlaybackEdit::PauseWatchHistory(on))
+                        }),
+                    )
+                    .bind("pause_watch_history", cx)
+                    .shown(cx),
+                )
+            })
+            .children(group(t("settings_group_output"), cx))
             .children(
                 SettingRow::new(t("channel_mode"))
                     .bind("channel_mode", cx)
@@ -375,6 +469,7 @@ impl PlaybackSettings {
                     )
                     .shown(cx),
             )
+            .children(self.replay_gain(gain, cx))
             .children(
                 SettingRow::new(t("equalizer"))
                     .bind("equalizer", cx)
@@ -385,7 +480,62 @@ impl PlaybackSettings {
             )
     }
 
-    // TODO(logs): opening and exporting the log folder is local filesystem work a socket-only client has no business doing.
+    /// Every row writes the whole `replay_gain` table, so each one is bound to that key.
+    fn replay_gain(
+        &self,
+        gain: config::ReplayGainSettings,
+        cx: &mut Context<Self>,
+    ) -> Vec<gpui_kit::AnyElement> {
+        let key = replay_gain::CONFIG_KEY;
+        let mut rows: Vec<gpui_kit::AnyElement> = Vec::new();
+        rows.extend(group(t("settings_group_loudness"), cx).map(IntoElement::into_any_element));
+        let mode = SettingRow::new(t("replay_gain")).bind(key, cx).setting(
+            Choice::listed(
+                "replay_gain_mode",
+                gain.mode,
+                ReplayGainMode::ALL.iter().copied(),
+                replay_gain::mode_label,
+            )
+            .on_change(|mode, cx| replay_gain::change(|gain| gain.mode = mode, true, cx)),
+        );
+        let loudness = toggle_row(
+            "replay_gain_youtube_loudness",
+            t("replay_gain_youtube_loudness"),
+            gain.normalize_loudness,
+            |on, cx| replay_gain::change(|gain| gain.normalize_loudness = on, true, cx),
+        )
+        .bind(key, cx);
+        let mut shown = vec![mode, loudness];
+        if gain.mode != ReplayGainMode::Off {
+            shown.push(
+                toggle_row(
+                    "replay_gain_prevent_clipping",
+                    t("replay_gain_prevent_clipping"),
+                    gain.prevent_clipping,
+                    |on, cx| replay_gain::change(|gain| gain.prevent_clipping = on, true, cx),
+                )
+                .bind(key, cx),
+            );
+            shown.push(
+                SettingRow::new(t("replay_gain_preamp"))
+                    .bind(key, cx)
+                    .setting(SliderRow::new(&self.preamp).readout(replay_gain::decibels)),
+            );
+            shown.push(
+                SettingRow::new(t("replay_gain_fallback"))
+                    .bind(key, cx)
+                    .setting(SliderRow::new(&self.fallback_gain).readout(replay_gain::decibels)),
+            );
+        }
+        rows.extend(
+            shown
+                .into_iter()
+                .filter_map(|row| row.shown(cx))
+                .map(IntoElement::into_any_element),
+        );
+        rows
+    }
+
     fn tools(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let tracing_enabled = ConfigModel::global(cx)
             .read(cx)
@@ -412,7 +562,27 @@ impl PlaybackSettings {
                 ),
                 cx,
             ))
+            .children(components::settings::when_unfiltered(logs::actions(cx), cx))
     }
+}
+
+/// How often a drag may preview: `Change` fires per pointer move, and unlike the config write a preview is not debounced.
+const PREVIEW_INTERVAL: std::time::Duration = std::time::Duration::from_millis(40);
+
+/// When the last preview went out.
+#[derive(Default)]
+struct LastPreview(Option<std::time::Instant>);
+
+impl gpui_kit::Global for LastPreview {}
+
+fn preview_due(cx: &mut App) -> bool {
+    let now = std::time::Instant::now();
+    let last = cx.default_global::<LastPreview>().0;
+    let due = last.is_none_or(|last| now.duration_since(last) >= PREVIEW_INTERVAL);
+    if due {
+        cx.default_global::<LastPreview>().0 = Some(now);
+    }
+    due
 }
 
 impl PlaybackSettings {
@@ -442,6 +612,24 @@ impl Render for PlaybackSettings {
             .when(self.shows("player"), |panel| panel.child(self.player(cx)))
             .when(self.shows("tools"), |panel| panel.child(self.tools(cx)))
     }
+}
+
+/// A sub-heading inside a section; a search shows rows from anywhere, so it steps aside then.
+fn group(label: SharedString, cx: &App) -> Option<impl IntoElement> {
+    components::settings::when_unfiltered(
+        div()
+            .px_5()
+            .pt_4()
+            .pb_1()
+            .text_xs()
+            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+            .text_color(components::style::white(
+                components::style::TEXT_SECONDARY,
+                cx,
+            ))
+            .child(label),
+        cx,
+    )
 }
 
 fn volume_percent(step: f32) -> f32 {

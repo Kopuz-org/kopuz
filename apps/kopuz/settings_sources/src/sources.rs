@@ -22,6 +22,7 @@ use store::{ConfigModel, Notices, Query, SourceStatus, SourcesModel};
 
 use crate::add_source::{AddSource, SourceAdded};
 use crate::folders;
+use crate::source_tools::{AccountPicker, CloudStorage, ConnectionTest};
 use crate::ui;
 
 /// Answer one of a source's own options; a refusal puts the form back. The value is never logged.
@@ -83,8 +84,17 @@ struct Browsing {
     generation: u64,
 }
 
+/// The blocks a card shows only while its source is in a state to answer them.
+#[derive(Default)]
+struct SourceTools {
+    accounts: Option<Entity<AccountPicker>>,
+    test: Option<Entity<ConnectionTest>>,
+    storage: Option<Entity<CloudStorage>>,
+}
+
 pub struct Sources {
     options: HashMap<String, SourceOptions>,
+    tools: HashMap<String, SourceTools>,
     browser: Browsing,
     switching: Option<String>,
     host_access: Entity<Query<bool>>,
@@ -125,6 +135,7 @@ impl Sources {
         cx.defer_in(window, |this, window, cx| this.sync_options(window, cx));
         Self {
             options: HashMap::new(),
+            tools: HashMap::new(),
             browser: Browsing::default(),
             switching: None,
             host_access,
@@ -141,10 +152,44 @@ impl Sources {
         self.host_access.read(cx).value().copied().unwrap_or(true)
     }
 
+    /// Each block reads from the daemon once made, so it exists only while its source can answer.
+    fn sync_tools(&mut self, sources: &[SourceInfo], cx: &mut Context<Self>) {
+        self.tools
+            .retain(|id, _| sources.iter().any(|source| &source.id == id));
+        for source in sources {
+            let tools = self.tools.entry(source.id.clone()).or_default();
+            let caps = &source.capabilities;
+            let id = &source.id;
+            match caps.accounts && source.authenticated {
+                true if tools.accounts.is_none() => {
+                    tools.accounts = Some(cx.new(|cx| AccountPicker::new(id.clone(), cx)));
+                }
+                true => {}
+                false => tools.accounts = None,
+            }
+            match source.active && source.needs_network {
+                true if tools.test.is_none() => {
+                    tools.test = Some(cx.new(|_| ConnectionTest::new(id.clone())));
+                }
+                true => {}
+                false => tools.test = None,
+            }
+            if source.active && source.authenticated && caps.storage_quota {
+                let storage = tools
+                    .storage
+                    .get_or_insert_with(|| cx.new(|cx| CloudStorage::new(id.clone(), cx)));
+                storage.update(cx, |storage, cx| storage.set_uploads(caps.uploads, cx));
+            } else {
+                tools.storage = None;
+            }
+        }
+    }
+
     /// Keep one form per source over its options, rebuilt only when the daemon's fields change.
     fn sync_options(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let locked = ConfigModel::global(cx).read(cx).locked_names();
         let sources = Self::sources(cx);
+        self.sync_tools(&sources, cx);
         self.options
             .retain(|id, _| sources.iter().any(|source| &source.id == id));
         for source in sources {
@@ -384,6 +429,7 @@ impl Sources {
         let host_access = self.host_access(cx);
         let picker = source.active && source.capabilities.browse_folders && source.authenticated;
         let needs_host = source.capabilities.browser_playback && !host_access;
+        let tools = self.tools.get(&source.id);
 
         SourceCard::new(id.clone(), source.name.clone())
             .mark(SourceMark::new(&source.service))
@@ -436,12 +482,15 @@ impl Sources {
                 )
             })
             .when(picker, |card| card.child(self.remote_folders(source, cx)))
+            .children(tools.and_then(|tools| tools.accounts.clone()))
             .when(needs_host, |card| {
                 card.child(ui::host_access_warning(
                     SharedString::from(format!("host-access-{id}")),
                     t("browser_playback_needs_host"),
                 ))
             })
+            .children(tools.and_then(|tools| tools.test.clone()))
+            .children(tools.and_then(|tools| tools.storage.clone()))
             .children(self.options.get(&source.id).map(|options| {
                 v_flex()
                     .w_full()

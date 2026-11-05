@@ -3,6 +3,7 @@
 use std::rc::Rc;
 
 use gpui_kit::component::menu::ContextMenuExt as _;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme as _, Icon, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -36,6 +37,7 @@ pub struct NavListRow {
     click: Option<Click>,
     wires: Vec<Wire>,
     zones: Option<ReorderDropZones>,
+    collapsed: bool,
 }
 
 impl NavListRow {
@@ -56,7 +58,14 @@ impl NavListRow {
             click: None,
             wires: Vec::new(),
             zones: None,
+            collapsed: false,
         }
+    }
+
+    /// Only the glyph, centred, with the name moved into a tooltip: the row as an icon rail draws it.
+    pub fn collapsed(mut self, collapsed: bool) -> Self {
+        self.collapsed = collapsed;
+        self
     }
 
     pub fn glyph(mut self, glyph: &'static str) -> Self {
@@ -170,17 +179,19 @@ impl RenderOnce for NavListRow {
             });
         let row = self.wires.into_iter().fold(row, |row, wire| wire(row));
 
+        let collapsed = self.collapsed;
+        let label = self.label;
         let body = row
+            .when(collapsed, |row| {
+                let tip = label.clone();
+                row.justify_center()
+                    .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+            })
             .child(Icon::default().path(self.glyph).size(GLYPH).flex_shrink_0())
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_sm()
-                    .child(self.label),
-            )
-            .children(self.detail.map(|detail| {
+            .when(!collapsed, |row| {
+                row.child(div().flex_1().min_w_0().truncate().text_sm().child(label))
+            })
+            .children(self.detail.filter(|_| !collapsed).map(|detail| {
                 div()
                     .flex_shrink_0()
                     .text_size(style::text_10())

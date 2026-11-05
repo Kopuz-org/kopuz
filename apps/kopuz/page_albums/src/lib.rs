@@ -3,6 +3,7 @@
 mod detail;
 mod grid;
 mod ops;
+mod rip;
 
 pub use detail::AlbumDetail;
 pub use grid::Albums;

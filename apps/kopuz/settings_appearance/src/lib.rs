@@ -3,21 +3,23 @@
 mod theme_editor;
 
 use components::format::t;
+use components::icons;
 use components::settings::{
     Choice, SettingRow, SliderRow, on_slider_change, section, set_slider, slider_state, toggle_row,
 };
 use components::{PathField, PathKind, ThemeGallery, ThemeOption, style};
 use config::{
     BackBehavior, BackgroundEdit, LyricsEdit, PlaybackEdit, PlayerBarPosition, Settings,
-    SettingsEdit, SystemEdit, UiEdit,
+    SettingsEdit, SettingsLayout, SystemEdit, TitlebarMode, UiEdit, UiStyle,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::slider::SliderState;
-use gpui_kit::component::{Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, Styled, Subscription, Window, div,
+    AnyElement, App, AppContext as _, ClipboardItem, Context, Entity, FontWeight,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Styled,
+    Subscription, Window, div, rems,
 };
 use store::ConfigModel;
 use theme_editor::ThemeEditor;
@@ -48,6 +50,14 @@ fn theme_label(id: &str) -> SharedString {
     };
     t(key)
 }
+
+/// `text-white/50` on a path the row shows rather than lets you type.
+const PATH: f32 = 0.50;
+/// `border-white/10` and `bg-black/25` on the build card.
+const CARD_BORDER: f32 = 0.10;
+const CARD_BG: f32 = 0.25;
+/// `text-white/45` on the commit under the version.
+const COMMIT: f32 = 0.45;
 
 /// What a whole-percent slider reads as.
 fn percent(value: f32) -> SharedString {
@@ -224,6 +234,15 @@ impl AppearanceSettings {
                 .setting(self.theme(cfg)),
             cx,
         );
+        if cfg!(not(target_os = "android")) && cfg.ui.theme == utils::live_theme::THEME_ID {
+            push(
+                &mut rows,
+                SettingRow::new(t("live_theme_file"))
+                    .bind("live_theme_path", cx)
+                    .control(self.live_theme_path(cfg, cx)),
+                cx,
+            );
+        }
         push(
             &mut rows,
             toggle_row(
@@ -354,6 +373,28 @@ impl AppearanceSettings {
             .description(t("show_row_images_description")),
             cx,
         );
+        if cfg!(any(target_os = "linux", target_os = "windows")) {
+            push(
+                &mut rows,
+                SettingRow::new(t("titlebar_mode"))
+                    .bind("titlebar_mode", cx)
+                    .setting(
+                        Choice::new(
+                            "titlebar_mode",
+                            cfg.ui.titlebar_mode,
+                            vec![
+                                (TitlebarMode::Custom, t("titlebar_custom")),
+                                (TitlebarMode::System, t("titlebar_system")),
+                                (TitlebarMode::Off, t("titlebar_off")),
+                            ],
+                        )
+                        .on_change(ConfigModel::writer(|value| {
+                            SettingsEdit::Ui(UiEdit::TitlebarMode(value))
+                        })),
+                    ),
+                cx,
+            );
+        }
         push(
             &mut rows,
             SettingRow::new(t("player_bar_position"))
@@ -373,8 +414,70 @@ impl AppearanceSettings {
                 ),
             cx,
         );
-        // TODO(parity): titlebar_mode, ui_style (no Vaxry layout), settings_layout and the live theme.
+        // Material 3 always draws the top bar, so the choice would do nothing there.
+        if cfg.ui.ui_style != UiStyle::Material3 {
+            push(
+                &mut rows,
+                SettingRow::new(t("settings_layout"))
+                    .bind("settings_layout", cx)
+                    .setting(
+                        Choice::new(
+                            "settings_layout",
+                            cfg.ui.settings_layout,
+                            vec![
+                                (SettingsLayout::Cd, t("settings_layout_cd")),
+                                (SettingsLayout::TopBar, t("settings_layout_topbar")),
+                            ],
+                        )
+                        .on_change(ConfigModel::writer(|value| {
+                            SettingsEdit::Ui(UiEdit::SettingsLayout(value))
+                        })),
+                    ),
+                cx,
+            );
+        }
+        push(
+            &mut rows,
+            SettingRow::new(t("ui_style")).bind("ui_style", cx).setting(
+                Choice::new(
+                    "ui_style",
+                    cfg.ui.ui_style,
+                    vec![
+                        (UiStyle::Normal, t("ui_normal")),
+                        (UiStyle::Vaxry, t("ui_vaxry")),
+                        (UiStyle::Material3, t("ui_material3")),
+                    ],
+                )
+                .on_change(ConfigModel::writer(|value| {
+                    SettingsEdit::Ui(UiEdit::UiStyle(value))
+                })),
+            ),
+            cx,
+        );
         rows
+    }
+
+    /// The file the palette is read from, even when unset: the generator's default is shown then.
+    fn live_theme_path(&self, cfg: &Settings, cx: &mut Context<Self>) -> AnyElement {
+        let configured = cfg.ui.live_theme_path.clone();
+        let resolved = utils::live_theme::resolve_path(&configured)
+            .display()
+            .to_string();
+        h_flex()
+            .gap_2()
+            .items_center()
+            .when(configured.is_empty(), |row| {
+                row.child(
+                    div()
+                        .max_w(rems(13.75))
+                        .truncate()
+                        .text_xs()
+                        .text_color(style::white(PATH, cx))
+                        .child(resolved),
+                )
+            })
+            .child(self.path_row("live_theme_path", configured, t("choose_palette"), cx))
+            .into_any_element()
     }
 
     fn language(&self, cfg: &Settings) -> Choice<String> {
@@ -408,6 +511,24 @@ pub fn theme_options(cfg: &Settings) -> Vec<ThemeOption> {
         label: t("system_colors"),
         colors: theme::system_colors(None, true),
     });
+    // Album art keeps the default's colours under the cover's light, so the default is what its example shows.
+    if let Some(palette) = theme::palette("default") {
+        options.push(ThemeOption {
+            id: theme::ALBUM_ART.to_string(),
+            label: t("album_art_gradient"),
+            colors: palette.into(),
+        });
+    }
+    // A generator's palette recolours the default, so the default is what its example shows.
+    if cfg!(not(target_os = "android"))
+        && let Some(palette) = theme::palette("default")
+    {
+        options.push(ThemeOption {
+            id: utils::live_theme::THEME_ID.to_string(),
+            label: t("live_theme"),
+            colors: palette.into(),
+        });
+    }
     let mut custom: Vec<ThemeOption> = cfg
         .ui
         .custom_themes
@@ -439,6 +560,51 @@ fn push(rows: &mut Vec<AnyElement>, row: SettingRow, cx: &App) {
     }
 }
 
+/// The version and commit this build came from, copyable as one block for a bug report.
+fn build_info(cx: &App) -> impl IntoElement {
+    let summary = SharedString::from(utils::build_info::summary());
+    h_flex()
+        .w_full()
+        .mt_4()
+        .px_5()
+        .py_3()
+        .gap_5()
+        .justify_between()
+        .rounded_xl()
+        .border_1()
+        .border_color(style::white(CARD_BORDER, cx))
+        .bg(style::black(CARD_BG, cx))
+        .child(
+            v_flex()
+                .min_w_0()
+                .gap_1()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(style::white(style::TEXT_STRONG, cx))
+                        .child(format!("Kopuz {}", utils::build_info::VERSION)),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_color(style::white(COMMIT, cx))
+                        .child(utils::build_info::COMMIT),
+                ),
+        )
+        .child(
+            Button::new("copy-build-info")
+                .ghost()
+                .small()
+                .icon(icons::icon(icons::COPY))
+                .tooltip(summary.clone())
+                .on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(summary.to_string()))
+                }),
+        )
+}
+
 /// First-run setup sets far more than sources, so its way back in sits under General.
 fn run_setup_row(cx: &App) -> impl IntoElement {
     h_flex().w_full().justify_end().child(
@@ -457,6 +623,7 @@ fn path_edit(key: &str, value: String) -> Option<SettingsEdit> {
             BackgroundEdit::CustomBackgroundPath(value),
         )),
         "custom_font_path" => Some(SettingsEdit::Ui(UiEdit::CustomFontPath(value))),
+        "live_theme_path" => Some(SettingsEdit::Ui(UiEdit::LiveThemePath(value))),
         other => {
             tracing::warn!(key = other, "no path setting by that name");
             None
@@ -492,7 +659,7 @@ impl Render for AppearanceSettings {
                         .gap_2()
                         .child(section(t("general")).children(self.general(&cfg, cx)))
                         .when(components::settings::query(cx).is_none(), |general| {
-                            general.child(run_setup_row(cx))
+                            general.child(run_setup_row(cx)).child(build_info(cx))
                         }),
                 )
             })

@@ -13,6 +13,7 @@ workspace = true
 profile = { path = "../profile" }
 settings_interface = { path = "../settings_interface" }
 api = { workspace = true }
+config = { workspace = true }
 theme = { workspace = true }
 store = { workspace = true }
 components = { path = "../components" }
