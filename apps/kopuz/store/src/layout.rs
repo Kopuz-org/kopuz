@@ -20,6 +20,9 @@ pub const FRONTEND: &str = "gpui";
 // Stored once `layout.toml` has been carried over, so the file is never read again.
 const IMPORTED: &str = "layout_toml_imported";
 
+// Where the skin was picked before `ui_style` drove it; read once to carry the choice over, then deleted.
+const LEGACY_SKIN: &str = "skin";
+
 /// How big the UI may be scaled, either way of 100%.
 pub const SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.8..=1.4;
 
@@ -958,6 +961,8 @@ pub struct LayoutModel {
     generation: u64,
     import_checked: bool,
     send_imported: bool,
+    legacy_skin: Option<String>,
+    drop_legacy_skin: bool,
     ready: Option<oneshot::Sender<()>>,
     waiter: Option<oneshot::Receiver<()>>,
     _load: Option<Task<()>>,
@@ -987,6 +992,8 @@ impl LayoutModel {
             generation: 0,
             import_checked: false,
             send_imported: false,
+            legacy_skin: None,
+            drop_legacy_skin: false,
             ready: Some(ready),
             waiter: Some(waiter),
             _load: None,
@@ -997,6 +1004,19 @@ impl LayoutModel {
 
     pub fn get(&self) -> &Layout {
         &self.layout
+    }
+
+    /// The skin picked before `ui_style` existed, until `forget_legacy_skin` deletes it.
+    pub fn legacy_skin(&self) -> Option<&str> {
+        self.legacy_skin.as_deref()
+    }
+
+    /// Delete the old skin key from the daemon, once its choice has been carried over or found moot.
+    pub fn forget_legacy_skin(&mut self, cx: &mut Context<Self>) {
+        if self.legacy_skin.take().is_some() {
+            self.drop_legacy_skin = true;
+            self.schedule_save(cx);
+        }
     }
 
     /// Resolves once the daemon's preferences have been read the first time; taken once.
@@ -1056,7 +1076,7 @@ impl LayoutModel {
     fn adopt(
         &mut self,
         stored: Vec<FrontendPref>,
-        imported: Option<Layout>,
+        imported: Option<(Layout, Option<String>)>,
         cx: &mut Context<Self>,
     ) {
         let current = fields(&self.layout);
@@ -1064,6 +1084,16 @@ impl LayoutModel {
             .into_iter()
             .map(|pref| (pref.key, pref.value))
             .collect();
+        let (imported, imported_skin) = imported.unzip();
+        // A delete still on its way out would otherwise read the key back in.
+        if !self.drop_legacy_skin {
+            let legacy = legacy_skin(&stored).or(imported_skin.flatten());
+            // The migration waits on this even when the layout itself comes back unchanged.
+            if legacy != self.legacy_skin {
+                self.legacy_skin = legacy;
+                cx.notify();
+            }
+        }
         let remote = overlay(&Layout::default(), &stored);
         let mut merged = fields(imported.as_ref().unwrap_or(&remote));
         for (key, value) in &current {
@@ -1103,6 +1133,12 @@ impl LayoutModel {
                 value: Some("1".into()),
             });
         }
+        if self.drop_legacy_skin {
+            entries.push(PrefEntry {
+                key: LEGACY_SKIN.into(),
+                value: None,
+            });
+        }
         entries
     }
 
@@ -1128,6 +1164,7 @@ impl LayoutModel {
                 for entry in sent {
                     match (entry.key.as_str(), entry.value) {
                         (IMPORTED, _) => this.send_imported = false,
+                        (LEGACY_SKIN, None) => this.drop_legacy_skin = false,
                         (_, Some(value)) => {
                             this.synced.insert(entry.key, value);
                         }
@@ -1140,10 +1177,23 @@ impl LayoutModel {
     }
 }
 
-/// The old file's look, if there is one; it is left where it is.
-fn import() -> Option<Layout> {
+/// The old file's look and the skin it named, if there is one; it is left where it is.
+fn import() -> Option<(Layout, Option<String>)> {
     let path = layout_path()?;
-    path.exists().then(|| read(&path))
+    path.exists().then(|| (read(&path), read_skin(&path)))
+}
+
+/// The old `skin` key as the daemon holds it, a JSON string.
+fn legacy_skin(stored: &Fields) -> Option<String> {
+    let text = stored.get(LEGACY_SKIN)?;
+    serde_json::from_str(text).ok()
+}
+
+/// The `skin` the old file named; the layout no longer reads it.
+fn read_skin(path: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let table: toml::Table = toml::from_str(&text).ok()?;
+    table.get(LEGACY_SKIN)?.as_str().map(str::to_owned)
 }
 
 /// An unreadable file is the default look, not a failure worth stopping for.
@@ -1607,6 +1657,21 @@ mod tests {
         assert_eq!(layout.library_view.as_deref(), Some("albums"));
         assert_eq!(layout.panel, Panel::default());
         assert_eq!(layout.motion, Motion::default());
+    }
+
+    #[test]
+    fn the_old_skin_key_reads_from_the_daemon_and_from_the_old_file() {
+        let stored = Fields::from([(LEGACY_SKIN.to_string(), "\"material3\"".to_string())]);
+        assert_eq!(legacy_skin(&stored).as_deref(), Some("material3"));
+        assert_eq!(legacy_skin(&Fields::new()), None);
+        let dir = std::env::temp_dir().join(format!("kopuz-skin-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("layout.toml");
+        std::fs::write(&path, "skin = \"material3\"\n[panel]\nshown = true\n").expect("write");
+        assert_eq!(read_skin(&path).as_deref(), Some("material3"));
+        std::fs::write(&path, "[panel]\nshown = true\n").expect("write");
+        assert_eq!(read_skin(&path), None);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

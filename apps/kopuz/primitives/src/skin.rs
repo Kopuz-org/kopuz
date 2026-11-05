@@ -256,12 +256,12 @@ pub enum BarLayout {
 pub struct Rows {
     /// The index column's width.
     pub lead: Pixels,
-    /// The space between columns.
-    pub gap: Pixels,
+    /// The space between columns; rems, so it follows the interface scale.
+    pub gap: Rems,
     /// The space above and below a row's cells.
-    pub pad_y: Pixels,
+    pub pad_y: Rems,
     /// The space between a row's cover and its title.
-    pub cover_gap: Pixels,
+    pub cover_gap: Rems,
     /// The white wash under the pointer.
     pub hover: f32,
     /// A hairline ring drawn with the hover wash, at this alpha.
@@ -276,9 +276,9 @@ impl Default for Rows {
     fn default() -> Self {
         Self {
             lead: px(20.),
-            gap: px(24.),
-            pad_y: px(8.),
-            cover_gap: px(16.),
+            gap: rems(1.5),
+            pad_y: rems(0.5),
+            cover_gap: rems(1.),
             hover: 0.05,
             hover_ring: None,
             number: 0.60,
@@ -461,11 +461,12 @@ impl Skin for Vaxry {
         "ui_vaxry"
     }
 
-    // A row is `py-1.5` around a `w-8 h-8` cover: 44px, against Normal's 56.
+    // A row is `py-1.5` around a `w-8 h-8` cover: 44px, against Normal's 56, in the library's table too.
     fn metrics(&self) -> Metrics {
         Metrics {
             row_height: rems(2.75),
             row_cover: rems(2.),
+            comfortable_row: px(44.),
             ..Metrics::default()
         }
     }
@@ -484,9 +485,9 @@ impl Skin for Vaxry {
             bar: BarLayout::Inline,
             rows: Rows {
                 lead: px(40.),
-                gap: px(12.),
-                pad_y: px(6.),
-                cover_gap: px(8.),
+                gap: rems(0.75),
+                pad_y: rems(0.375),
+                cover_gap: rems(0.5),
                 hover: 0.10,
                 hover_ring: Some(0.08),
                 number: 0.25,
@@ -719,9 +720,10 @@ mod tests {
         assert_eq!(arrangement.nav, Nav::Strip);
         assert_eq!(arrangement.bar, BarLayout::Split);
         assert_eq!(arrangement.rows.lead, px(20.));
-        assert_eq!(arrangement.rows.gap, px(24.));
-        assert_eq!(arrangement.rows.pad_y, px(8.));
-        assert_eq!(arrangement.rows.cover_gap, px(16.));
+        // `gap-6`, `p-2` and `mr-4`: rems, so Normal keeps its spacing at every interface scale.
+        assert_eq!(arrangement.rows.gap, rems(1.5));
+        assert_eq!(arrangement.rows.pad_y, rems(0.5));
+        assert_eq!(arrangement.rows.cover_gap, rems(1.));
         assert_eq!(arrangement.rows.hover, 0.05);
         assert_eq!(arrangement.rows.number, 0.60);
         assert_eq!(arrangement.pages.padding, rems(2.));
@@ -738,11 +740,13 @@ mod tests {
         select("vaxry");
         assert_eq!(active(), "vaxry");
         assert_eq!(metrics().row_height, rems(2.75));
+        assert_eq!(metrics().density_row(Density::Comfortable), px(44.));
         assert_eq!(chrome().player_height, px(64.));
         assert_eq!(arrangement().bar, BarLayout::Inline);
         assert_eq!(nav_position(NavPosition::Top), NavPosition::Left);
         select("normal");
         assert_eq!(nav_position(NavPosition::Top), NavPosition::Top);
+        assert_eq!(metrics().density_row(Density::Comfortable), px(56.));
     }
 
     #[test]
