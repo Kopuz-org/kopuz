@@ -8,11 +8,11 @@ use api::{PlayerCommand, TrackVersion};
 use components::format::t;
 use components::{Segment, Segmented, style};
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
-    Subscription, Window, div,
+    App, AppContext as _, Context, Entity, EventEmitter, IntoElement, ParentElement as _, Render,
+    Styled as _, Subscription, Window, div,
 };
 use link::Link;
-use store::{PlayerModel, SourcesModel};
+use store::{Chrome, PlayerModel, SourcesModel};
 
 use crate::NowPlaying;
 
@@ -37,13 +37,24 @@ pub(crate) fn current_version(cx: &App) -> Option<TrackVersion> {
         .and_then(api::TrackInfo::version)
 }
 
+/// Whether the shell draws the sheet at all: open, not shrunk to compact, and attached to a daemon.
+fn sheet_shown(sheet_open: bool, compact: bool, connected: bool) -> bool {
+    sheet_open && !compact && connected
+}
+
+/// The first decoded frame arrived, or the frames stopped.
+pub(crate) struct Framed;
+
 /// The muted picture of the music video playing, following the engine's playhead.
 pub(crate) struct MusicVideo {
     key: String,
     framed: bool,
     #[cfg(target_os = "macos")]
     picture: Option<mac::Picture>,
+    _player: Option<Subscription>,
 }
+
+impl EventEmitter<Framed> for MusicVideo {}
 
 impl MusicVideo {
     fn new(key: String, cx: &mut Context<Self>) -> Self {
@@ -62,14 +73,27 @@ impl MusicVideo {
                 }))
             }))
         };
-        #[cfg(not(target_os = "macos"))]
-        let _ = cx;
+        // A pause or a seek reaches the picture even on a frame GPUI does not draw it.
+        let player = cx.observe(&PlayerModel::global(cx), |this, _, cx| this.follow(cx));
         Self {
             key,
             framed: false,
             #[cfg(target_os = "macos")]
             picture,
+            _player: Some(player),
         }
+    }
+
+    fn follow(&mut self, cx: &mut Context<Self>) {
+        #[cfg(target_os = "macos")]
+        if let Some(picture) = self.picture.as_mut() {
+            let player = PlayerModel::global(cx).read(cx);
+            let latency = player.output_latency_ms().unwrap_or_default();
+            let position = player.position_ms().saturating_sub(latency) as f64 / 1000.;
+            picture.follow(position, player.is_playing());
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = cx;
     }
 
     /// Whether a frame has been decoded, so the cover standing in for it can go.
@@ -82,15 +106,12 @@ impl Render for MusicVideo {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let surface = div().size_full().rounded_xl().bg(style::black(1., cx));
         #[cfg(target_os = "macos")]
-        if let Some(picture) = self.picture.as_mut() {
-            let player = PlayerModel::global(cx).read(cx);
-            let latency = player.output_latency_ms().unwrap_or_default();
-            let position = player.position_ms().saturating_sub(latency) as f64 / 1000.;
-            picture.follow(position, player.is_playing());
-            let frame = picture.frame();
+        if self.picture.is_some() {
+            self.follow(cx);
+            let frame = self.picture.as_mut().and_then(mac::Picture::frame);
             if frame.is_some() != self.framed {
                 self.framed = frame.is_some();
-                cx.notify();
+                cx.emit(Framed);
             }
             // Frames arrive on the decoder's clock, not GPUI's, so it is asked for one every frame it is shown.
             window.request_animation_frame();
@@ -102,11 +123,18 @@ impl Render for MusicVideo {
 }
 
 impl NowPlaying {
-    /// The video entity for what is playing, kept while the same cut plays and dropped once it is not a video.
-    pub(crate) fn sync_video(&mut self, open: bool, cx: &mut Context<Self>) {
+    /// The video entity for what is playing, kept while the same cut plays and the sheet is drawn, dropped otherwise.
+    pub(crate) fn sync_video(&mut self, cx: &mut Context<Self>) {
+        let chrome = Chrome::global(cx).read(cx);
+        let shown = self.presentation == crate::Presentation::Sheet
+            && sheet_shown(
+                chrome.is_sheet_open(),
+                chrome.is_compact(),
+                Link::connection(cx).read(cx).is_connected(),
+            );
         let key = self
             .track(cx)
-            .filter(|_| open && current_version(cx) == Some(TrackVersion::Video))
+            .filter(|_| shown && current_version(cx) == Some(TrackVersion::Video))
             .map(|track| track.key);
         match key {
             Some(key)
@@ -116,7 +144,7 @@ impl NowPlaying {
                     .is_some_and(|(video, _)| video.read(cx).key == key) => {}
             Some(key) => {
                 let video = cx.new(|cx| MusicVideo::new(key, cx));
-                let watch: Subscription = cx.observe(&video, |_, _, cx| cx.notify());
+                let watch = cx.subscribe(&video, |_, _, _: &Framed, cx| cx.notify());
                 self.video = Some((video, watch));
             }
             None => self.video = None,
@@ -185,5 +213,18 @@ impl NowPlaying {
         })
         .detach();
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sheet_shown;
+
+    #[test]
+    fn the_picture_goes_with_the_sheet_into_compact_or_a_disconnect() {
+        assert!(sheet_shown(true, false, true));
+        assert!(!sheet_shown(true, true, true));
+        assert!(!sheet_shown(true, false, false));
+        assert!(!sheet_shown(false, false, true));
     }
 }

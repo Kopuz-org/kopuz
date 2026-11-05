@@ -39,6 +39,13 @@ const SHEET_DEPTH: (f32, f32) = (1.5, 8.0);
 const PANEL_DEPTH: (f32, f32) = (1.1, 6.0);
 // Radii this close draw alike, so a line is not re-blurred for nothing.
 const DEPTH_QUANTUM: f32 = 0.5;
+// Each blurred line is several text copies, so only lines this near the anchor blur; the rest only fade.
+const BLUR_REACH: usize = 4;
+// The fade per line of distance and its floor, under the blur.
+const FADE_STEP: f32 = 0.09;
+const FADE_MAX: f32 = 0.55;
+// A blurred line spreads its ink to about this share of a sharp one, so the sharp lines past the reach take it too.
+const BLURRED_INK: f32 = 0.6;
 // `leading-relaxed` on unsynced words.
 const RELAXED: f32 = 1.625;
 
@@ -598,7 +605,21 @@ impl Render for LineClock {
     }
 }
 
-/// Every line but the lit ones blurs with distance from the anchor.
+/// Every line but the lit ones fades with distance from the anchor.
+fn depth_opacity(index: usize, anchor: Option<usize>, lit: bool, strength: f32) -> f32 {
+    let Some(anchor) = anchor.filter(|_| !lit && strength > 0.0) else {
+        return 1.0;
+    };
+    let distance = index.abs_diff(anchor);
+    let fade = 1.0 - (distance as f32 * FADE_STEP * strength).min(FADE_MAX * strength);
+    if distance > BLUR_REACH {
+        fade * (1.0 - (1.0 - BLURRED_INK) * strength)
+    } else {
+        fade
+    }
+}
+
+/// The lines near the anchor, lit ones aside, also blur with distance from it.
 fn depth_blur(
     index: usize,
     anchor: Option<usize>,
@@ -609,8 +630,11 @@ fn depth_blur(
     let Some(anchor) = anchor.filter(|_| !lit && strength > 0.0) else {
         return px(0.);
     };
-    let distance = index.abs_diff(anchor) as f32;
-    let radius = (distance * step * strength).min(max * strength);
+    let distance = index.abs_diff(anchor);
+    if distance > BLUR_REACH {
+        return px(0.);
+    }
+    let radius = (distance as f32 * step * strength).min(max * strength);
     px((radius / DEPTH_QUANTUM).round() * DEPTH_QUANTUM)
 }
 
@@ -680,6 +704,7 @@ impl Render for LyricsView {
                             .background(line.background)
                             .opposite(line.opposite)
                             .paired(paired)
+                            .opacity(depth_opacity(index, anchor, is_lit, strength))
                             .blur(depth_blur(index, anchor, is_lit, strength, self.depth))
                             .on_seek(seek_to)
                             .into_any_element(),
@@ -827,11 +852,38 @@ mod tests {
         assert_eq!(depth_blur(9, Some(4), false, 0.0, SHEET_DEPTH), px(0.));
         assert!(
             depth_blur(5, Some(4), false, 1.0, SHEET_DEPTH)
-                < depth_blur(9, Some(4), false, 1.0, SHEET_DEPTH)
+                < depth_blur(8, Some(4), false, 1.0, SHEET_DEPTH)
         );
-        assert_eq!(depth_blur(99, Some(4), false, 1.0, SHEET_DEPTH), px(8.));
-        assert_eq!(depth_blur(99, Some(4), false, 0.5, PANEL_DEPTH), px(3.));
+        assert_eq!(depth_blur(8, Some(4), false, 1.0, SHEET_DEPTH), px(6.));
+        assert_eq!(depth_blur(8, Some(4), false, 0.5, PANEL_DEPTH), px(2.));
         assert_eq!(depth_blur(5, Some(4), false, 1.0, PANEL_DEPTH), px(1.));
+    }
+
+    #[test]
+    fn lines_past_the_blur_reach_only_fade() {
+        assert_eq!(
+            depth_blur(4 + BLUR_REACH + 1, Some(4), false, 1.0, SHEET_DEPTH),
+            px(0.)
+        );
+        assert_eq!(depth_blur(99, Some(4), false, 1.0, SHEET_DEPTH), px(0.));
+        assert!(depth_opacity(99, Some(4), false, 1.0) < depth_opacity(5, Some(4), false, 1.0));
+    }
+
+    #[test]
+    fn far_lines_fade_further_than_near_ones() {
+        assert_eq!(depth_opacity(4, Some(4), true, 1.0), 1.0);
+        assert_eq!(depth_opacity(9, Some(4), false, 0.0), 1.0);
+        assert!(depth_opacity(5, Some(4), false, 1.0) > depth_opacity(9, Some(4), false, 1.0));
+        assert_eq!(
+            depth_opacity(99, Some(4), false, 1.0),
+            (1.0 - FADE_MAX) * BLURRED_INK
+        );
+    }
+
+    #[test]
+    fn the_first_sharp_line_reads_dimmer_than_the_last_blurred_one() {
+        let last_blurred = depth_opacity(4 + BLUR_REACH, Some(4), false, 1.0) * BLURRED_INK;
+        assert!(depth_opacity(4 + BLUR_REACH + 1, Some(4), false, 1.0) < last_blurred);
     }
 
     #[gpui_kit::test]

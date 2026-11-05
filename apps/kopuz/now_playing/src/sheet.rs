@@ -115,7 +115,6 @@ impl NowPlaying {
         let use_bar = config.ui.fullscreen_use_player_bar;
         let bar_at_top = config.ui.player_bar_position == config::PlayerBarPosition::Top;
         let collapsed = store::layout(cx).ui.fullscreen_tabs_collapsed;
-        self.sync_video(open, cx);
 
         let stage = self.stage(&swap, window, cx);
         let panel = (!collapsed).then(|| self.side_panel(showing, layout.side, window, cx));

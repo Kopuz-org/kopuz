@@ -8113,6 +8113,7 @@ dependencies = [
 name = "now_playing"
 version = "0.1.0"
 dependencies = [
+ "block2 0.6.2",
  "components",
  "core-foundation 0.10.1",
  "core-video",

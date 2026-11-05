@@ -27,9 +27,11 @@ const LINE_WIDTH: f32 = 20.;
 const TURN_WIDTH: f32 = 18.;
 // `leading-snug` on the small print of a background line.
 const SNUG: f32 = 1.375;
-// GPUI filters no text, so a blur is sampled: the words again around two rings, each faint.
-const BLUR_RINGS: [(f32, usize); 2] = [(0.5, 6), (1.0, 8)];
-const BLUR_CENTRE: f32 = 0.3;
+// GPUI filters no text, so a blur is sampled: the words again around one ring, each copy faint.
+const BLUR_TAPS: usize = 6;
+// Weights of the ink kept at the centre and given to each tap; together under one, so a blurred line reads lighter.
+const BLUR_CENTRE: f32 = 0.35;
+const BLUR_TAP: f32 = 0.05;
 
 type Seek = Rc<dyn Fn(u64, &mut Window, &mut App)>;
 
@@ -53,6 +55,7 @@ pub struct LyricLine {
     background: bool,
     opposite: bool,
     paired: bool,
+    opacity: f32,
     blur: Pixels,
     ink: Hsla,
     seek: Option<Seek>,
@@ -70,6 +73,7 @@ impl LyricLine {
             background: false,
             opposite: false,
             paired: false,
+            opacity: 1.,
             blur: px(0.),
             ink: Hsla::default(),
             seek: None,
@@ -102,6 +106,12 @@ impl LyricLine {
     /// Some line of the song is the other singer's, so this one sets to the left rather than centred.
     pub fn paired(mut self, paired: bool) -> Self {
         self.paired = paired;
+        self
+    }
+
+    /// How far the line has faded from the one being sung.
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity;
         self
     }
 
@@ -154,6 +164,7 @@ impl RenderOnce for LyricLine {
             .w(if turned { relative(0.9) } else { relative(1.) })
             .max_w(rems(if turned { TURN_WIDTH } else { LINE_WIDTH }))
             .py_0p5()
+            .opacity(self.opacity)
             .group(group.clone())
             .text_color(base)
             .when(background, |row| {
@@ -225,16 +236,10 @@ fn blurred(
     radius: Pixels,
     group: SharedString,
 ) -> impl IntoElement {
-    let taps: usize = BLUR_RINGS.iter().map(|(_, count)| count).sum();
-    let ring = ink.alpha(ink.a * (1. - BLUR_CENTRE) / taps as f32);
-    let copies = BLUR_RINGS.iter().flat_map(move |(reach, count)| {
-        (0..*count).map(move |tap| {
-            let angle = std::f32::consts::TAU * tap as f32 / *count as f32;
-            (
-                radius * (reach * angle.cos()),
-                radius * (reach * angle.sin()),
-            )
-        })
+    let ring = ink.alpha(ink.a * BLUR_TAP);
+    let copies = (0..BLUR_TAPS).map(move |tap| {
+        let angle = std::f32::consts::TAU * tap as f32 / BLUR_TAPS as f32;
+        (radius * angle.cos(), radius * angle.sin())
     });
     div()
         .relative()

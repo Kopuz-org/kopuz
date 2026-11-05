@@ -5,11 +5,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use api::{ApiError, VideoChunk};
+use block2::RcBlock;
 use core_foundation::base::TCFType as _;
 use core_video::pixel_buffer::CVPixelBuffer as Frame;
 use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
+use objc2::runtime::{AnyObject, Bool, NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{
     AnyThread as _, DefinedClass as _, MainThreadMarker, Message as _, define_class, msg_send,
 };
@@ -28,8 +29,6 @@ use objc2_foundation::{NSData, NSDictionary, NSError, NSNumber, NSString, NSURL}
 const URL: &str = "kopuz-video://picture/video.mp4";
 // The daemon answers at most this much per call.
 const CHUNK: u64 = 2 * 1024 * 1024;
-// A seek has this long to land before drift is measured again.
-const SEEK_SETTLE: Duration = Duration::from_secs(1);
 // A drift found this soon after a seek is what that seek cost, so the next aims that much ahead.
 const LEARN_WINDOW: Duration = Duration::from_secs(4);
 const PLAYING_DRIFT: f64 = 0.15;
@@ -88,6 +87,10 @@ impl Feed {
     }
 
     fn answer(&self, request: &AVAssetResourceLoadingRequest) -> Result<Served, ApiError> {
+        debug_assert!(
+            MainThreadMarker::new().is_none(),
+            "a range blocks on the daemon, never on the main thread"
+        );
         let info = unsafe { request.contentInformationRequest() };
         let data = unsafe { request.dataRequest() };
         let (mut at, mut end) = match &data {
@@ -181,7 +184,15 @@ pub(crate) struct Picture {
     _queue: DispatchRetained<DispatchQueue>,
     frame: Option<Frame>,
     seeked: Option<Instant>,
+    /// Set while a seek is in flight, so a slow one is not interrupted by the next correction.
+    seeking: Arc<AtomicBool>,
     lead: f64,
+}
+
+/// Whether drift this large calls for a seek; never while one is still landing.
+fn needs_seek(drift: f64, playing: bool, seeking: bool) -> bool {
+    let limit = if playing { PLAYING_DRIFT } else { PAUSED_DRIFT };
+    !seeking && drift.abs() > limit
 }
 
 impl Picture {
@@ -217,6 +228,7 @@ impl Picture {
                 _queue: queue,
                 frame: None,
                 seeked: None,
+                seeking: Arc::new(AtomicBool::new(false)),
                 lead: 0.,
             })
         }
@@ -235,20 +247,25 @@ impl Picture {
                 return;
             }
             let drift = self.item.currentTime().seconds() - position;
-            let limit = if playing { PLAYING_DRIFT } else { PAUSED_DRIFT };
-            let seeked = self.seeked.map(|at| at.elapsed());
-            if drift.abs() <= limit || seeked.is_some_and(|since| since < SEEK_SETTLE) {
+            if !needs_seek(drift, playing, self.seeking.load(Ordering::Relaxed)) {
                 return;
             }
+            let seeked = self.seeked.map(|at| at.elapsed());
             if playing && seeked.is_some_and(|since| since < LEARN_WINDOW) && drift.abs() < 5. {
                 self.lead = (self.lead - drift).clamp(0., 1.);
             }
             let target = position + if playing { self.lead } else { 0. };
-            self.player.seekToTime_toleranceBefore_toleranceAfter(
-                CMTime::with_seconds(target.max(0.), TIMESCALE),
-                kCMTimeZero,
-                kCMTimeZero,
-            );
+            self.seeking.store(true, Ordering::Relaxed);
+            let seeking = self.seeking.clone();
+            // Called once the seek lands or a later one supersedes it, which both end this one.
+            let landed = RcBlock::new(move |_: Bool| seeking.store(false, Ordering::Relaxed));
+            self.player
+                .seekToTime_toleranceBefore_toleranceAfter_completionHandler(
+                    CMTime::with_seconds(target.max(0.), TIMESCALE),
+                    kCMTimeZero,
+                    kCMTimeZero,
+                    &landed,
+                );
         }
         self.seeked = Some(Instant::now());
     }
@@ -300,5 +317,24 @@ fn video_output() -> Retained<AVPlayerItemVideoOutput> {
             AVPlayerItemVideoOutput::alloc(),
             Some(&attributes),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::needs_seek;
+
+    #[test]
+    fn a_seek_still_landing_holds_off_the_next_correction() {
+        assert!(needs_seek(2.0, true, false));
+        assert!(!needs_seek(2.0, true, true));
+        assert!(!needs_seek(-9.0, false, true));
+    }
+
+    #[test]
+    fn a_paused_picture_is_held_closer_than_a_playing_one() {
+        assert!(!needs_seek(0.1, true, false));
+        assert!(needs_seek(0.1, false, false));
+        assert!(!needs_seek(0.04, false, false));
     }
 }

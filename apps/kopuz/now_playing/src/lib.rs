@@ -164,6 +164,7 @@ impl NowPlaying {
                         this.hero = None;
                     }
                     this.sheet_focus.set_open(open, window, cx);
+                    this.sync_video(cx);
                 }
                 cx.notify();
             }),
@@ -176,7 +177,11 @@ impl NowPlaying {
             }),
             cx.observe(&SourcesModel::global(cx), |this, _, cx| {
                 this.forget_devices(cx);
+                this.sync_video(cx);
                 cx.notify();
+            }),
+            cx.observe(&link::Link::connection(cx), |this, _, cx| {
+                this.sync_video(cx)
             }),
         ];
 
@@ -221,6 +226,7 @@ impl NowPlaying {
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let playing = PlayerModel::global(cx).read(cx).track().cloned();
         self.swap.follow(playing.as_ref());
+        self.sync_video(cx);
         if let Some((key, cut)) = &self.requested_version
             && playing
                 .as_ref()
