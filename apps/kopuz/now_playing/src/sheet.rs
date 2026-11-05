@@ -16,7 +16,7 @@ use gpui_kit::{
     AnyElement, App, Context, FocusHandle, InteractiveElement as _, IntoElement,
     ParentElement as _, Pixels, Styled, Window, div, point, px, relative, rems,
 };
-use store::layout::{Backdrop, Side};
+use store::layout::{Backdrop, SheetTab, Side};
 use store::{Chrome, ConfigModel, actions};
 
 use crate::NowPlaying;
@@ -32,6 +32,10 @@ const ACTION: Pixels = px(44.);
 const ACTION_GLYPH: Pixels = px(18.);
 const CLOSE: Pixels = px(40.);
 const CLOSE_GLYPH: Pixels = px(22.);
+const TOGGLE: Pixels = px(32.);
+const TOGGLE_GLYPH: Pixels = px(14.);
+const REVEAL: Pixels = px(36.);
+const VIDEO_ASPECT: f32 = 16. / 9.;
 // `bg-black/72` at the least: the sheet is read over, never a bright wallpaper.
 const SHEET_DARKENING: u8 = 72;
 
@@ -110,26 +114,12 @@ impl NowPlaying {
         let config = ConfigModel::global(cx).read(cx).config();
         let use_bar = config.ui.fullscreen_use_player_bar;
         let bar_at_top = config.ui.player_bar_position == config::PlayerBarPosition::Top;
+        let collapsed = store::layout(cx).ui.fullscreen_tabs_collapsed;
+        self.sync_video(open, cx);
 
         let stage = self.stage(&swap, window, cx);
-        let body = self.tab_body(showing, window, cx);
-        let panel = v_flex()
-            .h_full()
-            .w(relative(PANEL))
-            .flex_shrink_0()
-            .border_l_1()
-            .border_color(style::white(style::BORDER_SOFT, cx))
-            .bg(style::black(0.45, cx))
-            .child(
-                h_flex()
-                    .w_full()
-                    .flex_shrink_0()
-                    .justify_center()
-                    .px_4()
-                    .py_3()
-                    .child(self.tab_strip(showing, false, cx)),
-            )
-            .child(div().flex_1().min_h_0().w_full().child(body));
+        let panel = (!collapsed).then(|| self.side_panel(showing, layout.side, window, cx));
+        let reveal = collapsed.then(|| reveal_button(layout.side));
 
         let sheet = surface()
             .key_context("NowPlaying")
@@ -164,12 +154,17 @@ impl NowPlaying {
                         body.children(self.sheet_bar.clone())
                     })
                     .child(
-                        h_flex().flex_1().min_h_0().w_full().items_stretch().map(
-                            |row| match layout.side {
-                                Side::Left => row.child(panel).child(stage),
-                                Side::Right => row.child(stage).child(panel),
-                            },
-                        ),
+                        h_flex()
+                            .relative()
+                            .flex_1()
+                            .min_h_0()
+                            .w_full()
+                            .items_stretch()
+                            .map(|row| match layout.side {
+                                Side::Left => row.children(panel).child(stage),
+                                Side::Right => row.child(stage).children(panel),
+                            })
+                            .children(reveal),
                     )
                     .when(use_bar && !bar_at_top, |body| {
                         body.children(self.sheet_bar.clone())
@@ -190,6 +185,56 @@ impl NowPlaying {
             .into_any_element()
     }
 
+    /// The Up next and Lyrics column, with the chevron that folds it into the stage's edge.
+    fn side_panel(
+        &mut self,
+        showing: SheetTab,
+        side: Side,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let body = self.tab_body(showing, window, cx);
+        let strip = h_flex()
+            .flex_1()
+            .min_w_0()
+            .justify_center()
+            .child(self.tab_strip(showing, false, cx));
+        let hide = IconButton::new(
+            "sheet-hide-panel",
+            match side {
+                Side::Right => icons::CHEVRON_RIGHT,
+                Side::Left => icons::CHEVRON_LEFT,
+            },
+        )
+        .size(TOGGLE)
+        .glyph(TOGGLE_GLYPH)
+        .tooltip(t("hide_side_panel"))
+        .on_click(|_, _, cx| set_collapsed(true, cx));
+        let balance = div().size(TOGGLE).flex_shrink_0();
+
+        v_flex()
+            .h_full()
+            .w(relative(PANEL))
+            .flex_shrink_0()
+            .border_l_1()
+            .border_color(style::white(style::BORDER_SOFT, cx))
+            .bg(style::black(0.45, cx))
+            .child(
+                h_flex()
+                    .w_full()
+                    .flex_shrink_0()
+                    .items_center()
+                    .gap_2()
+                    .px_4()
+                    .py_3()
+                    .map(|header| match side {
+                        Side::Right => header.child(balance).child(strip).child(hide),
+                        Side::Left => header.child(hide).child(strip).child(balance),
+                    }),
+            )
+            .child(div().flex_1().min_h_0().w_full().child(body))
+    }
+
     /// The left half: the cover's landing place, the title, the transport and the clocks.
     fn stage(&self, swap: &SwapFrame, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let use_bar = ConfigModel::global(cx)
@@ -200,6 +245,8 @@ impl NowPlaying {
         let track = self.track(cx);
         let owner = cx.entity().downgrade();
         let hero = store::layout(cx).sheet.cover;
+        let version = crate::video::current_version(cx);
+        let video = self.video();
 
         v_flex()
             .relative()
@@ -223,14 +270,21 @@ impl NowPlaying {
                         }),
                 ),
             )
+            .children(version.map(|version| self.version_switch(version, cx)))
             .child(
                 // The hero cover is drawn by the flying layer; this only says where it lands.
                 div()
                     .id("sheet-hero-slot")
                     .flex_shrink_0()
-                    .size(px(hero.side()))
                     .max_h(relative(hero.max_height()))
                     .max_w(relative(HERO_WIDTH))
+                    .map(|slot| match video {
+                        Some(video) => slot
+                            .w(px(hero.side() * VIDEO_ASPECT))
+                            .aspect_ratio(VIDEO_ASPECT)
+                            .child(video),
+                        None => slot.size(px(hero.side())),
+                    })
                     .on_prepaint(move |bounds, _, cx| {
                         owner
                             .update(cx, |this, cx| {
@@ -313,6 +367,15 @@ impl NowPlaying {
                 }
             })
             .child(div().pt_2().child(marks))
+            .when(track.bitrate > 0, |block| {
+                block.child(
+                    div()
+                        .pt_1()
+                        .text_size(style::text_10())
+                        .text_color(style::white(0.6, cx))
+                        .child(format!("{} kbps", track.bitrate)),
+                )
+            })
     }
 
     /// The cover itself, drawn once, travelling between the bar's slot and the hero's.
@@ -331,9 +394,17 @@ impl NowPlaying {
             .as_ref()
             .map(|track| menus::menu_for(track_target(track)));
         let bar = crate::cover_slot(cx);
+        // A video's own frames replace the cover once they come; until then the cover stands in for them.
+        if open && self.video().is_some_and(|video| video.read(cx).framed()) {
+            return None;
+        }
         // Before the hero has been laid out there is nowhere to fly to, so it starts in the bar.
         let (origin, size) = match self.hero {
-            Some(hero) => (hero.origin, hero.size.width.min(hero.size.height)),
+            Some(hero) => {
+                let side = hero.size.width.min(hero.size.height);
+                let inset = (hero.size.width - side) / 2.;
+                (point(hero.origin.x + inset, hero.origin.y), side)
+            }
             None => match bar {
                 Some(bar) => (bar.origin, bar.size.width),
                 None => return None,
@@ -429,6 +500,36 @@ impl NowPlaying {
             Backdrop::Artwork => components::backdrop::layer(artwork, SHEET_DARKENING, window, cx),
         }
     }
+}
+
+/// Brings the folded side panel back, from the edge it folded into.
+fn reveal_button(side: Side) -> impl IntoElement {
+    let glyph = match side {
+        Side::Right => icons::CHEVRON_LEFT,
+        Side::Left => icons::CHEVRON_RIGHT,
+    };
+    div()
+        .absolute()
+        .top(relative(0.5))
+        .mt(REVEAL * -0.5)
+        .map(|anchor| match side {
+            Side::Right => anchor.right_4(),
+            Side::Left => anchor.left_4(),
+        })
+        .child(
+            IconButton::new("sheet-show-panel", glyph)
+                .size(REVEAL)
+                .glyph(TOGGLE_GLYPH)
+                .tone(IconTone::Scrim)
+                .tooltip(t("show_side_panel"))
+                .on_click(|_, _, cx| set_collapsed(false, cx)),
+        )
+}
+
+fn set_collapsed(collapsed: bool, cx: &mut App) {
+    store::LayoutModel::edit(cx, move |layout| {
+        layout.ui.fullscreen_tabs_collapsed = collapsed
+    });
 }
 
 /// A link out of the sheet folds it away first, so the page it opens is not hidden behind it.

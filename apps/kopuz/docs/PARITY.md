@@ -274,7 +274,7 @@ Data: full mirror from `api.queue_snapshot()` (§5.1)
 - [x] Click row → `queue_edit(Jump{index})` (play-order index)
 - [x] Reorder by mouse drag (6 px threshold, drop above/below split at 23 px) → `queue_edit(Move{from,to})`; ▲▼ ReorderButtons per row → Move
 - [x] Drop tracks dragged from any TrackRow (single or multi-selection, custom drag preview with count) into the queue at a position or at the end → `queue_edit(Insert{index, keys})`; auto-scroll near edges; drag only enabled while rightbar open
-- [ ] Summary line "current/total • total duration" (hidden for radio), click = jump-scroll to current (missing: no summary line)
+- [x] Summary line "current/total • total duration" (hidden for radio), click = jump-scroll to current
 - [x] Auto-follow current item; user scroll disarms; "jump_to_current_song" button re-arms
 - [x] Empty "no_more_songs"
 - [x] No remove-from-queue action exists (`QueueEdit::Remove` unused)
@@ -286,7 +286,7 @@ Data: `api.lyrics(key)` per track change (none for radio, stale answers dropped)
 - [x] Word/syllable karaoke fill per chunk (gradient sweep + glow), chunk end = next chunk start
 - [x] Background vocal lines (dimmer, indented), opposite-turn (duet) lines right-aligned/italic, parent_line_index linkage; secondary lines stay lit while overlapping
 - [x] Instrumental interludes (gaps ≥5 s incl. intro) rendered as a note glyph that fills over the gap
-- [ ] Depth blur of non-active lines (`cfg.lyrics_depth_blur`, strength `cfg.lyrics_depth_blur_strength`) (missing: drawn as opacity, since GPUI paints no blur over text)
+- [x] Depth blur of non-active lines (`cfg.lyrics_depth_blur`, strength `cfg.lyrics_depth_blur_strength`) (sampled: GPUI filters no text, so the words are redrawn faintly around two rings)
 - [x] Offset: `cfg.lyrics_offset_auto` → `PlayerState.output_latency_ms`, else `cfg.lyrics_offset_ms`
 - [x] Auto-sync disarmed by wheel/touch/scroll keys/scrollbar; "sync" button re-arms; new track re-arms
 - [x] Two layouts (rightbar, fullscreen) with separate sizing
@@ -308,11 +308,11 @@ Shown only when active source has `caps.external_devices` and `authenticated`
 ### 3.11 Fullscreen player (`layout/fullscreen/*`)
 - [x] Opened from bar button; closed by chevron or Escape
 - [x] Background: `cfg.cover_art_background` (blurred cover, `cover_art_blur`, `cover_art_darkening`), custom image `cfg.custom_background_path`, or "album-art" theme palette gradient (palette from `api.artwork` bytes)
-- [ ] Left: large Full cover, title, artist (→ artist, closes fullscreen), album (→ album), heart, don't-recommend, actions menu (Play next, Add to queue, Add to playlist if `caps.playlists != None`, Share, Start radio if `caps.track_radio`, View metadata read-only), bitrate "N kbps" (missing: the bitrate line)
+- [x] Left: large Full cover, title, artist (→ artist, closes fullscreen), album (→ album), heart, don't-recommend, actions menu (Play next, Add to queue, Add to playlist if `caps.playlists != None`, Share, Start radio if `caps.track_radio`, View metadata read-only), bitrate "N kbps"
 - [x] Seek / transport / volume (fullscreen variants) unless `cfg.fullscreen_use_player_bar`
-- [ ] Right tabs Up next / Lyrics; collapse/expand side panel → `cfg.fullscreen_tabs_collapsed` (missing: no collapse or expand of the side panel)
+- [x] Right tabs Up next / Lyrics; collapse/expand side panel → `cfg.fullscreen_tabs_collapsed`
 - [ ] Custom titlebar also rendered inside fullscreen (Linux/Windows) (missing: no custom titlebar)
-- [ ] Song / music video switch and video playback (`caps.music_videos`)
+- [x] Song / music video switch and video playback (`caps.music_videos`) (macOS: a muted AVPlayer fed by `api.video`, drawn as a GPUI surface; elsewhere the switch is hidden, as on the Dioxus Android build)
 
 ### 3.12 Compact mini-player (desktop)
 - [x] Toggled by bar button / Ctrl+M; window shrinks to 380×148 (170 on macOS), always-on-top, restores previous size on exit

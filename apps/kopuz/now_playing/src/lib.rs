@@ -12,6 +12,7 @@ mod settings;
 mod sheet;
 mod swap;
 mod transport;
+mod video;
 mod volume;
 mod window;
 
@@ -90,6 +91,9 @@ pub struct NowPlaying {
     tab_fade: components::motion::Fade,
     devices_open: bool,
     devices: Vec<api::ExternalDevice>,
+    /// The cut asked for and the track it was asked on, shown pressed until the swap lands.
+    requested_version: Option<(String, api::TrackVersion)>,
+    video: Option<(Entity<video::MusicVideo>, Subscription)>,
     queue: Option<Entity<QueueView>>,
     lyrics: Option<Entity<LyricsView>>,
     sheet_bar: Option<Entity<NowPlaying>>,
@@ -198,8 +202,13 @@ impl NowPlaying {
             },
             devices_open: false,
             devices: Vec::new(),
+            requested_version: None,
+            video: None,
             queue: holds_tabs.then(|| cx.new(|cx| QueueView::new(window, cx))),
-            lyrics: holds_tabs.then(|| cx.new(|cx| LyricsView::new(window, cx))),
+            lyrics: holds_tabs.then(|| {
+                let sheet = presentation == Presentation::Sheet;
+                cx.new(|cx| LyricsView::new(sheet, window, cx))
+            }),
             sheet_bar: (presentation == Presentation::Sheet)
                 .then(|| cx.new(|cx| Self::new(Presentation::SheetBar, window, cx))),
             restore_focus: cx.focus_handle(),
@@ -212,6 +221,13 @@ impl NowPlaying {
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let playing = PlayerModel::global(cx).read(cx).track().cloned();
         self.swap.follow(playing.as_ref());
+        if let Some((key, cut)) = &self.requested_version
+            && playing
+                .as_ref()
+                .is_none_or(|track| track.key != *key || track.version() == Some(*cut))
+        {
+            self.requested_version = None;
+        }
         if !self.volume_held {
             let shown = PlayerModel::global(cx).read(cx).volume();
             self.volume

@@ -34,9 +34,11 @@ const BACKGROUND_ALPHA: f32 = 0.7;
 const SLIDE_MS: f64 = 720.0;
 // Past this the list has moved under us (a remount or a resize), so re-park rather than wait.
 const REPARK_DRIFT: Pixels = px(24.);
-// Depth of field as opacity, per line of distance and clamped: GPUI paints no blur over text.
-const DEPTH_STEP: f32 = 0.09;
-const DEPTH_MAX: f32 = 0.55;
+// Depth of field per line of distance and its clamp, in px, scaled to each layout's type.
+const SHEET_DEPTH: (f32, f32) = (1.5, 8.0);
+const PANEL_DEPTH: (f32, f32) = (1.1, 6.0);
+// Radii this close draw alike, so a line is not re-blurred for nothing.
+const DEPTH_QUANTUM: f32 = 0.5;
 // `leading-relaxed` on unsynced words.
 const RELAXED: f32 = 1.625;
 
@@ -301,12 +303,15 @@ pub struct LyricsView {
     /// The lit lines that move with the playhead, each redrawing itself on a tick or a frame.
     clocks: HashMap<usize, Entity<LineClock>>,
     slide: Option<Slide>,
+    /// The step and clamp of the depth blur, which the sheet's larger type takes further.
+    depth: (f32, f32),
     _fetch: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl LyricsView {
-    pub fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// The lyrics tab, for the sheet when `sheet`, else for the docked panel.
+    pub fn new(sheet: bool, _: &mut Window, cx: &mut Context<Self>) -> Self {
         let player = PlayerModel::global(cx);
         let playhead = Playhead::global(cx);
         let config = ConfigModel::global(cx);
@@ -325,6 +330,7 @@ impl LyricsView {
             lit: Vec::new(),
             clocks: HashMap::new(),
             slide: None,
+            depth: if sheet { SHEET_DEPTH } else { PANEL_DEPTH },
             _fetch: None,
             _subscriptions: subscriptions,
         }
@@ -524,7 +530,6 @@ fn seek_to(ms: u64, _: &mut Window, cx: &mut App) {
 /// How a lit line sits among the others, which only the list can know.
 #[derive(Clone, Copy, PartialEq)]
 struct Look {
-    opacity: f32,
     paired: bool,
 }
 
@@ -564,7 +569,6 @@ impl Render for LineClock {
             .background(line.background)
             .opposite(line.opposite)
             .paired(self.look.paired)
-            .opacity(self.look.opacity)
             .on_seek(seek_to);
         if line.interlude {
             let span = line.end.unwrap_or(line.start) - line.start;
@@ -594,13 +598,20 @@ impl Render for LineClock {
     }
 }
 
-/// Every line but the lit ones recedes with distance from the anchor.
-fn depth_opacity(index: usize, anchor: Option<usize>, lit: bool, strength: f32) -> f32 {
+/// Every line but the lit ones blurs with distance from the anchor.
+fn depth_blur(
+    index: usize,
+    anchor: Option<usize>,
+    lit: bool,
+    strength: f32,
+    (step, max): (f32, f32),
+) -> Pixels {
     let Some(anchor) = anchor.filter(|_| !lit && strength > 0.0) else {
-        return 1.0;
+        return px(0.);
     };
     let distance = index.abs_diff(anchor) as f32;
-    1.0 - (distance * DEPTH_STEP * strength).min(DEPTH_MAX * strength)
+    let radius = (distance * step * strength).min(max * strength);
+    px((radius / DEPTH_QUANTUM).round() * DEPTH_QUANTUM)
 }
 
 impl Render for LyricsView {
@@ -653,9 +664,8 @@ impl Render for LyricsView {
                 let mut children = Vec::with_capacity(lines.len());
                 for (index, line) in lines.iter().enumerate() {
                     let is_lit = Some(index) == active || lit.contains(&index);
-                    let opacity = depth_opacity(index, anchor, is_lit, strength);
                     if is_lit && (line.interlude || !line.chunks.is_empty()) {
-                        let look = Look { opacity, paired };
+                        let look = Look { paired };
                         let clock = self.clocks.entry(index).or_insert_with(|| {
                             cx.new(|cx| LineClock::new(index, line.clone(), look, cx))
                         });
@@ -670,7 +680,7 @@ impl Render for LyricsView {
                             .background(line.background)
                             .opposite(line.opposite)
                             .paired(paired)
-                            .opacity(opacity)
+                            .blur(depth_blur(index, anchor, is_lit, strength, self.depth))
                             .on_seek(seek_to)
                             .into_any_element(),
                     );
@@ -813,10 +823,15 @@ mod tests {
 
     #[test]
     fn depth_leaves_the_lit_lines_alone_and_clamps_the_far_ones() {
-        assert_eq!(depth_opacity(4, Some(4), true, 1.0), 1.0);
-        assert_eq!(depth_opacity(9, Some(4), false, 0.0), 1.0);
-        assert!(depth_opacity(5, Some(4), false, 1.0) > depth_opacity(9, Some(4), false, 1.0));
-        assert_eq!(depth_opacity(99, Some(4), false, 1.0), 1.0 - DEPTH_MAX);
+        assert_eq!(depth_blur(4, Some(4), true, 1.0, SHEET_DEPTH), px(0.));
+        assert_eq!(depth_blur(9, Some(4), false, 0.0, SHEET_DEPTH), px(0.));
+        assert!(
+            depth_blur(5, Some(4), false, 1.0, SHEET_DEPTH)
+                < depth_blur(9, Some(4), false, 1.0, SHEET_DEPTH)
+        );
+        assert_eq!(depth_blur(99, Some(4), false, 1.0, SHEET_DEPTH), px(8.));
+        assert_eq!(depth_blur(99, Some(4), false, 0.5, PANEL_DEPTH), px(3.));
+        assert_eq!(depth_blur(5, Some(4), false, 1.0, PANEL_DEPTH), px(1.));
     }
 
     #[gpui_kit::test]
@@ -825,7 +840,7 @@ mod tests {
     ) {
         use crate::playhead_tests::{boot, counted};
         boot(cx);
-        let (view, cx) = cx.add_window_view(LyricsView::new);
+        let (view, cx) = cx.add_window_view(|window, cx| LyricsView::new(true, window, cx));
         let lines = vec![line(0.0, Some(5.0)), line(6.0, Some(9.0))];
         let main = main_indices(&lines);
         view.update(cx, |view, _| view.lyrics = Lyrics::Synced { lines, main });
