@@ -12,7 +12,9 @@ use crate::notices::Notices;
 pub struct CatalogMarks {
     known: HashMap<String, CatalogActions>,
     taken: Taken,
-    _subscriptions: [Subscription; 2],
+    /// The favorites last seen, so a heart flipped anywhere moves a noted song's like with it.
+    hearts: Option<HashSet<String>>,
+    _subscriptions: [Subscription; 3],
 }
 
 /// What the source said yes to, by the ref it was sent with.
@@ -51,6 +53,21 @@ impl Taken {
         }
         now
     }
+
+    /// Bring a song's rating in line with its heart; whether that changed it.
+    fn heart(&mut self, actions: &CatalogActions, favorite: bool) -> bool {
+        let Some(at) = &actions.rate_ref else {
+            return false;
+        };
+        let liked = self.over(actions).rating == Some(Rating::Like);
+        let rating = match (favorite, liked) {
+            (true, false) => Rating::Like,
+            (false, true) => Rating::None,
+            _ => return false,
+        };
+        self.rating.insert(at.clone(), rating);
+        true
+    }
 }
 
 impl CatalogMarks {
@@ -70,16 +87,43 @@ impl CatalogMarks {
             &crate::SourcesModel::global(cx),
             |this, _, _: &crate::SwitchStarted, cx| this.forget(cx),
         );
+        let hearts = cx.observe(&crate::FavoritesModel::global(cx), |this, favorites, cx| {
+            let favorites = favorites.read(cx);
+            let now = favorites
+                .is_loaded()
+                .then(|| favorites.keys().cloned().collect());
+            this.follow_hearts(now, cx)
+        });
         Self {
             known: HashMap::new(),
             taken: Taken::default(),
-            _subscriptions: [resync, switch],
+            hearts: None,
+            _subscriptions: [resync, switch, hearts],
+        }
+    }
+
+    fn follow_hearts(&mut self, now: Option<HashSet<String>>, cx: &mut Context<Self>) {
+        let Some(now) = now else {
+            return;
+        };
+        let Some(before) = self.hearts.replace(now.clone()) else {
+            return;
+        };
+        let mut changed = false;
+        for key in before.symmetric_difference(&now) {
+            if let Some(actions) = self.known.get(key) {
+                changed |= self.taken.heart(actions, now.contains(key));
+            }
+        }
+        if changed {
+            crate::notify(cx);
         }
     }
 
     fn forget(&mut self, cx: &mut Context<Self>) {
         self.known.clear();
         self.taken = Taken::default();
+        self.hearts = None;
         crate::notify(cx);
     }
 
@@ -232,6 +276,16 @@ mod tests {
         assert_eq!(now.saved, Some(true));
         assert_eq!(now.followed, Some(true));
         assert_eq!(now.history_token, None);
+    }
+
+    #[test]
+    fn a_heart_flipped_elsewhere_moves_the_like_with_it() {
+        let mut taken = taken();
+        assert!(taken.heart(&refs(), false));
+        assert_eq!(taken.over(&refs()).rating, Some(Rating::None));
+        assert!(taken.heart(&refs(), true));
+        assert_eq!(taken.over(&refs()).rating, Some(Rating::Like));
+        assert!(!taken.heart(&refs(), true));
     }
 
     #[test]

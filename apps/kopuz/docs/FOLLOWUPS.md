@@ -1,7 +1,7 @@
 # Shared-layer follow-ups (apply AFTER all agents finish)
 
 From page_library (a519fcea):
-- [x] `TrackList`: windowed mode — `set_window(rows, offset, total)` + emit
+- [x] `TrackList`: windowed mode: `set_window(rows, offset, total)` + emit
       `TrackListEvent::RangeChanged { offset, limit }` from the uniform_list range
       processor. Library and Activity both need it (§5.8). Note: with windowing,
       `TrackListEvent::Play(index)` must stay a *listing* index, not a row index.
@@ -9,11 +9,11 @@ From page_library (a519fcea):
       checkbox) — today only a page-level select-all can start it, so §3.9's
       long-press is unreachable.
 - [x] `TrackList`: `selected_count()` so pages don't build a Vec just to count.
-- [x] `TrackListOptions`: `now_playing` flag — §2.6 wants the highlight only when
+- [x] `TrackListOptions`: `now_playing` flag: §2.6 wants the highlight only when
       the queue IS this listing; today it always highlights by key.
 - [x] `store::actions`: `delete_tracks(keys, from_disk, cx)` helper; albums,
       playlists and favorites all want it.
-- [x] `components`: shared `SelectionBar` (§5.6 — every list page has the same one).
+- [x] `components`: shared `SelectionBar` (§5.6: every list page has the same one).
       page_library has a local one to lift.
 - [x] `en.ftl`: no key for "{n} selected" (hardcoded English in Dioxus too).
 
@@ -46,7 +46,7 @@ From page_activity + page_radio (ac29020c):
       KEEP the stale value instead of dropping it — that drop is what forces every
       windowed page to keep its own rows/offset/total mirror. Activity hand-rolled
       it; Library skipped it. Unify before more pages copy either.
-- [x] `store`: a debounce helper — radio, search, the library filter and
+- [x] `store`: a debounce helper: radio, search, the library filter and
       ConfigModel each hand-roll task-replacement debouncing.
 - [ ] `api::Table` has no Radio entry, so radio queries only refresh on resync or
       source switch; pinning refreshes explicitly. Upstream daemon change if we
@@ -68,7 +68,7 @@ SPACE KEY (fixed in app/src/main.rs, verify at integration):
       process-wide binding from inside a page — works, but wrong home).
 
 From page_search (ad20cd74):
-- [x] `TrackList`: no column sort/header at all — §2.2 and §2.6 both want it.
+- [x] `TrackList`: no column sort/header at all: §2.2 and §2.6 both want it.
 - [x] `PageHeader`: no cover slot (genre detail wants the hero image).
 - [x] No scroll persistence (§5.7): TrackList owns its scroll handle privately
       and grids use plain overflow scroll, so positions reset on navigation.
@@ -84,7 +84,7 @@ From page_discover (a1c78fcb):
       `Navigator::go_back`. Add a back_button() variant.
 - [x] Lift the horizontal carousel (scroll handle + arrows + clamping) into
       `components::cards`; Home wants it too.
-- [x] `Tile`: add `on_click` — song cards need a command, not a route.
+- [x] `Tile`: add `on_click`: song cards need a command, not a route.
 - [x] `TrackList` is size_full+uniform_list, so embedding in a scrolling page
       needs a reserved height; expose ROW_HEIGHT or add an intrinsic-height mode.
 - [x] `DiscoverNowPlaying` should live in `store` to survive navigation.
@@ -146,7 +146,7 @@ From settings_playback (a82359b1):
       to edit once their agents are done) and have the shell call it.
 - CONFIRMED FIXED: SchemaForm's `managed_by_settings_file` key did not exist;
   already repointed to `setting_managed_by_system`.
-- [x] `store`: a one-line "edit one config field" helper — every settings row
+- [x] `store`: a one-line "edit one config field" helper: every settings row
       repeats `ConfigModel::global(cx).update(cx, |m, cx| m.update(cx, |c| ...))`.
 - [x] `SchemaForm`: add `specs()` getter + windowless `set_specs` so a save's
       authoritative response can be adopted without a refetch round-trip.
@@ -164,19 +164,19 @@ From page_artists (ae99b324) — 4th/5th independent request for the same items:
 - [x] `Tile::route()` covers the whole tile, so a per-card dots menu double-fires
       navigation; add a `Tile::menu(..)` slot with its own click region. (This is
       why artists wrote its own card instead of using Tile.)
-- [x] `store::actions`: no library mutations — delete_tracks, delete_album,
+- [x] `store::actions`: no library mutations: delete_tracks, delete_album,
       upload_artwork, remove_artwork, with_album_keys are all raw `actions::run`
       here and albums/favorites need them too.
 - [x] `DownloadsModel::remove` is single-key → "remove all" makes N round trips;
       add `remove_many`.
-- [x] Lift `names.rs` (normalize / joined_credit_primary) into shared code —
+- [x] Lift `names.rs` (normalize / joined_credit_primary) into shared code:
       quick_search and the remote artist profile need the same keying. It has 7
       tests; this is the logic that kept regressing in Dioxus.
 - [ ] `cx.prompt_for_paths` has no extension filter (rfd had one).
       Left: gpui has no extension filter.
 
 From fullscreen (af979caf):
-- [x] **api::NowPlaying carries no album_id** — the "go to album" link from the
+- [x] **api::NowPlaying carries no album_id**: the "go to album" link from the
       player can only guess by matching QueueModel::current() on key, which is
       WRONG during a crossfade (the outgoing track is shown). Either add
       album_id to NowPlaying upstream (daemon+proto change) or add
@@ -185,7 +185,7 @@ From fullscreen (af979caf):
       -component: only shadow blur_radius). `cfg.cover_art_blur` cannot be
       honoured as-is; needs a downsampling custom element or a blurred variant
       produced at decode time in `store::artwork`. PARITY gap, tell the user.
-- [x] `store::actions::dont_recommend(key, cx)` — hand-rolled here, player_bar
+- [x] `store::actions::dont_recommend(key, cx)`: hand-rolled here, player_bar
       needs the identical thing (call, toast, then Next regardless).
 - [x] A shared seek-slider wrapper: SliderState's range is fixed at construction,
       so every seek bar works in 0..1 fractions and re-implements the drag latch
@@ -252,7 +252,7 @@ From quick_search + metadata_dialog (af54a6cb):
       dispatch path and Space/Ctrl+K/Escape go dead app-wide. Lift the dance out
       of quick_search before the next overlay copies it.
       Only palette saves focus now (quick_search folded into it), so nothing to lift yet.
-- [x] `components::dialogs::Dialogs` is a single-field global set with set_global —
+- [x] `components::dialogs::Dialogs` is a single-field global set with set_global:
       a second registrar silently CLOBBERS the metadata opener. Make it a map.
 - [x] No shared label/value detail-row widget (album/artist headers want it).
 - [ ] `theme::overlay` maps to accent_deep, which is opaque, so every scrim calls
@@ -276,7 +276,7 @@ From page_playlists (ab9e5d8a):
 From page_home (ac7feb70):
 - [x] `Tile` overlay is always visible and declares no hover group → every card
       page wraps it by hand. Add `Tile::hover_overlay(..)`. (4th Tile complaint.)
-- [x] Lift `AlbumPlayButton` into components — §2.1 says "everywhere".
+- [x] Lift `AlbumPlayButton` into components: §2.1 says "everywhere".
 - [x] Lift the horizontal scroller + row heading into components (discover too).
 - [x] `components::track_list::row_menu` is private and row-shaped; expose a
       `track_menu(track, entries)` builder (Home song cards, Discover SongCard,
@@ -324,7 +324,7 @@ MOTION PASS (after all motion agents land):
       on hover-in and only tweens on the way out; the fix is a
       ButtonCustomVariant whose `hover`/`active` get the SAME tweened colour.
       Without it half of `transition-colors` is silently lost on every button.
-- [x] **`motion::hover_flag(id, window, cx)`** + its listener — five private
+- [x] **`motion::hover_flag(id, window, cx)`** + its listener: five private
       copies now exist. Must be built on `window.use_keyed_state`, since a
       `RenderOnce` (Card, Tile, SettingRow) has no `cx.listener`.
 - [x] `motion::SNAP` (120ms) and `SLOWER` (500ms): the settings rows are 120ms

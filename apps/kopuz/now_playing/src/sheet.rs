@@ -246,6 +246,7 @@ impl NowPlaying {
         let hero = store::layout(cx).sheet.cover;
         let version = crate::video::current_version(cx);
         let video = self.video();
+        let open = Chrome::global(cx).read(cx).is_sheet_open();
 
         v_flex()
             .relative()
@@ -263,7 +264,8 @@ impl NowPlaying {
                         .glyph(CLOSE_GLYPH)
                         // Over a bright cover a bare glyph disappears, so the button carries a scrim of its own.
                         .tone(IconTone::Scrim)
-                        .tooltip(t("close"))
+                        // A tooltip re-shown during the fade-out outlives the button, so it is offered only while open.
+                        .when(open, |button| button.tooltip(t("close")))
                         .on_click(|_, _, cx| {
                             Chrome::global(cx).update(cx, |chrome, cx| chrome.set_sheet(false, cx))
                         }),

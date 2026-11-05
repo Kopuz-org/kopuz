@@ -18,13 +18,13 @@ use api::{AlbumInfo, ApiError, KopuzApi, SearchFilter, SearchRequest, SearchResu
 use components::format::{t, t_with};
 use components::{
     Chip, ChipSize, EmptyState, Heading, Loading, PageHeader, SectionHeading, TrackList,
-    TrackListEvent, icons,
+    TrackListEvent, TrackSection, icons,
 };
-use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
-    SharedString, Styled, Subscription, Window, div,
+    AnyElement, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
+    Styled, Subscription, Window, div, point, px, rems,
 };
 use store::{Chrome, PlayerModel, Query, SourcesModel, actions};
 
@@ -50,6 +50,9 @@ fn search_fetch(query: String) -> impl Fn(Arc<dyn KopuzApi>) -> Answer + 'static
 }
 
 /// The browsing destination: the landing's rows when nothing is asked for, results when something is.
+/// The results scroller, which the track list reveals its cursor in.
+const RESULTS_SCROLL: &str = "discover-results-scroll";
+
 pub struct Discover {
     landing: Entity<Landing>,
 
@@ -66,6 +69,8 @@ pub struct Discover {
     result_albums: Vec<AlbumInfo>,
     result_artists: Vec<(String, SharedString)>,
     playing: Playing,
+    scroll: ScrollHandle,
+    reveal: components::scroll::Reveal,
 
     _subscriptions: Vec<Subscription>,
 }
@@ -80,10 +85,13 @@ impl Discover {
                 cx,
             )
         });
+        let scroll = ScrollHandle::new();
+        let reveal = components::scroll::Reveal::new(scroll.clone());
         let tracks = cx.new(|cx| {
             TrackList::new(cx)
                 .with_options(components::TrackListOptions::default())
                 .with_actions(genres::row_actions(cx))
+                .reveal_in(reveal.clone())
         });
         commands::bind_track_list(&tracks, cx);
         let chrome = Chrome::global(cx);
@@ -156,6 +164,8 @@ impl Discover {
             result_albums: Vec::new(),
             result_artists: Vec::new(),
             playing: Playing::default(),
+            scroll,
+            reveal,
             _subscriptions: subscriptions,
         };
         discover.follow_source(cx);
@@ -201,6 +211,7 @@ impl Discover {
             return;
         }
         self.asked = wanted.clone();
+        self.scroll.set_offset(point(px(0.), px(0.)));
         self.results.update(cx, |results, cx| match wanted {
             Some(query) => results.set_fetch(search_fetch(query), cx),
             None => results.hold(SearchResults::default(), cx),
@@ -221,7 +232,7 @@ impl Discover {
     }
 
     /// What one query turned up: the strips over the list of matching tracks.
-    fn results_view(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn results_view(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if self.is_catalog() {
             return self.page(self.catalog.clone().into_any_element(), cx);
         }
@@ -262,21 +273,26 @@ impl Discover {
         } else {
             let albums = results::album_strip(&self.result_albums, t("albums"), &self.playing);
             let artists = results::artist_strip(&self.result_artists, t("artists"), &self.playing);
-            v_flex()
+            components::scroll::smooth_revealing(RESULTS_SCROLL, &self.reveal, window, cx);
+            let heading_gap = rems(1.).to_pixels(window.rem_size());
+            div()
+                .id("discover-results")
                 .flex_1()
                 .min_h_0()
+                .overflow_y_scroll()
+                .track_scroll(&self.scroll)
                 // The held rows answer the previous query: dim them rather than blanking the page.
                 .when(stale, |body| body.opacity(FADED))
                 .children(albums)
                 .children(artists)
                 .when(found > 0, |body| {
                     body.child(
-                        div()
-                            .flex_shrink_0()
-                            .mb_4()
-                            .child(SectionHeading::new(t("tracks")).heading(Heading::Band)),
+                        div().pb_8().child(
+                            TrackSection::new("discover-result-tracks", self.tracks.clone())
+                                .heading(SectionHeading::new(t("tracks")).heading(Heading::Band))
+                                .gap(heading_gap),
+                        ),
                     )
-                    .child(div().flex_1().min_h_0().pb_8().child(self.tracks.clone()))
                 })
                 .into_any_element()
         };

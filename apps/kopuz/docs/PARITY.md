@@ -338,7 +338,7 @@ Shown only when active source has `caps.external_devices` and `authenticated`
 ### 3.16 Theme application
 - [x] `#app-root` class `theme-<cfg.theme>`; "album-art" → `theme-default` + palette gradient background; "live" → `theme-default theme-live` (album art casts the cover's light at full spread whatever the ambient setting)
 - [x] Custom themes (`cfg.custom_themes`) injected as `.theme-<id>` CSS
-- [x] Live theme (`cfg.theme == "live"`, desktop): matugen/pywal JSON at `cfg.live_theme_path` (or default) polled every 400 ms (2 s idle), recolors in place (polled only while selected; a half-written file keeps the colours up)
+- [x] Live theme (`cfg.theme == "live"`, desktop): matugen/pywal JSON at `cfg.live_theme_path` (or default) polled every 400 ms, recolors in place (polled only while selected; a half-written file keeps the colours up)
 - [x] Custom UI font `cfg.custom_font_path` (ttf/otf/woff/woff2, ≤32 MB) applied app-wide
 - [x] `cfg.reduce_animations` → reduced-animation stylesheet
 - [x] `cfg.ui_style` Normal vs Vaxry switches sidebar, bar, showcase, headers, compact skin, page paddings

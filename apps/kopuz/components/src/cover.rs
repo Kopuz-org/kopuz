@@ -144,11 +144,12 @@ impl Cover {
             None => 0.,
         };
         let hq = self.hq;
+        let radius = self.rounded;
         div()
             .absolute()
             .inset_0()
             .overflow_hidden()
-            .when_some(self.rounded, |frame, radius| frame.rounded(radius))
+            .when_some(radius, |frame, radius| frame.rounded(radius))
             .when_some(self.artwork, |frame, artwork| {
                 let shown = arrived(&artwork, hq, window, cx);
                 frame.child(
@@ -160,15 +161,23 @@ impl Cover {
                         // Insets alone leave an image at its pixel width, so a wide frame showed a strip of it.
                         .w(relative(1. - 2. * bleed))
                         .h(relative(1. - 2. * bleed))
+                        // The frame's mask is a rect, so the picture rounds its own corners.
+                        .when_some(radius, |picture, radius| picture.rounded(radius))
                         .object_fit(ObjectFit::Cover),
                 )
             })
             .when_some(self.scrim, |frame, scrim| {
-                frame.child(div().absolute().inset_0().bg(linear_gradient(
-                    0.,
-                    linear_color_stop(style::black(scrim.foot, cx), 0.),
-                    linear_color_stop(style::black(scrim.top, cx), scrim.reach),
-                )))
+                frame.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .when_some(radius, |wash, radius| wash.rounded(radius))
+                        .bg(linear_gradient(
+                            0.,
+                            linear_color_stop(style::black(scrim.foot, cx), 0.),
+                            linear_color_stop(style::black(scrim.top, cx), scrim.reach),
+                        )),
+                )
             })
             .into_any_element()
     }

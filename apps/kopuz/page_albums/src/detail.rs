@@ -57,6 +57,7 @@ pub struct AlbumDetail {
     // Offline mode on a source across the internet: no catalog read, and only the tracks with a copy here.
     offline_reads: bool,
     scroll: ScrollHandle,
+    reveal: components::scroll::Reveal,
     _subscriptions: Vec<Subscription>,
     _lists: Vec<Subscription>,
 }
@@ -109,6 +110,7 @@ impl AlbumDetail {
             cx.observe(&PlayerModel::global(cx), |_, _, cx| cx.notify()),
         ];
 
+        let scroll = ScrollHandle::new();
         Self {
             id,
             album,
@@ -124,7 +126,8 @@ impl AlbumDetail {
             // Sources usually loaded before the page opened, so their observer would not fire again.
             capabilities: SourcesModel::global(cx).read(cx).capabilities(),
             offline_reads: SourcesModel::global(cx).read(cx).offline_reads(),
-            scroll: ScrollHandle::new(),
+            scroll: scroll.clone(),
+            reveal: components::scroll::Reveal::new(scroll),
             _subscriptions: subscriptions,
             _lists: Vec::new(),
         }
@@ -220,11 +223,13 @@ impl AlbumDetail {
         let mut groups = Vec::new();
         let mut subscriptions = Vec::new();
         let mut offset = 0;
+        let page = self.reveal.clone();
         for (disc, chunk) in by_disc(&self.rows) {
             let list = cx.new(|cx| {
                 TrackList::new(cx)
                     .with_options(options)
                     .with_actions(row_actions)
+                    .reveal_in(page.clone())
             });
             commands::bind_track_list(&list, cx);
             let count = chunk.len();
@@ -507,7 +512,7 @@ impl AlbumDetail {
 
 impl Render for AlbumDetail {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        components::scroll::smooth("album-detail-scroll", &self.scroll, window, cx);
+        components::scroll::smooth_revealing("album-detail-scroll", &self.reveal, window, cx);
         let album = self.album.read(cx).value().cloned().flatten();
         let remote = self.remote.read(cx).value().cloned().flatten();
 

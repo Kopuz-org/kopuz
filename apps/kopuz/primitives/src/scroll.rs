@@ -1,6 +1,8 @@
 //! Smooth scrolling. GPUI turns a wheel notch into `line_height * delta` and applies it at once,
 //! so the view teleports; here the drawn offset glides toward where the wheel has put it.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::{App, ElementId, Pixels, ScrollHandle, UniformListScrollHandle, Window, point, px};
@@ -83,6 +85,83 @@ pub fn smooth_x(
     record(state, target, drawn, cx);
 }
 
+/// A row a list wants its page scroller to show. The page's glide lives in the page's own element
+/// scope, so the list hands the row over and the page's [`smooth_revealing`] re-aims the glide.
+#[derive(Clone)]
+pub struct Reveal {
+    handle: ScrollHandle,
+    asked: Rc<Cell<Option<(Pixels, Pixels)>>>,
+}
+
+impl Reveal {
+    pub fn new(handle: ScrollHandle) -> Self {
+        Self {
+            handle,
+            asked: Rc::default(),
+        }
+    }
+
+    /// The page's offset now, which a list records beside where it painted its rows.
+    pub fn offset(&self) -> Pixels {
+        self.handle.offset().y
+    }
+
+    /// Show a row `height` tall whose window top, with the page at offset zero, is `rest`.
+    pub fn ask(&self, rest: Pixels, height: Pixels) {
+        self.asked.set(Some((rest, height)));
+    }
+}
+
+/// [`smooth`], first bringing into view the row a list asked for since the last frame.
+pub fn smooth_revealing(
+    id: impl Into<ElementId>,
+    reveal: &Reveal,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let id: ElementId = id.into();
+    let handle = &reveal.handle;
+    if let Some((rest, height)) = reveal.asked.take() {
+        let viewport = handle.bounds();
+        // Room for the row's focus outline, which a flush edge would clip.
+        let view = (viewport.top() + px(4.), viewport.bottom() - px(4.));
+        let offset = handle.offset();
+        let (target, drawn) = match motion::span(GLIDE, cx) {
+            Some(_) => match held(&id, "glide", window, cx).1 {
+                glide if glide.started => (glide.target, glide.drawn),
+                _ => (offset.y, offset.y),
+            },
+            None => (offset.y, offset.y),
+        };
+        if let Some(y) = aim(target, drawn, offset.y, view, rest + drawn, height) {
+            handle.set_offset(point(offset.x, y));
+        }
+    }
+    smooth(id, handle, window, cx);
+}
+
+/// The offset to write so [`smooth`] lands where a row starting at `top` (as drawn at `drawn`)
+/// is in `view`. [`smooth`] reads `offset - drawn` as fresh wheel on top of `target`.
+fn aim(
+    target: Pixels,
+    drawn: Pixels,
+    offset: Pixels,
+    (view_top, view_bottom): (Pixels, Pixels),
+    top: Pixels,
+    height: Pixels,
+) -> Option<Pixels> {
+    let heading = target + (offset - drawn);
+    let landed = top + (heading - drawn);
+    let wanted = if landed < view_top {
+        heading + (view_top - landed)
+    } else if landed + height > view_bottom {
+        heading - (landed + height - view_bottom)
+    } else {
+        return None;
+    };
+    Some(drawn + (wanted - target))
+}
+
 /// Move a horizontal scroller by `by`; [`smooth_x`] reads the new offset as target, so an arrow glides too.
 pub fn nudge_x(handle: &ScrollHandle, by: Pixels) {
     let offset = handle.offset();
@@ -146,6 +225,27 @@ pub fn smooth_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reveal_mid_glide_aims_the_glide_instead_of_adding_to_it() {
+        let view = (px(100.), px(500.));
+        // Resting: the row 20 below the viewport moves the page by exactly that.
+        assert_eq!(
+            aim(px(0.), px(0.), px(0.), view, px(480.), px(40.)),
+            Some(px(-20.))
+        );
+        assert_eq!(aim(px(0.), px(0.), px(0.), view, px(200.), px(40.)), None);
+        // Drawn at -100 but heading to -500: the glide is re-aimed to end with the row at the bottom.
+        let written = aim(px(-500.), px(-100.), px(-100.), view, px(1000.), px(40.));
+        assert_eq!(written, Some(px(-240.)));
+        // What `smooth` then makes of it: the old target plus the new wheel.
+        assert_eq!(px(-500.) + (px(-240.) - px(-100.)), px(-640.));
+        // A row that lands in view once the glide ends needs nothing.
+        assert_eq!(
+            aim(px(-500.), px(-100.), px(-100.), view, px(660.), px(40.)),
+            None
+        );
+    }
 
     #[test]
     fn a_row_settles_on_the_nearest_tile() {

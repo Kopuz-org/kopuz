@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
@@ -6,9 +7,9 @@ use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, ClickEvent, Context, EventEmitter, FocusHandle, Focusable, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, Styled, UniformListScrollHandle,
-    WeakEntity, Window, actions, div, uniform_list,
+    AnyElement, Bounds, ClickEvent, Context, EventEmitter, FocusHandle, Focusable,
+    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, SharedString, Styled,
+    UniformListScrollHandle, WeakEntity, Window, actions, canvas, div, px, uniform_list,
 };
 use store::{RowEdit, RowScope, Target};
 
@@ -104,6 +105,10 @@ pub struct TrackList {
     selection: Selection,
     focus: FocusHandle,
     scroll: UniformListScrollHandle,
+    /// The page scroller a list sized to all its rows sits in, which has to bring the cursor into view.
+    page: Option<crate::scroll::Reveal>,
+    /// Where the rows were last painted, in window coordinates, and the page offset they were painted at.
+    painted: Rc<Cell<(Bounds<Pixels>, Pixels)>>,
     playing: Option<String>,
     /// Whether the queue is exactly these rows, which `NowPlaying::WhenQueued` waits for.
     queued: bool,
@@ -145,6 +150,8 @@ impl TrackList {
             selection: Selection::new(),
             focus: cx.focus_handle(),
             scroll: UniformListScrollHandle::new(),
+            page: None,
+            painted: Rc::default(),
             playing: None,
             queued: false,
             row_images: true,
@@ -170,11 +177,6 @@ impl TrackList {
             self.queued = queued;
             cx.notify();
         }
-    }
-
-    /// Whether the queue is this listing, row for row.
-    pub fn is_queued(&self) -> bool {
-        self.queued
     }
 
     /// The keys with an offline copy, which their rows mark.
@@ -205,6 +207,12 @@ impl TrackList {
 
     pub fn with_actions(mut self, actions: TrackActions) -> Self {
         self.row_actions = actions;
+        self
+    }
+
+    /// The page scroller this list sits in, sized to all its rows, which shows the cursor row.
+    pub fn reveal_in(mut self, page: crate::scroll::Reveal) -> Self {
+        self.page = Some(page);
         self
     }
 
@@ -370,13 +378,16 @@ impl TrackList {
             .scroll_to_item(index, gpui_kit::ScrollStrategy::Center);
     }
 
-    pub fn scroll_to_top(&self) {
-        self.scroll.scroll_to_item(0, gpui_kit::ScrollStrategy::Top);
-    }
-
-    /// How tall every row stacked is, for a page that embeds the list in its own scroller.
-    pub fn content_height(&self, window: &Window) -> gpui_kit::Pixels {
-        style::to_px(style::row_height(), window) * self.rows.len() as f32
+    fn reveal_on_page(&self, index: usize) {
+        let Some(page) = &self.page else {
+            return;
+        };
+        let (rows, painted_at) = self.painted.get();
+        if self.rows.is_empty() || rows.size.height <= px(0.) {
+            return;
+        }
+        let height = rows.size.height / self.rows.len() as f32;
+        page.ask(rows.top() + height * index as f32 - painted_at, height);
     }
 
     /// A hold on a row starts a selection with that row in it.
@@ -417,6 +428,7 @@ impl TrackList {
         };
         self.selection.set_cursor(Some(next));
         self.scroll_to(next);
+        self.reveal_on_page(next);
         cx.notify();
     }
 
@@ -564,6 +576,17 @@ impl Render for TrackList {
                 .flex_1()
                 .size_full(),
             )
+            .when_some(self.page.clone(), |list, page| {
+                let painted = self.painted.clone();
+                list.relative().child(
+                    canvas(
+                        move |bounds, _, _| painted.set((bounds, page.offset())),
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .inset_0(),
+                )
+            })
     }
 }
 
