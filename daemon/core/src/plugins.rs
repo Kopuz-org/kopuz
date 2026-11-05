@@ -513,11 +513,10 @@ fn differs(plugin: &plugin_host::Plugin, listing: &Listing) -> bool {
             .is_some_and(|digest| !digest.eq_ignore_ascii_case(listing.component.sha256.trim()))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn a_same_sized_replacement_keeping_its_modification_time_is_noticed() {
         let dir = std::env::temp_dir().join(format!("kopuz-stamps-{}", std::process::id()));
