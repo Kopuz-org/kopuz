@@ -256,8 +256,12 @@ mod tests {
         Arc::new(Only { allowed, server })
     }
 
+    /// Skipped where 127.0.0.2 is not a loopback address, as on macOS by default.
     #[tokio::test]
     async fn a_guarded_fetch_never_redirects_off_its_hosts() {
+        if std::net::TcpListener::bind(("127.0.0.2", 0)).is_err() {
+            return;
+        }
         let (elsewhere, elsewhere_hits) = redirecting("127.0.0.2", "/".into());
         let (start, _) = redirecting("127.0.0.1", format!("{elsewhere}/x"));
         let client = guarded_builder(Some(only("127.0.0.1", Some("127.0.0.1"))))
