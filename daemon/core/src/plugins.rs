@@ -24,7 +24,8 @@ pub struct PluginService {
     http: Option<reqwest::Client>,
     index: Mutex<Option<(Instant, Arc<Index>)>>,
     /// Held while the plugin directory changes, since an install and a
-    /// removal of one id share its staging paths.
+    /// removal of one id share its staging paths. Another daemon sharing the
+    /// directory is kept out by [`market::lock`].
     changing: Mutex<()>,
 }
 
@@ -244,6 +245,7 @@ impl PluginService {
 
         let id = listing.id.clone();
         tokio::task::spawn_blocking(move || {
+            let _locked = market::lock(&dir)?;
             let target = market::install(&dir, &id, &manifest_text, &component)?;
             // A hand-installed copy under another directory name would still
             // load beside it on the next start.
@@ -285,6 +287,7 @@ impl PluginService {
         let id = id.to_string();
         let removed = id.clone();
         tokio::task::spawn_blocking(move || {
+            let _locked = market::lock(&dir)?;
             plugin_host::dirs_of(&dir, &removed)
                 .iter()
                 .try_for_each(|copy| market::uninstall(&dir, copy))
