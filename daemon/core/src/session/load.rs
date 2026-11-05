@@ -593,16 +593,13 @@ pub(super) async fn fetch_cover_to_temp(
         return Some(path.to_string_lossy().to_string());
     }
     let fetch = async {
-        let response = crate::artwork::get(
-            &utils::http::client(),
-            &crate::artwork::unredirected_client(),
-            url,
-            reach,
-        )
-        .await
-        .ok()?
-        .error_for_status()
-        .ok()?;
+        let unredirected = crate::artwork::unredirected_client().ok();
+        let response =
+            crate::artwork::get(&utils::http::client(), unredirected.as_ref(), url, reach)
+                .await
+                .ok()?
+                .error_for_status()
+                .ok()?;
         response.bytes().await.ok()
     };
     let bytes = tokio::time::timeout(Duration::from_secs(30), fetch)
