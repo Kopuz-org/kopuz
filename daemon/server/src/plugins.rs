@@ -22,7 +22,10 @@ pub const FLATPAK_EXTENSION_DIR: &str = "/app/plugins";
 /// Flatpak's extension point inside the Flatpak, then `kopuz/plugins` in each
 /// data directory (`$XDG_DATA_DIRS`; `/usr/local/share` and `/usr/share` when
 /// unset), where a system package or a Nix profile puts one, or the list in
-/// `KOPUZ_PLUGIN_PATH` in their place.
+/// `KOPUZ_PLUGIN_PATH` in their place. Lowest first: a later root replaces an
+/// earlier copy of a plugin, so the first one listed comes last and wins, and
+/// the Flatpak's extension point wins over them all. A path that resolves to
+/// `dir`, or to one already listed, is left out.
 pub fn read_only_dirs(dir: &std::path::Path) -> Vec<PathBuf> {
     read_only_dirs_from(
         crate::cookies::browser::in_flatpak().then(|| PathBuf::from(FLATPAK_EXTENSION_DIR)),
@@ -50,12 +53,18 @@ fn read_only_dirs_from(
             .map(|data| data.join("kopuz").join("plugins"))
             .collect()
     });
+    let resolved = |path: &std::path::Path| std::fs::canonicalize(path).unwrap_or(path.into());
+    let mine = resolved(dir);
+    let mut seen: Vec<PathBuf> = Vec::new();
     let mut dirs: Vec<PathBuf> = Vec::new();
     for read_only in flatpak.into_iter().chain(system) {
-        if read_only.is_absolute() && read_only != dir && !dirs.contains(&read_only) {
+        let real = resolved(&read_only);
+        if read_only.is_absolute() && real != mine && !seen.contains(&real) {
+            seen.push(real);
             dirs.push(read_only);
         }
     }
+    dirs.reverse();
     dirs
 }
 
@@ -447,17 +456,18 @@ mod tests {
                 mine
             ),
             [
-                PathBuf::from("/app/plugins"),
-                PathBuf::from("/app/share/kopuz/plugins"),
                 PathBuf::from("/usr/share/kopuz/plugins"),
+                PathBuf::from("/app/share/kopuz/plugins"),
+                PathBuf::from("/app/plugins"),
             ]
         );
         assert_eq!(
             read_only_dirs_from(None, None, None, mine),
             [
-                PathBuf::from("/usr/local/share/kopuz/plugins"),
                 PathBuf::from("/usr/share/kopuz/plugins"),
-            ]
+                PathBuf::from("/usr/local/share/kopuz/plugins"),
+            ],
+            "the first data directory wins, so it comes last"
         );
         assert_eq!(
             read_only_dirs_from(
@@ -469,6 +479,29 @@ mod tests {
             [PathBuf::from("/opt/plugins")],
             "the listed path wins; a relative entry and the plugin directory are skipped"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_path_leading_to_the_plugin_directory_or_one_already_listed_is_left_out() {
+        let root = std::env::temp_dir().join(format!("kopuz-ro-dirs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mine = root.join("mine");
+        let system = root.join("system");
+        std::fs::create_dir_all(&mine).unwrap();
+        std::fs::create_dir_all(&system).unwrap();
+        std::os::unix::fs::symlink(&mine, root.join("to-mine")).unwrap();
+        std::os::unix::fs::symlink(&system, root.join("to-system")).unwrap();
+        let listed = std::env::join_paths([
+            root.join("to-mine"),
+            system.clone(),
+            root.join("to-system"),
+            root.join("system").join("..").join("mine"),
+        ])
+        .unwrap();
+        let dirs = read_only_dirs_from(None, Some(listed), None, &mine);
+        std::fs::remove_dir_all(&root).ok();
+        assert_eq!(dirs, [system]);
     }
 
     #[test]
