@@ -144,8 +144,10 @@ keeps serving. New files that reach hosts the loaded version does not wait
 until the user allows them: the Plugins page lists the update with the new
 hosts, and Update loads it. The daemon records the hosts allowed for each
 plugin in `.approved-hosts.toml` in the plugin directory, so such an update
-still waits after a restart, with nothing of that plugin loaded until it is
-allowed. A plugin the record does not name yet is taken as allowed.
+still waits after a restart. Until it is allowed the new version stays
+unloaded: an official plugin it would replace keeps serving, and a community
+plugin is not loaded at all. A plugin the record does not name yet is taken as
+allowed.
 
 Inside the Flatpak, a plugin can also ship as an extension of the
 `moe.kopuz.kopuz.Plugin` extension point: an extension
@@ -191,8 +193,10 @@ and refuses a manifest whose id, version, services or hosts differ from the
 listing. The index is fetched again for the install, so the hosts the Plugins
 page showed are sent with the request, and an install whose listing now reaches
 other hosts is refused. The component is compiled once before anything is
-written, the plugin directory is swapped in with one rename, and the new
-version replaces the running one the same way a file dropped in by hand does.
+written. The files are staged in a hidden directory, the installed version's
+directory is moved aside, and the staged one is renamed into its place; the new
+version then replaces the running one the same way a file dropped in by hand
+does.
 
 An installed plugin shows Update when the index lists another version, or the
 same version with a component whose hash differs from the one installed.
