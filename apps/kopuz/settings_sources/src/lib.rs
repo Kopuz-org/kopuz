@@ -8,6 +8,7 @@ pub mod offline_cache;
 mod reauth;
 mod registries;
 mod schedule;
+mod source_tools;
 mod sources;
 pub mod ui;
 
