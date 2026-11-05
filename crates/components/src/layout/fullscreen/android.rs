@@ -1,4 +1,5 @@
 use super::metadata::TrackMetadata;
+use super::tabs::Tabs;
 use crate::lyrics_view::LyricsView;
 use crate::player_controls::{ControlsVariant, SeekSlider, TransportButtons};
 use crate::queue_list_view::QueueListView;
@@ -23,7 +24,13 @@ pub(crate) fn FullscreenAndroid(
     cover_background: Memo<Option<String>>,
 ) -> Element {
     let mut active_tab = use_signal(|| 0usize);
-    let tab = *active_tab.read();
+    let side_tab = use_signal(|| 0usize);
+    let form_factor = crate::form_factor::use_form_factor();
+    let wide = form_factor.is_wide();
+    let tablet = form_factor.is_tablet();
+    let mut prefs = hooks::ui_prefs::use_ui_prefs();
+    let side_panel = wide && !prefs.read().fullscreen_tabs_collapsed;
+    let tab = if wide { 0 } else { *active_tab.read() };
 
     let mut swipe = crate::gestures::use_swipe();
     let mut skip_swipe = crate::gestures::use_swipe();
@@ -149,60 +156,97 @@ pub(crate) fn FullscreenAndroid(
                     onclick: move |_| begin_close(0.0),
                     i { class: "fa-solid fa-chevron-down text-xl", "aria-hidden": "true" }
                 }
-                div { class: "flex flex-1 items-center",
-                    {tab_btn(0, "fa-solid fa-compact-disc", music_text.clone())}
-                    {tab_btn(1, "fa-solid fa-list", up_next_text.clone())}
-                    {tab_btn(2, "fa-solid fa-align-left", lyrics_text.clone())}
+                if wide {
+                    div { class: "flex-1" }
+                    if !side_panel {
+                        button {
+                            class: "w-10 h-10 flex items-center justify-center text-white/60 active:scale-95 transition-all shrink-0",
+                            "aria-label": i18n::t("show_side_panel").to_string(),
+                            onclick: move |_| prefs.write().fullscreen_tabs_collapsed = false,
+                            i { class: "fa-solid fa-list text-lg", "aria-hidden": "true" }
+                        }
+                    }
+                } else {
+                    div { class: "flex flex-1 items-center",
+                        {tab_btn(0, "fa-solid fa-compact-disc", music_text.clone())}
+                        {tab_btn(1, "fa-solid fa-list", up_next_text.clone())}
+                        {tab_btn(2, "fa-solid fa-align-left", lyrics_text.clone())}
+                    }
                 }
             }
 
             div {
-                class: "flex-1 min-h-0 flex flex-col",
-                ontouchstart: move |evt| begin_pull(&evt),
-                ontouchmove: move |evt| swipe.update(&evt),
-                ontouchend: on_pull_end,
-                ontouchcancel: move |_| swipe.reset(),
+                class: "flex-1 min-h-0 flex",
 
-                if tab == 0 {
-                    div {
-                        class: "flex-1 overflow-y-auto flex flex-col items-center justify-center px-6 pb-[calc(env(safe-area-inset-bottom)_+_1.5rem)]",
+                div {
+                    class: "flex-1 min-w-0 min-h-0 flex flex-col",
+                    ontouchstart: move |evt| begin_pull(&evt),
+                    ontouchmove: move |evt| swipe.update(&evt),
+                    ontouchend: on_pull_end,
+                    ontouchcancel: move |_| swipe.reset(),
+
+                    if tab == 0 {
                         div {
-                            class: "w-full flex-1 min-h-0 flex flex-col",
-                            ontouchstart: move |evt| skip_swipe.start(&evt),
-                            ontouchmove: move |evt| skip_swipe.update(&evt),
-                            ontouchend: move |evt| {
-                                let mut ctrl = ctrl;
-                                match skip_swipe.finish(&evt) {
-                                    Some(crate::gestures::SwipeDirection::Left) => ctrl.play_next(),
-                                    Some(crate::gestures::SwipeDirection::Right) => ctrl.play_prev(),
-                                    _ => {}
-                                }
+                            class: if tablet {
+                                "flex-1 overflow-y-auto flex flex-col items-center justify-center px-10 pb-[calc(env(safe-area-inset-bottom)_+_2rem)]"
+                            } else {
+                                "flex-1 overflow-y-auto flex flex-col items-center justify-center px-6 pb-[calc(env(safe-area-inset-bottom)_+_1.5rem)]"
                             },
-                            ontouchcancel: move |_| skip_swipe.reset(),
-                            TrackMetadata {
-                                is_fullscreen,
-                                current_song_title,
-                                current_song_artist,
-                                current_song_album,
-                                current_song_bitrate,
+                            div {
+                                class: if tablet { "w-full max-w-[640px] flex-1 min-h-0 flex flex-col items-center" } else { "w-full flex-1 min-h-0 flex flex-col items-center" },
+                                div {
+                                    class: "w-full flex-1 min-h-0 flex flex-col",
+                                    ontouchstart: move |evt| skip_swipe.start(&evt),
+                                    ontouchmove: move |evt| skip_swipe.update(&evt),
+                                    ontouchend: move |evt| {
+                                        let mut ctrl = ctrl;
+                                        match skip_swipe.finish(&evt) {
+                                            Some(crate::gestures::SwipeDirection::Left) => ctrl.play_next(),
+                                            Some(crate::gestures::SwipeDirection::Right) => ctrl.play_prev(),
+                                            _ => {}
+                                        }
+                                    },
+                                    ontouchcancel: move |_| skip_swipe.reset(),
+                                    TrackMetadata {
+                                        is_fullscreen,
+                                        current_song_title,
+                                        current_song_artist,
+                                        current_song_album,
+                                        current_song_bitrate,
+                                    }
+                                }
+                                SeekSlider { current_song_duration, current_song_progress, variant: ControlsVariant::Fullscreen }
+                                TransportButtons { is_playing, variant: ControlsVariant::Fullscreen }
                             }
                         }
-                        SeekSlider { current_song_duration, current_song_progress, variant: ControlsVariant::Fullscreen }
-                        TransportButtons { is_playing, variant: ControlsVariant::Fullscreen }
+                    } else if tab == 1 {
+                        QueueListView {
+                            items: items.clone(),
+                            settings,
+                            current_queue_index,
+                            layout: crate::queue_list_view::LayoutMode::Fullscreen,
+                        }
+                    } else {
+                        LyricsView {
+                            lyrics,
+                            current_song_progress,
+                            settings,
+                            layout: crate::lyrics_view::LayoutMode::Fullscreen,
+                        }
                     }
-                } else if tab == 1 {
-                    QueueListView {
-                        items,
-                        settings,
-                        current_queue_index,
-                        layout: crate::queue_list_view::LayoutMode::Fullscreen,
-                    }
-                } else {
-                    LyricsView {
-                        lyrics,
-                        current_song_progress,
-                        settings,
-                        layout: crate::lyrics_view::LayoutMode::Fullscreen,
+                }
+
+                if side_panel {
+                    div {
+                        class: "w-[45%] max-w-[560px] shrink-0 min-h-0 flex flex-col pb-[env(safe-area-inset-bottom)]",
+                        Tabs {
+                            settings,
+                            items,
+                            current_queue_index,
+                            lyrics,
+                            current_song_progress,
+                            active_tab: side_tab,
+                        }
                     }
                 }
             }

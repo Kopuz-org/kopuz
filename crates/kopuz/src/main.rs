@@ -997,6 +997,12 @@ fn App() -> Element {
     // Sidebar component reads this from context.
     let mut is_sidebar_collapsed = use_signal(|| cfg!(target_os = "android"));
     use_context_provider(|| components::sidebar::SidebarCollapsed(is_sidebar_collapsed));
+    let form_factor = components::form_factor::use_form_factor_provider();
+    use_effect(move || {
+        if form_factor.is_tablet() {
+            is_sidebar_collapsed.set(true);
+        }
+    });
 
     // Only an edge swipe opens the drawer; horizontal scrolling and sliders
     // elsewhere on the page must not turn into navigation gestures.
@@ -1008,6 +1014,7 @@ fn App() -> Element {
         if open_swipe.finish(&evt) == Some(components::gestures::SwipeDirection::Right)
             && from_edge
             && cfg!(target_os = "android")
+            && !form_factor.is_tablet()
             && *is_sidebar_collapsed.peek()
         {
             is_sidebar_collapsed.set(false);
@@ -1335,6 +1342,7 @@ fn App() -> Element {
             },
             dir: "{dir}",
             "data-platform": if cfg!(target_os = "android") { "android" } else { "desktop" },
+            "data-form-factor": if form_factor.is_tablet() { "tablet" } else { "phone" },
             "data-ui-style": settings.read().ui.ui_style.as_str(),
             "data-reduce-animations": "{reduce_animations}",
             tabindex: "0",
@@ -1629,14 +1637,14 @@ fn App() -> Element {
                                             onclick: move |_| settings_subpage.set(None),
                                             i { class: "fa-solid fa-arrow-left text-lg" }
                                         }
-                                    } else {
+                                    } else if !form_factor.is_tablet() {
                                         button {
                                             class: "app-icon-button w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
                                             onclick: move |_| is_sidebar_collapsed.toggle(),
                                             i { class: "fa-solid fa-bars text-lg" }
                                         }
                                     }
-                                    div { class: "flex-1 flex justify-center pr-10",
+                                    div { class: if is_details || settings_title.is_some() || !form_factor.is_tablet() { "flex-1 flex justify-center pr-10" } else { "flex-1 flex justify-center" },
                                         h2 {
                                             class: "app-topbar-title text-[13px] font-black tracking-[0.2em] text-white/90 uppercase",
                                             style: if settings.read().ui.ui_style != config::UiStyle::Material3 { "font-family: 'kopuz-custom-font', 'JetBrains Mono', monospace;" },
@@ -1957,7 +1965,7 @@ fn App() -> Element {
                     is_devices_open: is_devices_open,
                 }
             }
-            if cfg!(target_os = "android") {
+            if cfg!(target_os = "android") && !form_factor.is_tablet() {
                 TabBar {
                     current_route,
                     on_navigate: move |route| {
