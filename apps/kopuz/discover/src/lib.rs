@@ -112,7 +112,7 @@ impl Discover {
             cx.subscribe(&tracks, |_, list, event: &TrackListEvent, cx| match event {
                 TrackListEvent::Play(index) => {
                     let keys = list.read(cx).keys();
-                    actions::play_tracks(keys, Some(*index as u32), cx);
+                    actions::play_listing(keys, *index, cx);
                 }
                 TrackListEvent::Delete(keys) => genres::delete_tracks(keys.clone(), cx),
                 _ => {}

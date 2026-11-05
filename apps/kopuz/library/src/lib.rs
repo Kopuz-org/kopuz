@@ -31,8 +31,8 @@ use gpui_kit::{
 };
 use store::layout::{Column, Density, TileSize, ViewMode};
 use store::{
-    DownloadsModel, LayoutModel, Navigator, Pager, PlayerModel, PlaylistsModel, Query, Route,
-    SourcesModel, Target,
+    DownloadsModel, LayoutModel, Navigator, Pager, PlayerModel, PlaylistsModel, Query, QueueModel,
+    Route, SourcesModel, Target,
 };
 
 pub use facet::Facet;
@@ -105,6 +105,7 @@ pub(crate) enum Line {
 #[derive(Clone, Default)]
 struct AlbumMeta {
     year: u16,
+    genre: String,
 }
 
 #[derive(Clone)]
@@ -159,6 +160,8 @@ pub struct Library {
     year_span: Option<(u16, u16)>,
     plays: HashMap<String, u64>,
     playing: store::Playing,
+    // The playing row lights only while the queue is this listing, judged as the Dioxus table did: by length.
+    queued: bool,
     pager: Pager,
     window_request: Option<Range<usize>>,
     whole: bool,
@@ -173,7 +176,7 @@ pub struct Library {
     shared: Shared,
     frozen: bool,
 
-    _filter_delay: Option<Task<()>>,
+    filter_delay: store::Debounce,
     _resolve: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -191,7 +194,7 @@ impl store::Freeze for Library {
     fn freeze(&mut self, _: &mut Context<Self>) {
         self.frozen = true;
         self._subscriptions.clear();
-        self._filter_delay = None;
+        self.filter_delay.cancel();
     }
 }
 
@@ -297,6 +300,7 @@ impl Library {
             cx.observe(&downloads, |this, _, cx| this.on_downloads(cx)),
             // The playing mark sits on every row and tile, so it is derived here, not in render.
             cx.observe(&player, |this, _, cx| this.adopt_playing(cx)),
+            cx.observe(&QueueModel::global(cx), |this, _, cx| this.adopt_queue(cx)),
             cx.observe(&layout, |this, _, cx| this.adopt_layout(cx)),
             cx.observe(&store::ConfigModel::global(cx), |_, _, cx| cx.notify()),
             cx.observe(&sources, |_, _, cx| cx.notify()),
@@ -334,6 +338,7 @@ impl Library {
             year_span: None,
             plays: HashMap::new(),
             playing: store::Playing::default(),
+            queued: false,
             pager: Pager::new(),
             window_request: None,
             whole: false,
@@ -343,7 +348,7 @@ impl Library {
             type_ahead_at: None,
             shared: Shared::default(),
             frozen: false,
-            _filter_delay: None,
+            filter_delay: store::Debounce::default(),
             _resolve: None,
             _subscriptions: subscriptions,
         };
@@ -518,15 +523,11 @@ impl Library {
     }
 
     fn delay_filter(&mut self, typed: String, cx: &mut Context<Self>) {
-        self._filter_delay = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(FILTER_DELAY).await;
-            this.update(cx, |this, cx| {
-                let mut filters = this.filters.clone();
-                filters.search = typed;
-                this.set_filters(filters, false, cx);
-            })
-            .ok();
-        }));
+        self.filter_delay.run(FILTER_DELAY, cx, |this, cx| {
+            let mut filters = this.filters.clone();
+            filters.search = typed;
+            this.set_filters(filters, false, cx);
+        });
     }
 
     /// Whether grouping, a column the daemon cannot order by, or the jump rail needs the whole listing.
@@ -659,6 +660,7 @@ impl Library {
         }
         let loaded: HashSet<String> = self.rows.iter().map(|row| row.key.clone()).collect();
         self.selection.retain_loaded(&loaded, self.whole);
+        self.queued = self.listing_queued(cx);
         self.rebuild(cx);
     }
 
@@ -688,7 +690,13 @@ impl Library {
             self.albums_meta = page
                 .albums
                 .iter()
-                .map(|album| (album.id.clone(), AlbumMeta { year: album.year }))
+                .map(|album| {
+                    let meta = AlbumMeta {
+                        year: album.year,
+                        genre: album.genre.clone(),
+                    };
+                    (album.id.clone(), meta)
+                })
                 .collect();
             self.year_span = span_of(&page.albums);
         }
@@ -731,6 +739,14 @@ impl Library {
         }
         self.playing = playing;
         self.rebuild(cx);
+    }
+
+    fn adopt_queue(&mut self, cx: &mut Context<Self>) {
+        let queued = self.listing_queued(cx);
+        if queued != self.queued {
+            self.queued = queued;
+            cx.notify();
+        }
     }
 
     fn on_downloads(&mut self, cx: &mut Context<Self>) {
@@ -804,7 +820,14 @@ impl Library {
     }
 
     pub(crate) fn is_playing(&self, key: &str) -> bool {
-        self.playing.is_track(key)
+        components::NowPlaying::WhenQueued.lights(self.queued) && self.playing.is_track(key)
+    }
+
+    /// The genre column's text: a track row carries none, so it is its album's.
+    pub(crate) fn genre_of(&self, track: &TrackInfo) -> &str {
+        self.albums_meta
+            .get(&track.album_id)
+            .map_or("", |meta| meta.genre.as_str())
     }
 
     /// Whether the first read has answered, whatever it answered with.

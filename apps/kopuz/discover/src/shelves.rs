@@ -16,7 +16,8 @@ use gpui_kit::{
     SharedString, StatefulInteractiveElement as _, Styled, Subscription, Task, Window, div, px,
 };
 use store::{
-    Link, Navigator, Notice, Notices, Pictured, PlayerModel, Route, SourcesModel, Target, actions,
+    CatalogCache, CatalogMarks, Link, Navigator, Notice, Notices, Pictured, PlayerModel, Route,
+    SourcesModel, Target, actions,
 };
 
 use crate::states::catalog_failure;
@@ -68,6 +69,7 @@ impl EventEmitter<MoreOf> for Shelves {}
 impl Shelves {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let player = PlayerModel::global(cx);
+        let marks = CatalogMarks::global(cx);
         Self {
             views: Vec::new(),
             now_playing: None,
@@ -75,8 +77,36 @@ impl Shelves {
             offer_more: false,
             topping_up: None,
             _play: None,
-            _subscriptions: vec![cx.observe(&player, |_, _, cx| cx.notify())],
+            _subscriptions: vec![
+                cx.observe(&player, |_, _, cx| cx.notify()),
+                cx.observe(&marks, |this, marks, cx| this.drop_removed(marks, cx)),
+            ],
         }
+    }
+
+    /// A history row the source let go of leaves its shelf at once.
+    fn drop_removed(&mut self, marks: Entity<CatalogMarks>, cx: &mut Context<Self>) {
+        let mut lists = Vec::new();
+        let marks = marks.read(cx);
+        for view in &mut self.views {
+            let before = view.shelf.items.len();
+            view.shelf.items.retain(|item| {
+                !item
+                    .actions
+                    .history_token
+                    .as_deref()
+                    .is_some_and(|token| marks.is_removed(token))
+            });
+            if view.shelf.items.len() != before
+                && let Some(list) = view.list.clone()
+            {
+                lists.push((list, songs(&view.shelf)));
+            }
+        }
+        for (list, rows) in lists {
+            list.update(cx, |list, cx| list.set_rows(rows, cx));
+        }
+        cx.notify();
     }
 
     pub fn offer_more(mut self, offer: bool) -> Self {
@@ -92,6 +122,7 @@ impl Shelves {
 
     pub fn extend(&mut self, shelves: Vec<CatalogShelf>, cx: &mut Context<Self>) {
         for shelf in shelves {
+            CatalogMarks::global(cx).update(cx, |marks, _| marks.note(&shelf.items));
             let index = self.views.len();
             let list = self.list_for(&shelf, cx);
             self.views.push(ShelfView {
@@ -191,6 +222,7 @@ impl Shelves {
                     show_album: false,
                     track_numbers: false,
                     selectable: false,
+                    ..TrackListOptions::default()
                 })
                 .with_actions(TrackActions::default());
             list.set_rows(rows, cx);
@@ -201,7 +233,7 @@ impl Shelves {
             cx.subscribe(&list, |this, list, event: &TrackListEvent, cx| {
                 if let TrackListEvent::Play(index) = event {
                     let keys = list.read(cx).keys();
-                    actions::play_tracks(keys, Some(*index as u32), cx);
+                    actions::play_listing(keys, *index, cx);
                     // A song preview is nobody's tile, so no card keeps the pause overlay.
                     this.now_playing = None;
                     cx.notify();
@@ -211,7 +243,6 @@ impl Shelves {
         list
     }
 
-    // TODO(prefetch): §2.3's 250 ms hover prefetch cache is not ported; every play pages fresh.
     /// Play everything behind a catalog id: the first page starts the queue, the rest append.
     pub fn play(&mut self, kind: CatalogItemKind, id: String, cx: &mut Context<Self>) {
         self.now_playing = Some(id.clone());
@@ -222,17 +253,32 @@ impl Shelves {
             let mut cursor: Option<String> = None;
             let mut started = false;
             loop {
-                let request = CatalogDetailRequest {
-                    continuation: cursor.clone(),
-                    ..CatalogDetailRequest::new(kind, id.clone())
+                // A first page the hover prefetched starts the queue without the round trip.
+                let held = match cursor.is_none() {
+                    true => this
+                        .update(cx, |_, cx| CatalogCache::get(&id, cx))
+                        .ok()
+                        .flatten()
+                        .filter(|cached| cached.fresh),
+                    false => None,
                 };
-                let Ok(call) = this.update(cx, |_, cx| {
-                    Link::global(cx)
-                        .call(move |api| async move { api.catalog_detail(request).await })
-                }) else {
-                    return;
+                let detail = match held {
+                    Some(cached) => Ok(cached.detail),
+                    None => {
+                        let request = CatalogDetailRequest {
+                            continuation: cursor.clone(),
+                            ..CatalogDetailRequest::new(kind, id.clone())
+                        };
+                        let Ok(call) = this.update(cx, |_, cx| {
+                            Link::global(cx)
+                                .call(move |api| async move { api.catalog_detail(request).await })
+                        }) else {
+                            return;
+                        };
+                        call.await
+                    }
                 };
-                let detail = match call.await {
+                let detail = match detail {
                     Ok(detail) => detail,
                     Err(error) => {
                         this.update(cx, |this, cx| {
@@ -586,7 +632,7 @@ impl Shelves {
                 )
                 .into_any_element();
         }
-        let row = row.menu(menu_of(item));
+        let row = row.menu(menu_of(item, cx));
         match open_route(item) {
             Some(route) => row.route(route).into_any_element(),
             None => row.into_any_element(),
@@ -597,6 +643,7 @@ impl Shelves {
         let tile = Tile::new(element_id(shelf, &item.id), item.title.clone())
             .subtitle(item.subtitle.clone().unwrap_or_default())
             .artwork(item.artwork.as_ref())
+            .explicit(item.explicit)
             .size(TILE);
         match item.kind {
             CatalogItemKind::Track | CatalogItemKind::Video | CatalogItemKind::Episode => {
@@ -612,7 +659,7 @@ impl Shelves {
                 .tint(true)
                 .route(Route::DiscoverArtist(item.id.clone()))
                 .pictured(Pictured::Artist(item.title.clone().into()))
-                .menu(menu_of(item))
+                .menu(menu_of(item, cx))
                 .into_any_element(),
             // A mood with no picture is a coloured button, as the source draws it.
             CatalogItemKind::Mood | CatalogItemKind::Page if item.artwork.is_none() => {
@@ -647,7 +694,8 @@ impl Shelves {
         tile.pictured(of)
             .placeholder(if album { icons::DISC } else { icons::LIST })
             .route(route)
-            .menu(menu_of(item))
+            .menu(menu_of(item, cx))
+            .prefetch(kind, id.clone())
             .play(
                 self.play_state(&id, cx),
                 cx.listener(move |this, _, _, cx| this.toggle_or_play(kind, id.clone(), cx)),
@@ -735,9 +783,12 @@ pub(crate) fn open_route(item: &CatalogItem) -> Option<Route> {
     }
 }
 
-/// A catalog playlist is nobody's saved list, so only albums and artists carry a menu.
-fn menu_of(item: &CatalogItem) -> Option<Target> {
+/// A catalog playlist is nobody's saved list, so its menu holds only the source's own verbs.
+fn menu_of(item: &CatalogItem, cx: &App) -> Option<Target> {
     match item.kind {
+        CatalogItemKind::Playlist => {
+            Some(Target::catalog(item)).filter(|target| commands::has_menu(target, cx))
+        }
         CatalogItemKind::Album => Some(Target::Album {
             id: item.id.clone().into(),
             title: item.title.clone().into(),

@@ -1,6 +1,7 @@
 //! The one track row every table draws, and the lead, thumb, title and link cells it is built from.
 
 use std::rc::Rc;
+use std::time::Duration;
 
 use api::{ArtworkRef, TrackInfo};
 use gpui_kit::component::ActiveTheme as _;
@@ -8,14 +9,15 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, ClickEvent, Div, ElementId, FontWeight, Hsla,
-    InteractiveElement as _, IntoElement, Length, ParentElement as _, RenderOnce, SharedString,
-    Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    AnyElement, App, AppContext as _, ClickEvent, Div, ElementId, Entity, FontWeight, Hsla,
+    InteractiveElement as _, IntoElement, Length, MouseButton, ParentElement as _, RenderOnce,
+    SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Task, Window, div, px,
 };
 use store::{Pictured, Route};
 
 use crate::columns::{self, Layout};
 use crate::cover::Cover;
+use crate::explicit::ExplicitBadge;
 use crate::format::known_duration;
 use crate::icons;
 use crate::lead;
@@ -29,10 +31,15 @@ use crate::track_list::TrackDrag;
 // The row is the hover group, so the number can step aside for the play glyph.
 const ROW_GROUP: &str = "track-row";
 
+/// How long a press is held before it picks the row instead of playing it; the Dioxus row waited as long.
+const LONG_PRESS: Duration = Duration::from_millis(600);
+
 /// What a press on a row does.
 pub type OnRowClick = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 /// What ticking a row's box does.
 pub type OnPick = Rc<dyn Fn(&bool, &mut Window, &mut App)>;
+/// What holding a row down does.
+pub type OnLongPress = Rc<dyn Fn(&mut Window, &mut App)>;
 pub use crate::menus::Menu as RowMenu;
 
 /// A track on its table's columns; whoever holds the rows says what is picked, playing and pressed.
@@ -42,6 +49,8 @@ pub struct TrackRow {
     title: SharedString,
     artist: SharedString,
     album: SharedString,
+    genre: SharedString,
+    explicit: bool,
     artist_route: Option<Route>,
     album_route: Option<Route>,
     artwork: Option<ArtworkRef>,
@@ -61,6 +70,7 @@ pub struct TrackRow {
     drag: Option<TrackDrag>,
     click: Option<OnRowClick>,
     pick: Option<OnPick>,
+    long_press: Option<OnLongPress>,
     menu: Option<RowMenu>,
 }
 
@@ -72,6 +82,8 @@ impl TrackRow {
             title: track.title.clone().into(),
             artist: track.artist.clone().into(),
             album: track.album.clone().into(),
+            genre: SharedString::default(),
+            explicit: track.explicit,
             artist_route: Route::artist_of(track),
             album_route: (!track.album_id.is_empty())
                 .then(|| Route::Album(track.album_id.clone().into())),
@@ -92,6 +104,7 @@ impl TrackRow {
             drag: None,
             click: None,
             pick: None,
+            long_press: None,
             menu: None,
         }
     }
@@ -120,6 +133,12 @@ impl TrackRow {
 
     pub fn cover(mut self, cover: bool) -> Self {
         self.cover = cover;
+        self
+    }
+
+    /// What the genre column reads; a track row carries none, so its album's comes from the page.
+    pub fn genre(mut self, genre: impl Into<SharedString>) -> Self {
+        self.genre = genre.into();
         self
     }
 
@@ -170,10 +189,41 @@ impl TrackRow {
         self
     }
 
+    /// What holding the row down does, which is how a touch or a mouse hold starts a selection.
+    pub fn on_long_press(mut self, press: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        self.long_press = Some(Rc::new(press));
+        self
+    }
+
     pub fn menu(mut self, menu: RowMenu) -> Self {
         self.menu = Some(menu);
         self
     }
+}
+
+/// A hold in progress, and whether one ran out, so the release that ends it does not also play the row.
+#[derive(Default)]
+struct Press {
+    timer: Option<Task<()>>,
+    fired: bool,
+}
+
+impl Press {
+    /// Each press starts clean, so a hold that ran out and was released off the row swallows nothing later.
+    fn begin(&mut self, timer: Option<Task<()>>) {
+        self.fired = false;
+        self.timer = timer;
+    }
+
+    /// Whether the click ending this press is the release of a long press, which must not also play the row.
+    fn swallows_click(&mut self) -> bool {
+        std::mem::take(&mut self.fired)
+    }
+}
+
+/// Release, drag or leaving stops the hold; `fired` stays for the click that follows a release.
+fn cancel(press: &Entity<Press>, cx: &mut App) {
+    press.update(cx, |press, _| press.timer = None);
 }
 
 impl RenderOnce for TrackRow {
@@ -234,6 +284,8 @@ impl RenderOnce for TrackRow {
             false => style::white(style::TEXT_SECONDARY, cx),
         };
 
+        let press = window.use_keyed_state(("track-row-press", slot), cx, |_, _| Press::default());
+        let long_press = self.long_press.filter(|_| !self.picking);
         let mut row = columns::frame()
             .id(("track-row", slot))
             .group(ROW_GROUP)
@@ -241,7 +293,38 @@ impl RenderOnce for TrackRow {
             .rounded(style::radius_lg())
             .bg(wash)
             .when_some(self.drag, |row, drag| {
-                row.on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
+                let press = press.clone();
+                row.on_drag(drag, move |drag, _, _, cx| {
+                    cancel(&press, cx);
+                    cx.new(|_| drag.clone())
+                })
+            })
+            // Picking mode has no hold, but a hold that entered it may still have a release to forget.
+            .on_mouse_down(MouseButton::Left, {
+                let (down, long_press) = (press.clone(), long_press.clone());
+                move |_, window, cx| {
+                    let timer = long_press.clone().map(|long_press| {
+                        let held = down.clone();
+                        window.spawn(cx, async move |cx| {
+                            cx.background_executor().timer(LONG_PRESS).await;
+                            cx.update(|window, cx| {
+                                held.update(cx, |press, _| press.fired = true);
+                                long_press(window, cx);
+                            })
+                            .ok();
+                        })
+                    });
+                    down.update(cx, |press, _| press.begin(timer));
+                }
+            })
+            .when(long_press.is_some(), |row| {
+                let (up, left) = (press.clone(), press.clone());
+                row.on_mouse_up(MouseButton::Left, move |_, _, cx| cancel(&up, cx))
+                    .on_hover(move |over, _, cx| {
+                        if !*over {
+                            cancel(&left, cx);
+                        }
+                    })
             })
             // Upstream the wash is an inline style, which outranks `hover:bg-white/5`; a refinement does not.
             .when(!self.playing && !self.selected, |row| {
@@ -251,7 +334,12 @@ impl RenderOnce for TrackRow {
                 row.border_1().border_color(cx.theme().ring)
             })
             .when_some(self.click, |row, click| {
-                row.on_click(move |event, window, cx| click(event, window, cx))
+                row.on_click(move |event, window, cx| {
+                    if press.update(cx, |press, _| press.swallows_click()) {
+                        return;
+                    }
+                    click(event, window, cx)
+                })
             })
             .child(
                 columns::fixed(columns::INDEX)
@@ -274,7 +362,18 @@ impl RenderOnce for TrackRow {
             row = row.child(match shown.spec.id {
                 "title" => cell
                     .children(cover.take())
-                    .child(title(("track-title", slot), self.title.clone(), title_ink).flex_1())
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1p5()
+                            .flex_1()
+                            .min_w_0()
+                            .child(title(("track-title", slot), self.title.clone(), title_ink))
+                            .when(self.explicit, |line| {
+                                line.child(ExplicitBadge::new(("track-explicit", slot)))
+                            }),
+                    )
                     .into_any_element(),
                 "artist" => link(
                     cell,
@@ -288,7 +387,27 @@ impl RenderOnce for TrackRow {
                     self.album.clone(),
                     self.album_route.clone(),
                 ),
+                "genre" => dim(cell, cx)
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .child(match self.genre.is_empty() {
+                                true => SharedString::new_static("-"),
+                                false => self.genre.clone(),
+                            }),
+                    )
+                    .into_any_element(),
+                // A track that has been played wears the flame, and its count reads brighter.
                 "plays" => dim(cell, cx)
+                    .gap_2()
+                    .when(self.plays > 0, |cell| {
+                        cell.text_color(cx.theme().foreground).child(
+                            icons::icon(icons::FLAME)
+                                .size(px(10.))
+                                .text_color(cx.theme().warning.opacity(0.8)),
+                        )
+                    })
                     .child(self.plays.to_string())
                     .into_any_element(),
                 "format" => dim(cell, cx).child(self.format.clone()).into_any_element(),
@@ -449,7 +568,9 @@ fn dim(cell: Div, cx: &App) -> Div {
 
 #[cfg(test)]
 mod tests {
-    use super::CopyMark;
+    use gpui_kit::Task;
+
+    use super::{CopyMark, Press};
 
     #[test]
     fn a_download_outranks_a_cached_copy() {
@@ -457,5 +578,35 @@ mod tests {
         assert_eq!(CopyMark::of(true, false), Some(CopyMark::Downloaded));
         assert_eq!(CopyMark::of(false, true), Some(CopyMark::Cached));
         assert_eq!(CopyMark::of(false, false), None);
+    }
+
+    #[test]
+    fn a_long_press_swallows_only_its_own_release() {
+        let mut press = Press::default();
+        press.begin(None);
+        press.fired = true;
+        assert!(press.swallows_click());
+        assert!(!press.swallows_click());
+    }
+
+    #[test]
+    fn a_long_press_released_off_the_row_leaves_the_next_click_alone() {
+        let mut press = Press::default();
+        press.begin(None);
+        // The hold ran out, then the pointer left the row, so no click consumed the mark.
+        press.fired = true;
+        press.begin(None);
+        assert!(!press.swallows_click());
+    }
+
+    #[test]
+    fn a_press_in_picking_mode_forgets_the_hold_that_entered_it() {
+        let mut press = Press::default();
+        press.begin(Some(Task::ready(())));
+        // The hold ran out and picked the row; the release landed off it, then a press came with no hold to arm.
+        press.fired = true;
+        press.begin(None);
+        assert!(press.timer.is_none());
+        assert!(!press.swallows_click());
     }
 }

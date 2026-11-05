@@ -60,6 +60,16 @@ pub const WIFI_OFF: &str = "icons/wifi-off.svg";
 pub const CLOUD_OFF: &str = "icons/cloud-off.svg";
 pub const WIFI: &str = "icons/wifi.svg";
 pub const FOLDER_TREE: &str = "icons/folder-tree.svg";
+pub const FLAME: &str = "icons/flame.svg";
+pub const SLIDERS: &str = "icons/sliders-horizontal.svg";
+pub const GEARS: &str = "icons/cog.svg";
+pub const SIGN_IN: &str = "icons/log-in.svg";
+pub const THUMBS_UP: &str = "icons/thumbs-up.svg";
+pub const BOOKMARK: &str = "icons/bookmark.svg";
+pub const BOOKMARK_OFF: &str = "icons/bookmark-minus.svg";
+pub const FOLLOW: &str = "icons/user-plus.svg";
+pub const UNFOLLOW: &str = "icons/user-minus.svg";
+pub const HISTORY: &str = "icons/rotate-ccw.svg";
 
 /// An icon by path, e.g. `icon(icons::PLAY)`; the active skin may swap what it draws.
 pub fn icon(path: &'static str) -> Icon {

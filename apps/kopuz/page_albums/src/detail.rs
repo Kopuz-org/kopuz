@@ -196,6 +196,7 @@ impl AlbumDetail {
             show_album: false,
             track_numbers: true,
             selectable: !remote,
+            ..TrackListOptions::default()
         };
         let row_actions = TrackActions {
             remove_from_playlist: false,
@@ -231,7 +232,7 @@ impl AlbumDetail {
         match event {
             TrackListEvent::Play(index) => {
                 let keys: Vec<String> = self.rows.iter().map(|row| row.key.clone()).collect();
-                actions::play_tracks(keys, Some((offset + index) as u32), cx);
+                actions::play_listing(keys, offset + index, cx);
             }
             TrackListEvent::Delete(keys) => ops::delete_tracks(keys.clone(), cx),
             _ => cx.notify(),
@@ -447,7 +448,7 @@ impl AlbumDetail {
                     .play(commands::play_all)
                     .shuffle(commands::set_shuffle)
                     .share(move |_, _, cx| {
-                        ops::share_album(browse_id.clone(), first_key.clone(), cx)
+                        actions::share_album(browse_id.clone(), first_key.clone(), cx)
                     }),
             );
         if let Some(year) = view.year.clone() {

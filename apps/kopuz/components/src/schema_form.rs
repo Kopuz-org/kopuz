@@ -9,7 +9,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::v_flex;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, IntoElement,
+    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, Focusable as _, IntoElement,
     ParentElement as _, Render, SharedString, Styled, Subscription, Window, div,
 };
 
@@ -23,82 +23,143 @@ use crate::style;
 #[derive(Debug, Clone)]
 pub struct FieldChanged(pub FieldValue);
 
-/// A form over daemon-supplied fields. The daemon owns which fields exist and what they mean.
+/// A form over daemon-supplied fields; a text box answers when it blurs or Enter is pressed, never per keystroke.
 pub struct SchemaForm {
     specs: Vec<FieldSpec>,
     values: HashMap<String, String>,
-    inputs: HashMap<String, Entity<InputState>>,
+    inputs: HashMap<String, Held>,
+    // Kept boxes whose daemon value moved; they take it at the next render unless focused.
+    moved: Vec<String>,
     problems: Vec<Problem>,
     locked: Vec<String>,
     // Secret keys the daemon already holds a value for, since a secret never comes back to prefill.
     saved: Vec<String>,
-    _subscriptions: Vec<Subscription>,
+}
+
+/// A text box and what it was built for, so a respec that leaves its field alone keeps the box, its caret and its typing.
+struct Held {
+    state: Entity<InputState>,
+    kind: FieldKind,
+    placeholder: Option<api::schema::Text>,
+    _subscription: Subscription,
+}
+
+impl Held {
+    fn fits(&self, spec: &FieldSpec) -> bool {
+        self.kind == spec.kind && self.placeholder == spec.placeholder
+    }
 }
 
 impl EventEmitter<FieldChanged> for SchemaForm {}
 
+/// Whether a field is typed into, which is what gets a box.
+fn typed(spec: &FieldSpec) -> bool {
+    matches!(
+        spec.kind,
+        FieldKind::Text
+            | FieldKind::Secret
+            | FieldKind::Url
+            | FieldKind::Directory
+            | FieldKind::Choice { custom: true, .. }
+    )
+}
+
 impl SchemaForm {
-    pub fn new(specs: Vec<FieldSpec>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let mut form = Self {
+    /// A form with no fields yet, for specs that arrive later through [`SchemaForm::set_specs`].
+    pub fn empty() -> Self {
+        Self {
             specs: Vec::new(),
             values: HashMap::new(),
             inputs: HashMap::new(),
+            moved: Vec::new(),
             problems: Vec::new(),
             locked: Vec::new(),
             saved: Vec::new(),
-            _subscriptions: Vec::new(),
-        };
-        form.set_specs(specs, window, cx);
+        }
+    }
+
+    pub fn new(specs: Vec<FieldSpec>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let mut form = Self::empty();
+        form.set_specs(specs, cx);
+        form.build_inputs(window, cx);
         form
     }
 
-    /// Replace the fields, keeping nothing: the daemon answered with the current values.
-    pub fn set_specs(
-        &mut self,
-        specs: Vec<FieldSpec>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    /// The fields as the daemon last described them.
+    pub fn specs(&self) -> &[FieldSpec] {
+        &self.specs
+    }
+
+    /// Take the daemon's fields and values; a box whose field kept its shape survives with its focus and typing.
+    pub fn set_specs(&mut self, specs: Vec<FieldSpec>, cx: &mut Context<Self>) {
         self.values = specs
             .iter()
             .map(|spec| (spec.key.clone(), spec.value.clone().unwrap_or_default()))
             .collect();
-        self.inputs.clear();
-        self._subscriptions.clear();
-        for spec in &specs {
-            let free_text = matches!(&spec.kind, FieldKind::Choice { custom: true, .. });
-            if !free_text
-                && !matches!(
-                    spec.kind,
-                    FieldKind::Text | FieldKind::Secret | FieldKind::Url | FieldKind::Directory
-                )
-            {
+        self.inputs.retain(|key, held| {
+            specs
+                .iter()
+                .any(|spec| spec.key == *key && typed(spec) && held.fits(spec))
+        });
+        self.moved = specs
+            .iter()
+            .filter(|spec| !matches!(spec.kind, FieldKind::Secret))
+            .filter(|spec| {
+                self.inputs.get(&spec.key).is_some_and(|held| {
+                    held.state.read(cx).value().as_ref()
+                        != spec.value.as_deref().unwrap_or_default()
+                })
+            })
+            .map(|spec| spec.key.clone())
+            .collect();
+        self.specs = specs;
+        cx.notify();
+    }
+
+    /// Make the boxes the fields need, which takes a window; render calls it, so a windowless respec is enough.
+    fn build_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        for key in std::mem::take(&mut self.moved) {
+            let (Some(held), Some(value)) = (self.inputs.get(&key), self.values.get(&key)) else {
+                continue;
+            };
+            let state = held.state.clone();
+            if !state.read(cx).focus_handle(cx).is_focused(window) {
+                let value = value.clone();
+                state.update(cx, |state, cx| state.set_value(value, window, cx));
+            }
+        }
+        for spec in &self.specs {
+            if !typed(spec) || self.inputs.contains_key(&spec.key) {
                 continue;
             }
             let key = spec.key.clone();
             let initial = spec.value.clone().unwrap_or_default();
             let placeholder = spec.placeholder.as_ref().map(text).unwrap_or_default();
-            let input = cx.new(|cx| {
-                let mut state = InputState::new(window, cx).placeholder(placeholder);
+            let secret = matches!(spec.kind, FieldKind::Secret);
+            let state = cx.new(|cx| {
+                let state = InputState::new(window, cx).placeholder(placeholder);
                 // A secret is write-only, so its stored value never comes back to prefill.
-                if !matches!(spec.kind, FieldKind::Secret) {
-                    state = state.default_value(initial);
+                match secret {
+                    true => state,
+                    false => state.default_value(initial),
                 }
-                state
             });
-            self._subscriptions.push(cx.subscribe(
-                &input,
-                move |this, state, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::Blur | InputEvent::PressEnter { .. }) {
-                        let value = state.read(cx).value().to_string();
-                        this.answer(&key, value, cx);
-                    }
+            let subscription = cx.subscribe(&state, move |this, state, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Blur | InputEvent::PressEnter { .. }) {
+                    let value = state.read(cx).value().to_string();
+                    this.answer(&key, value, cx);
+                }
+            });
+            self.inputs.insert(
+                spec.key.clone(),
+                Held {
+                    state,
+                    kind: spec.kind.clone(),
+                    placeholder: spec.placeholder.clone(),
+                    _subscription: subscription,
                 },
-            ));
-            self.inputs.insert(spec.key.clone(), input);
+            );
         }
-        self.specs = specs;
-        cx.notify();
     }
 
     /// Bring the form up to what the daemon last said: rebuilt only when its fields change, so a refetch never swaps an input out from under the caret.
@@ -120,7 +181,8 @@ impl SchemaForm {
             false => Vec::new(),
         };
         if self.specs != specs {
-            self.set_specs(specs, window, cx);
+            self.set_specs(specs, cx);
+            self.build_inputs(window, cx);
         }
         self.set_locked(locked, cx);
         self.set_saved(saved, cx);
@@ -158,7 +220,7 @@ impl SchemaForm {
         let typed: Vec<(String, String)> = self
             .inputs
             .iter()
-            .map(|(key, input)| (key.clone(), input.read(cx).value().to_string()))
+            .map(|(key, held)| (key.clone(), held.state.read(cx).value().to_string()))
             .collect();
         self.values.extend(typed);
     }
@@ -174,7 +236,9 @@ impl SchemaForm {
         };
         let held = spec.value.clone().unwrap_or_default();
         if let Some(input) = self.inputs.get(key) {
-            input.update(cx, |state, cx| state.set_value(held.clone(), window, cx));
+            input
+                .state
+                .update(cx, |state, cx| state.set_value(held.clone(), window, cx));
         }
         self.values.insert(key.to_string(), held);
         cx.notify();
@@ -240,7 +304,7 @@ impl SchemaForm {
                     .locked(locked)
                     .on_change(move |path, cx| answer(path, cx));
                 match self.inputs.get(&key) {
-                    Some(input) => field.input(input),
+                    Some(held) => field.input(&held.state),
                     None => field,
                 }
                 .into_any_element()
@@ -266,8 +330,8 @@ impl SchemaForm {
                         move |value, _, cx| answer(value.to_string(), cx)
                     });
                 match self.inputs.get(&key).filter(|_| *custom) {
-                    Some(input) => combo.custom(input.clone()).on_custom({
-                        let input = input.clone();
+                    Some(held) => combo.custom(held.state.clone()).on_custom({
+                        let input = held.state.clone();
                         move |window, cx| {
                             input.update(cx, |state, cx| state.set_value("", window, cx));
                             input.update(cx, |state, cx| state.focus(window, cx));
@@ -279,11 +343,11 @@ impl SchemaForm {
                 .into_any_element()
             }
             FieldKind::Text | FieldKind::Url => match self.inputs.get(&key) {
-                Some(input) => Input::new(input).disabled(locked).into_any_element(),
+                Some(held) => Input::new(&held.state).disabled(locked).into_any_element(),
                 None => div().into_any_element(),
             },
             FieldKind::Secret => match self.inputs.get(&key) {
-                Some(input) => SecretInput::new(input)
+                Some(held) => SecretInput::new(&held.state)
                     .saved(self.saved.iter().any(|saved| saved == &key))
                     .locked(locked)
                     .into_any_element(),
@@ -355,7 +419,8 @@ impl SchemaForm {
 }
 
 impl Render for SchemaForm {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.build_inputs(window, cx);
         let mut section: Option<SharedString> = None;
         let mut rows = Vec::new();
         for spec in self.specs.clone() {

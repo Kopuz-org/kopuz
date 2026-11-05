@@ -53,7 +53,7 @@ impl UrlDownload {
             cx.new(|cx| InputState::new(window, cx).placeholder(t("downloader_url_placeholder")));
         let formats =
             cx.new(|cx| Query::new(&[], |api| async move { api.download_formats().await }, cx));
-        let options = cx.new(|cx| SchemaForm::new(Vec::new(), window, cx));
+        let options = cx.new(|_| SchemaForm::empty());
         let connection = Link::connection(cx);
 
         let subscriptions = vec![
@@ -70,15 +70,11 @@ impl UrlDownload {
                     this.save_setting(changed.0.clone(), window, cx)
                 },
             ),
-            cx.subscribe_in(
-                &connection,
-                window,
-                |this, _, event: &ApiEvent, window, cx| {
-                    if matches!(event, ApiEvent::Resync) {
-                        this.load_settings(window, cx);
-                    }
-                },
-            ),
+            cx.subscribe(&connection, |this, _, event: &ApiEvent, cx| {
+                if matches!(event, ApiEvent::Resync) {
+                    this.load_settings(cx);
+                }
+            }),
         ];
 
         let mut dialog = Self {
@@ -92,7 +88,7 @@ impl UrlDownload {
             _start: None,
             _subscriptions: subscriptions,
         };
-        dialog.load_settings(window, cx);
+        dialog.load_settings(cx);
         dialog
     }
 
@@ -147,13 +143,13 @@ impl UrlDownload {
         }));
     }
 
-    fn load_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn load_settings(&mut self, cx: &mut Context<Self>) {
         let call = Link::global(cx).call(|api| async move { api.downloader_settings().await });
-        cx.spawn_in(window, async move |this, cx| {
+        cx.spawn(async move |this, cx| {
             let Ok(specs) = call.await else { return };
-            this.update_in(cx, |this, window, cx| {
+            this.update(cx, |this, cx| {
                 this.options
-                    .update(cx, |form, cx| form.set_specs(specs, window, cx));
+                    .update(cx, |form, cx| form.set_specs(specs, cx));
             })
             .ok();
         })
@@ -166,9 +162,9 @@ impl UrlDownload {
             .call(move |api| async move { api.set_downloader_settings(vec![value]).await });
         cx.spawn_in(window, async move |this, cx| match call.await {
             Ok(specs) => {
-                this.update_in(cx, |this, window, cx| {
+                this.update(cx, |this, cx| {
                     this.options
-                        .update(cx, |form, cx| form.set_specs(specs, window, cx));
+                        .update(cx, |form, cx| form.set_specs(specs, cx));
                 })
                 .ok();
             }

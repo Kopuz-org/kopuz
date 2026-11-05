@@ -19,8 +19,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, FocusHandle, FontWeight, InteractiveElement as _,
     IntoElement, ParentElement as _, Pixels, Render, ScrollStrategy, SharedString,
-    StatefulInteractiveElement as _, Styled, Subscription, Task, UniformListScrollHandle, Window,
-    div, px, uniform_list,
+    StatefulInteractiveElement as _, Styled, Subscription, UniformListScrollHandle, Window, div,
+    px, uniform_list,
 };
 use mode::{Mode, Part};
 use store::{Chrome, LayoutModel, Navigator, PlayerModel, PlaylistsModel, Query, Route, Target};
@@ -123,12 +123,7 @@ type Answer = Pin<Box<dyn Future<Output = Result<SearchResults, ApiError>> + Sen
 fn search_fetch(query: String) -> impl Fn(Arc<dyn KopuzApi>) -> Answer + 'static {
     move |api| {
         let query = query.clone();
-        Box::pin(async move {
-            if query.is_empty() {
-                return Ok(SearchResults::default());
-            }
-            api.search(SearchRequest::new(query)).await
-        })
+        Box::pin(async move { api.search(SearchRequest::new(query)).await })
     }
 }
 
@@ -156,7 +151,7 @@ pub struct Palette {
     scroll: UniformListScrollHandle,
     // Closing hands focus back, or the shell's keys would have nowhere to dispatch from.
     was_focused: Option<FocusHandle>,
-    _debounce: Option<Task<()>>,
+    debounce: store::Debounce,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -206,7 +201,7 @@ impl Palette {
             fade: motion::Fade::hidden(),
             scroll: UniformListScrollHandle::new(),
             was_focused: None,
-            _debounce: None,
+            debounce: store::Debounce::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -219,7 +214,7 @@ impl Palette {
         self.mode = Mode::default();
         self.drill = None;
         self.selected = 0;
-        self._debounce = None;
+        self.debounce.cancel();
         self.was_focused = window.focused(cx);
         self.load(cx);
         self.input.update(cx, |state, cx| {
@@ -227,9 +222,7 @@ impl Palette {
             state.focus(window, cx);
         });
         if let Some(tracks) = self.tracks.clone() {
-            tracks.update(cx, |query, cx| {
-                query.set_fetch(search_fetch(String::new()), cx)
-            });
+            tracks.update(cx, |query, cx| query.hold(SearchResults::default(), cx));
         }
         self.rebuild(cx);
     }
@@ -239,7 +232,7 @@ impl Palette {
         if self.tracks.is_some() {
             return;
         }
-        let tracks = cx.new(|cx| Query::new(&[Table::Tracks], search_fetch(String::new()), cx));
+        let tracks = cx.new(|cx| Query::held(&[Table::Tracks], SearchResults::default(), cx));
         let albums = cx.new(|cx| {
             Query::new(
                 &[Table::Albums],
@@ -306,18 +299,15 @@ impl Palette {
             return;
         }
         self.asked = wanted.clone();
-        self._debounce = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(DEBOUNCE).await;
-            this.update(cx, |this, cx| {
-                let Some(tracks) = this.tracks.clone() else {
-                    return;
-                };
-                tracks.update(cx, |query, cx| {
-                    query.set_fetch(search_fetch(wanted.clone()), cx)
-                });
-            })
-            .ok();
-        }));
+        self.debounce.run(DEBOUNCE, cx, move |this, cx| {
+            let Some(tracks) = this.tracks.clone() else {
+                return;
+            };
+            tracks.update(cx, |query, cx| match wanted.is_empty() {
+                true => query.hold(SearchResults::default(), cx),
+                false => query.set_fetch(search_fetch(wanted), cx),
+            });
+        });
     }
 
     fn move_selection(&mut self, forward: bool, cx: &mut Context<Self>) {
