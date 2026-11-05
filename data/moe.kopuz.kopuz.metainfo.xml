@@ -48,6 +48,13 @@
   </screenshots>
 
   <releases>
+    <release version="0.67.1" date="2026-11-05">
+      <description>
+        <p>
+          Android tablets get a proper layout with a permanent sidebar and a two pane fullscreen player. This release also fixes starting a radio restarting the current song, media keys going dead after another app took the MPRIS name, rescans missing edited tags, YouTube Music brand accounts, and missing covers while Spotify plays a queued song.
+        </p>
+      </description>
+    </release>
     <release version="0.67.0" date="2026-10-26">
       <description>
         <p>
