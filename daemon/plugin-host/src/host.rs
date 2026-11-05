@@ -25,7 +25,9 @@ pub(crate) struct State {
     permissions: Arc<Permissions>,
     /// What `$server` names.
     server_host: Option<String>,
-    client: reqwest::Client,
+    /// Nothing when it failed to build, since a client without the gate and
+    /// redirect policy is no substitute.
+    client: Option<reqwest::Client>,
 }
 
 impl State {
@@ -63,16 +65,19 @@ impl WasiView for State {
 
 /// Redirects are held to the same allowlist, so an allowed server cannot
 /// bounce a plugin elsewhere.
-fn client_for(permissions: &Arc<Permissions>, server_host: Option<String>) -> reqwest::Client {
+fn client_for(
+    permissions: &Arc<Permissions>,
+    server_host: Option<String>,
+) -> Option<reqwest::Client> {
     let permissions = Arc::clone(permissions);
     let gate = Gate {
         server_host: server_host.clone(),
     };
     let policy = reqwest::redirect::Policy::custom(move |attempt| {
-        let allowed = attempt
-            .url()
-            .host_str()
-            .is_some_and(|host| permissions.allows(host, server_host.as_deref()));
+        let allowed = attempt.url().host_str().is_some_and(|host| {
+            permissions.allows(host, server_host.as_deref())
+                && !local_literal(host, server_host.as_deref())
+        });
         if !allowed {
             attempt.error("redirected to a host the plugin's manifest does not allow")
         } else if attempt.previous().len() >= 10 {
@@ -86,7 +91,21 @@ fn client_for(permissions: &Arc<Permissions>, server_host: Option<String>) -> re
         .dns_resolver(Arc::new(gate))
         .redirect(policy)
         .build()
-        .unwrap_or_else(|_| utils::http::client())
+        .inspect_err(|error| tracing::warn!(%error, "a plugin's HTTP client failed to build"))
+        .ok()
+}
+
+/// A host written as an address skips the lookup [`Gate`] filters, so it is
+/// held to the same rule here: on this machine or its network, only the
+/// configured server.
+fn local_literal(host: &str, server_host: Option<&str>) -> bool {
+    let normal = host.trim_end_matches('.').to_ascii_lowercase();
+    normal
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+        .is_ok_and(local)
+        && server_host != Some(normal.as_str())
 }
 
 /// Allowed names are checked before the lookup; this checks where they lead.
@@ -144,7 +163,9 @@ impl http::Host for State {
             )));
         }
         let host = url.host_str().unwrap_or_default().to_string();
-        if !self.permissions.allows(&host, self.server_host.as_deref()) {
+        if !self.permissions.allows(&host, self.server_host.as_deref())
+            || local_literal(&host, self.server_host.as_deref())
+        {
             tracing::warn!(plugin = %self.plugin_id, %host, "plugin request to an undeclared host refused");
             return Err(http::HttpError::Denied(format!(
                 "the plugin's manifest does not allow {host}"
@@ -156,7 +177,11 @@ impl http::Host for State {
             .timeout_ms
             .map_or(DEFAULT_TIMEOUT, |ms| Duration::from_millis(ms.into()));
 
-        let mut builder = self.client.request(method, url).timeout(timeout);
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| http::HttpError::Other("the plugin has no HTTP client".into()))?;
+        let mut builder = client.request(method, url).timeout(timeout);
         for (name, value) in request.headers {
             builder = builder.header(name, value);
         }
@@ -240,6 +265,17 @@ mod tests {
         };
         assert!(resolves(&server, "localhost").await);
         assert!(resolves(&server, "LOCALHOST.").await);
+    }
+
+    #[test]
+    fn a_local_address_written_into_a_url_is_only_the_servers() {
+        assert!(local_literal("192.168.1.20", None));
+        assert!(local_literal("127.0.0.1", Some("music.example")));
+        assert!(local_literal("[::1]", None));
+        assert!(local_literal("0.0.0.0", None));
+        assert!(!local_literal("192.168.1.20", Some("192.168.1.20")));
+        assert!(!local_literal("93.184.216.34", None));
+        assert!(!local_literal("music.example", None));
     }
 
     #[test]

@@ -7,7 +7,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use api::{ApiError, JobKind, JobRef, Table};
-use server::playback_ref::PlaybackItemRef;
+use server::playback_ref::{PlaybackItemRef, ResolvedStreamRef};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
@@ -284,12 +284,28 @@ impl DownloadsService {
                 if ctx.cancelled() {
                     return Ok(());
                 }
-                let hint = info
-                    .format
-                    .map(|(format, _)| format.extension())
-                    .unwrap_or("m4a");
-                self.fetch_to_cache(ctx, &item_id, &info.url, hint, info.guard)
-                    .await?
+                if let ResolvedStreamRef::SoundCloudHls(url) = ResolvedStreamRef::parse(&info.url) {
+                    let (url, agent, guard) =
+                        (url.to_string(), info.user_agent.clone(), info.guard.clone());
+                    let bytes = tokio::task::spawn_blocking(move || {
+                        server::stream::hls_source::assemble(&url, agent.as_deref(), guard)
+                    })
+                    .await
+                    .map_err(|error| ApiError::internal(format!("HLS download failed: {error}")))?
+                    .map_err(|error| ApiError::internal(format!("HLS download failed: {error}")))?;
+                    if ctx.cancelled() {
+                        return Ok(());
+                    }
+                    let path = self.cache_file_path(&item_id, "m4a")?;
+                    self.publish_bytes(&path, &bytes).await?
+                } else {
+                    let hint = info
+                        .format
+                        .map(|(format, _)| format.extension())
+                        .unwrap_or("m4a");
+                    self.fetch_to_cache(ctx, &item_id, &info.url, hint, info.guard)
+                        .await?
+                }
             }
             Err(error) => {
                 return Err(ApiError::internal(format!("download failed: {error}")));
