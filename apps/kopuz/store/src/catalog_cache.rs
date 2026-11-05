@@ -147,6 +147,16 @@ impl CatalogCache {
         .detach();
     }
 
+    /// The active source changed, and a page held from before could be another source's answer under this one's key.
+    pub(crate) fn forget_all(cx: &mut App) {
+        cx.default_global::<Self>().forget();
+    }
+
+    fn forget(&mut self) {
+        self.pages.clear();
+        self.armed = None;
+    }
+
     /// A page grew by a continuation: keep what was loaded, without making it look newly fetched.
     pub fn update(id: &str, ticket: Option<Ticket>, detail: CatalogDetail, cx: &mut App) {
         let Some(ticket) = ticket.filter(|ticket| Self::current(id, ticket, cx)) else {
@@ -164,7 +174,25 @@ fn key_of(source: Option<&str>, id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::key_of;
+    use std::time::Instant;
+
+    use api::CatalogDetail;
+    use gpui_kit::Task;
+
+    use super::{CatalogCache, Entry, key_of};
+
+    #[test]
+    fn a_source_change_leaves_no_page_or_dwell_behind() {
+        let mut cache = CatalogCache::default();
+        let entry = Entry {
+            detail: CatalogDetail::default(),
+            fetched: Instant::now(),
+        };
+        cache.pages.insert(key_of(Some("a"), "MPREb_1"), entry);
+        cache.armed = Some((key_of(Some("a"), "MPREb_2"), Task::ready(())));
+        cache.forget();
+        assert!(cache.pages.is_empty() && cache.armed.is_none());
+    }
 
     #[test]
     fn the_same_id_from_two_sources_is_two_pages() {
