@@ -21,6 +21,38 @@ const PAGE_MARGIN: Pixels = px(600.);
 /// Shelves answering the previous query or filter stay up, dimmed, until the new ones land.
 const FADED: f32 = 0.55;
 
+/// Which ask an answer belongs to: a newer ask, or freezing the page, leaves every earlier answer unclaimed.
+#[derive(Debug, Default)]
+struct Asks {
+    current: u64,
+    frozen: bool,
+}
+
+impl Asks {
+    /// A new ask, or none once frozen: a frozen page draws what it holds and asks nothing more.
+    fn begin(&mut self) -> Option<u64> {
+        if self.frozen {
+            return None;
+        }
+        self.current += 1;
+        Some(self.current)
+    }
+
+    /// The ask an extra page continues, which a fresh ask supersedes like any other answer.
+    fn ongoing(&self) -> Option<u64> {
+        (!self.frozen).then_some(self.current)
+    }
+
+    fn answers(&self, ask: u64) -> bool {
+        !self.frozen && ask == self.current
+    }
+
+    fn freeze(&mut self) {
+        self.frozen = true;
+        self.current += 1;
+    }
+}
+
 pub(crate) struct CatalogSearch {
     query: String,
     filters: Vec<SearchFilter>,
@@ -33,8 +65,8 @@ pub(crate) struct CatalogSearch {
     loading: bool,
     paging: bool,
     error: Option<SharedString>,
-    // Bumped per ask; an answer for a query or filter since left behind is dropped.
-    generation: u64,
+    // An answer for a query or filter since left behind, or one landing after a freeze, is dropped.
+    asks: Asks,
     scroll: ScrollHandle,
     _load: Option<Task<()>>,
     _more: Option<Task<()>>,
@@ -58,7 +90,7 @@ impl CatalogSearch {
             loading: false,
             paging: false,
             error: None,
-            generation: 0,
+            asks: Asks::default(),
             scroll: ScrollHandle::new(),
             _load: None,
             _more: None,
@@ -110,9 +142,20 @@ impl CatalogSearch {
             .is_some_and(|all| all.id != self.filter)
     }
 
+    /// Stop asking and drop what is in flight, so a source switch's frozen page takes no late answer.
+    pub(crate) fn freeze(&mut self, cx: &mut Context<Self>) {
+        self.asks.freeze();
+        self._load = None;
+        self._more = None;
+        self.loading = false;
+        self.paging = false;
+        cx.notify();
+    }
+
     fn load(&mut self, cx: &mut Context<Self>) {
-        self.generation += 1;
-        let generation = self.generation;
+        let Some(generation) = self.asks.begin() else {
+            return;
+        };
         self.continuation = None;
         self.correction = None;
         self.error = None;
@@ -135,7 +178,7 @@ impl CatalogSearch {
         self._load = Some(cx.spawn(async move |this, cx| {
             let result = call.await;
             this.update(cx, |this, cx| {
-                if this.generation != generation {
+                if !this.asks.answers(generation) {
                     return;
                 }
                 this.loading = false;
@@ -192,8 +235,10 @@ impl CatalogSearch {
 
     /// A continuation answers with one shelf, which continues the last one held.
     fn load_more(&mut self, token: String, cx: &mut Context<Self>) {
+        let Some(generation) = self.asks.ongoing() else {
+            return;
+        };
         self.paging = true;
-        let generation = self.generation;
         let request = SearchRequest {
             query: self.query.clone(),
             filter: Some(self.filter.clone()),
@@ -204,7 +249,7 @@ impl CatalogSearch {
         self._more = Some(cx.spawn(async move |this, cx| {
             let result = call.await;
             this.update(cx, |this, cx| {
-                if this.generation != generation {
+                if !this.asks.answers(generation) {
                     return;
                 }
                 this.paging = false;
@@ -325,6 +370,36 @@ impl Render for CatalogSearch {
 
 #[cfg(test)]
 mod tests {
+    use super::Asks;
+
+    #[test]
+    fn a_freeze_drops_every_answer_in_flight_and_asks_nothing_more() {
+        let mut asks = Asks::default();
+        let search = asks.begin().expect("a live page asks");
+        let more = asks.ongoing().expect("a live page pages");
+        assert!(asks.answers(search) && asks.answers(more));
+        asks.freeze();
+        assert!(
+            !asks.answers(search),
+            "a search answer landed on a frozen page"
+        );
+        assert!(
+            !asks.answers(more),
+            "a page of more landed on a frozen page"
+        );
+        assert_eq!(asks.begin(), None);
+        assert_eq!(asks.ongoing(), None);
+    }
+
+    #[test]
+    fn a_new_ask_drops_the_answers_to_the_one_before() {
+        let mut asks = Asks::default();
+        let first = asks.begin().expect("a live page asks");
+        let second = asks.begin().expect("a live page asks");
+        assert!(!asks.answers(first));
+        assert!(asks.answers(second));
+    }
+
     #[test]
     fn every_search_string_resolves_in_kopuz() {
         for key in [

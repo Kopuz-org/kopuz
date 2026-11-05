@@ -302,6 +302,7 @@ impl store::Freeze for Discover {
     fn freeze(&mut self, cx: &mut Context<Self>) {
         self._subscriptions.clear();
         self.landing.update(cx, |landing, cx| landing.freeze(cx));
+        self.catalog.update(cx, |search, cx| search.freeze(cx));
     }
 }
 

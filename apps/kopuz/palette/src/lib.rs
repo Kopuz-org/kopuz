@@ -126,6 +126,22 @@ enum Line {
 
 type Answer = Pin<Box<dyn Future<Output = Result<SearchResults, ApiError>> + Send>>;
 
+/// What the source suggested, and for which query, so an answer to an earlier one is never offered for this one.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct Suggested {
+    query: String,
+    items: Vec<SearchSuggestion>,
+}
+
+impl Suggested {
+    fn for_query(&self, query: &str) -> &[SearchSuggestion] {
+        match self.query == query {
+            true => &self.items,
+            false => &[],
+        }
+    }
+}
+
 /// The read behind one query; a blank one answers with nothing rather than asking the daemon.
 fn search_fetch(query: String) -> impl Fn(Arc<dyn KopuzApi>) -> Answer + 'static {
     move |api| {
@@ -138,7 +154,7 @@ fn search_fetch(query: String) -> impl Fn(Arc<dyn KopuzApi>) -> Answer + 'static
 pub struct Palette {
     input: Entity<InputState>,
     tracks: Option<Entity<Query<SearchResults>>>,
-    suggestions: Option<Entity<Query<Vec<SearchSuggestion>>>>,
+    suggestions: Option<Entity<Query<Suggested>>>,
     albums: Option<Entity<Query<AlbumPage>>>,
     artists: Option<Entity<Query<ArtistPage>>>,
     typed: String,
@@ -234,7 +250,7 @@ impl Palette {
             tracks.update(cx, |query, cx| query.hold(SearchResults::default(), cx));
         }
         if let Some(suggestions) = self.suggestions.clone() {
-            suggestions.update(cx, |query, cx| query.hold(Vec::new(), cx));
+            suggestions.update(cx, |query, cx| query.hold(Suggested::default(), cx));
         }
         self.rebuild(cx);
     }
@@ -245,7 +261,7 @@ impl Palette {
             return;
         }
         let tracks = cx.new(|cx| Query::held(&[Table::Tracks], SearchResults::default(), cx));
-        let suggestions = cx.new(|cx| Query::held(&[], Vec::new(), cx));
+        let suggestions = cx.new(|cx| Query::held(&[], Suggested::default(), cx));
         let albums = cx.new(|cx| {
             Query::new(
                 &[Table::Albums],
@@ -315,6 +331,10 @@ impl Palette {
             return;
         }
         self.asked = wanted.clone();
+        // The read for the previous text must not answer while the timer runs for this one.
+        if let Some(suggestions) = self.suggestions.clone() {
+            suggestions.update(cx, |query, cx| query.hold(Suggested::default(), cx));
+        }
         self.debounce.run(DEBOUNCE, cx, move |this, cx| {
             let (Some(tracks), Some(suggestions)) = (this.tracks.clone(), this.suggestions.clone())
             else {
@@ -327,11 +347,17 @@ impl Palette {
             });
             // A source that offers none answers with nothing, and a failed ask is no reason to stop typing.
             suggestions.update(cx, |query, cx| match typed.is_empty() {
-                true => query.hold(Vec::new(), cx),
+                true => query.hold(Suggested::default(), cx),
                 false => query.set_fetch(
                     move |api| {
-                        let typed = typed.clone();
-                        async move { Ok(api.search_suggestions(typed).await.unwrap_or_default()) }
+                        let query = typed.clone();
+                        async move {
+                            let items = api
+                                .search_suggestions(query.clone())
+                                .await
+                                .unwrap_or_default();
+                            Ok(Suggested { query, items })
+                        }
                     },
                     cx,
                 ),
@@ -698,6 +724,7 @@ impl Palette {
             return Vec::new();
         };
         found
+            .for_query(&self.query)
             .iter()
             .filter_map(|suggestion| match &suggestion.item {
                 Some(item) => suggested_item(item, cx),
@@ -1121,5 +1148,35 @@ impl Render for Palette {
                     })
                     .child(self.footer(cx)),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn suggested(query: &str, texts: &[&str]) -> Suggested {
+        Suggested {
+            query: query.to_string(),
+            items: texts
+                .iter()
+                .map(|text| SearchSuggestion {
+                    text: text.to_string(),
+                    ..SearchSuggestion::default()
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn an_answer_to_an_earlier_query_is_never_offered_for_the_current_one() {
+        let late = suggested("porti", &["portis", "portishead"]);
+        assert!(late.for_query("portishead").is_empty());
+        assert_eq!(late.for_query("porti").len(), 2);
+    }
+
+    #[test]
+    fn nothing_held_offers_nothing() {
+        assert!(Suggested::default().for_query("portishead").is_empty());
     }
 }
