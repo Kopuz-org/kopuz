@@ -30,18 +30,24 @@ pub enum Bar {
     Pill,
     /// Flat tabs over a 2px rule in the accent that sits on the strip's own border.
     Rule,
+    /// A sidebar's rows: no bar, the chosen one washed and inked in the accent.
+    Sidebar,
 }
 
 impl Bar {
     fn thickness(self, along: Along) -> Pixels {
         match (self, along) {
             (Bar::Pill, Along::Column) => px(3.),
+            (Bar::Sidebar, _) => px(0.),
             _ => px(2.),
         }
     }
 
     fn ink(self, active: bool, hovered: bool, cx: &App) -> Hsla {
         match (self, active, hovered) {
+            (Bar::Sidebar, true, _) => cx.theme().primary,
+            (Bar::Sidebar, false, true) => style::white(style::TEXT_STRONG, cx),
+            (Bar::Sidebar, false, false) => style::white(0.70, cx),
             (_, true, _) => cx.theme().foreground,
             (Bar::Pill, false, true) => style::white(style::TEXT_STRONG, cx),
             (Bar::Pill, false, false) => style::slate_400(cx),
@@ -51,13 +57,17 @@ impl Bar {
     }
 
     fn wash(self, active: bool, hovered: bool, cx: &App) -> Hsla {
+        if self == Bar::Sidebar && active {
+            return style::accent(style::PICKED, cx);
+        }
         style::white(
             match (self, active, hovered) {
                 (Bar::Pill, true, _) => style::HOVER,
                 (Bar::Pill, false, true) => style::RAISED,
                 (Bar::Rule, true, _) => 0.03,
                 (Bar::Rule, false, true) => 0.04,
-                (_, false, false) => 0.,
+                (Bar::Sidebar, _, true) => style::HOVER,
+                (_, _, false) => 0.,
             },
             cx,
         )
@@ -186,7 +196,7 @@ impl TabStrip {
             false => 2.,
         };
         let radius = match self.bar {
-            Bar::Pill => style::radius_lg(),
+            Bar::Pill | Bar::Sidebar => style::radius_lg(),
             Bar::Rule => style::radius_md(),
         };
         let thickness = self.bar.thickness(self.along);
@@ -203,6 +213,7 @@ impl TabStrip {
                 (Bar::Pill, true) => frame.rounded(radius).w_full().py_2(),
                 (Bar::Pill, false) => frame.rounded(radius).h_full().py_1(),
                 (Bar::Rule, _) => frame.h_11().items_center(),
+                (Bar::Sidebar, _) => frame.rounded(radius).w_full().py(px(6.)),
             })
             .child(marker::probe(tab.key.clone(), self.along, marks))
             .when_some(tab.tooltip, |frame, tip| {
@@ -221,17 +232,25 @@ impl TabStrip {
                     .map(|row| match self.bar {
                         Bar::Pill => row.text_sm().font_weight(FontWeight::MEDIUM),
                         Bar::Rule => row.text_xs().font_weight(FontWeight::SEMIBOLD),
+                        // `px-2.5 gap-3`, and the chosen row a weight heavier.
+                        Bar::Sidebar => {
+                            row.px(px(10.)).gap_3().text_sm().font_weight(match active {
+                                true => FontWeight::SEMIBOLD,
+                                false => FontWeight::MEDIUM,
+                            })
+                        }
                     })
                     .child(
                         icons::icon(tab.icon)
                             .when(self.bar == Bar::Pill, |glyph| glyph.size(px(16.)))
+                            .when(self.bar == Bar::Sidebar, |glyph| glyph.size(px(14.)))
                             .flex_shrink_0(),
                     )
                     .when_some(tab.label, |row, label| {
                         row.child(div().flex_1().min_w_0().truncate().child(label))
                     }),
             )
-            .when(vertical && active, |frame| {
+            .when(vertical && active && self.bar == Bar::Pill, |frame| {
                 frame.child(
                     div()
                         .absolute()
@@ -352,7 +371,7 @@ impl TabStrip {
         };
         let thickness = self.bar.thickness(self.along);
         let ink = match self.bar {
-            Bar::Pill => cx.theme().foreground,
+            Bar::Pill | Bar::Sidebar => cx.theme().foreground,
             Bar::Rule => cx.theme().primary_hover,
         };
         let rounded = self.bar == Bar::Pill;
@@ -363,6 +382,7 @@ impl TabStrip {
         let gap = |strip: Div| match self.bar {
             Bar::Pill => strip.gap_1(),
             Bar::Rule => strip.gap_0p5(),
+            Bar::Sidebar => strip,
         };
         let origin = marker::origin(self.along, marks);
         // The bar rides in the flow beside the tabs rather than over them, so it scrolls with them.
@@ -376,7 +396,7 @@ impl TabStrip {
             Along::Row => {
                 let inset = match self.bar {
                     Bar::Pill => INSET,
-                    Bar::Rule => px(0.),
+                    Bar::Rule | Bar::Sidebar => px(0.),
                 };
                 v_flex()
                     .h_full()

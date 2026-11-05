@@ -35,8 +35,6 @@ const OFFLINE_SCRIM: f32 = 0.45;
 
 /// Drawn over the routed page, so it paints nothing until it has something to say.
 pub struct Overlays {
-    // The error the user closed, so the banner stays gone until the daemon reports a different one.
-    dismissed_error: Option<String>,
     banner: Entity<ConnectionBanner>,
     network: Entity<NetworkBanner>,
     update: Entity<UpdateBanner>,
@@ -64,7 +62,6 @@ impl Overlays {
             cx.observe(&store::LayoutModel::global(cx), |_, _, cx| cx.notify()),
         ];
         Self {
-            dismissed_error: None,
             banner,
             network,
             update,
@@ -76,20 +73,7 @@ impl Overlays {
 
     /// Switching source clears the error it belonged to, so what is here is about what plays now.
     fn playback_error(&self, cx: &App) -> Option<SharedString> {
-        let message = store::human_body(PlayerModel::global(cx).read(cx).error()?);
-        if self.dismissed_error == Self::occurrence(cx) {
-            return None;
-        }
-        Some(message)
-    }
-
-    /// A dismissal is keyed on the failure and its track, so dismissing one never silences the next.
-    fn occurrence(cx: &App) -> Option<String> {
-        let player = PlayerModel::global(cx);
-        let player = player.read(cx);
-        let message = &player.error()?.message;
-        let track = player.track().map(|track| track.key.as_str()).unwrap_or("");
-        Some(format!("{track}\u{1}{message}"))
+        Some(store::human_body(PlayerModel::global(cx).read(cx).error()?))
     }
 
     fn scan_banner(
@@ -190,10 +174,9 @@ impl Overlays {
                     .on_hover(motion::track(pointer))
                     .tooltip(|window, cx| Tooltip::new(t("close")).build(window, cx))
                     .child(icons::icon(icons::CLOSE).size(SMALL_ICON))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.dismissed_error = Self::occurrence(cx);
-                        cx.notify();
-                    })),
+                    .on_click(|_, _, cx| {
+                        PlayerModel::global(cx).update(cx, |player, cx| player.dismiss_error(cx))
+                    }),
             )
             .into_any_element()
     }

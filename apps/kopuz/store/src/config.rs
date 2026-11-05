@@ -1,4 +1,8 @@
+use std::fmt::Display;
+use std::future::Future;
 use std::time::Duration;
+
+use futures::channel::oneshot;
 
 use api::{ApiEvent, ConfigView, EditOutcome, EditReport, LockSource, SettingLock};
 use config::{SettingKey, Settings, SettingsEdit};
@@ -21,11 +25,14 @@ pub struct ConfigModel {
     pending: Vec<SettingsEdit>,
     /// Edits sent and not answered yet; a view read meanwhile keeps them on top.
     in_flight: Vec<SettingsEdit>,
+    /// Resolves once the write in flight is answered, whatever becomes of the task that sent it.
+    writing: Option<oneshot::Receiver<()>>,
     saved: Vec<SettingKey>,
     _save: Option<Task<()>>,
     _tick: Option<Task<()>>,
     _fetch: Option<Task<()>>,
     _subscription: Subscription,
+    _quit: Subscription,
 }
 
 impl ConfigModel {
@@ -42,16 +49,20 @@ impl ConfigModel {
             }
             _ => {}
         });
+        // An edit still inside the save delay would otherwise die with the process.
+        let quit = cx.on_app_quit(|this, cx| this.flush(cx));
         Self {
             view: ConfigView::default(),
             loaded: false,
             pending: Vec::new(),
             in_flight: Vec::new(),
+            writing: None,
             saved: Vec::new(),
             _save: None,
             _tick: None,
             _fetch: None,
             _subscription: subscription,
+            _quit: quit,
         }
     }
 
@@ -91,9 +102,14 @@ impl ConfigModel {
             .map(|lock| &lock.by)
     }
 
-    /// A settings layer pins `name`; its control renders locked.
+    /// A settings layer pins `name`, spelled as `SettingKey::name` spells it (`cover_art_blur`); its control renders locked.
     pub fn is_locked(&self, name: &str) -> bool {
         self.lock_of(name).is_some()
+    }
+
+    /// The same, by the typed key, so a misspelt name cannot silently read as unlocked.
+    pub fn is_pinned(&self, key: SettingKey) -> bool {
+        self.view.locks.iter().any(|lock| lock.key == key)
     }
 
     pub fn reload(&mut self, cx: &mut Context<Self>) {
@@ -130,13 +146,6 @@ impl ConfigModel {
 
     /// Apply `edit` to the copy now and queue it; the daemon hears it once edits settle.
     pub fn update(&mut self, cx: &mut Context<Self>, edit: SettingsEdit) {
-        if !self.loaded {
-            tracing::warn!(
-                key = SettingKey::of(&edit).name(),
-                "config edit before the daemon config loaded; ignored"
-            );
-            return;
-        }
         let key = SettingKey::of(&edit);
         self.saved.retain(|held| *held != key);
         let language = self.view.settings.ui.language.clone();
@@ -146,7 +155,25 @@ impl ConfigModel {
         }
         queue(&mut self.pending, edit);
         crate::notify(cx);
-        self.schedule_save(cx);
+        // Held until the daemon's config is read, so a defaulted copy is never what gets written.
+        if self.loaded {
+            self.schedule_save(cx);
+        }
+    }
+
+    /// For shutdown: wait for the write in flight, then send what is still queued; nothing comes back to the UI.
+    pub fn flush(&mut self, cx: &mut Context<Self>) -> Task<()> {
+        // A save's UI half would spawn after GPUI began quitting; the write it sent carries on without it.
+        self._save = None;
+        let writing = self.writing.take();
+        let edits = match self.loaded {
+            true => std::mem::take(&mut self.pending),
+            false => Vec::new(),
+        };
+        let link = Link::global(cx).clone();
+        let send = (!edits.is_empty())
+            .then_some(move || link.call(move |api| async move { api.edit_config(edits).await }));
+        cx.background_executor().spawn(settle(writing, send))
     }
 
     fn schedule_save(&mut self, cx: &mut Context<Self>) {
@@ -157,8 +184,13 @@ impl ConfigModel {
                 this.in_flight = edits.clone();
                 (!edits.is_empty()).then(|| {
                     let sent = edits.clone();
-                    let call = Link::global(cx)
-                        .call(move |api| async move { api.edit_config(sent).await });
+                    let (done, writing) = oneshot::channel();
+                    this.writing = Some(writing);
+                    let call = Link::global(cx).call(move |api| async move {
+                        let report = api.edit_config(sent).await;
+                        done.send(()).ok();
+                        report
+                    });
                     (edits, call)
                 })
             }) else {
@@ -171,6 +203,7 @@ impl ConfigModel {
             let result = call.await;
             this.update(cx, |this, cx| {
                 this._save = None;
+                this.writing = None;
                 this.in_flight.clear();
                 match result {
                     Ok(report) => this.answer(&edits, report, cx),
@@ -250,8 +283,12 @@ impl ConfigModel {
             locks: view.locks,
             revision: view.revision,
         };
+        let first = !self.loaded;
         self.loaded = true;
         crate::notify(cx);
+        if first && !self.pending.is_empty() {
+            self.schedule_save(cx);
+        }
     }
 }
 
@@ -275,6 +312,21 @@ pub fn lock_cause(by: &LockSource) -> String {
 fn queue(pending: &mut Vec<SettingsEdit>, edit: SettingsEdit) {
     pending.retain(|queued| !edit.supersedes(queued));
     pending.push(edit);
+}
+
+/// Wait out the write already sent, so a newer edit cannot land before it, then send the rest.
+async fn settle<T, E: Display, Fut: Future<Output = Result<T, E>>>(
+    writing: Option<oneshot::Receiver<()>>,
+    send: Option<impl FnOnce() -> Fut>,
+) {
+    if let Some(writing) = writing {
+        writing.await.ok();
+    }
+    if let Some(send) = send
+        && let Err(error) = send().await
+    {
+        tracing::warn!(%error, "flushing the config failed");
+    }
 }
 
 #[cfg(test)]
@@ -309,5 +361,42 @@ mod tests {
         queue(&mut pending, put("b"));
         queue(&mut pending, crossfade(3));
         assert_eq!(pending, vec![put("a"), put("b"), crossfade(3)]);
+    }
+
+    fn poll<F: Future>(task: &mut std::pin::Pin<Box<F>>) -> bool {
+        let waker = futures::task::noop_waker();
+        let mut cx = std::task::Context::from_waker(&waker);
+        task.as_mut().poll(&mut cx).is_ready()
+    }
+
+    #[test]
+    fn a_quit_waits_for_the_write_already_out_even_with_nothing_queued() {
+        let (done, writing) = oneshot::channel();
+        let mut task = Box::pin(settle(
+            Some(writing),
+            None::<fn() -> std::future::Ready<Result<(), String>>>,
+        ));
+        assert!(!poll(&mut task));
+        done.send(()).ok();
+        assert!(poll(&mut task));
+    }
+
+    #[test]
+    fn a_quit_sends_the_rest_only_after_the_write_already_out() {
+        let sent = std::rc::Rc::new(std::cell::Cell::new(false));
+        let flag = sent.clone();
+        let (done, writing) = oneshot::channel();
+        let mut task = Box::pin(settle(
+            Some(writing),
+            Some(move || {
+                flag.set(true);
+                std::future::ready(Ok::<(), String>(()))
+            }),
+        ));
+        assert!(!poll(&mut task));
+        assert!(!sent.get());
+        done.send(()).ok();
+        assert!(poll(&mut task));
+        assert!(sent.get());
     }
 }

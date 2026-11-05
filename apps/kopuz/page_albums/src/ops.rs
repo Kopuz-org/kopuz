@@ -1,9 +1,8 @@
 //! The album commands a card menu or a detail button issues.
 
 use api::TrackInfo;
-use gpui_kit::{App, ClipboardItem};
-use link::Link;
-use store::{Notices, actions};
+use gpui_kit::App;
+use store::actions;
 
 /// Album order: by disc, then by track number.
 pub fn in_album_order(tracks: &mut [TrackInfo]) {
@@ -32,32 +31,4 @@ pub fn delete_tracks(keys: Vec<String>, cx: &mut App) {
         cx,
         move |api| async move { api.delete_tracks(keys, true).await },
     );
-}
-
-/// The album's public page, falling back to its first track's; the daemon knows which sources have one.
-pub fn share_album(browse_id: Option<String>, first_key: Option<String>, cx: &mut App) {
-    let call = Link::global(cx).call(move |api| async move {
-        if let Some(id) = browse_id
-            && let Some(url) = api.album_web_url(id).await?
-        {
-            return Ok(Some(url));
-        }
-        match first_key {
-            Some(key) => api.track_web_url(key).await,
-            None => Ok(None),
-        }
-    });
-    cx.spawn(async move |cx| {
-        let url = call.await;
-        cx.update(|cx| match url {
-            Ok(Some(url)) => {
-                cx.write_to_clipboard(ClipboardItem::new_string(url));
-                // TODO(i18n): no en.ftl key for a generic share result yet.
-                Notices::info("Link copied", cx);
-            }
-            Ok(None) => Notices::error("No public page for this album", cx),
-            Err(error) => Notices::failed(&error, cx),
-        });
-    })
-    .detach();
 }

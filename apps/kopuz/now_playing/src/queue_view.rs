@@ -334,16 +334,19 @@ impl QueueView {
             .px_2()
             .pt_1()
             .pb_2()
-            .child(
-                Link::new("queue-summary")
-                    .label(if radio { t("radio") } else { label })
-                    .tone(Tone::Quiet)
-                    .tooltip(Some(t("jump_to_current_song")))
-                    .on_click(cx.listener(|this, _, _, cx| this.rearm(cx)))
-                    .flex_1()
-                    .min_w_0()
-                    .text_size(style::text_11()),
-            )
+            .map(|bar| match radio {
+                true => bar.child(div().flex_1()),
+                false => bar.child(
+                    Link::new("queue-summary")
+                        .label(label)
+                        .tone(Tone::Quiet)
+                        .tooltip(Some(t("jump_to_current_song")))
+                        .on_click(cx.listener(|this, _, _, cx| this.rearm(cx)))
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(style::text_11()),
+                ),
+            })
             .child(
                 tool("queue-shuffle-upcoming", icons::SHUFFLE, cx)
                     .tooltip(t("shuffle_upcoming"))

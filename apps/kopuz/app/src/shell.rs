@@ -108,7 +108,9 @@ pub struct Shell {
     debug_overlay: Entity<debug_overlay::DebugOverlay>,
     // The theme these were applied for, so config edits reapply only on a change.
     applied_theme: AppliedTheme,
-    system_artwork: Option<api::ArtworkRef>,
+    // The titlebar the window was opened with; macOS and Windows can only change it by reopening.
+    frame_mode: config::TitlebarMode,
+    shown_artwork: Option<api::ArtworkRef>,
     system_ease: crate::system_ease::SystemEase,
     // The route last drawn and the incoming page's fade, kept here so a cached page fades like a new one.
     page_key: String,
@@ -145,7 +147,12 @@ impl Shell {
         })
     }
 
-    pub fn new(started: std::time::Instant, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        started: std::time::Instant,
+        frame_mode: config::TitlebarMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let connection = link::Link::connection(cx);
         let navigator = Navigator::global(cx);
         let chrome = Chrome::global(cx);
@@ -162,17 +169,14 @@ impl Shell {
             cx.observe(&connection, |this, _, cx| this.boot(cx)),
             cx.observe(&navigator, |_, _, cx| cx.notify()),
             cx.observe(&chrome, |_, _, cx| cx.notify()),
-            // System colors follows the cover; the player ticks constantly, so only a new cover redraws.
+            // System colors and the backdrop follow the cover; the player ticks constantly, so only a new cover redraws.
             cx.observe(&PlayerModel::global(cx), |this, player, cx| {
-                if this.applied_theme.0 != theme::SYSTEM {
-                    return;
-                }
                 let artwork = player
                     .read(cx)
                     .track()
                     .and_then(|track| track.artwork.clone());
-                if artwork != this.system_artwork {
-                    this.system_artwork = artwork;
+                if artwork != this.shown_artwork {
+                    this.shown_artwork = artwork;
                     cx.notify();
                 }
             }),
@@ -195,6 +199,7 @@ impl Shell {
             }),
             cx.observe_in(&config, window, |this, _, window, cx| {
                 follow_config(&mut this.applied_theme, window, cx);
+                this.follow_frame(window, cx);
                 cx.notify();
             }),
             // The skin sizes the player bar, which the toasts have to clear.
@@ -248,7 +253,8 @@ impl Shell {
             loader: (!booted).then(|| cx.new(|cx| status::Loader::new(started, cx))),
             debug_overlay: cx.new(|cx| debug_overlay::DebugOverlay::new(window, cx)),
             applied_theme,
-            system_artwork: None,
+            frame_mode,
+            shown_artwork: None,
             system_ease: Default::default(),
             page_key: String::new(),
             page_fade: motion::Fade::hidden(),
@@ -261,6 +267,34 @@ impl Shell {
             _heartbeat: Self::heartbeat(window, cx),
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Give the window the titlebar the settings now ask for: Linux redecorates in place, the others reopen it.
+    fn follow_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mode = topbar::frame::mode(cx);
+        if mode == self.frame_mode {
+            return;
+        }
+        let reopen = topbar::frame::transparent_titlebar(mode)
+            != topbar::frame::transparent_titlebar(self.frame_mode);
+        tracing::info!(?mode, reopen, "the titlebar setting changed");
+        self.frame_mode = mode;
+        if cfg!(target_os = "linux") {
+            window.request_decorations(topbar::frame::decorations(mode));
+            return;
+        }
+        if !reopen {
+            return;
+        }
+        let bounds = window.window_bounds();
+        let leaving = window.window_handle();
+        // The new window opens before the old one closes, so the app never sees its last window go.
+        cx.defer(move |cx| {
+            crate::open_main_window(std::time::Instant::now(), Some(bounds), cx);
+            if let Err(error) = leaving.update(cx, |_, window, _| window.remove_window()) {
+                tracing::warn!(%error, "could not close the window being replaced");
+            }
+        });
     }
 
     /// The first answer is in: the loader goes for good, and a later disconnect is the banner's.
@@ -314,7 +348,12 @@ impl Shell {
         if self.handover.is_some() {
             return;
         }
-        if let Some(shown) = self.shown.clone() {
+        // A kept page is its own replacement: held over itself it would draw twice, every id in it doubled.
+        let shown = self
+            .shown
+            .clone()
+            .filter(|shown| !self.router.survives_switch(shown));
+        if let Some(shown) = shown {
             self.router.freeze(&shown, cx);
             self.handover = Some(crate::handover::Handover::new(shown, awaiting));
         }
@@ -448,14 +487,16 @@ impl Render for Shell {
             self.system_ease = Default::default();
         }
         if let Some(loader) = self.loader.clone() {
-            return div()
+            let loader = div()
                 .size_full()
                 .child(loader)
                 .children(Root::render_notification_layer(window, cx))
                 .into_any_element();
+            return framed(loader, true, window, cx);
         }
         if store::SetupModel::global(cx).read(cx).showing() {
-            return self.render_first_run(window, cx);
+            let first_run = self.render_first_run(window, cx);
+            return framed(first_run, true, window, cx);
         }
         // The guide's focused button leaves with it, and with nothing focused no shortcut fires.
         if window.focused(cx).is_none() {
@@ -469,7 +510,9 @@ impl Render for Shell {
         // A disconnect outranks compact: a mini player with nothing behind it would keep showing
         // the last track it saw, with no way to learn the daemon had gone.
         let compact = chrome.is_compact() && connected;
-        let nav_left = store::layout(cx).nav.position == store::layout::NavPosition::Left;
+        let nav_left = components::skin::nav_position(store::layout(cx).nav.position)
+            == store::layout::NavPosition::Left;
+        let rtl = i18n::is_rtl();
         let bar = Some(self.topbar.clone());
         let playlists = self.playlists_panel.read(cx);
         let playlists_open = playlists.is_open(cx) && connected;
@@ -525,6 +568,8 @@ impl Render for Shell {
                         .flex_1()
                         .min_h_0()
                         .items_stretch()
+                        // Right to left puts the rail and the panel on the right, the side panel on the left.
+                        .when(rtl, |body| body.flex_row_reverse())
                         .when(paned, |body| {
                             body.gap(skin.pane_gap)
                                 .pt(skin.pane_gap)
@@ -575,7 +620,7 @@ impl Render for Shell {
                 .into_any_element()
         };
 
-        components::focus::watch(topbar::mouse_history(div()))
+        let shell = components::focus::watch(topbar::mouse_history(div()))
             .size_full()
             .track_focus(&self.focus)
             .key_context("Shell")
@@ -625,6 +670,42 @@ impl Render for Shell {
             .children(Root::render_dialog_layer(window, cx))
             .children(Root::render_sheet_layer(window, cx))
             .children(Root::render_notification_layer(window, cx))
-            .into_any_element()
+            .into_any_element();
+        // Compact has no top bar to drag the window by.
+        framed(shell, compact, window, cx)
     }
+}
+
+/// `content` inside the window's frame: the app-drawn titlebar above it and the resize edges around it; `bare` is a screen without the top bar to move the window by.
+fn framed(
+    content: gpui_kit::AnyElement,
+    bare: bool,
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+) -> gpui_kit::AnyElement {
+    let titlebar = topbar::frame::titlebar(window, cx);
+    let handles = topbar::frame::resize_handles(window);
+    let drag = topbar::frame::traffic_lights(window, cx)
+        .filter(|_| bare)
+        .map(|_| {
+            topbar::frame::drag_region("window-drag", window, cx)
+                .absolute()
+                .top_0()
+                .left_0()
+                .w_full()
+                .h(components::style::chrome().bar_height)
+                .occlude()
+        });
+    if titlebar.is_none() && handles.is_none() && drag.is_none() {
+        return content;
+    }
+    v_flex()
+        .size_full()
+        .relative()
+        .bg(cx.theme().background)
+        .children(titlebar)
+        .child(div().relative().w_full().flex_1().min_h_0().child(content))
+        .children(drag)
+        .children(handles)
+        .into_any_element()
 }
