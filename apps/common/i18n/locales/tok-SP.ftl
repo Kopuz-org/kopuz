@@ -911,6 +911,7 @@ discover_genre_count =
     }
 discover_read_failed = Couldn't load your library: { $error }
 palette_all_results = All results for "{ $query }" in Discover
+palette_suggestions = Suggestions
 
 library_count =
     { $count ->

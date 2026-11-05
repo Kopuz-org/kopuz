@@ -74,14 +74,14 @@ Data: `api.albums(all)` inv:Albums · `api.albums_recently_added({0,64})` inv:Al
 ### 2.2 Search (`pages/search.rs`, `components/search/*`)
 Data: `api.search(query)` (lowercased, re-run on inv:Tracks/Albums; `None` when blank) · genres derived client-side from `api.albums(all)` (split `genre` on `/;,`, first album cover per genre) · `api.genre_tracks(genre, all)` inv:Tracks
 - [x] Search bar, 150 ms debounce, keydown stops propagation (so Space doesn't toggle playback)
-- [ ] Blank query → "Browse genres" grid (genre tiles with cover); empty → "no_genres_found" (missing: nothing draws a genre grid; `components::GenreCard` has no caller, so `Route::Genre` opens only from the player's genre link)
+- [x] Blank query → "Browse genres" grid (genre tiles with cover); empty → "no_genres_found" (on the Discover landing while the source's search is the library one, as `LocalSearch` draws it)
 - [x] Results: Tracks list (virtualized TrackRow, full track-row menu, play = PLAY_LIST(results, i)); Albums grid (click → Album). Layout differs if only albums. "no_results_found{query}"
-- [ ] Genre detail: back, genre title, track count, Play (PLAY_ALL), Shuffle (toggle shuffle + play shuffled), virtualized TrackRow list with column sort (missing: column sort on the genre track list)
+- [x] Genre detail: back, genre title, track count, Play (PLAY_ALL), Shuffle (toggle shuffle + play shuffled), virtualized TrackRow list with column sort
 - [x] Track-row delete in Search/Genre detail always `DELETE([key], true)` (not caps-gated; parity bug to decide)
 - [x] Add to playlist via PlaylistModal (ADD_TO_PL([key]))
-- [ ] Search filters (`caps.search_filters`): chips narrow `api.search` to one result kind
-- [ ] Search suggestions: `api.search_suggestions(query)` listed under the box while typing
-- [ ] A song played from catalog search starts RADIO_T when `caps.track_radio` (missing: results play the result list)
+- [x] Search filters (`caps.search_filters`): chips narrow `api.search` to one result kind; shelves page on scroll, a shelf's "Show all" picks its `search_filter`, the source's correction shows over the results
+- [x] Search suggestions: `api.search_suggestions(query)` listed while typing (in the palette, which is the search box)
+- [x] A song played from search starts RADIO_T when `caps.search_radio` (catalog search lists, Discover's library results and palette hits)
 
 ### 2.3 Discover (`pages/server/discover.rs`, only when `caps.discover`)
 Data: `api.catalog(continuation)` · `api.catalog_detail(CatalogDetailRequest)`
@@ -97,8 +97,8 @@ Data: `api.catalog(continuation)` · `api.catalog_detail(CatalogDetailRequest)`
 - [x] List shelves (`shelf.list`): TrackRow list, play = `set_queue{Replace, Tracks{keys}, start_index:i}`, "discover_show_all" → DiscoverPlaylist(more_ref, title)
 - [x] Failure while appending pages sets `playback_error` banner
 - [x] Explicit badge on catalog tiles and song rows (`CatalogItem.explicit`)
-- [ ] Rate a song or catalog item (`caps.rate` → `api.rate(ref, Rating)`) from the track and catalog menus (missing: album and artist tiles still carry library menus)
-- [ ] Save an album or playlist to the source's library (`caps.save` → `api.save(ref, on)`) (missing: album tiles still carry library menus; playlists are done)
+- [x] Rate a song or catalog item (`caps.rate` → `api.rate(ref, Rating)`) from the track and catalog menus
+- [x] Save an album or playlist to the source's library (`caps.save` → `api.save(ref, on)`)
 - [x] Remove an entry from the source's history (`caps.remove_from_history` → `api.remove_from_history(token)`)
 - [x] Pages the source declares (`caps.pages`) open as their own route, read with `CatalogDetailRequest::page(id)`
 

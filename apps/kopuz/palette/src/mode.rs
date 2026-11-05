@@ -50,6 +50,8 @@ pub enum Part {
     RecentCommands,
     RecentSearches,
     Commands,
+    /// What the source suggests for a half-typed query.
+    Suggestions,
     Tracks,
     Albums,
     Artists,
@@ -65,6 +67,7 @@ impl Part {
             Part::RecentCommands => "palette_recent_commands",
             Part::RecentSearches => "palette_recent_searches",
             Part::Commands => "palette_commands",
+            Part::Suggestions => "palette_suggestions",
             Part::Tracks => "tracks",
             Part::Albums => "albums",
             Part::Artists => "artists",
@@ -94,6 +97,7 @@ pub fn order(mode: Mode, searching: bool, current: bool) -> Vec<Part> {
         }
         Mode::Everything => {
             parts.push(Part::Commands);
+            parts.push(Part::Suggestions);
             parts.push(Part::Tracks);
             parts.push(Part::Albums);
             parts.push(Part::Artists);
@@ -156,6 +160,16 @@ mod tests {
         let tracks = parts.iter().position(|part| *part == Part::Tracks);
         let navigate = parts.iter().position(|part| *part == Part::Navigate);
         assert!(current < tracks && tracks < navigate);
+    }
+
+    #[test]
+    fn suggestions_lead_the_matches_and_only_while_searching() {
+        let parts = order(Mode::Everything, true, false);
+        let suggestions = parts.iter().position(|part| *part == Part::Suggestions);
+        let tracks = parts.iter().position(|part| *part == Part::Tracks);
+        assert!(suggestions.is_some() && suggestions < tracks);
+        assert!(!order(Mode::Everything, false, false).contains(&Part::Suggestions));
+        assert!(!order(Mode::Albums, true, false).contains(&Part::Suggestions));
     }
 
     #[test]
