@@ -173,6 +173,7 @@ impl PluginService {
                     homepage: None,
                     origin: PluginOrigin::Community,
                     sandboxed: true,
+                    system: waiting.plugin.origin() == plugin_host::Origin::Extension,
                     installed_version: None,
                     available_version: Some(manifest.version.clone()),
                     services: manifest
@@ -360,6 +361,7 @@ fn installed() -> Vec<PluginInfo> {
                     }
                 },
                 sandboxed: !plugin.is_native(),
+                system: plugin.origin() == plugin_host::Origin::Extension,
                 installed_version: Some(manifest.version.clone()),
                 available_version: None,
                 services: manifest
@@ -459,6 +461,7 @@ fn listed(listing: &Listing) -> PluginInfo {
         homepage: listing.homepage.clone(),
         origin: PluginOrigin::Community,
         sandboxed: true,
+        system: false,
         installed_version: None,
         available_version: Some(listing.version.clone()),
         services: listing.services.clone(),

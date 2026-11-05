@@ -66,18 +66,19 @@ enum Reread {
 }
 
 impl Registry {
-    /// The bundled plugins, then each plugin a Flatpak extension mounts under
-    /// `extensions`, then each plugin installed under `dir`. A later layer's
+    /// The bundled plugins, then each plugin in the read-only `extensions`
+    /// directories (a Flatpak extension's, a system package's), in order,
+    /// then each plugin installed under `dir`. A later layer's
     /// plugin with an earlier one's id replaces it, which is how a fix or a
     /// fork of an official plugin is tried without rebuilding kopuz. A plugin
     /// is compiled first, so one that does not compile never displaces the
     /// plugin it would replace. One that reaches hosts beyond those agreed to
     /// for its id waits in [`Self::pending`], as on a reload; one with no
     /// record is taken as agreed, as before records.
-    pub async fn load(bundled: &[Bundled], dir: Option<&Path>, extensions: Option<&Path>) -> Self {
+    pub async fn load(bundled: &[Bundled], dir: Option<&Path>, extensions: &[PathBuf]) -> Self {
         let approved = dir.map(read_approved).unwrap_or_default();
         let mut provided = Extensions::default();
-        for path in extensions.map(plugin_dirs).unwrap_or_default() {
+        for path in extensions.iter().flat_map(|root| plugin_dirs(root)) {
             match compile(&path, Origin::Extension).await {
                 Ok(plugin) => provided.plugins.push((path, Arc::new(plugin))),
                 Err(error) => {
@@ -592,7 +593,7 @@ mod tests {
         std::fs::create_dir_all(&broken).unwrap();
         std::fs::write(broken.join(MANIFEST_FILE), "id = ").unwrap();
 
-        let registry = Registry::load(&bundled, Some(&dir), None).await;
+        let registry = Registry::load(&bundled, Some(&dir), &[]).await;
         std::fs::remove_dir_all(&dir).ok();
 
         assert_eq!(registry.plugins().len(), 1);
@@ -642,7 +643,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(port.join(COMPONENT_FILE), EMPTY_COMPONENT).unwrap();
-        let registry = Registry::load(&native, Some(&dir), None).await;
+        let registry = Registry::load(&native, Some(&dir), &[]).await;
         std::fs::remove_dir_all(&dir).ok();
         assert!(!registry.for_service("ytmusic").unwrap().is_native());
     }
@@ -662,7 +663,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(fork.join(COMPONENT_FILE), b"not a component").unwrap();
-        let registry = Registry::load(&bundled, Some(&dir), None).await;
+        let registry = Registry::load(&bundled, Some(&dir), &[]).await;
         std::fs::remove_dir_all(&dir).ok();
         let serving = registry.for_service("subsonic").expect("subsonic served");
         assert_eq!(serving.origin(), Origin::Bundled);
@@ -682,7 +683,7 @@ mod tests {
             .unwrap();
             std::fs::write(path.join(COMPONENT_FILE), EMPTY_COMPONENT).unwrap();
         }
-        let registry = Registry::load(&[], Some(&dir), None).await;
+        let registry = Registry::load(&[], Some(&dir), &[]).await;
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(registry.plugins().len(), 1);
         assert_eq!(registry.dirs_of("radio"), [dir.join("my-radio-fork")]);
@@ -720,7 +721,7 @@ mod tests {
     async fn unchanged_files_keep_the_loaded_plugin() {
         let dir = scratch("unchanged");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let first = Registry::load(&[], Some(&dir), None).await;
+        let first = Registry::load(&[], Some(&dir), &[]).await;
         let again = first.reload(&dir).await;
         std::fs::remove_dir_all(&dir).ok();
         assert!(Arc::ptr_eq(serving(&first), serving(&again)));
@@ -731,7 +732,7 @@ mod tests {
     async fn an_update_that_compiles_replaces_the_loaded_plugin() {
         let dir = scratch("update");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let first = Registry::load(&[], Some(&dir), None).await;
+        let first = Registry::load(&[], Some(&dir), &[]).await;
         write(&dir, &radio("radio", "1.0.1", &["a.test"]), EMPTY_COMPONENT);
         let next = first.reload(&dir).await;
         std::fs::remove_dir_all(&dir).ok();
@@ -743,7 +744,7 @@ mod tests {
     async fn a_failed_load_keeps_the_old_module() {
         let dir = scratch("failed");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let first = Registry::load(&[], Some(&dir), None).await;
+        let first = Registry::load(&[], Some(&dir), &[]).await;
 
         write(
             &dir,
@@ -767,7 +768,7 @@ mod tests {
     async fn new_files_may_not_change_the_plugin_id() {
         let dir = scratch("id");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let first = Registry::load(&[], Some(&dir), None).await;
+        let first = Registry::load(&[], Some(&dir), &[]).await;
         write(&dir, &radio("other", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
         let next = first.reload(&dir).await;
         std::fs::remove_dir_all(&dir).ok();
@@ -779,7 +780,7 @@ mod tests {
     async fn an_update_reaching_new_hosts_waits_until_they_are_allowed() {
         let dir = scratch("hosts");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let first = Registry::load(&[], Some(&dir), None).await;
+        let first = Registry::load(&[], Some(&dir), &[]).await;
         write(
             &dir,
             &radio("radio", "1.1.0", &["a.test", "B.test"]),
@@ -811,7 +812,7 @@ mod tests {
     async fn an_update_reaching_new_hosts_still_waits_after_a_restart() {
         let dir = scratch("restart");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        Registry::load(&[], Some(&dir), None)
+        Registry::load(&[], Some(&dir), &[])
             .await
             .save_approved(&dir)
             .unwrap();
@@ -821,7 +822,7 @@ mod tests {
             EMPTY_COMPONENT,
         );
 
-        let restarted = Registry::load(&[], Some(&dir), None).await;
+        let restarted = Registry::load(&[], Some(&dir), &[]).await;
         assert!(restarted.for_service("radio").is_none());
         let [pending] = restarted.pending() else {
             panic!("the update still waits");
@@ -837,7 +838,7 @@ mod tests {
             .expect("the hosts shown are the hosts asked for")
             .save_approved(&dir)
             .unwrap();
-        let allowed = Registry::load(&[], Some(&dir), None).await;
+        let allowed = Registry::load(&[], Some(&dir), &[]).await;
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(serving(&allowed).manifest().version, "1.1.0");
         assert!(allowed.pending().is_empty());
@@ -851,7 +852,7 @@ mod tests {
         }];
         let dir = scratch("bundled");
         std::fs::remove_dir_all(dir.join("radio")).unwrap();
-        Registry::load(&bundled, Some(&dir), None)
+        Registry::load(&bundled, Some(&dir), &[])
             .await
             .save_approved(&dir)
             .unwrap();
@@ -862,7 +863,7 @@ mod tests {
             EMPTY_COMPONENT,
         );
 
-        let restarted = Registry::load(&bundled, Some(&dir), None).await;
+        let restarted = Registry::load(&bundled, Some(&dir), &[]).await;
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(serving(&restarted).origin(), Origin::Bundled);
         let [pending] = restarted.pending() else {
@@ -875,13 +876,13 @@ mod tests {
     async fn a_waiting_plugin_whose_files_break_for_a_while_still_waits() {
         let dir = scratch("broken-wait");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        Registry::load(&[], Some(&dir), None)
+        Registry::load(&[], Some(&dir), &[])
             .await
             .save_approved(&dir)
             .unwrap();
         let widened = radio("radio", "1.1.0", &["a.test", "b.test"]);
         write(&dir, &widened, EMPTY_COMPONENT);
-        let restarted = Registry::load(&[], Some(&dir), None).await;
+        let restarted = Registry::load(&[], Some(&dir), &[]).await;
         assert_eq!(restarted.pending().len(), 1);
 
         write(&dir, "id = ", EMPTY_COMPONENT);
@@ -912,14 +913,16 @@ mod tests {
         let dir = scratch("ext-layers-installed");
         std::fs::remove_dir_all(dir.join("radio")).unwrap();
 
-        let extended = Registry::load(&bundled, Some(&dir), Some(&extensions)).await;
+        let extended =
+            Registry::load(&bundled, Some(&dir), std::slice::from_ref(&extensions)).await;
         assert_eq!(serving(&extended).origin(), Origin::Extension);
         assert_eq!(serving(&extended).manifest().version, "2.0.0");
         assert!(extended.dirs_of("radio").is_empty());
 
         std::fs::create_dir_all(dir.join("radio")).unwrap();
         write(&dir, &radio("radio", "3.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let installed = Registry::load(&bundled, Some(&dir), Some(&extensions)).await;
+        let installed =
+            Registry::load(&bundled, Some(&dir), std::slice::from_ref(&extensions)).await;
         assert_eq!(serving(&installed).origin(), Origin::Installed);
         assert_eq!(installed.plugins().len(), 1);
         assert_eq!(installed.dirs_of("radio"), [dir.join("radio")]);
@@ -938,7 +941,7 @@ mod tests {
         let dir = scratch("ext-missing");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
         let missing = dir.join("no-such-extensions");
-        let registry = Registry::load(&[], Some(&dir), Some(&missing)).await;
+        let registry = Registry::load(&[], Some(&dir), std::slice::from_ref(&missing)).await;
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(serving(&registry).origin(), Origin::Installed);
         assert!(!registry.from_extension("radio"));
@@ -949,7 +952,7 @@ mod tests {
     async fn an_extension_reaching_hosts_not_agreed_to_waits_until_they_are_allowed() {
         let dir = scratch("ext-hosts");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        Registry::load(&[], Some(&dir), None)
+        Registry::load(&[], Some(&dir), &[])
             .await
             .save_approved(&dir)
             .unwrap();
@@ -961,7 +964,7 @@ mod tests {
             EMPTY_COMPONENT,
         );
 
-        let restarted = Registry::load(&[], Some(&dir), Some(&extensions)).await;
+        let restarted = Registry::load(&[], Some(&dir), std::slice::from_ref(&extensions)).await;
         assert!(restarted.for_service("radio").is_none());
         let [pending] = restarted.pending() else {
             panic!("the extension waits");
@@ -979,7 +982,7 @@ mod tests {
         assert!(allowed.pending().is_empty());
         assert!(allowed.reload(&dir).await.same_as(&allowed));
 
-        let again = Registry::load(&[], Some(&dir), Some(&extensions)).await;
+        let again = Registry::load(&[], Some(&dir), std::slice::from_ref(&extensions)).await;
         std::fs::remove_dir_all(&dir).ok();
         std::fs::remove_dir_all(&extensions).ok();
         assert_eq!(serving(&again).manifest().version, "1.1.0");

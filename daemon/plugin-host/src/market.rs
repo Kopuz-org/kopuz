@@ -61,7 +61,7 @@ pub enum MarketError {
     NotListed(String),
     #[error("`{0}` is an official plugin; it ships with kopuz and is updated with it")]
     Official(String),
-    #[error("`{0}` comes from a Flatpak extension; remove it with `flatpak uninstall`")]
+    #[error("`{0}` comes from a Flatpak extension or a system package; remove it there")]
     Extension(String),
     #[error("the download does not match the hash the marketplace lists")]
     HashMismatch,

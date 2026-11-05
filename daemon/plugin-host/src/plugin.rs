@@ -18,7 +18,8 @@ pub enum Origin {
     Bundled,
     /// Installed into the plugin directory.
     Installed,
-    /// Mounted read-only by a Flatpak extension; Flatpak owns its files.
+    /// Read-only, from a Flatpak extension or a system package, whose
+    /// package manager owns its files.
     Extension,
 }
 

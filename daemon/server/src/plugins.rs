@@ -18,21 +18,57 @@ static REGISTRY: OnceLock<ArcSwap<Registry>> = OnceLock::new();
 /// Where the Flatpak manifest's `moe.kopuz.kopuz.Plugin` extension point mounts each extension.
 pub const FLATPAK_EXTENSION_DIR: &str = "/app/plugins";
 
-/// The plugins Flatpak extensions provide, inside the Flatpak only.
-pub fn flatpak_extensions() -> Option<PathBuf> {
-    crate::cookies::browser::in_flatpak().then(|| PathBuf::from(FLATPAK_EXTENSION_DIR))
+/// The read-only directories plugins are read from beneath `dir`: the
+/// Flatpak's extension point inside the Flatpak, then `kopuz/plugins` in each
+/// data directory (`$XDG_DATA_DIRS`; `/usr/local/share` and `/usr/share` when
+/// unset), where a system package or a Nix profile puts one, or the list in
+/// `KOPUZ_PLUGIN_PATH` in their place.
+pub fn read_only_dirs(dir: &std::path::Path) -> Vec<PathBuf> {
+    read_only_dirs_from(
+        crate::cookies::browser::in_flatpak().then(|| PathBuf::from(FLATPAK_EXTENSION_DIR)),
+        std::env::var_os("KOPUZ_PLUGIN_PATH"),
+        std::env::var_os("XDG_DATA_DIRS"),
+        dir,
+    )
+}
+
+fn read_only_dirs_from(
+    flatpak: Option<PathBuf>,
+    plugin_path: Option<std::ffi::OsString>,
+    data_dirs: Option<std::ffi::OsString>,
+    dir: &std::path::Path,
+) -> Vec<PathBuf> {
+    let listed = |paths: Option<std::ffi::OsString>| {
+        paths
+            .filter(|paths| !paths.is_empty())
+            .map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
+    };
+    let system = listed(plugin_path).unwrap_or_else(|| {
+        listed(data_dirs)
+            .unwrap_or_else(|| vec!["/usr/local/share".into(), "/usr/share".into()])
+            .into_iter()
+            .map(|data| data.join("kopuz").join("plugins"))
+            .collect()
+    });
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for read_only in flatpak.into_iter().chain(system) {
+        if read_only.is_absolute() && read_only != dir && !dirs.contains(&read_only) {
+            dirs.push(read_only);
+        }
+    }
+    dirs
 }
 
 /// Name the directory installed plugins are read from and load them, with
 /// those under the read-only `extensions` beneath them. Only the first call
 /// counts.
-pub async fn init(dir: Option<PathBuf>, extensions: Option<PathBuf>) {
+pub async fn init(dir: Option<PathBuf>, extensions: Vec<PathBuf>) {
     if DIR.set(dir).is_err() {
         tracing::debug!("the plugin directory was already set");
         return;
     }
     let _one_at_a_time = CHANGING.lock().await;
-    let loaded = Arc::new(Registry::load(&official(), self::dir(), extensions.as_deref()).await);
+    let loaded = Arc::new(Registry::load(&official(), self::dir(), &extensions).await);
     for plugin in loaded.plugins() {
         tracing::info!(
             plugin = %plugin.id(),
@@ -398,6 +434,42 @@ impl utils::http::Reach for Reach {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn read_only_plugins_come_from_the_flatpak_and_each_data_directory() {
+        let mine = std::path::Path::new("/home/me/.local/share/kopuz/plugins");
+        assert_eq!(
+            read_only_dirs_from(
+                Some("/app/plugins".into()),
+                None,
+                Some("/app/share:/usr/share".into()),
+                mine
+            ),
+            [
+                PathBuf::from("/app/plugins"),
+                PathBuf::from("/app/share/kopuz/plugins"),
+                PathBuf::from("/usr/share/kopuz/plugins"),
+            ]
+        );
+        assert_eq!(
+            read_only_dirs_from(None, None, None, mine),
+            [
+                PathBuf::from("/usr/local/share/kopuz/plugins"),
+                PathBuf::from("/usr/share/kopuz/plugins"),
+            ]
+        );
+        assert_eq!(
+            read_only_dirs_from(
+                None,
+                Some("/opt/plugins:relative:/home/me/.local/share/kopuz/plugins".into()),
+                Some("/usr/share".into()),
+                mine,
+            ),
+            [PathBuf::from("/opt/plugins")],
+            "the listed path wins; a relative entry and the plugin directory are skipped"
+        );
+    }
 
     #[test]
     fn a_server_written_with_a_trailing_dot_still_names_itself() {

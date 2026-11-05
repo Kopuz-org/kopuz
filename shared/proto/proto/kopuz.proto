@@ -2162,6 +2162,8 @@ message PluginInfo {
   repeated string network = 10;
   bool sandboxed = 11;
   optional PluginUpdate update = 12;
+  // From a Flatpak extension or a system package, which removes it.
+  bool system = 13;
 }
 
 message PluginCatalog {
