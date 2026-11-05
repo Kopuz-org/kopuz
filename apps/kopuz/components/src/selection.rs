@@ -9,8 +9,8 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{ActiveTheme as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, Div, FontWeight, IntoElement, ParentElement as _, Rems, RenderOnce,
-    SharedString, Styled as _, Window, div, px, rems,
+    AnyElement, App, Div, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
+    Rems, RenderOnce, SharedString, Styled as _, Window, div, px, rems,
 };
 use store::Target;
 
@@ -152,6 +152,8 @@ impl RenderOnce for SelectionBar {
             .opacity(fade)
             .child(
                 h_flex()
+                    // The pill floats over the list; a click on it must not reach the row beneath.
+                    .occlude()
                     .gap_4()
                     .items_center()
                     .px_6()

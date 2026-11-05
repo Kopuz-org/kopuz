@@ -118,9 +118,14 @@ impl QueueModel {
         self.snapshot.items.iter().any(|item| item.key == key)
     }
 
-    /// What the daemon built the queue from, which a windowed listing compares against its own filter.
-    pub fn context(&self) -> Option<&QueueContext> {
-        self.snapshot.context.as_ref()
+    /// Whether the daemon built the queue from `context` and it is still `len` long, as a windowed listing checks.
+    pub fn built_from(&self, context: &QueueContext, len: usize) -> bool {
+        built_from(&self.snapshot, context, len)
+    }
+
+    /// The key at unshuffled index `index`, the row `JumpPhysical` lands on.
+    pub fn physical_key(&self, index: usize) -> Option<&str> {
+        physical_key(&self.snapshot, index)
     }
 
     /// Whether the queue is exactly `keys`, in the listing's own order however shuffle has played it.
@@ -281,6 +286,19 @@ fn reindex(at: u32, from: u32, to: u32) -> u32 {
     }
 }
 
+fn built_from(snapshot: &QueueSnapshot, context: &QueueContext, len: usize) -> bool {
+    snapshot.context.as_ref() == Some(context) && snapshot.items.len() == len
+}
+
+fn physical_key(snapshot: &QueueSnapshot, index: usize) -> Option<&str> {
+    let order = &snapshot.shuffle_order;
+    let at = match order.len() == snapshot.items.len() && !order.is_empty() {
+        true => order.iter().position(|at| *at as usize == index)?,
+        false => index,
+    };
+    snapshot.items.get(at).map(|item| item.key.as_str())
+}
+
 fn holds_by<'a>(
     snapshot: &QueueSnapshot,
     len: usize,
@@ -311,7 +329,9 @@ fn edit(edit: QueueEdit, cx: &App) {
 
 #[cfg(test)]
 mod tests {
-    use super::{QueueSnapshot, TrackInfo, holds_by, reindex};
+    use api::{QueueContext, TrackFilter};
+
+    use super::{QueueSnapshot, TrackInfo, built_from, holds_by, physical_key, reindex};
 
     fn snapshot(keys: &[&str], shuffle_order: Vec<u32>) -> QueueSnapshot {
         QueueSnapshot {
@@ -345,6 +365,42 @@ mod tests {
         let queue = snapshot(&["c", "a", "b"], vec![2, 0, 1]);
         assert!(holds(&queue, &["a", "b", "c"]));
         assert!(!holds(&queue, &["c", "a", "b"]));
+    }
+
+    #[test]
+    fn a_physical_index_names_the_row_jump_physical_plays() {
+        let straight = snapshot(&["a", "b", "c"], Vec::new());
+        assert_eq!(physical_key(&straight, 1), Some("b"));
+        // Play order c, a, b: unshuffled index 0 is a, which plays second.
+        let shuffled = snapshot(&["c", "a", "b"], vec![2, 0, 1]);
+        assert_eq!(physical_key(&shuffled, 0), Some("a"));
+        assert_eq!(physical_key(&shuffled, 2), Some("c"));
+        assert_eq!(physical_key(&shuffled, 3), None);
+    }
+
+    #[test]
+    fn two_filters_with_the_same_count_are_different_listings() {
+        let filter = |genre: &str| QueueContext::Filter {
+            filter: TrackFilter {
+                genre: Some(genre.into()),
+                ..TrackFilter::default()
+            },
+        };
+        let queue = QueueSnapshot {
+            context: Some(filter("Rock")),
+            ..snapshot(&["a", "b"], Vec::new())
+        };
+        assert!(built_from(&queue, &filter("Rock"), 2));
+        assert!(!built_from(&queue, &filter("Jazz"), 2));
+        assert!(!built_from(&queue, &filter("Rock"), 3));
+    }
+
+    #[test]
+    fn a_reordered_queue_no_longer_names_the_listing_row() {
+        // The listing has a, b, c; dragging c to the top leaves the same context and length.
+        let reordered = snapshot(&["c", "a", "b"], Vec::new());
+        assert_eq!(physical_key(&reordered, 0), Some("c"));
+        assert_ne!(physical_key(&reordered, 0), Some("a"));
     }
 
     #[test]

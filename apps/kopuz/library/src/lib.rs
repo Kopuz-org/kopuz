@@ -660,7 +660,7 @@ impl Library {
         }
         let loaded: HashSet<String> = self.rows.iter().map(|row| row.key.clone()).collect();
         self.selection.retain_loaded(&loaded, self.whole);
-        self.queued = QueueModel::global(cx).read(cx).len() == self.total();
+        self.queued = self.listing_queued(cx);
         self.rebuild(cx);
     }
 
@@ -742,7 +742,7 @@ impl Library {
     }
 
     fn adopt_queue(&mut self, cx: &mut Context<Self>) {
-        let queued = QueueModel::global(cx).read(cx).len() == self.total();
+        let queued = self.listing_queued(cx);
         if queued != self.queued {
             self.queued = queued;
             cx.notify();
@@ -820,7 +820,7 @@ impl Library {
     }
 
     pub(crate) fn is_playing(&self, key: &str) -> bool {
-        self.queued && self.playing.is_track(key)
+        components::NowPlaying::WhenQueued.lights(self.queued) && self.playing.is_track(key)
     }
 
     /// The genre column's text: a track row carries none, so it is its album's.

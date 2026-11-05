@@ -29,6 +29,16 @@ pub enum NowPlaying {
     WhenQueued,
 }
 
+impl NowPlaying {
+    /// Whether the playing track's row lights, given whether the queue is this listing.
+    pub fn lights(self, queued: bool) -> bool {
+        match self {
+            NowPlaying::ByKey => true,
+            NowPlaying::WhenQueued => queued,
+        }
+    }
+}
+
 /// Which columns a list draws; an album view numbers its rows and hides the album column.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TrackListOptions {
@@ -445,11 +455,8 @@ impl TrackList {
             return div().into_any_element();
         };
         let key = track.key.clone();
-        let lit = match self.options.now_playing {
-            NowPlaying::ByKey => true,
-            NowPlaying::WhenQueued => self.queued,
-        };
-        let playing = lit && self.playing.as_deref() == Some(key.as_str());
+        let playing = self.options.now_playing.lights(self.queued)
+            && self.playing.as_deref() == Some(key.as_str());
         let selected = self.selection.contains(&key);
         let lead = self.options.show_index.then(|| {
             let number = match self.options.track_numbers {
@@ -567,5 +574,17 @@ impl From<RowEdit> for TrackListEvent {
             RowEdit::RemoveFromPlaylist(index) => TrackListEvent::RemoveFromPlaylist(index),
             RowEdit::Delete(keys) => TrackListEvent::Delete(keys),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NowPlaying;
+
+    #[test]
+    fn a_listing_waiting_for_its_queue_stays_dark_until_it_plays() {
+        assert!(NowPlaying::ByKey.lights(false));
+        assert!(!NowPlaying::WhenQueued.lights(false));
+        assert!(NowPlaying::WhenQueued.lights(true));
     }
 }

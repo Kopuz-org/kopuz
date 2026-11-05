@@ -1,4 +1,8 @@
+use std::fmt::Display;
+use std::future::Future;
 use std::time::Duration;
+
+use futures::channel::oneshot;
 
 use api::{ApiEvent, ConfigView, EditOutcome, EditReport, LockSource, SettingLock};
 use config::{SettingKey, Settings, SettingsEdit};
@@ -21,6 +25,8 @@ pub struct ConfigModel {
     pending: Vec<SettingsEdit>,
     /// Edits sent and not answered yet; a view read meanwhile keeps them on top.
     in_flight: Vec<SettingsEdit>,
+    /// Resolves once the write in flight is answered, whatever becomes of the task that sent it.
+    writing: Option<oneshot::Receiver<()>>,
     saved: Vec<SettingKey>,
     _save: Option<Task<()>>,
     _tick: Option<Task<()>>,
@@ -50,6 +56,7 @@ impl ConfigModel {
             loaded: false,
             pending: Vec::new(),
             in_flight: Vec::new(),
+            writing: None,
             saved: Vec::new(),
             _save: None,
             _tick: None,
@@ -154,27 +161,19 @@ impl ConfigModel {
         }
     }
 
-    /// Send every queued edit now instead of after the settle delay; the task ends once the daemon answers.
+    /// For shutdown: wait for the write in flight, then send what is still queued; nothing comes back to the UI.
     pub fn flush(&mut self, cx: &mut Context<Self>) -> Task<()> {
-        if !self.loaded || self.pending.is_empty() {
-            return Task::ready(());
-        }
+        // A save's UI half would spawn after GPUI began quitting; the write it sent carries on without it.
         self._save = None;
-        let edits = std::mem::take(&mut self.pending);
-        self.in_flight.extend(edits.iter().cloned());
-        let sent = edits.clone();
-        let call = Link::global(cx).call(move |api| async move { api.edit_config(sent).await });
-        cx.spawn(async move |this, cx| {
-            let result = call.await;
-            this.update(cx, |this, cx| {
-                this.in_flight.retain(|held| !edits.contains(held));
-                match result {
-                    Ok(report) => this.answer(&edits, report, cx),
-                    Err(error) => tracing::warn!(%error, "flushing the config failed"),
-                }
-            })
-            .ok();
-        })
+        let writing = self.writing.take();
+        let edits = match self.loaded {
+            true => std::mem::take(&mut self.pending),
+            false => Vec::new(),
+        };
+        let link = Link::global(cx).clone();
+        let send = (!edits.is_empty())
+            .then_some(move || link.call(move |api| async move { api.edit_config(edits).await }));
+        cx.background_executor().spawn(settle(writing, send))
     }
 
     fn schedule_save(&mut self, cx: &mut Context<Self>) {
@@ -185,8 +184,13 @@ impl ConfigModel {
                 this.in_flight = edits.clone();
                 (!edits.is_empty()).then(|| {
                     let sent = edits.clone();
-                    let call = Link::global(cx)
-                        .call(move |api| async move { api.edit_config(sent).await });
+                    let (done, writing) = oneshot::channel();
+                    this.writing = Some(writing);
+                    let call = Link::global(cx).call(move |api| async move {
+                        let report = api.edit_config(sent).await;
+                        done.send(()).ok();
+                        report
+                    });
                     (edits, call)
                 })
             }) else {
@@ -199,6 +203,7 @@ impl ConfigModel {
             let result = call.await;
             this.update(cx, |this, cx| {
                 this._save = None;
+                this.writing = None;
                 this.in_flight.clear();
                 match result {
                     Ok(report) => this.answer(&edits, report, cx),
@@ -309,6 +314,21 @@ fn queue(pending: &mut Vec<SettingsEdit>, edit: SettingsEdit) {
     pending.push(edit);
 }
 
+/// Wait out the write already sent, so a newer edit cannot land before it, then send the rest.
+async fn settle<T, E: Display, Fut: Future<Output = Result<T, E>>>(
+    writing: Option<oneshot::Receiver<()>>,
+    send: Option<impl FnOnce() -> Fut>,
+) {
+    if let Some(writing) = writing {
+        writing.await.ok();
+    }
+    if let Some(send) = send
+        && let Err(error) = send().await
+    {
+        tracing::warn!(%error, "flushing the config failed");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,5 +361,42 @@ mod tests {
         queue(&mut pending, put("b"));
         queue(&mut pending, crossfade(3));
         assert_eq!(pending, vec![put("a"), put("b"), crossfade(3)]);
+    }
+
+    fn poll<F: Future>(task: &mut std::pin::Pin<Box<F>>) -> bool {
+        let waker = futures::task::noop_waker();
+        let mut cx = std::task::Context::from_waker(&waker);
+        task.as_mut().poll(&mut cx).is_ready()
+    }
+
+    #[test]
+    fn a_quit_waits_for_the_write_already_out_even_with_nothing_queued() {
+        let (done, writing) = oneshot::channel();
+        let mut task = Box::pin(settle(
+            Some(writing),
+            None::<fn() -> std::future::Ready<Result<(), String>>>,
+        ));
+        assert!(!poll(&mut task));
+        done.send(()).ok();
+        assert!(poll(&mut task));
+    }
+
+    #[test]
+    fn a_quit_sends_the_rest_only_after_the_write_already_out() {
+        let sent = std::rc::Rc::new(std::cell::Cell::new(false));
+        let flag = sent.clone();
+        let (done, writing) = oneshot::channel();
+        let mut task = Box::pin(settle(
+            Some(writing),
+            Some(move || {
+                flag.set(true);
+                std::future::ready(Ok::<(), String>(()))
+            }),
+        ));
+        assert!(!poll(&mut task));
+        assert!(!sent.get());
+        done.send(()).ok();
+        assert!(poll(&mut task));
+        assert!(sent.get());
     }
 }

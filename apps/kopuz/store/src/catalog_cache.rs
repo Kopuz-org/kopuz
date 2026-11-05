@@ -39,8 +39,10 @@ impl CatalogCache {
     /// Keyed by the active source as well: two sources can hand out the same id.
     fn key(id: &str, cx: &App) -> String {
         let sources = SourcesModel::global(cx);
-        let source = sources.read(cx).active().map(|source| source.id.as_str());
-        format!("{}\u{0}{id}", source.unwrap_or_default())
+        key_of(
+            sources.read(cx).active().map(|source| source.id.as_str()),
+            id,
+        )
     }
 
     pub fn get(id: &str, cx: &App) -> Option<Cached> {
@@ -61,6 +63,10 @@ impl CatalogCache {
 
     pub fn put(id: &str, detail: CatalogDetail, cx: &mut App) {
         let key = Self::key(id, cx);
+        Self::put_at(key, detail, cx);
+    }
+
+    fn put_at(key: String, detail: CatalogDetail, cx: &mut App) {
         let pages = &mut cx.default_global::<Self>().pages;
         pages.insert(
             key,
@@ -85,9 +91,15 @@ impl CatalogCache {
             return;
         }
         let key = Self::key(&id, cx);
+        let armed = key.clone();
         let dwell = cx.spawn(async move |cx| {
             cx.background_executor().timer(DWELL).await;
-            cx.update(|cx| Self::prefetch(kind, id, cx));
+            cx.update(|cx| {
+                // A source switched during the dwell would be asked for an id another source gave out.
+                if Self::key(&id, cx) == armed {
+                    Self::prefetch(kind, id, armed, cx);
+                }
+            });
         });
         cx.default_global::<Self>().armed = Some((key, dwell));
     }
@@ -101,12 +113,13 @@ impl CatalogCache {
         }
     }
 
-    fn prefetch(kind: CatalogItemKind, id: String, cx: &mut App) {
-        let request = CatalogDetailRequest::new(kind, id.clone());
+    /// The answer is held under the source that was asked, even if another is active by the time it lands.
+    fn prefetch(kind: CatalogItemKind, id: String, key: String, cx: &mut App) {
+        let request = CatalogDetailRequest::new(kind, id);
         let call =
             Link::global(cx).call(move |api| async move { api.catalog_detail(request).await });
         cx.spawn(async move |cx| match call.await {
-            Ok(detail) => cx.update(|cx| Self::put(&id, detail, cx)),
+            Ok(detail) => cx.update(|cx| Self::put_at(key, detail, cx)),
             Err(error) => tracing::debug!(%error, "prefetching a catalog page failed"),
         })
         .detach();
@@ -118,5 +131,22 @@ impl CatalogCache {
         if let Some(entry) = cx.default_global::<Self>().pages.get_mut(&key) {
             entry.detail = detail;
         }
+    }
+}
+
+fn key_of(source: Option<&str>, id: &str) -> String {
+    format!("{}\u{0}{id}", source.unwrap_or_default())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::key_of;
+
+    #[test]
+    fn the_same_id_from_two_sources_is_two_pages() {
+        // A dwell armed on source A finds a different key once B is active, so it never fetches.
+        let armed = key_of(Some("a"), "MPREb_1");
+        assert_ne!(armed, key_of(Some("b"), "MPREb_1"));
+        assert_eq!(armed, key_of(Some("a"), "MPREb_1"));
     }
 }

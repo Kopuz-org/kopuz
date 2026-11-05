@@ -208,6 +208,20 @@ struct Press {
     fired: bool,
 }
 
+impl Press {
+    /// Each press starts clean, so a hold that ran out and was released off the row swallows nothing later.
+    fn begin(&mut self, timer: Option<Task<()>>) {
+        self.fired = false;
+        self.timer = timer;
+    }
+
+    /// Whether the click ending this press is the release of a long press, which must not also play the row.
+    fn swallows_click(&mut self) -> bool {
+        std::mem::take(&mut self.fired)
+    }
+}
+
+/// Release, drag or leaving stops the hold; `fired` stays for the click that follows a release.
 fn cancel(press: &Entity<Press>, cx: &mut App) {
     press.update(cx, |press, _| press.timer = None);
 }
@@ -297,10 +311,7 @@ impl RenderOnce for TrackRow {
                         })
                         .ok();
                     });
-                    down.update(cx, |press, _| {
-                        press.fired = false;
-                        press.timer = Some(timer);
-                    });
+                    down.update(cx, |press, _| press.begin(Some(timer)));
                 })
                 .on_mouse_up(MouseButton::Left, move |_, _, cx| cancel(&up, cx))
                 .on_hover(move |over, _, cx| {
@@ -318,7 +329,7 @@ impl RenderOnce for TrackRow {
             })
             .when_some(self.click, |row, click| {
                 row.on_click(move |event, window, cx| {
-                    if press.update(cx, |press, _| std::mem::take(&mut press.fired)) {
+                    if press.update(cx, |press, _| press.swallows_click()) {
                         return;
                     }
                     click(event, window, cx)
@@ -551,7 +562,7 @@ fn dim(cell: Div, cx: &App) -> Div {
 
 #[cfg(test)]
 mod tests {
-    use super::CopyMark;
+    use super::{CopyMark, Press};
 
     #[test]
     fn a_download_outranks_a_cached_copy() {
@@ -559,5 +570,24 @@ mod tests {
         assert_eq!(CopyMark::of(true, false), Some(CopyMark::Downloaded));
         assert_eq!(CopyMark::of(false, true), Some(CopyMark::Cached));
         assert_eq!(CopyMark::of(false, false), None);
+    }
+
+    #[test]
+    fn a_long_press_swallows_only_its_own_release() {
+        let mut press = Press::default();
+        press.begin(None);
+        press.fired = true;
+        assert!(press.swallows_click());
+        assert!(!press.swallows_click());
+    }
+
+    #[test]
+    fn a_long_press_released_off_the_row_leaves_the_next_click_alone() {
+        let mut press = Press::default();
+        press.begin(None);
+        // The hold ran out, then the pointer left the row, so no click consumed the mark.
+        press.fired = true;
+        press.begin(None);
+        assert!(!press.swallows_click());
     }
 }

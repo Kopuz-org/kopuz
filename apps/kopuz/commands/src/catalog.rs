@@ -1,10 +1,10 @@
 //! The catalog verbs: rate, save, follow, take out of history, and an opened source playlist's own menu.
 //! An entry exists only when the source's capabilities take the verb and the item carries the ref for it.
 
-use api::{CatalogActions, CatalogItemKind, PlaylistCapability, PlaylistEdit, Rating};
+use api::{CatalogActions, CatalogItemKind, PlaylistCapability, Rating};
 use components::format::{t, t_with};
 use gpui_kit::{App, SharedString, Window};
-use store::{CatalogEntry, CatalogMarks, Navigator, Route, SourcesModel, Target, actions};
+use store::{CatalogEntry, CatalogMarks, Navigator, Route, SourcesModel, Target};
 
 use crate::ops::caps;
 
@@ -117,20 +117,16 @@ pub fn edit_details(target: &Target, window: &mut Window, cx: &mut App) {
     };
     let Some(privacy) = entry.privacy else { return };
     let id = entry.id.to_string();
+    // The page was read before this session's last save, so that save is what the editor reopens with.
+    let (description, privacy) = match CatalogMarks::global(cx).read(cx).details(&id) {
+        Some((description, privacy)) => (SharedString::from(description.to_string()), privacy),
+        None => (entry.description.clone().unwrap_or_default(), privacy),
+    };
     components::playlist_details::open(
-        entry.description.clone().unwrap_or_default(),
+        description,
         privacy,
         move |description, privacy, cx| {
-            let id = id.clone();
-            let edit = PlaylistEdit {
-                name: None,
-                description: Some(description),
-                privacy: Some(privacy),
-            };
-            actions::run(
-                cx,
-                move |api| async move { api.edit_playlist(id, edit).await },
-            );
+            CatalogMarks::edit_details(id.clone(), description, privacy, cx)
         },
         window,
         cx,

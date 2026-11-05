@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use api::{ApiEvent, CatalogActions, CatalogItem, Rating};
+use api::{ApiEvent, CatalogActions, CatalogItem, PlaylistEdit, PlaylistPrivacy, Rating};
 use gpui_kit::{App, Context, Entity, Subscription};
 use link::Link;
 
@@ -22,6 +22,8 @@ struct Taken {
     saved: HashMap<String, bool>,
     followed: HashMap<String, bool>,
     removed: HashSet<String>,
+    /// A playlist's description and privacy as last saved, by playlist id.
+    details: HashMap<String, (String, PlaylistPrivacy)>,
 }
 
 impl Taken {
@@ -103,6 +105,28 @@ impl CatalogMarks {
     /// Whether a history row was removed, which is a listing's cue to drop it.
     pub fn is_removed(&self, token: &str) -> bool {
         self.taken.removed.contains(token)
+    }
+
+    /// A playlist's description and privacy as this session last saved them, over what its page was read with.
+    pub fn details(&self, id: &str) -> Option<(&str, PlaylistPrivacy)> {
+        let (description, privacy) = self.taken.details.get(id)?;
+        Some((description.as_str(), *privacy))
+    }
+
+    pub fn edit_details(id: String, description: String, privacy: PlaylistPrivacy, cx: &mut App) {
+        let sent = id.clone();
+        let edit = PlaylistEdit {
+            name: None,
+            description: Some(description.clone()),
+            privacy: Some(privacy),
+        };
+        Self::send(
+            cx,
+            move |api| async move { api.edit_playlist(sent, edit).await },
+            move |marks| {
+                marks.taken.details.insert(id, (description, privacy));
+            },
+        );
     }
 
     /// Like, dislike or clear; a like on a song also sets its favorite at the source.
@@ -197,6 +221,7 @@ mod tests {
             saved: HashMap::from([("s".to_string(), true)]),
             followed: HashMap::from([("f".to_string(), true)]),
             removed: HashSet::from(["h".to_string()]),
+            details: HashMap::new(),
         }
     }
 
