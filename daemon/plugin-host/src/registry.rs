@@ -36,11 +36,20 @@ pub struct Pending {
     dir: PathBuf,
 }
 
+/// The plugins Flatpak extensions provide. Read once at load, since Flatpak
+/// mounts an extension only when the app starts.
+#[derive(Debug, Default, Clone)]
+struct Extensions {
+    plugins: Vec<(PathBuf, Arc<Plugin>)>,
+    unreadable: bool,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Registry {
     plugins: Vec<Arc<Plugin>>,
     by_service: HashMap<String, Arc<Plugin>>,
     bundled: Vec<Arc<Plugin>>,
+    extensions: Extensions,
     /// Each installed plugin and the directory it was read from, in load order.
     installed: Vec<(PathBuf, Arc<Plugin>)>,
     pending: Vec<Pending>,
@@ -57,49 +66,50 @@ enum Reread {
 }
 
 impl Registry {
-    /// The bundled plugins, then each plugin installed under `dir`. An
-    /// installed plugin with a bundled plugin's id replaces it, which is how a
-    /// fix or a fork of an official plugin is tried without rebuilding kopuz.
-    /// An installed plugin is compiled first, so one that does not compile
-    /// never displaces the plugin it would replace. One that reaches hosts
-    /// beyond those agreed to for its id waits in [`Self::pending`], as on a
-    /// reload; one with no record is taken as agreed, as before records.
-    pub async fn load(bundled: &[Bundled], dir: Option<&Path>) -> Self {
+    /// The bundled plugins, then each plugin a Flatpak extension mounts under
+    /// `extensions`, then each plugin installed under `dir`. A later layer's
+    /// plugin with an earlier one's id replaces it, which is how a fix or a
+    /// fork of an official plugin is tried without rebuilding kopuz. A plugin
+    /// is compiled first, so one that does not compile never displaces the
+    /// plugin it would replace. One that reaches hosts beyond those agreed to
+    /// for its id waits in [`Self::pending`], as on a reload; one with no
+    /// record is taken as agreed, as before records.
+    pub async fn load(bundled: &[Bundled], dir: Option<&Path>, extensions: Option<&Path>) -> Self {
         let approved = dir.map(read_approved).unwrap_or_default();
+        let mut provided = Extensions::default();
+        for path in extensions.map(plugin_dirs).unwrap_or_default() {
+            match compile(&path, Origin::Extension).await {
+                Ok(plugin) => provided.plugins.push((path, Arc::new(plugin))),
+                Err(error) => {
+                    provided.unreadable = true;
+                    tracing::warn!(plugin = %path.display(), %error, "plugin not loaded");
+                }
+            }
+        }
         let mut installed = Vec::new();
         let mut pending = Vec::new();
         let mut unreadable = false;
         for path in dir.map(plugin_dirs).unwrap_or_default() {
-            match read_plugin(&path) {
-                Ok((manifest, wasm)) => {
-                    let plugin =
-                        Plugin::new(manifest, Code::Wasm(Cow::Owned(wasm)), Origin::Installed);
-                    match plugin.prepare().await {
-                        Ok(()) => {
-                            let plugin = Arc::new(plugin);
-                            let added_hosts = approved
-                                .get(plugin.id())
-                                .map(|agreed| added_hosts(agreed, &plugin))
-                                .unwrap_or_default();
-                            if added_hosts.is_empty() {
-                                installed.push((path, plugin));
-                            } else {
-                                tracing::warn!(
-                                    plugin = %plugin.id(),
-                                    hosts = ?added_hosts,
-                                    "a plugin reaches hosts not yet allowed and waits"
-                                );
-                                pending.push(Pending {
-                                    plugin,
-                                    added_hosts,
-                                    dir: path,
-                                });
-                            }
-                        }
-                        Err(error) => {
-                            unreadable = true;
-                            tracing::warn!(plugin = %path.display(), %error, "plugin not loaded");
-                        }
+            match compile(&path, Origin::Installed).await {
+                Ok(plugin) => {
+                    let plugin = Arc::new(plugin);
+                    let added_hosts = approved
+                        .get(plugin.id())
+                        .map(|agreed| added_hosts(agreed, &plugin))
+                        .unwrap_or_default();
+                    if added_hosts.is_empty() {
+                        installed.push((path, plugin));
+                    } else {
+                        tracing::warn!(
+                            plugin = %plugin.id(),
+                            hosts = ?added_hosts,
+                            "a plugin reaches hosts not yet allowed and waits"
+                        );
+                        pending.push(Pending {
+                            plugin,
+                            added_hosts,
+                            dir: path,
+                        });
                     }
                 }
                 Err(error) => {
@@ -110,6 +120,7 @@ impl Registry {
         }
         Self::assemble(
             Self::parse_bundled(bundled),
+            provided,
             installed,
             pending,
             &approved,
@@ -121,6 +132,7 @@ impl Registry {
     pub fn bundled(bundled: &[Bundled]) -> Self {
         Self::assemble(
             Self::parse_bundled(bundled),
+            Extensions::default(),
             Vec::new(),
             Vec::new(),
             &Approved::new(),
@@ -147,32 +159,58 @@ impl Registry {
             .collect()
     }
 
+    /// `pending` holds only installed copies; which extension plugins serve
+    /// or wait is worked out here from `approved`, so it follows every change
+    /// to the installed layer above them.
     fn assemble(
         bundled: Vec<Arc<Plugin>>,
+        extensions: Extensions,
         installed: Vec<(PathBuf, Arc<Plugin>)>,
-        pending: Vec<Pending>,
+        mut pending: Vec<Pending>,
         approved: &Approved,
         unreadable: bool,
     ) -> Self {
+        let mut serving_extensions = Vec::new();
+        for (dir, plugin) in &extensions.plugins {
+            if installed.iter().any(|(_, other)| other.id() == plugin.id()) {
+                continue;
+            }
+            let added_hosts = approved
+                .get(plugin.id())
+                .map(|agreed| added_hosts(agreed, plugin))
+                .unwrap_or_default();
+            if added_hosts.is_empty() {
+                serving_extensions.push(Arc::clone(plugin));
+            } else if !pending
+                .iter()
+                .any(|waiting| waiting.plugin.id() == plugin.id())
+            {
+                pending.push(Pending {
+                    plugin: Arc::clone(plugin),
+                    added_hosts,
+                    dir: dir.clone(),
+                });
+            }
+        }
         // A record is dropped only once no directory can hold its plugin: a
         // waiting plugin keeps it, and while a directory fails to read every
         // record stays, since which plugin it holds is unknown.
+        let keep_all = unreadable || extensions.unreadable;
         let agreed: Approved = approved
             .iter()
-            .filter(|(id, _)| {
-                unreadable || pending.iter().any(|waiting| waiting.plugin.id() == *id)
-            })
+            .filter(|(id, _)| keep_all || pending.iter().any(|waiting| waiting.plugin.id() == *id))
             .map(|(id, hosts)| (id.clone(), hosts.clone()))
             .collect();
         let mut registry = Self {
             bundled: bundled.clone(),
+            extensions,
             installed: installed.clone(),
             pending,
             approved: agreed,
             unreadable,
             ..Self::default()
         };
-        for plugin in bundled {
+        for plugin in bundled.into_iter().chain(serving_extensions) {
             registry.add(plugin);
         }
         for (_, plugin) in installed {
@@ -200,7 +238,9 @@ impl Registry {
             tracing::info!(
                 plugin = %plugin.id(),
                 version = %plugin.manifest().version,
-                "an installed plugin replaces the bundled one"
+                origin = ?plugin.origin(),
+                replaced = ?old.origin(),
+                "a plugin replaces another with its id"
             );
         }
         for service in &plugin.manifest().services {
@@ -257,6 +297,7 @@ impl Registry {
         }
         Self::assemble(
             self.bundled.clone(),
+            self.extensions.clone(),
             installed,
             pending,
             &self.approved,
@@ -327,7 +368,31 @@ impl Registry {
             .iter()
             .find(|waiting| waiting.plugin.id() == id)?;
         let agreed = host_set(network) == host_set(&waiting.plugin.manifest().permissions.network);
-        agreed.then(|| self.with_installed(waiting.dir.clone(), Arc::clone(&waiting.plugin)))
+        if !agreed {
+            return None;
+        }
+        if waiting.plugin.origin() != Origin::Extension {
+            return Some(self.with_installed(waiting.dir.clone(), Arc::clone(&waiting.plugin)));
+        }
+        let mut approved = self.approved.clone();
+        approved.insert(id.to_string(), host_set(network));
+        Some(Self::assemble(
+            self.bundled.clone(),
+            self.extensions.clone(),
+            self.installed.clone(),
+            self.waiting_installs().collect(),
+            &approved,
+            self.unreadable,
+        ))
+    }
+
+    /// The waiting copies in the plugin directory, without the extension
+    /// plugins [`Self::assemble`] works out again.
+    fn waiting_installs(&self) -> impl Iterator<Item = Pending> + '_ {
+        self.pending
+            .iter()
+            .filter(|waiting| waiting.plugin.origin() != Origin::Extension)
+            .cloned()
     }
 
     /// `plugin`, read from `dir`, in place of whatever `dir` held and of any
@@ -340,15 +405,14 @@ impl Registry {
             .cloned()
             .collect();
         let pending = self
-            .pending
-            .iter()
+            .waiting_installs()
             .filter(|waiting| waiting.dir != dir && waiting.plugin.id() != plugin.id())
-            .cloned()
             .collect();
         installed.push((dir, plugin));
         installed.sort_by(|a, b| a.0.cmp(&b.0));
         Self::assemble(
             self.bundled.clone(),
+            self.extensions.clone(),
             installed,
             pending,
             &self.approved,
@@ -369,8 +433,9 @@ impl Registry {
         &self.pending
     }
 
-    /// Every directory holding a copy of `id`, loaded or waiting. The
-    /// directory name need not be the id.
+    /// Every directory in the plugin directory holding a copy of `id`, loaded
+    /// or waiting. The directory name need not be the id. A Flatpak
+    /// extension's copy is never one: it is read-only and Flatpak owns it.
     pub fn dirs_of(&self, id: &str) -> Vec<PathBuf> {
         let mut dirs: Vec<PathBuf> = self
             .installed
@@ -378,15 +443,22 @@ impl Registry {
             .filter(|(_, plugin)| plugin.id() == id)
             .map(|(dir, _)| dir.clone())
             .chain(
-                self.pending
-                    .iter()
+                self.waiting_installs()
                     .filter(|waiting| waiting.plugin.id() == id)
-                    .map(|waiting| waiting.dir.clone()),
+                    .map(|waiting| waiting.dir),
             )
             .collect();
         dirs.sort();
         dirs.dedup();
         dirs
+    }
+
+    /// Whether a Flatpak extension provides `id`, serving or not.
+    pub fn from_extension(&self, id: &str) -> bool {
+        self.extensions
+            .plugins
+            .iter()
+            .any(|(_, plugin)| plugin.id() == id)
     }
 
     /// Whether `other` loaded the very same plugins and holds the same updates.
@@ -471,6 +543,13 @@ pub fn plugin_dirs(dir: &Path) -> Vec<PathBuf> {
     paths
 }
 
+async fn compile(dir: &Path, origin: Origin) -> Result<Plugin, String> {
+    let (manifest, wasm) = read_plugin(dir)?;
+    let plugin = Plugin::new(manifest, Code::Wasm(Cow::Owned(wasm)), origin);
+    plugin.prepare().await.map_err(|error| error.to_string())?;
+    Ok(plugin)
+}
+
 fn read_plugin(dir: &Path) -> Result<(Manifest, Vec<u8>), String> {
     let manifest = std::fs::read_to_string(dir.join(MANIFEST_FILE))
         .map_err(|error| format!("{MANIFEST_FILE}: {error}"))?;
@@ -513,7 +592,7 @@ mod tests {
         std::fs::create_dir_all(&broken).unwrap();
         std::fs::write(broken.join(MANIFEST_FILE), "id = ").unwrap();
 
-        let registry = Registry::load(&bundled, Some(&dir)).await;
+        let registry = Registry::load(&bundled, Some(&dir), None).await;
         std::fs::remove_dir_all(&dir).ok();
 
         assert_eq!(registry.plugins().len(), 1);
@@ -563,7 +642,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(port.join(COMPONENT_FILE), EMPTY_COMPONENT).unwrap();
-        let registry = Registry::load(&native, Some(&dir)).await;
+        let registry = Registry::load(&native, Some(&dir), None).await;
         std::fs::remove_dir_all(&dir).ok();
         assert!(!registry.for_service("ytmusic").unwrap().is_native());
     }
@@ -583,7 +662,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(fork.join(COMPONENT_FILE), b"not a component").unwrap();
-        let registry = Registry::load(&bundled, Some(&dir)).await;
+        let registry = Registry::load(&bundled, Some(&dir), None).await;
         std::fs::remove_dir_all(&dir).ok();
         let serving = registry.for_service("subsonic").expect("subsonic served");
         assert_eq!(serving.origin(), Origin::Bundled);
@@ -603,7 +682,7 @@ mod tests {
             .unwrap();
             std::fs::write(path.join(COMPONENT_FILE), EMPTY_COMPONENT).unwrap();
         }
-        let registry = Registry::load(&[], Some(&dir)).await;
+        let registry = Registry::load(&[], Some(&dir), None).await;
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(registry.plugins().len(), 1);
         assert_eq!(registry.dirs_of("radio"), [dir.join("my-radio-fork")]);
@@ -641,7 +720,7 @@ mod tests {
     async fn unchanged_files_keep_the_loaded_plugin() {
         let dir = scratch("unchanged");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let first = Registry::load(&[], Some(&dir)).await;
+        let first = Registry::load(&[], Some(&dir), None).await;
         let again = first.reload(&dir).await;
         std::fs::remove_dir_all(&dir).ok();
         assert!(Arc::ptr_eq(serving(&first), serving(&again)));
@@ -652,7 +731,7 @@ mod tests {
     async fn an_update_that_compiles_replaces_the_loaded_plugin() {
         let dir = scratch("update");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let first = Registry::load(&[], Some(&dir)).await;
+        let first = Registry::load(&[], Some(&dir), None).await;
         write(&dir, &radio("radio", "1.0.1", &["a.test"]), EMPTY_COMPONENT);
         let next = first.reload(&dir).await;
         std::fs::remove_dir_all(&dir).ok();
@@ -664,7 +743,7 @@ mod tests {
     async fn a_failed_load_keeps_the_old_module() {
         let dir = scratch("failed");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let first = Registry::load(&[], Some(&dir)).await;
+        let first = Registry::load(&[], Some(&dir), None).await;
 
         write(
             &dir,
@@ -688,7 +767,7 @@ mod tests {
     async fn new_files_may_not_change_the_plugin_id() {
         let dir = scratch("id");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let first = Registry::load(&[], Some(&dir)).await;
+        let first = Registry::load(&[], Some(&dir), None).await;
         write(&dir, &radio("other", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
         let next = first.reload(&dir).await;
         std::fs::remove_dir_all(&dir).ok();
@@ -700,7 +779,7 @@ mod tests {
     async fn an_update_reaching_new_hosts_waits_until_they_are_allowed() {
         let dir = scratch("hosts");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let first = Registry::load(&[], Some(&dir)).await;
+        let first = Registry::load(&[], Some(&dir), None).await;
         write(
             &dir,
             &radio("radio", "1.1.0", &["a.test", "B.test"]),
@@ -732,7 +811,7 @@ mod tests {
     async fn an_update_reaching_new_hosts_still_waits_after_a_restart() {
         let dir = scratch("restart");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        Registry::load(&[], Some(&dir))
+        Registry::load(&[], Some(&dir), None)
             .await
             .save_approved(&dir)
             .unwrap();
@@ -742,7 +821,7 @@ mod tests {
             EMPTY_COMPONENT,
         );
 
-        let restarted = Registry::load(&[], Some(&dir)).await;
+        let restarted = Registry::load(&[], Some(&dir), None).await;
         assert!(restarted.for_service("radio").is_none());
         let [pending] = restarted.pending() else {
             panic!("the update still waits");
@@ -758,7 +837,7 @@ mod tests {
             .expect("the hosts shown are the hosts asked for")
             .save_approved(&dir)
             .unwrap();
-        let allowed = Registry::load(&[], Some(&dir)).await;
+        let allowed = Registry::load(&[], Some(&dir), None).await;
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(serving(&allowed).manifest().version, "1.1.0");
         assert!(allowed.pending().is_empty());
@@ -772,7 +851,7 @@ mod tests {
         }];
         let dir = scratch("bundled");
         std::fs::remove_dir_all(dir.join("radio")).unwrap();
-        Registry::load(&bundled, Some(&dir))
+        Registry::load(&bundled, Some(&dir), None)
             .await
             .save_approved(&dir)
             .unwrap();
@@ -783,7 +862,7 @@ mod tests {
             EMPTY_COMPONENT,
         );
 
-        let restarted = Registry::load(&bundled, Some(&dir)).await;
+        let restarted = Registry::load(&bundled, Some(&dir), None).await;
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(serving(&restarted).origin(), Origin::Bundled);
         let [pending] = restarted.pending() else {
@@ -796,13 +875,13 @@ mod tests {
     async fn a_waiting_plugin_whose_files_break_for_a_while_still_waits() {
         let dir = scratch("broken-wait");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        Registry::load(&[], Some(&dir))
+        Registry::load(&[], Some(&dir), None)
             .await
             .save_approved(&dir)
             .unwrap();
         let widened = radio("radio", "1.1.0", &["a.test", "b.test"]);
         write(&dir, &widened, EMPTY_COMPONENT);
-        let restarted = Registry::load(&[], Some(&dir)).await;
+        let restarted = Registry::load(&[], Some(&dir), None).await;
         assert_eq!(restarted.pending().len(), 1);
 
         write(&dir, "id = ", EMPTY_COMPONENT);
@@ -816,5 +895,94 @@ mod tests {
             panic!("the update still waits");
         };
         assert_eq!(pending.added_hosts, ["b.test"]);
+    }
+
+    #[tokio::test]
+    async fn an_extension_replaces_the_bundled_plugin_and_an_installed_one_wins() {
+        let bundled = [Bundled {
+            manifest: Box::leak(radio("radio", "1.0.0", &["a.test"]).into_boxed_str()),
+            wasm: Some(EMPTY_COMPONENT),
+        }];
+        let extensions = scratch("ext-layers");
+        write(
+            &extensions,
+            &radio("radio", "2.0.0", &["a.test"]),
+            EMPTY_COMPONENT,
+        );
+        let dir = scratch("ext-layers-installed");
+        std::fs::remove_dir_all(dir.join("radio")).unwrap();
+
+        let extended = Registry::load(&bundled, Some(&dir), Some(&extensions)).await;
+        assert_eq!(serving(&extended).origin(), Origin::Extension);
+        assert_eq!(serving(&extended).manifest().version, "2.0.0");
+        assert!(extended.dirs_of("radio").is_empty());
+
+        std::fs::create_dir_all(dir.join("radio")).unwrap();
+        write(&dir, &radio("radio", "3.0.0", &["a.test"]), EMPTY_COMPONENT);
+        let installed = Registry::load(&bundled, Some(&dir), Some(&extensions)).await;
+        assert_eq!(serving(&installed).origin(), Origin::Installed);
+        assert_eq!(installed.plugins().len(), 1);
+        assert_eq!(installed.dirs_of("radio"), [dir.join("radio")]);
+        assert!(installed.from_extension("radio"));
+
+        std::fs::remove_dir_all(dir.join("radio")).unwrap();
+        let removed = installed.reload(&dir).await;
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&extensions).ok();
+        assert_eq!(serving(&removed).origin(), Origin::Extension);
+        assert!(removed.pending().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_missing_extension_directory_provides_nothing() {
+        let dir = scratch("ext-missing");
+        write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
+        let missing = dir.join("no-such-extensions");
+        let registry = Registry::load(&[], Some(&dir), Some(&missing)).await;
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(serving(&registry).origin(), Origin::Installed);
+        assert!(!registry.from_extension("radio"));
+        assert!(registry.pending().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_extension_reaching_hosts_not_agreed_to_waits_until_they_are_allowed() {
+        let dir = scratch("ext-hosts");
+        write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
+        Registry::load(&[], Some(&dir), None)
+            .await
+            .save_approved(&dir)
+            .unwrap();
+        std::fs::remove_dir_all(dir.join("radio")).unwrap();
+        let extensions = scratch("ext-hosts-mounted");
+        write(
+            &extensions,
+            &radio("radio", "1.1.0", &["a.test", "b.test"]),
+            EMPTY_COMPONENT,
+        );
+
+        let restarted = Registry::load(&[], Some(&dir), Some(&extensions)).await;
+        assert!(restarted.for_service("radio").is_none());
+        let [pending] = restarted.pending() else {
+            panic!("the extension waits");
+        };
+        assert_eq!(pending.added_hosts, ["b.test"]);
+        assert!(restarted.reload(&dir).await.same_as(&restarted));
+        assert!(restarted.dirs_of("radio").is_empty());
+
+        assert!(restarted.approve("radio", &["a.test".into()]).is_none());
+        let allowed = restarted
+            .approve("radio", &["a.test".into(), "b.test".into()])
+            .expect("the hosts shown are the hosts asked for");
+        allowed.save_approved(&dir).unwrap();
+        assert_eq!(serving(&allowed).origin(), Origin::Extension);
+        assert!(allowed.pending().is_empty());
+        assert!(allowed.reload(&dir).await.same_as(&allowed));
+
+        let again = Registry::load(&[], Some(&dir), Some(&extensions)).await;
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&extensions).ok();
+        assert_eq!(serving(&again).manifest().version, "1.1.0");
+        assert!(again.pending().is_empty());
     }
 }

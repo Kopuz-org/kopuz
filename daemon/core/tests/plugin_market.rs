@@ -95,7 +95,7 @@ fn temp(name: &str) -> PathBuf {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
     let plugins = temp("installed");
-    server::plugins::init(Some(plugins.clone())).await;
+    server::plugins::init(Some(plugins.clone()), None).await;
 
     // A tampered component is refused before anything is written.
     let tampered = PluginService::new(marketplace(

@@ -1,6 +1,7 @@
 //! The plugins this process loaded, and the sessions open on them: the native
-//! ones, the sandboxed ones embedded in the binary, then whatever is installed
-//! in the plugin directory the daemon names at boot.
+//! ones, the sandboxed ones embedded in the binary, those Flatpak extensions
+//! mount, then whatever is installed in the plugin directory the daemon names
+//! at boot.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -14,15 +15,24 @@ use crate::server_ops::ServerConn;
 static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
 static REGISTRY: OnceLock<ArcSwap<Registry>> = OnceLock::new();
 
-/// Name the directory installed plugins are read from and load them. Only the
-/// first call counts.
-pub async fn init(dir: Option<PathBuf>) {
+/// Where the Flatpak manifest's `moe.kopuz.kopuz.Plugin` extension point mounts each extension.
+pub const FLATPAK_EXTENSION_DIR: &str = "/app/plugins";
+
+/// The plugins Flatpak extensions provide, inside the Flatpak only.
+pub fn flatpak_extensions() -> Option<PathBuf> {
+    crate::cookies::browser::in_flatpak().then(|| PathBuf::from(FLATPAK_EXTENSION_DIR))
+}
+
+/// Name the directory installed plugins are read from and load them, with
+/// those under the read-only `extensions` beneath them. Only the first call
+/// counts.
+pub async fn init(dir: Option<PathBuf>, extensions: Option<PathBuf>) {
     if DIR.set(dir).is_err() {
         tracing::debug!("the plugin directory was already set");
         return;
     }
     let _one_at_a_time = CHANGING.lock().await;
-    let loaded = Arc::new(Registry::load(&official(), self::dir()).await);
+    let loaded = Arc::new(Registry::load(&official(), self::dir(), extensions.as_deref()).await);
     for plugin in loaded.plugins() {
         tracing::info!(
             plugin = %plugin.id(),
