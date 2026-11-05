@@ -483,7 +483,16 @@ impl LyricsView {
     }
 
     fn scroller(&self, cx: &mut Context<Self>) -> gpui_kit::Stateful<gpui_kit::Div> {
+        let view = cx.entity().downgrade();
         div()
+            // The range drawn came from the last layout, so a resize can uncover lines it left sharp.
+            .on_children_prepainted(move |_, window, cx| {
+                let Some(view) = view.upgrade() else { return };
+                if view.update(cx, |this, _| this.reconcile_shown()) {
+                    // A notify while prepainting is dropped, so the redraw waits for the next frame.
+                    window.on_next_frame(move |_, cx| cx.notify(view.entity_id()));
+                }
+            })
             .id("lyrics-scroll")
             .flex_1()
             .min_h_0()
@@ -497,21 +506,25 @@ impl LyricsView {
                     this.auto_sync = false;
                     this.slide = None;
                     cx.notify();
-                } else if this.shown_lines() != this.shown {
-                    cx.notify();
                 }
             }))
     }
 
     /// The lines in view and a margin past them, once the list has been laid out.
     fn shown_lines(&self) -> Option<RangeInclusive<usize>> {
-        if self.scroll.children_count() == 0 {
-            return None;
-        }
-        // Item 0 is the spacer above the first line.
-        let top = self.scroll.top_item().saturating_sub(1 + VIEW_MARGIN);
-        let bottom = self.scroll.bottom_item().saturating_sub(1) + VIEW_MARGIN;
-        Some(top..=bottom)
+        lines_in_view(
+            self.scroll.children_count(),
+            self.scroll.top_item(),
+            self.scroll.bottom_item(),
+        )
+    }
+
+    /// Takes the laid-out lines in view, saying whether they differ from the ones the blur covered.
+    fn reconcile_shown(&mut self) -> bool {
+        let shown = self.shown_lines();
+        let moved = shown != self.shown;
+        self.shown = shown;
+        moved
     }
 }
 
@@ -617,6 +630,12 @@ impl Render for LineClock {
         }
         row
     }
+}
+
+/// The lines between the scroller's top and bottom items, and a margin past them; item 0 is the spacer above the first line.
+fn lines_in_view(items: usize, top: usize, bottom: usize) -> Option<RangeInclusive<usize>> {
+    (items > 0)
+        .then(|| top.saturating_sub(1 + VIEW_MARGIN)..=bottom.saturating_sub(1) + VIEW_MARGIN)
 }
 
 /// The lowest opacity the fade reaches at `strength`.
@@ -938,6 +957,16 @@ mod tests {
             }
             assert!(blur(30) > blur(5));
         }
+    }
+
+    #[test]
+    fn the_lines_in_view_skip_the_spacer_and_keep_a_margin() {
+        assert_eq!(lines_in_view(0, 0, 0), None);
+        assert_eq!(lines_in_view(42, 0, 12), Some(0..=11 + VIEW_MARGIN));
+        assert_eq!(
+            lines_in_view(42, 20, 35),
+            Some(19 - VIEW_MARGIN..=34 + VIEW_MARGIN)
+        );
     }
 
     #[test]
