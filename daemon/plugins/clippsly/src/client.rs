@@ -95,26 +95,35 @@ pub fn validate_upload(filename: &str, length: usize) -> Result<(), SourceError>
 }
 
 /// A `multipart/form-data` body with one file part, and its content type.
-fn multipart(field: &str, filename: &str, content: &[u8]) -> (Vec<u8>, String) {
+/// Built around `content` itself, so the file is never held twice.
+fn multipart(field: &str, filename: &str, mut content: Vec<u8>) -> (Vec<u8>, String) {
     // The boundary only has to be absent from the payload; a validated name
     // never holds quotes or line breaks, and the length check is cheap.
-    let mut boundary = String::from("kopuz-clippsly-upload");
-    while content
-        .windows(boundary.len())
-        .any(|window| window == boundary.as_bytes())
-    {
-        boundary.push('x');
-    }
-    let mut body = Vec::with_capacity(content.len() + 256);
-    body.extend_from_slice(
-        format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"{field}\"; filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
-        )
-        .as_bytes(),
+    const BASE: &[u8] = b"kopuz-clippsly-upload";
+    // One more `x` than the payload ever puts after the base, found in one
+    // pass, so the boundary cannot occur in it.
+    let padding = content
+        .windows(BASE.len())
+        .enumerate()
+        .filter(|(_, window)| *window == BASE)
+        .map(|(at, _)| {
+            content[at + BASE.len()..]
+                .iter()
+                .take_while(|byte| **byte == b'x')
+                .count()
+                + 1
+        })
+        .max()
+        .unwrap_or(0);
+    let boundary = format!("kopuz-clippsly-upload{}", "x".repeat(padding));
+    let head = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"{field}\"; filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
     );
-    body.extend_from_slice(content);
-    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
-    (body, format!("multipart/form-data; boundary={boundary}"))
+    let tail = format!("\r\n--{boundary}--\r\n");
+    content.reserve_exact(head.len() + tail.len());
+    content.splice(0..0, head.bytes());
+    content.extend_from_slice(tail.as_bytes());
+    (content, format!("multipart/form-data; boundary={boundary}"))
 }
 
 impl ClippslyClient {
@@ -246,7 +255,7 @@ impl ClippslyClient {
         Ok(url.to_string())
     }
 
-    pub fn upload(&self, filename: &str, content: &[u8]) -> Result<(), SourceError> {
+    pub fn upload(&self, filename: &str, content: Vec<u8>) -> Result<(), SourceError> {
         validate_upload(filename, content.len())?;
         let quota = self.storage()?;
         if content.len() as u64 > quota.quota_remaining_bytes {
@@ -343,7 +352,7 @@ mod tests {
 
     #[test]
     fn the_upload_body_is_one_file_part() {
-        let (body, content_type) = multipart("audio", "song.flac", b"fLaC-test");
+        let (body, content_type) = multipart("audio", "song.flac", b"fLaC-test".to_vec());
         let body = String::from_utf8(body).unwrap();
         let boundary = content_type
             .strip_prefix("multipart/form-data; boundary=")
@@ -353,8 +362,25 @@ mod tests {
         assert!(body.contains("\r\n\r\nfLaC-test\r\n"));
         assert!(body.ends_with(&format!("--{boundary}--\r\n")));
 
-        let (_, avoiding) = multipart("audio", "a.flac", b"--kopuz-clippsly-upload--");
+        let (_, avoiding) = multipart("audio", "a.flac", b"--kopuz-clippsly-upload--".to_vec());
         assert!(avoiding.ends_with("kopuz-clippsly-uploadx"));
+
+        let crafted = [&b"kopuz-clippsly-upload"[..], &[b'x'; 5000]].concat();
+        let (body, longer) = multipart("audio", "a.flac", crafted.clone());
+        let boundary = longer
+            .strip_prefix("multipart/form-data; boundary=")
+            .unwrap();
+        assert_eq!(boundary.len(), "kopuz-clippsly-upload".len() + 5001);
+        assert!(body.windows(crafted.len()).any(|window| window == crafted));
+    }
+
+    #[test]
+    fn the_upload_body_is_built_in_the_files_own_buffer() {
+        let mut file = Vec::with_capacity(4096);
+        file.extend_from_slice(b"fLaC-test");
+        let buffer = file.as_ptr();
+        let (body, _) = multipart("audio", "song.flac", file);
+        assert_eq!(body.as_ptr(), buffer, "the file was copied");
     }
 
     #[test]

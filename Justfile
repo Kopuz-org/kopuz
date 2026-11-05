@@ -32,7 +32,7 @@ plugin-market:
     nu scripts/plugin_market.nu
 
 serve-market: plugin-market tailwind
-    KOPUZ_PLUGIN_INDEX=file://{{justfile_directory()}}/target/plugin-market/index.json dx serve
+    KOPUZ_PLUGIN_INDEX=file://{{justfile_directory()}}/target/plugin-market/index.json dx serve --package kopuz-legacy
 
 run-release: build
     target/dx/kopuz-legacy/release/linux/app/kopuz-legacy

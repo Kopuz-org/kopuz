@@ -455,6 +455,9 @@ impl HeroSize {
     }
 }
 
+/// The Favorites page's layout, kept apart from the library's tracks.
+pub const FAVORITES: &str = "favorites";
+
 /// The library's per-facet state, keyed by facet name.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default, transparent)]
@@ -541,6 +544,16 @@ fn shared_criteria<F>(sort: &Sort, field: fn(&str) -> Option<F>) -> Option<Vec<S
 impl Layout {
     /// How a library facet was left; albums and artists keep their order and view in the prefs every frontend shares.
     pub fn library_facet(&self, name: &str) -> Facet {
+        // Until Favorites is arranged on its own it wears the tracks' columns, in the order things were liked.
+        if name == FAVORITES && !self.library.0.contains_key(FAVORITES) {
+            return Facet {
+                sort: Sort {
+                    field: String::new(),
+                    descending: false,
+                },
+                ..self.library.facet("tracks")
+            };
+        }
         let mut facet = self.library.facet(name);
         let (mode, sort) = match name {
             "albums" => (
@@ -1165,6 +1178,19 @@ mod tests {
         let home = CatalogHome::default();
         assert_eq!(home.visible(), &["for_you", "catalog", "your_playlists"]);
         assert_eq!(home.order.len(), CATALOG_SHELVES.len());
+    }
+
+    #[test]
+    fn favorites_borrow_the_tracks_columns_but_not_their_order() {
+        let mut layout = Layout::default();
+        layout.edit_library_facet("tracks", |facet| facet.density = Density::Compact);
+        let favorites = layout.library_facet(FAVORITES);
+        assert_eq!(favorites.density, Density::Compact);
+        assert!(favorites.sort.field.is_empty());
+
+        layout.edit_library_facet(FAVORITES, |facet| facet.sort.field = "artist".into());
+        assert_eq!(layout.library_facet(FAVORITES).sort.field, "artist");
+        assert_eq!(layout.library_facet("tracks").sort.field, "title");
     }
 
     #[test]

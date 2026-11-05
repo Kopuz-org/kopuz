@@ -306,7 +306,9 @@ pub trait Source: Sized + 'static {
         Err(SourceError::unsupported("track download"))
     }
 
-    fn upload_track(&self, filename: &str, content: &[u8]) -> Result<()> {
+    /// `content` is the plugin's to keep, so a request body can be built in
+    /// place: a large upload held twice would not fit in the sandbox.
+    fn upload_track(&self, filename: &str, content: Vec<u8>) -> Result<()> {
         let _ = (filename, content);
         Err(SourceError::unsupported("music uploads"))
     }
@@ -519,7 +521,7 @@ macro_rules! export_source {
                 filename: ::std::string::String,
                 content: ::std::vec::Vec<u8>,
             ) -> $crate::Result<()> {
-                $crate::Source::upload_track(&self.0, &filename, &content)
+                $crate::Source::upload_track(&self.0, &filename, content)
             }
             fn storage_quota(&self) -> $crate::Result<$crate::StorageQuota> {
                 $crate::Source::storage_quota(&self.0)

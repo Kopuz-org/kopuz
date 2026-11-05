@@ -300,6 +300,7 @@ pub fn own_service(slug: &str) -> Option<OwnService> {
 
 /// What a plugin may reach. The pictures it names are fetched or read by the
 /// host, outside the sandbox, so they are held to the same hosts.
+#[derive(Clone)]
 pub struct Reach {
     /// Shipped inside kopuz, so its references are ours to trust.
     trusted: bool,
@@ -355,17 +356,32 @@ impl Reach {
         keep.then_some(raw)
     }
 
+    /// What every fetch of this plugin's streams is held to: their redirects,
+    /// the segments they list and where their names lead. Nothing for one
+    /// kopuz ships.
+    pub(crate) fn stream_guard(&self) -> Option<utils::http::Guard> {
+        (!self.trusted).then(|| Arc::new(self.clone()) as utils::http::Guard)
+    }
+
     /// Whether the host may fetch `url` for this plugin.
     pub fn allows(&self, url: &str) -> bool {
-        let Ok(url) = reqwest::Url::parse(url) else {
-            return false;
-        };
-        matches!(url.scheme(), "http" | "https")
-            && url.username().is_empty()
-            && url.password().is_none()
-            && url.host_str().is_some_and(|host| {
-                self.trusted || self.permissions.allows(host, self.server_host.as_deref())
-            })
+        reqwest::Url::parse(url).is_ok_and(|url| utils::http::within(self, &url))
+    }
+}
+
+impl utils::http::Reach for Reach {
+    fn allows_host(&self, host: &str) -> bool {
+        self.trusted || self.permissions.allows(host, self.server_host.as_deref())
+    }
+
+    fn may_be_local(&self, host: &str) -> bool {
+        if self.trusted {
+            return true;
+        }
+        let normal = |host: &str| host.trim_end_matches('.').to_ascii_lowercase();
+        self.server_host
+            .as_deref()
+            .is_some_and(|server| normal(server) == normal(host))
     }
 }
 

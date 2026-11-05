@@ -86,6 +86,8 @@ pub struct SourceCapabilities {
     pub playlist_details: bool,
     pub track_radio: bool,
     pub playlist_radio: bool,
+    /// The playlist holding the account's favorites; a playlist radio of it is the favorites radio.
+    pub favorites_playlist: Option<String>,
     /// Playing a search result starts a track radio from it rather than
     /// queueing the results.
     pub search_radio: bool,

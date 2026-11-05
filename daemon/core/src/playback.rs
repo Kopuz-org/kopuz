@@ -11,16 +11,28 @@ use server::stream::stream_buffer::{Captured, CompleteSink};
 /// The returned closure runs on the decode worker thread, which has no tokio
 /// runtime. Keep the captured runtime handle and its `block_on` calls here;
 /// the blocking decode I/O is intentional.
+/// What a resolved network stream is fetched as.
+pub(crate) struct NetworkStream {
+    pub(crate) url: String,
+    pub(crate) format: Option<(server::stream::AudioFormat, bool)>,
+    pub(crate) user_agent: Option<String>,
+    pub(crate) guard: Option<utils::http::Guard>,
+}
+
 pub(crate) fn network_factory(
-    stream_url: String,
-    yt_format: Option<(server::stream::AudioFormat, bool)>,
-    yt_user_agent: Option<String>,
+    stream: NetworkStream,
     is_radio: bool,
     icy_tx: Option<tokio::sync::watch::Sender<server::stream::icy::IcyMeta>>,
     rt_handle: tokio::runtime::Handle,
     buffer_progress: Option<server::stream::stream_buffer::BufferProgressCallback>,
     complete: Option<CompleteSink>,
 ) -> SourceFactory {
+    let NetworkStream {
+        url: stream_url,
+        format: yt_format,
+        user_agent: yt_user_agent,
+        guard,
+    } = stream;
     Box::new(move || {
         let mut complete = complete;
         let build = || -> std::io::Result<_> {
@@ -47,6 +59,7 @@ pub(crate) fn network_factory(
                         stream_url.clone(),
                         yt_user_agent.clone(),
                         buffer_progress.clone(),
+                        guard.clone(),
                     )?;
                     range.check_tail()?;
                     Ok::<_, std::io::Error>(range)
@@ -78,7 +91,10 @@ pub(crate) fn network_factory(
                     // of failing outright (issue #386). No scrubbing.
                     let stream = server::stream::stream_buffer::StreamBuffer::capturing(
                         stream_url,
-                        server::stream::stream_buffer::stream_client(yt_user_agent),
+                        server::stream::stream_buffer::guarded_stream_client(
+                            yt_user_agent,
+                            guard.clone(),
+                        )?,
                         rt_handle,
                         buffer_progress,
                         complete.take(),
@@ -95,8 +111,11 @@ pub(crate) fn network_factory(
             } else if let ResolvedStreamRef::SoundCloudHls(hls_url) =
                 ResolvedStreamRef::parse(&stream_url)
             {
-                let bytes =
-                    server::stream::hls_source::assemble(hls_url, yt_user_agent.as_deref())?;
+                let bytes = server::stream::hls_source::assemble(
+                    hls_url,
+                    yt_user_agent.as_deref(),
+                    guard.clone(),
+                )?;
                 if let Some(sink) = complete.take() {
                     sink(Captured {
                         bytes: bytes.clone(),
@@ -170,6 +189,7 @@ pub(crate) fn network_factory(
                     stream_url.clone(),
                     yt_user_agent.clone(),
                     buffer_progress.clone(),
+                    guard.clone(),
                 ) {
                     Ok(mut range) => {
                         if let Some(sink) = complete.take() {
@@ -182,7 +202,10 @@ pub(crate) fn network_factory(
                         tracing::debug!(%error, "HTTP ranges unavailable; using progressive stream");
                         let stream = server::stream::stream_buffer::StreamBuffer::capturing(
                             stream_url,
-                            server::stream::stream_buffer::stream_client(yt_user_agent),
+                            server::stream::stream_buffer::guarded_stream_client(
+                                yt_user_agent,
+                                guard.clone(),
+                            )?,
                             rt_handle,
                             buffer_progress,
                             complete.take(),

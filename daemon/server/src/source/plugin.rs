@@ -380,6 +380,7 @@ impl MediaSource for PluginSource {
             ));
         }
         Ok(StreamInfo {
+            guard: self.artwork().stream_guard(),
             url: if stream.hls {
                 format!("__SC_HLS:{}", stream.url)
             } else {

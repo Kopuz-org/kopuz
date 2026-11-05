@@ -5,16 +5,16 @@ use std::rc::Rc;
 use api::JobKind;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, Sizable as _, h_flex};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, ClickEvent, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled as _,
-    Window, px,
+    Window, div, px,
 };
 use store::JobsModel;
 
 use crate::format::t;
-use crate::{icons, style};
+use crate::{ProgressBar, icons, style};
 
 type OnRefresh = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
@@ -57,9 +57,19 @@ impl RenderOnce for SyncStatus {
         let syncing = progress.is_some();
         let done = progress.and_then(|job| job.current).unwrap_or(0) as usize;
         let total = self.total;
+        // The page's own count stands in when the job does not say how many it expects.
+        let fraction = progress.and_then(|job| {
+            crate::job::fraction(job)
+                .or_else(|| (total > 0).then(|| (done as f32 / total as f32).min(1.)))
+        });
+        let bar = syncing.then(|| {
+            div()
+                .px_2()
+                .child(ProgressBar::new("sync-progress", fraction))
+        });
         let label = store::kind_label(self.kind);
         let refresh = self.on_refresh;
-        h_flex()
+        let row = h_flex()
             .w_full()
             .justify_between()
             .items_center()
@@ -96,6 +106,7 @@ impl RenderOnce for SyncStatus {
                             refresh(event, window, cx);
                         }
                     }),
-            )
+            );
+        v_flex().w_full().gap_1p5().child(row).children(bar)
     }
 }

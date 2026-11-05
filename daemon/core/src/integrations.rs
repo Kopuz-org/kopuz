@@ -1063,15 +1063,22 @@ pub fn browser_profiles() -> Vec<api::BrowserProfile> {
 async fn listenbrainz_token_from(
     profile: &server::cookies::BrowserProfile,
 ) -> Result<String, ApiError> {
-    let cookies = server::cookies::read_cookies(profile.browser, &profile.dir, "listenbrainz.org")
+    let scratch = server::cookies::scratch_dir();
+    let cookies = server::cookies::profiles::read_cookies(profile, &scratch, "listenbrainz.org")
         .await
         .map_err(|error| {
+            let reason = match error {
+                server::cookies::ProfileError::BrowserOpen => ErrorReason::BrowserOpen,
+                server::cookies::ProfileError::Unreadable(_) => {
+                    ErrorReason::BrowserCookiesUnreadable
+                }
+            };
             ApiError::internal(format!(
                 "could not read the cookies of {} ({}): {error}",
                 profile.name,
                 profile.browser.label()
             ))
-            .because(ErrorReason::BrowserCookiesUnreadable)
+            .because(reason)
         })?;
     let header = scrobble::listenbrainz::session_header(
         cookies.iter().map(|c| (c.name.as_str(), c.value.as_str())),
