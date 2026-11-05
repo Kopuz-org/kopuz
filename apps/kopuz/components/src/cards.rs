@@ -387,6 +387,7 @@ pub struct TileRow {
     detail: Option<SharedString>,
     click: Option<OnClick>,
     menu: Option<Target>,
+    play: Option<(PlayState, OnClick)>,
     playing: bool,
     selected: bool,
     thumb: bool,
@@ -406,6 +407,7 @@ impl TileRow {
             detail: None,
             click: None,
             menu: None,
+            play: None,
             playing: false,
             selected: false,
             thumb: true,
@@ -464,6 +466,16 @@ impl TileRow {
         self
     }
 
+    /// A play button before the menu, shown under the pointer; `state` says whether it would pause.
+    pub fn play(
+        mut self,
+        state: PlayState,
+        click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.play = Some((state, Rc::new(click)));
+        self
+    }
+
     pub fn playing(mut self, playing: bool) -> Self {
         self.playing = playing;
         self
@@ -489,6 +501,9 @@ impl TileRow {
 
 /// The edge of a row's thumb.
 const ROW_THUMB: Pixels = px(48.);
+/// `w-8 h-8` with a `text-xs` glyph, the play button at a row's end.
+const ROW_PLAY: Pixels = px(32.);
+const ROW_PLAY_GLYPH: Pixels = px(12.);
 
 impl RenderOnce for TileRow {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
@@ -601,6 +616,18 @@ impl RenderOnce for TileRow {
                     .child(detail),
             )
         })
+        .when_some(
+            self.play.filter(|_| hovered || focused),
+            |row, (state, click)| {
+                row.child(
+                    PlayPauseButton::new(format!("{id}-play"))
+                        .playing(state == PlayState::Playing)
+                        .size(ROW_PLAY, ROW_PLAY_GLYPH)
+                        .stop_propagation(true)
+                        .on_click(move |event, window, cx| click(event, window, cx)),
+                )
+            },
+        )
         .when_some(self.menu.clone(), |row, target| {
             row.child(
                 div().flex_shrink_0().child(

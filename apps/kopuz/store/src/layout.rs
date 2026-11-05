@@ -246,8 +246,8 @@ pub trait Ordered {
 
     fn lists(&mut self) -> (&mut Vec<String>, &mut Vec<String>);
 
-    /// The visible names, in order: the saved order with anything new placed by its neighbours, minus hidden.
-    fn visible(&self) -> Vec<&str> {
+    /// Every known name, hidden ones too, in order: the saved order with anything new placed by its neighbours.
+    fn arranged(&self) -> Vec<&'static str> {
         let mut names: Vec<String> = self
             .order()
             .iter()
@@ -257,8 +257,15 @@ pub trait Ordered {
         place_missing(&mut names, Self::KNOWN);
         names
             .iter()
-            .filter(|name| self.shows(name))
             .filter_map(|name| Self::KNOWN.iter().find(|known| **known == name).copied())
+            .collect()
+    }
+
+    /// The visible names, in order.
+    fn visible(&self) -> Vec<&str> {
+        self.arranged()
+            .into_iter()
+            .filter(|name| self.shows(name))
             .collect()
     }
 
@@ -283,15 +290,17 @@ pub trait Ordered {
         let (order, _) = self.lists();
         // A file written by hand or before a name existed may lack some; fill them in before moving one.
         place_missing(order, Self::KNOWN);
-        let Some(from) = order.iter().position(|held| held == name) else {
+        // Names this build does not draw keep their slots, so every move is one the page shows.
+        let known: Vec<usize> = (0..order.len())
+            .filter(|&at| Self::KNOWN.contains(&order[at].as_str()))
+            .collect();
+        let Some(from) = known.iter().position(|&at| order[at] == name) else {
             return;
         };
-        let Some(to) = from.checked_add_signed(delta) else {
+        let Some(&to) = from.checked_add_signed(delta).and_then(|to| known.get(to)) else {
             return;
         };
-        if to < order.len() {
-            order.swap(from, to);
-        }
+        order.swap(known[from], to);
     }
 }
 
@@ -623,8 +632,11 @@ impl Default for Home {
 /// The home shelves, in their designed order.
 pub const SHELVES: &[&str] = &[
     "for_you",
+    "hero",
     "jump_back_in",
+    "listen_now",
     "recently_added",
+    "new_releases",
     "made_for_you",
     "top_artists",
     "your_playlists",
@@ -1181,6 +1193,23 @@ mod tests {
     }
 
     #[test]
+    fn a_home_saved_before_the_hero_gets_it_and_keeps_its_hidden_shelves() {
+        let home = Home {
+            order: vec![
+                "for_you".into(),
+                "jump_back_in".into(),
+                "top_artists".into(),
+            ],
+            hidden: vec!["top_artists".into()],
+        };
+        let arranged = home.arranged();
+        assert_eq!(&arranged[..3], &["for_you", "hero", "jump_back_in"]);
+        assert!(arranged.contains(&"top_artists"));
+        assert!(!home.visible().contains(&"top_artists"));
+        assert_eq!(arranged.len(), SHELVES.len());
+    }
+
+    #[test]
     fn favorites_borrow_the_tracks_columns_but_not_their_order() {
         let mut layout = Layout::default();
         layout.edit_library_facet("tracks", |facet| facet.density = Density::Compact);
@@ -1313,14 +1342,22 @@ mod tests {
     fn moving_a_shelf_changes_what_the_page_draws() {
         let mut home = Home::default();
         home.step("jump_back_in", -1);
-        assert_eq!(&home.visible()[..2], &["jump_back_in", "for_you"]);
+        assert_eq!(&home.visible()[..3], &["for_you", "jump_back_in", "hero"]);
+    }
+
+    #[test]
+    fn a_move_steps_over_a_name_this_build_does_not_draw() {
+        let mut home = saved(&["for_you", "from_a_newer_build", "hero", "jump_back_in"]);
+        home.step("hero", -1);
+        assert_eq!(&home.visible()[..3], &["hero", "for_you", "jump_back_in"]);
+        assert_eq!(home.order[1], "from_a_newer_build");
     }
 
     #[test]
     fn for_you_leads_a_fresh_home() {
         assert_eq!(
-            &Home::default().visible()[..2],
-            &["for_you", "jump_back_in"]
+            &Home::default().visible()[..3],
+            &["for_you", "hero", "jump_back_in"]
         );
     }
 
@@ -1347,9 +1384,12 @@ mod tests {
         assert_eq!(
             home.visible(),
             &[
+                "listen_now",
                 "recently_added",
                 "for_you",
+                "hero",
                 "jump_back_in",
+                "new_releases",
                 "made_for_you",
                 "your_playlists",
                 "top_artists",
@@ -1365,9 +1405,12 @@ mod tests {
         assert_eq!(
             home.order,
             [
+                "listen_now",
                 "recently_added",
                 "for_you",
+                "hero",
                 "jump_back_in",
+                "new_releases",
                 "made_for_you",
                 "your_playlists",
                 "recently_played",
@@ -1382,7 +1425,7 @@ mod tests {
         home.hidden.push("jump_back_in".into());
         let visible = home.visible();
         assert!(!visible.contains(&"jump_back_in"));
-        assert_eq!(&visible[..2], &["recently_added", "for_you"]);
+        assert_eq!(&visible[..3], &["listen_now", "recently_added", "for_you"]);
         assert_eq!(visible.last(), Some(&"recently_played"));
     }
 

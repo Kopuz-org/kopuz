@@ -51,22 +51,22 @@ Shared verbs used below:
 
 ### 2.1 Home (`pages/home.rs`, `home_body.rs`, `home_body_sections.rs`)
 Data: `api.albums(all)` inv:Albums · `api.albums_recently_added({0,64})` inv:Albums+Tracks · `api.artists(all)` inv:Tracks · `api.playlists()` inv:Playlists+Folders · `api.recent_tracks({0,50})` inv:Recents · `api.top_genre()` inv:Tracks · `api.artist_sample_tracks({0,30})` inv:Tracks · `api.tracks_by_keys(offline keys)` · hero `api.album_tracks(id, all)` · `api.favorites()` inv:Favorites
-- [ ] Header "home" title (hidden in Vaxry), "Customize home" button → edit mode (missing: a Customize home button on the page; shelf order and visibility are in Settings → Interface → Home)
-- [ ] Edit mode: per-section row with label, move up/down (swap in `cfg.home_sections`), show/hide toggle (`enabled`), Listen Now layout toggle (`cfg.listen_now_style` List⇄Cards); "Reset home" → `config::default_home_sections()`; "Done" (missing: the in-page edit mode and the Listen Now layout toggle; move, show/hide and reset are in Settings → Interface → Home)
+- [x] Header "home" title (hidden in Vaxry), "Customize home" button → edit mode
+- [x] Edit mode: per-section row with label, move up/down (swap in `cfg.home_sections`), show/hide toggle (`enabled`), Listen Now layout toggle (`cfg.listen_now_style` List⇄Cards); "Reset home" → `config::default_home_sections()`; "Done" (the same order, visibility and reset are also in Settings → Interface → Home)
 - [x] Sections rendered in `cfg.home_sections` order, disabled ones hidden (shown at 40% opacity in edit mode). Keys: `hero, continue_listening, listen_now, top_artists, new_releases, made_for_you, recently_added, playlists`
-- [ ] Hero ("featured_album"): newest recent track; cover = album Full art else track Full art; gradient overlay; title + "by_artist_full"; "Start listening" → `set_queue{Replace, Album{id}, start_index:0}`; heart = all album tracks favorited → `api.set_favorite(key,on)` for each track not already in target state (reads `api.favorites()` first), toast "Couldn't update some favorites" on partial failure (missing: no hero shelf)
-- [ ] Hero height resizable by drag handle in edit mode (140–800 px) → `cfg.hero_height` (missing: no hero shelf)
-- [ ] Hero empty state when no recents (blank block) (missing: no hero shelf)
-- [ ] Continue Listening: up to 10 recent tracks, one per album, skipping unknown artist/album; horizontal scroller with ‹ › buttons (scrollBy ±300); card click → album; hover play button (AlbumPlayButton); card dots menu: Play next (PLAY_NEXT), Add to queue (APPEND), Start radio (RADIO_T, `caps.track_radio`), Share (SHARE) (missing: the Jump back in tiles carry the album menu, so no Start radio or Share)
-- [ ] Listen Now: shuffled albums (dedup by lowercased title, drop unknown artist/album), skip first; Cards (10) or List grid (8); click → album; play button (missing: no Listen Now shelf)
+- [x] Hero ("featured_album"): newest recent track; cover = album Full art else track Full art; gradient overlay; title + "by_artist_full"; "Start listening" → `set_queue{Replace, Album{id}, start_index:0}`; heart = all album tracks favorited → `api.set_favorite(key,on)` for each track not already in target state (reads `api.favorites()` first), toast "Couldn't update some favorites" on partial failure (each refused track is reverted and toasted with its error)
+- [x] Hero height resizable by drag handle in edit mode (140–800 px) → `cfg.hero_height`
+- [x] Hero empty state when no recents (blank block, drawn in edit mode only, as upstream)
+- [x] Continue Listening: up to 10 recent tracks, one per album, skipping unknown artist/album; horizontal scroller with ‹ › buttons (scrollBy ±300); card click → album; hover play button (AlbumPlayButton); card dots menu: Play next (PLAY_NEXT), Add to queue (APPEND), Start radio (RADIO_T, `caps.track_radio`), Share (SHARE) (as Jump back in, whose tiles carry the menu of the track that put the album there)
+- [x] Listen Now: shuffled albums (dedup by lowercased title, drop unknown artist/album), skip first; Cards (10) or List grid (8); click → album; play button (upstream no longer dedups or skips the first)
 - [x] AlbumPlayButton semantics (everywhere): shows pause if current track's `album_id` == card id and playing; click toggles (`player_command(Toggle)`) when current, else `set_queue{Replace, Album{id}, 0}`
 - [x] Top Artists: up to 10 distinct artists from `artist_sample_tracks` (or offline tracks), photo from `ArtistInfo.artwork`; click → Artist page (by name)
-- [ ] New Releases: 12 albums sorted by year desc, dedup title (missing: no New Releases shelf)
+- [x] New Releases: 12 albums sorted by year desc, dedup title (as long as the other album shelves, from `api.albums` sorted by Year desc)
 - [x] Made For You: 12 random albums whose `genre == top_genre`; title uses genre
 - [x] Recently Added: 12 from `albums_recently_added`, dedup title
 - [x] Playlists: last 10 playlists (reverse order), cover from `PlaylistInfo.artwork`, "music_playlist_count"; click → playlist detail; dots menu with only Start radio (RADIO_P) when `caps.playlist_radio`
 - [x] Offline mode (`caps.downloads && is_offline`): albums/artists/playlists filtered to fully-downloaded content (see §6 seam note)
-- [ ] Auto-sync: if `caps.sync` and albums empty on first load → JOB(LibrarySync) (missing: no automatic sync; the empty library offers a refresh button instead)
+- [x] Auto-sync: if `caps.sync` and albums empty on first load → JOB(LibrarySync) (upstream left this to the daemon in 4f357f79: it syncs a never-synced source the first time it is active, `daemon/core/src/auto_sync.rs`)
 - [x] Each empty section renders nothing
 - [x] For you shelf: `api.for_you()` (a mix from radios of liked tracks), rebuilt by `api.refresh_for_you()`; hidden in offline mode
 - [x] Catalog home: a source with a catalog (`caps.pages`) gets its own feed and chips on Home, read with `api.catalog_detail(CatalogDetailRequest::page(id))`
@@ -129,7 +129,7 @@ Data: windowed `api.tracks(TrackFilter{sort: Fields(cfg.library_sort)}, Page{off
 
 ### 2.7 Albums (`pages/album.rs`)
 Grid data: `api.albums(all)` inv:Albums; detail: `api.album(id)` inv:Albums, `api.album_tracks(id, all)` for every same-titled album inv:Tracks, `api.catalog_detail(Album,id)` when `caps.albums == Remote` (online) or DB miss
-- [ ] Grid title "all_albums"; auto JOB(LibrarySync) once if empty and `caps.sync` (missing: no automatic sync; the empty library offers a refresh button instead)
+- [x] Grid title "all_albums"; auto JOB(LibrarySync) once if empty and `caps.sync` (the daemon syncs a never-synced source itself, as in §2.1)
 - [x] ViewModeToggle Grid/List → `cfg.album_view_mode`; SortControl over available fields (Title, Artist, +Year if any year, +Genre if any genre) → `cfg.album_sort`; client-side sort
 - [x] Grid dedups by lowercased title; offline filter to downloaded albums
 - [x] Card: click → detail; right-click (contextmenu) or dots → menu: Add all to queue (`album_tracks` sorted → APPEND), Add all to playlist (ADD_TO_PL(album keys)), Delete album (`caps.delete_from_disk` → `api.delete_album(id, true)`) / Remove from cache (else `delete_album(id,false)` for every same-titled album)
@@ -139,18 +139,18 @@ Grid data: `api.albums(all)` inv:Albums; detail: `api.album(id)` inv:Albums, `ap
 - [x] Detail cover click (`caps.edit_tags`): native file picker (jpg/png/webp) → `api.upload_artwork{Album(id), content_type, bytes}`; trash button (if artwork) → `api.remove_artwork(Album(id))`
 - [x] Detail: per-track delete + selection delete (`caps.delete_from_disk`, from_disk=true); per-track download toggle, Download all / Remove all (`caps.downloads`); download-all disabled while any track active
 - [x] Detail (Remote, `caps.albums == Remote`) "YtAlbumDetail": left meta column (cover, artist link, title, "Album • N songs • M min • year"), buttons: download-all/remove-all toggle, go to artist, Play (PLAY_ALL), Shuffle toggle, Share (`api.album_web_url(browse_id)` fallback `api.track_web_url(first key)` → clipboard); track list of TrackRows (radio, queue, playlist, download toggle; no delete)
-- [ ] Offline: detail tracks filtered to downloaded (missing: the offline filter; `TODO(offline)` in page_albums/src/detail.rs)
-- [ ] Rip an audio CD to FLAC (`caps.rip_audio` → `api.rip_audio`), progress from JobProgress
+- [x] Offline: detail tracks filtered to downloaded (and no catalog read while offline)
+- [x] Rip an audio CD to FLAC (`caps.rip_audio` → `api.rip_audio`), progress from JobProgress
 
 ### 2.8 Artists (`pages/artist.rs`, library presentation)
 Data: `api.albums(all)`, `api.artists(all)` (counts + photos), `api.artist_sample_tracks({0,MAX})`, `api.artist_tracks(name, all)`; `api.refresh_artist_artwork(names)` fired when the grid's name set changes (results arrive as inv:Tracks)
-- [ ] Grid: artist set = album artists ∪ sample-track `artists`, normalized, dropping joined collab credits whose primary exists; photo = `ArtistInfo.artwork`; placeholder mic icon (missing: `api.refresh_artist_artwork` is never called)
+- [x] Grid: artist set = album artists ∪ sample-track `artists`, normalized, dropping joined collab credits whose primary exists; photo = `ArtistInfo.artwork`; placeholder mic icon (upstream no longer calls `api.refresh_artist_artwork`: the daemon sweeps missing photos at boot and on each source switch, `daemon/core/src/library/artist_art.rs`)
 - [x] ViewModeToggle → `cfg.artists_view_mode`; SortControl Name/Tracks/Albums → `cfg.artist_sort` (name breaks ties)
 - [x] Grid scroll persisted (key "artists")
 - [x] Detail: back button; Tracks⇄Albums toggle → `cfg.artist_view_order`
 - [x] Detail Tracks (Showcase): header w/ photo (click → pick file → `upload_artwork{Artist(name)}`), Play all, shuffle, download all/remove all, select all, sortable columns, full row menu, metadata edit, selection bar (queue / playlist / delete)
 - [x] Detail Albums: ViewModeToggle → `cfg.artist_album_view_mode`, SortControl (no Artist field) → `cfg.artist_album_sort`; card menu: Add all to queue, Add all to playlist (`caps.playlists != None`), Delete album (`caps.delete_from_disk`), Download/Remove downloads (`caps.downloads`, uses `with_album_keys`)
-- [ ] States: "no_tracks_found", "no_albums_found"; offline filter (missing: the offline filter; `TODO(offline)` in page_artists/src/detail.rs)
+- [x] States: "no_tracks_found", "no_albums_found"; offline filter
 
 ### 2.9 Playlists (`pages/playlists.rs`, `components/playlist/*`)
 Data: `api.playlists()` → `PlaylistCatalog` inv:Playlists+Folders; detail tracks `api.tracks_by_keys(track_keys)` inv:Tracks

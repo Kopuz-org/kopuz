@@ -213,13 +213,16 @@ impl ArtistDetail {
     }
 
     fn rows(&self, cx: &App) -> Vec<TrackInfo> {
-        // TODO(offline): filter to downloaded tracks when offline.
         let mut rows = self
             .tracks
             .read(cx)
             .value()
             .map(|page| page.items.clone())
             .unwrap_or_default();
+        // The daemon's re-read lands after offline mode switches, so the rows held until then are kept to copies here too.
+        if SourcesModel::global(cx).read(cx).offline_reads() {
+            rows.retain(|row| row.offline || row.cached);
+        }
         if let Some((column, direction)) = self.column {
             sort_tracks(&mut rows, column, direction);
         }
