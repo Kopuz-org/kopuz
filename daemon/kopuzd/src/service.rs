@@ -1633,6 +1633,11 @@ impl Kopuz for KopuzGrpc {
                 "this source does not support music uploads",
             ));
         }
+        static BUFFERING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+        let _buffering = BUFFERING
+            .acquire()
+            .await
+            .map_err(|_| Status::unavailable("uploads have stopped"))?;
         let mut content = Vec::new();
         while let Some(chunk) =
             tokio::time::timeout(std::time::Duration::from_secs(30), stream.message())

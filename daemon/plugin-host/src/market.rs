@@ -194,6 +194,22 @@ pub fn check_manifest(
     Ok(manifest)
 }
 
+/// An advisory lock on `dir`, released when the file is dropped. Hold it
+/// across an install or removal, so two daemons sharing the directory never
+/// stage, publish or remove one plugin at once.
+pub fn lock(dir: &Path) -> Result<std::fs::File, MarketError> {
+    std::fs::create_dir_all(dir)?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join(LOCK_FILE))?;
+    file.lock()?;
+    Ok(file)
+}
+
+const LOCK_FILE: &str = ".lock";
+
 /// Staged first, so a failure halfway leaves the old version whole.
 pub fn install(
     dir: &Path,
@@ -256,6 +272,21 @@ fn plugin_dir(dir: &Path, id: &str) -> Result<PathBuf, MarketError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_directory_lock_keeps_a_second_holder_out_until_it_is_dropped() {
+        let dir = std::env::temp_dir().join(format!("kopuz-plugin-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let held = lock(&dir).expect("lock");
+        let other = std::fs::File::open(dir.join(LOCK_FILE)).expect("open");
+        assert!(matches!(
+            other.try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+        drop(held);
+        assert!(other.try_lock().is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn sha(bytes: &[u8]) -> String {
         sha256_hex(bytes)

@@ -432,7 +432,10 @@ impl MediaSource for PluginSource {
     }
 
     async fn upload_track(&self, filename: String, content: Vec<u8>) -> Result<(), SourceError> {
-        answer(self.session.upload_track(&filename, &content).await)
+        let uploaded = self.session.upload_track(&filename, &content).await;
+        drop(content);
+        self.session.release_idle().await;
+        answer(uploaded)
     }
 
     /// Without favorites of its own, the remote set is kopuz's, so a

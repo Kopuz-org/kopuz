@@ -167,7 +167,7 @@ pub struct ArtworkService {
     cache_dir: PathBuf,
     http: reqwest::Client,
     /// Follows no redirect, for a fetch whose every hop is checked here.
-    http_unredirected: reqwest::Client,
+    http_unredirected: Option<reqwest::Client>,
 }
 
 #[derive(Debug)]
@@ -242,7 +242,9 @@ impl ArtworkService {
             radio: OnceLock::new(),
             cache_dir,
             http: utils::http::client(),
-            http_unredirected: unredirected_client(),
+            http_unredirected: unredirected_client()
+                .inspect_err(|error| tracing::warn!(%error, "plugin artwork will not be fetched"))
+                .ok(),
         })
     }
 
@@ -497,7 +499,7 @@ impl ArtworkService {
         hq: bool,
         reach: Option<&server::plugins::Reach>,
     ) -> Result<(Vec<u8>, &'static str), ApiError> {
-        let mut response = get(&self.http, &self.http_unredirected, url, reach)
+        let mut response = get(&self.http, self.http_unredirected.as_ref(), url, reach)
             .await?
             .error_for_status()
             .map_err(fetch_failed)?;
@@ -526,11 +528,13 @@ impl ArtworkService {
 }
 
 /// A client that follows no redirect, for a fetch that checks each hop itself.
-pub(crate) fn unredirected_client() -> reqwest::Client {
+/// The client a plugin's cover is fetched with, hop by hop. One that fails to
+/// build is no reason to fall back to a client that follows redirects itself.
+pub(crate) fn unredirected_client() -> Result<reqwest::Client, ApiError> {
     utils::http::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .unwrap_or_default()
+        .map_err(fetch_failed)
 }
 
 fn fetch_failed(error: reqwest::Error) -> ApiError {
@@ -542,7 +546,7 @@ fn fetch_failed(error: reqwest::Error) -> ApiError {
 /// one stored before the plugin narrowed them is refused, not fetched.
 pub(crate) async fn get(
     http: &reqwest::Client,
-    unredirected: &reqwest::Client,
+    unredirected: Option<&reqwest::Client>,
     url: &str,
     reach: Option<&server::plugins::Reach>,
 ) -> Result<reqwest::Response, ApiError> {
@@ -558,6 +562,9 @@ pub(crate) async fn get(
     if !reach.allows(url) {
         return Err(outside());
     }
+    let unredirected = unredirected.ok_or_else(|| {
+        ApiError::internal("no redirect-free client to fetch plugin artwork with")
+    })?;
     let mut url = reqwest::Url::parse(url)
         .map_err(|error| ApiError::internal(format!("artwork URL is invalid: {error}")))?;
     for _ in 0..=MAX_ARTWORK_REDIRECTS {
@@ -626,8 +633,12 @@ mod tests {
         (format!("http://{address}"), hits)
     }
 
+    /// Skipped where 127.0.0.2 is not a loopback address, as on macOS by default.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_plugin_cover_never_leaves_the_plugins_hosts() {
+        if std::net::TcpListener::bind(("127.0.0.2", 0)).is_err() {
+            return;
+        }
         let (elsewhere, elsewhere_hits) =
             serve_on("127.0.0.2", vec![("/x.jpg", String::new())]).await;
         let (allowed, _) = serve_on(
@@ -648,11 +659,11 @@ mod tests {
             &allowed,
         );
         let http = utils::http::client();
-        let unredirected = unredirected_client();
+        let unredirected = unredirected_client().expect("client");
 
         let followed = get(
             &http,
-            &unredirected,
+            Some(&unredirected),
             &format!("{allowed}/moved.jpg"),
             Some(&reach),
         )
@@ -662,7 +673,7 @@ mod tests {
 
         let refused = get(
             &http,
-            &unredirected,
+            Some(&unredirected),
             &format!("{allowed}/away.jpg"),
             Some(&reach),
         )
@@ -670,7 +681,7 @@ mod tests {
         assert!(refused.is_err());
         let denied = get(
             &http,
-            &unredirected,
+            Some(&unredirected),
             &format!("{elsewhere}/x.jpg"),
             Some(&reach),
         )
@@ -685,9 +696,14 @@ mod tests {
             "the undeclared host is never asked"
         );
 
-        let unrestricted = get(&http, &unredirected, &format!("{elsewhere}/x.jpg"), None)
-            .await
-            .expect("without a community plugin the URL is fetched as before");
+        let unrestricted = get(
+            &http,
+            Some(&unredirected),
+            &format!("{elsewhere}/x.jpg"),
+            None,
+        )
+        .await
+        .expect("without a community plugin the URL is fetched as before");
         assert_eq!(unrestricted.status(), reqwest::StatusCode::OK);
     }
 

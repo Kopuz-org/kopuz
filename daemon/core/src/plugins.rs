@@ -20,12 +20,16 @@ const MAX_INDEX_BYTES: usize = 4 * 1024 * 1024;
 /// How often the plugin directory is checked for files dropped in by hand.
 const WATCH_INTERVAL: Duration = Duration::from_secs(2);
 
+const MAX_REDIRECTS: usize = 5;
+
 pub struct PluginService {
     index_url: String,
-    http: reqwest::Client,
+    /// Nothing when it failed to build, since a client without the https-only redirect policy is no substitute.
+    http: Option<reqwest::Client>,
     index: Mutex<Option<(Instant, Arc<Index>)>>,
     /// Held while the plugin directory changes, since an install and a
-    /// removal of one id share its staging paths.
+    /// removal of one id share its staging paths. Another daemon sharing the
+    /// directory is kept out by [`market::lock`].
     changing: Mutex<()>,
 }
 
@@ -49,8 +53,18 @@ impl PluginService {
     pub fn new(index_url: String) -> Self {
         let http = utils::http::builder()
             .timeout(Duration::from_secs(60))
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.url().scheme() != "https" {
+                    attempt.error("a marketplace redirect left https")
+                } else if attempt.previous().len() >= MAX_REDIRECTS {
+                    attempt.error("too many redirects")
+                } else {
+                    attempt.follow()
+                }
+            }))
             .build()
-            .unwrap_or_else(|_| utils::http::client());
+            .inspect_err(|error| tracing::warn!(%error, "the plugin marketplace is unreachable"))
+            .ok();
         Self {
             index_url,
             http,
@@ -74,8 +88,11 @@ impl PluginService {
         if parsed.scheme() != "https" {
             return Err(format!("{url} is not an https address"));
         }
-        let mut response = self
+        let http = self
             .http
+            .as_ref()
+            .ok_or("no client to reach the marketplace with")?;
+        let mut response = http
             .get(parsed)
             .send()
             .await
@@ -288,6 +305,7 @@ impl PluginService {
         // otherwise stay on disk and win a later rescan.
         let copies = server::plugins::registry().dirs_of(&id);
         server::plugins::adopt(Arc::new(candidate), move || {
+            let _locked = market::lock(&dir)?;
             let target = market::install(&dir, &id, &manifest_text, &component)?;
             for copy in copies.iter().filter(|copy| **copy != target) {
                 market::uninstall(&dir, copy)?;
@@ -330,6 +348,7 @@ impl PluginService {
             .ok_or_else(|| ApiError::unsupported("this daemon has no plugin directory"))?
             .to_path_buf();
         server::plugins::remove(move || {
+            let _locked = market::lock(&dir)?;
             copies
                 .iter()
                 .try_for_each(|copy| market::uninstall(&dir, copy))
