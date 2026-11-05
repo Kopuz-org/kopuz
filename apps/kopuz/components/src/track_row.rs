@@ -299,26 +299,32 @@ impl RenderOnce for TrackRow {
                     cx.new(|_| drag.clone())
                 })
             })
-            .when_some(long_press, |row, long_press| {
-                let (down, up, left) = (press.clone(), press.clone(), press.clone());
-                row.on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                    let (held, long_press) = (down.clone(), long_press.clone());
-                    let timer = window.spawn(cx, async move |cx| {
-                        cx.background_executor().timer(LONG_PRESS).await;
-                        cx.update(|window, cx| {
-                            held.update(cx, |press, _| press.fired = true);
-                            long_press(window, cx);
+            // Picking mode has no hold, but a hold that entered it may still have a release to forget.
+            .on_mouse_down(MouseButton::Left, {
+                let (down, long_press) = (press.clone(), long_press.clone());
+                move |_, window, cx| {
+                    let timer = long_press.clone().map(|long_press| {
+                        let held = down.clone();
+                        window.spawn(cx, async move |cx| {
+                            cx.background_executor().timer(LONG_PRESS).await;
+                            cx.update(|window, cx| {
+                                held.update(cx, |press, _| press.fired = true);
+                                long_press(window, cx);
+                            })
+                            .ok();
                         })
-                        .ok();
                     });
-                    down.update(cx, |press, _| press.begin(Some(timer)));
-                })
-                .on_mouse_up(MouseButton::Left, move |_, _, cx| cancel(&up, cx))
-                .on_hover(move |over, _, cx| {
-                    if !*over {
-                        cancel(&left, cx);
-                    }
-                })
+                    down.update(cx, |press, _| press.begin(timer));
+                }
+            })
+            .when(long_press.is_some(), |row| {
+                let (up, left) = (press.clone(), press.clone());
+                row.on_mouse_up(MouseButton::Left, move |_, _, cx| cancel(&up, cx))
+                    .on_hover(move |over, _, cx| {
+                        if !*over {
+                            cancel(&left, cx);
+                        }
+                    })
             })
             // Upstream the wash is an inline style, which outranks `hover:bg-white/5`; a refinement does not.
             .when(!self.playing && !self.selected, |row| {
@@ -562,6 +568,8 @@ fn dim(cell: Div, cx: &App) -> Div {
 
 #[cfg(test)]
 mod tests {
+    use gpui_kit::Task;
+
     use super::{CopyMark, Press};
 
     #[test]
@@ -588,6 +596,17 @@ mod tests {
         // The hold ran out, then the pointer left the row, so no click consumed the mark.
         press.fired = true;
         press.begin(None);
+        assert!(!press.swallows_click());
+    }
+
+    #[test]
+    fn a_press_in_picking_mode_forgets_the_hold_that_entered_it() {
+        let mut press = Press::default();
+        press.begin(Some(Task::ready(())));
+        // The hold ran out and picked the row; the release landed off it, then a press came with no hold to arm.
+        press.fired = true;
+        press.begin(None);
+        assert!(press.timer.is_none());
         assert!(!press.swallows_click());
     }
 }

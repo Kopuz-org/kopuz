@@ -45,6 +45,12 @@ impl CatalogCache {
         )
     }
 
+    /// The source switch and key a fetch belongs to; `None` while a switch is settling.
+    fn ticket(id: &str, cx: &App) -> Option<(u64, String)> {
+        let epoch = SourcesModel::global(cx).read(cx).switch_epoch()?;
+        Some((epoch, Self::key(id, cx)))
+    }
+
     pub fn get(id: &str, cx: &App) -> Option<Cached> {
         let key = Self::key(id, cx);
         let entry = cx.try_global::<Self>()?.pages.get(&key)?;
@@ -90,14 +96,15 @@ impl CatalogCache {
         if Self::get(&id, cx).is_some_and(|cached| cached.fresh) {
             return;
         }
-        let key = Self::key(&id, cx);
-        let armed = key.clone();
+        let Some(ticket) = Self::ticket(&id, cx) else {
+            return;
+        };
+        let key = ticket.1.clone();
         let dwell = cx.spawn(async move |cx| {
             cx.background_executor().timer(DWELL).await;
             cx.update(|cx| {
-                // A source switched during the dwell would be asked for an id another source gave out.
-                if Self::key(&id, cx) == armed {
-                    Self::prefetch(kind, id, armed, cx);
+                if Self::ticket(&id, cx).as_ref() == Some(&ticket) {
+                    Self::prefetch(kind, id, ticket, cx);
                 }
             });
         });
@@ -113,13 +120,17 @@ impl CatalogCache {
         }
     }
 
-    /// The answer is held under the source that was asked, even if another is active by the time it lands.
-    fn prefetch(kind: CatalogItemKind, id: String, key: String, cx: &mut App) {
-        let request = CatalogDetailRequest::new(kind, id);
+    /// A switch started since the ask may have reached the daemon first, so its answer could be another source's page.
+    fn prefetch(kind: CatalogItemKind, id: String, ticket: (u64, String), cx: &mut App) {
+        let request = CatalogDetailRequest::new(kind, id.clone());
         let call =
             Link::global(cx).call(move |api| async move { api.catalog_detail(request).await });
         cx.spawn(async move |cx| match call.await {
-            Ok(detail) => cx.update(|cx| Self::put_at(key, detail, cx)),
+            Ok(detail) => cx.update(|cx| {
+                if Self::ticket(&id, cx).as_ref() == Some(&ticket) {
+                    Self::put_at(ticket.1, detail, cx);
+                }
+            }),
             Err(error) => tracing::debug!(%error, "prefetching a catalog page failed"),
         })
         .detach();

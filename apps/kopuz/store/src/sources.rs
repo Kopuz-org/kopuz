@@ -68,6 +68,7 @@ pub struct SourcesModel {
     network: NetworkStatus,
     /// `--offline` asked for offline mode before the daemon answered.
     offline_on_connect: bool,
+    switching: Switching,
     _network: Option<Task<()>>,
     _fetch: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
@@ -122,6 +123,7 @@ impl SourcesModel {
             loaded: false,
             network: NetworkStatus::default(),
             offline_on_connect: false,
+            switching: Switching::default(),
             _network: None,
             _fetch: None,
             _subscriptions: subscriptions,
@@ -144,6 +146,7 @@ impl SourcesModel {
             }
         }
         self.sources = sources;
+        self.switching.settle();
         let after = self.active().map(|source| source.id.clone());
         let switched = self.loaded && before != after;
         self.loaded = true;
@@ -186,6 +189,16 @@ impl SourcesModel {
         }));
     }
 
+    /// Bumped by every switch, and `None` from its start until the new source is adopted.
+    pub fn switch_epoch(&self) -> Option<u64> {
+        self.switching.epoch()
+    }
+
+    fn start_switch(&mut self, cx: &mut Context<Self>) {
+        self.switching.start();
+        cx.emit(SwitchStarted);
+    }
+
     pub fn is_loaded(&self) -> bool {
         self.loaded
     }
@@ -220,7 +233,7 @@ impl SourcesModel {
     /// Make `id` active, and start whichever sign-in the daemon says it still needs.
     pub fn switch(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         if self.active().is_none_or(|source| source.id != id) {
-            cx.emit(SwitchStarted);
+            self.start_switch(cx);
         }
         let call = Link::global(cx).call(move |api| async move { api.switch_source(id).await });
         cx.spawn_in(window, async move |this, cx| {
@@ -231,7 +244,10 @@ impl SourcesModel {
                     ConfigModel::global(cx).update(cx, |config, cx| config.reload(cx));
                     crate::signin::start_sign_in(&source, window, cx);
                 }
-                Err(error) => Notices::failed(&error, cx),
+                Err(error) => {
+                    this.switching.settle();
+                    Notices::failed(&error, cx);
+                }
             })
             .ok();
         })
@@ -243,13 +259,14 @@ impl SourcesModel {
         // Only a source that needs the internet reads differently in offline mode.
         let remote = self.active().is_some_and(|source| !source.works_offline);
         if remote && on != self.network.offline_mode.is_on() {
-            cx.emit(SwitchStarted);
+            self.start_switch(cx);
         }
         let call = Link::global(cx).call(move |api| async move { api.set_offline(on).await });
         cx.spawn(async move |this, cx| {
             let result = call.await;
             this.update(cx, |this, cx| match result {
                 Ok(status) => {
+                    this.switching.settle();
                     let said = match status.offline_mode.is_on() {
                         true => "offline_mode_on",
                         false => "offline_mode_off",
@@ -258,7 +275,10 @@ impl SourcesModel {
                     crate::notify(cx);
                     Notices::info(i18n::t(said), cx);
                 }
-                Err(error) => Notices::failed(&error, cx),
+                Err(error) => {
+                    this.switching.settle();
+                    Notices::failed(&error, cx);
+                }
             })
             .ok();
         })
@@ -296,6 +316,27 @@ impl SourcesModel {
     }
 }
 
+#[derive(Default)]
+struct Switching {
+    count: u64,
+    settling: bool,
+}
+
+impl Switching {
+    fn start(&mut self) {
+        self.count += 1;
+        self.settling = true;
+    }
+
+    fn settle(&mut self) {
+        self.settling = false;
+    }
+
+    fn epoch(&self) -> Option<u64> {
+        (!self.settling).then_some(self.count)
+    }
+}
+
 /// Whether the internet being down leaves `source` out of reach; a folder or a loopback or LAN server is not.
 pub fn cut_off(status: &NetworkStatus, source: &SourceInfo) -> bool {
     status.internet_down && !source.works_offline && !source.active
@@ -311,6 +352,17 @@ mod tests {
             left_source: left.map(str::to_string),
             offline_mode: mode,
         }
+    }
+
+    #[test]
+    fn a_switch_reads_unsettled_until_adopted_and_never_matches_the_epoch_before_it() {
+        let mut switching = Switching::default();
+        let before = switching.epoch();
+        assert_eq!(before, Some(0));
+        switching.start();
+        assert_eq!(switching.epoch(), None);
+        switching.settle();
+        assert!(switching.epoch().is_some_and(|epoch| Some(epoch) != before));
     }
 
     fn back(source: &str) -> Option<NetworkNotice> {
