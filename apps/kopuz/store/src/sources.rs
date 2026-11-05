@@ -1,4 +1,6 @@
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use api::{
     ApiEvent, NetworkStatus, OfflineMode, SourceCapabilities, SourceInfo, SourceState, Table,
@@ -102,10 +104,10 @@ impl SourcesModel {
                             crate::notify(cx);
                         }
                     }
-                    // Answers may have been lost; the refetch the resync starts is trusted over them.
+                    // Answers may have been lost; the refetch is trusted over them, and calls in flight still count.
                     ApiEvent::Resync => {
                         this.heard.clear();
-                        this.switching.reset();
+                        this.refetch(cx);
                         match std::mem::take(&mut this.offline_on_connect) {
                             true => this.set_offline(true, cx),
                             false => this.read_network(cx),
@@ -230,21 +232,27 @@ impl SourcesModel {
             .unwrap_or_default()
     }
 
+    /// Counts `call` answered, and once none are left asks which source the daemon settled on.
+    fn finish(&mut self, call: InFlight, cx: &mut Context<Self>) {
+        drop(call);
+        if self.switching.idle() {
+            self.refetch(cx);
+        }
+    }
+
     /// Make `id` active, and start whichever sign-in the daemon says it still needs.
     pub fn switch(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         if self.active().is_none_or(|source| source.id != id) {
             cx.emit(SwitchStarted);
         }
-        let started = self.switching.start();
+        let in_flight = self.switching.start();
         let call = Link::global(cx).call(move |api| async move { api.switch_source(id).await });
         cx.spawn_in(window, async move |this, cx| {
             let result = call.await;
             // Apart from the window, so a closed one still counts the call as answered.
-            this.update(cx, |this, _| this.switching.finish(started))
-                .ok();
-            this.update_in(cx, |this, window, cx| match result {
+            this.update(cx, |this, cx| this.finish(in_flight, cx)).ok();
+            this.update_in(cx, |_, window, cx| match result {
                 Ok(source) => {
-                    this.refetch(cx);
                     ConfigModel::global(cx).update(cx, |config, cx| config.reload(cx));
                     crate::signin::start_sign_in(&source, window, cx);
                 }
@@ -262,29 +270,36 @@ impl SourcesModel {
         if remote && on != self.network.offline_mode.is_on() {
             cx.emit(SwitchStarted);
         }
-        let started = self.switching.start();
+        let in_flight = self.switching.start();
         let call = Link::global(cx).call(move |api| async move { api.set_offline(on).await });
         cx.spawn(async move |this, cx| {
             let result = call.await;
-            this.update(cx, |this, cx| match result {
-                Ok(status) => {
-                    this.switching.finish(started);
-                    let said = match status.offline_mode.is_on() {
-                        true => "offline_mode_on",
-                        false => "offline_mode_off",
-                    };
-                    this.network = status;
-                    crate::notify(cx);
-                    Notices::info(i18n::t(said), cx);
-                }
-                Err(error) => {
-                    this.switching.finish(started);
-                    Notices::failed(&error, cx);
-                }
+            this.update(cx, |this, cx| {
+                this.finish(in_flight, cx);
+                this.answered_offline(result, cx);
             })
             .ok();
         })
         .detach();
+    }
+
+    fn answered_offline(
+        &mut self,
+        result: Result<NetworkStatus, api::ApiError>,
+        cx: &mut Context<Self>,
+    ) {
+        match result {
+            Ok(status) => {
+                let said = match status.offline_mode.is_on() {
+                    true => "offline_mode_on",
+                    false => "offline_mode_off",
+                };
+                self.network = status;
+                crate::notify(cx);
+                Notices::info(i18n::t(said), cx);
+            }
+            Err(error) => Notices::failed(&error, cx),
+        }
     }
 
     /// Ask for offline mode as soon as the daemon answers, as `--offline` does.
@@ -322,41 +337,33 @@ impl SourcesModel {
 #[derive(Default)]
 struct Switching {
     count: u64,
-    outstanding: usize,
-    /// Bumped by a reconnect, so a call from before it cannot count down the calls after it.
-    resets: u64,
+    outstanding: Rc<Cell<usize>>,
     settling: bool,
 }
 
-/// Handed back to `finish` on every exit of the call it was started for.
-#[derive(Clone, Copy)]
-struct Started {
-    resets: u64,
+/// One unanswered call, counted down however its future ends; a dropped one only refetches at the next answer.
+struct InFlight(Rc<Cell<usize>>);
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        self.0.set(self.0.get().saturating_sub(1));
+    }
 }
 
 impl Switching {
-    fn start(&mut self) -> Started {
+    fn start(&mut self) -> InFlight {
         self.count += 1;
-        self.outstanding += 1;
+        self.outstanding.set(self.outstanding.get() + 1);
         self.settling = true;
-        Started {
-            resets: self.resets,
-        }
+        InFlight(self.outstanding.clone())
     }
 
-    fn finish(&mut self, started: Started) {
-        if started.resets == self.resets {
-            self.outstanding = self.outstanding.saturating_sub(1);
-        }
-    }
-
-    fn reset(&mut self) {
-        self.resets += 1;
-        self.outstanding = 0;
+    fn idle(&self) -> bool {
+        self.outstanding.get() == 0
     }
 
     fn adopted(&mut self) {
-        if self.outstanding == 0 {
+        if self.idle() {
             self.settling = false;
         }
     }
@@ -388,10 +395,11 @@ mod tests {
         let mut switching = Switching::default();
         let older = switching.start();
         let newer = switching.start();
-        switching.finish(older);
+        drop(older);
         switching.adopted();
         assert_eq!(switching.epoch(), None);
-        switching.finish(newer);
+        drop(newer);
+        assert!(switching.idle());
         switching.adopted();
         assert!(switching.epoch().is_some());
     }
@@ -399,26 +407,45 @@ mod tests {
     #[test]
     fn two_switches_settle_once_both_answer_and_the_last_is_adopted() {
         let mut switching = Switching::default();
-        let before = switching.epoch();
         let to_b = switching.start();
         let to_a = switching.start();
-        switching.finish(to_b);
-        switching.finish(to_a);
+        drop(to_b);
+        switching.adopted();
         assert_eq!(switching.epoch(), None);
+        drop(to_a);
+        switching.adopted();
+        assert!(switching.epoch().is_some());
+    }
+
+    #[test]
+    fn an_offline_call_answering_leaves_nothing_outstanding_for_the_refetch_to_settle() {
+        let mut switching = Switching::default();
+        let before = switching.epoch();
+        drop(switching.start());
+        assert!(switching.idle());
         switching.adopted();
         assert!(switching.epoch().is_some_and(|epoch| Some(epoch) != before));
     }
 
     #[test]
-    fn a_reconnect_mid_switch_lets_the_next_answer_settle_it() {
+    fn a_lone_failed_switch_settles_at_the_refetch_it_asks_for() {
         let mut switching = Switching::default();
-        let lost = switching.start();
-        switching.reset();
-        let after = switching.start();
-        switching.finish(lost);
+        let failed = switching.start();
+        assert_eq!(switching.epoch(), None);
+        drop(failed);
+        assert!(switching.idle());
+        switching.adopted();
+        assert!(switching.epoch().is_some());
+    }
+
+    #[test]
+    fn a_resync_mid_switch_keeps_caching_blocked_until_that_switch_answers() {
+        let mut switching = Switching::default();
+        let in_flight = switching.start();
+        // The resync's refetch lands while the switch is still out.
         switching.adopted();
         assert_eq!(switching.epoch(), None);
-        switching.finish(after);
+        drop(in_flight);
         switching.adopted();
         assert!(switching.epoch().is_some());
     }
