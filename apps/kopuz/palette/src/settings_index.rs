@@ -45,12 +45,12 @@ pub static ROWS: &[Entry] = &[
     entry("titlebar_mode", "appearance"),
     entry("player_bar_position", "appearance"),
     entry("settings_layout", "appearance"),
+    entry("ui_style", "appearance"),
     entry("interface_motion", "interface"),
     entry("interface_accent", "interface"),
     entry("interface_ambient", "interface"),
     entry("interface_scale", "interface"),
     entry("interface_font", "interface"),
-    entry("interface_skin", "interface"),
     entry("palette_history", "interface"),
     entry("palette_recents", "interface"),
     entry("palette_current_track_first", "interface"),
@@ -80,7 +80,6 @@ mod tests {
     const SOURCES: &[&str] = &[
         include_str!("../../settings_appearance/src/lib.rs"),
         include_str!("../../settings_interface/src/general.rs"),
-        include_str!("../../settings_interface/src/skin.rs"),
         include_str!("../../settings_playback/src/lib.rs"),
         include_str!("prefs.rs"),
     ];

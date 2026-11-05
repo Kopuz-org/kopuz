@@ -238,7 +238,7 @@ Data: `api.download_formats()`, `api.downloader_settings()`, `api.downloader_his
 ### 3.3 Sidebar (`layout/{normal,vaxry}/sidebar.rs`)
 - [x] Normal style: flat list Home, Search, Discover, Library, Albums, Artists, Playlists, Favorites, Radio, Activity, Downloader (desktop) + separator + Settings
 - [x] Normal: order from `cfg.sidebar_order`, hover ▲▼ reorder buttons per item (writes `cfg.sidebar_order`)
-- [ ] Vaxry style: sections "discover" (Home, Search, Discover, Radio) and "library" (Library, Albums, Artists, Favorites, Activity, Playlists), then Downloader + Settings; no reorder (missing: no Vaxry skin)
+- [x] Vaxry style: sections "discover" (Home, Search, Discover, Radio) and "library" (Library, Albums, Artists, Favorites, Activity, Playlists), then Downloader + Settings; no reorder (Search folds into Discover, as the GPUI routes do)
 - [x] Discover item hidden unless `caps.discover`
 - [x] Drag-to-resize width (Normal default 240, Vaxry 200; collapse to 72 px icon rail under 150 px, expand over 180; max 450); collapsed items show tooltips (the playlists panel, up to 420 px)
 - [x] Active item indicator bar
@@ -261,7 +261,7 @@ Mirrors PlayerController signals (§5.1)
 - [x] Volume: mute toggle (remembers pre-mute level), slider (`SetVolume` live on input), wheel step = `cfg.volume_scroll_step`; persisted volume saved with config
 - [x] Queue/lyrics panel toggle (rightbar), External devices button (§3.10), Share current (SHARE), Mini player toggle (desktop), Fullscreen button
 - [x] `cfg.fullscreen_use_player_bar`: bar stays on top of fullscreen view (cover/title hidden in bar)
-- [ ] Vaxry variant: same actions, different layout (missing: no Vaxry skin)
+- [x] Vaxry variant: same actions, different layout
 
 ### 3.6 Right bar: queue + lyrics (`layout/rightbar.rs`)
 - [x] Tabs "up_next" / "lyrics", close button; resizable width 280–600 px (drag left edge); mutually exclusive with devices panel
@@ -292,7 +292,7 @@ Data: `api.lyrics(key)` per track change (none for radio, stale answers dropped)
 - [x] Two layouts (rightbar, fullscreen) with separate sizing
 
 ### 3.9 Track row (`track/row.rs`) — shared by every list
-- [ ] Columns: # (or track number in albums; play icon on hover), cover (`cfg.show_row_images`), title (+artist inline), artist (click → artist), album (click → album; hidden in album views), duration, dots menu; Normal and Vaxry column templates; disc headers in multi-disc albums (missing: no Vaxry column template)
+- [x] Columns: # (or track number in albums; play icon on hover), cover (`cfg.show_row_images`), title (+artist inline), artist (click → artist), album (click → album; hidden in album views), duration, dots menu; Normal and Vaxry column templates; disc headers in multi-disc albums
 - [x] Click → on_play; long-press (touch or mouse hold) → selection mode; checkbox in selection mode
 - [x] Right-click opens the same menu at the cursor
 - [x] Mouse-drag a row (or the selection) toward the queue (§3.7)
@@ -317,7 +317,7 @@ Shown only when active source has `caps.external_devices` and `authenticated`
 ### 3.12 Compact mini-player (desktop)
 - [x] Toggled by bar button / Ctrl+M; window shrinks to 380×148 (170 on macOS), always-on-top, restores previous size on exit
 - [x] Whole surface drags window; blurred cover bg; title, artist, "mm:ss / mm:ss" or "LIVE"; restore button; prev/play-pause/next; thin seek bar with buffer indicator
-- [ ] UI-style skins (Normal/Vaxry) (missing: no Vaxry skin)
+- [x] UI-style skins (Normal/Vaxry)
 
 ### 3.13 Quick Search (Ctrl/Cmd+K overlay)
 - [x] Modal input (autofocus), 150 ms debounce → `api.search`; shows top results (cover, title, artist)
@@ -341,7 +341,7 @@ Shown only when active source has `caps.external_devices` and `authenticated`
 - [x] Live theme (`cfg.theme == "live"`, desktop): matugen/pywal JSON at `cfg.live_theme_path` (or default) polled every 400 ms (2 s idle), recolors in place (polled only while selected; a half-written file keeps the colours up)
 - [x] Custom UI font `cfg.custom_font_path` (ttf/otf/woff/woff2, ≤32 MB) applied app-wide
 - [x] `cfg.reduce_animations` → reduced-animation stylesheet
-- [ ] `cfg.ui_style` Normal vs Vaxry switches sidebar, bar, showcase, headers, compact skin, page paddings (missing: no Vaxry layout; `TODO(parity)` in settings_appearance/src/lib.rs)
+- [x] `cfg.ui_style` Normal vs Vaxry switches sidebar, bar, showcase, headers, compact skin, page paddings
 
 ### 3.17 Tray / close behavior (desktop)
 - [ ] `cfg.minimize_to_tray`: tray icon with "Show / Hide Kopuz" and "Quit Kopuz"; window close hides instead of quitting; Linux checks appindicator libs and warns/popups if missing (missing: Linux has no tray, since appindicator needs a GTK main loop and GPUI runs none; macOS and Windows have it)
@@ -373,7 +373,7 @@ Category → rows. **[H]** = hardcoded `Settings` field (applied to the local co
 - [x] [H] `show_source_toggle` toggle
 - [x] [H] `show_row_images` toggle
 - [x] [H] `titlebar_mode` Custom/System/Off (Linux/Windows)
-- [ ] [H] `ui_style` Normal/Vaxry (missing: no Vaxry layout; Material 3 is the other skin)
+- [x] [H] `ui_style` Normal/Vaxry (Material 3 is the third choice)
 - [x] [H] `player_bar_position` Bottom/Top
 - [x] [H] `settings_layout` Cd/TopBar
 - [x] Theme editor section (§2.15) → `custom_themes`

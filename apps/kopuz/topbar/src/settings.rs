@@ -53,21 +53,28 @@ impl Render for Navigation {
             .w_full()
             .child(
                 section(t("interface_nav"))
+                    // A skin that sections the navigation keeps it down the side, so the choice would do nothing.
                     .children(
-                        SettingRow::new(t("interface_nav_position"))
-                            .description(t("interface_nav_position_description"))
-                            .control(choice(
-                                "interface-nav-position",
-                                &position,
-                                vec![
-                                    (NavPosition::Top, t("interface_nav_position_top")),
-                                    (NavPosition::Left, t("interface_nav_position_left")),
-                                ],
-                                |value, cx| {
-                                    LayoutModel::edit(cx, |layout| layout.nav.position = value)
-                                },
-                            ))
-                            .shown(cx),
+                        (components::skin::arrangement().nav == components::skin::Nav::Strip)
+                            .then(|| {
+                                SettingRow::new(t("interface_nav_position"))
+                                    .description(t("interface_nav_position_description"))
+                                    .control(choice(
+                                        "interface-nav-position",
+                                        &position,
+                                        vec![
+                                            (NavPosition::Top, t("interface_nav_position_top")),
+                                            (NavPosition::Left, t("interface_nav_position_left")),
+                                        ],
+                                        |value, cx| {
+                                            LayoutModel::edit(cx, |layout| {
+                                                layout.nav.position = value
+                                            })
+                                        },
+                                    ))
+                                    .shown(cx)
+                            })
+                            .flatten(),
                     )
                     .children(
                         SettingRow::new(t("interface_nav_start"))

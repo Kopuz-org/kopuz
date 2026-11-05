@@ -96,6 +96,7 @@ pub struct PlayPauseButton {
     loading: bool,
     floating: bool,
     filled: bool,
+    soft: bool,
 }
 
 impl PlayPauseButton {
@@ -112,6 +113,7 @@ impl PlayPauseButton {
             loading: false,
             floating: false,
             filled: false,
+            soft: false,
         }
     }
 
@@ -150,6 +152,12 @@ impl PlayPauseButton {
     /// A filled accent circle whatever the skin, for a surface where play is the one thing to find.
     pub fn filled(mut self, filled: bool) -> Self {
         self.filled = filled;
+        self
+    }
+
+    /// A `bg-white/10` circle instead, quieter than the accent; it outranks `filled` and the skin's shape.
+    pub fn soft(mut self, soft: bool) -> Self {
+        self.soft = soft;
         self
     }
 
@@ -240,20 +248,24 @@ impl RenderOnce for PlayPauseButton {
                 .into_any_element();
         }
         // A skin that squares the play button fills it, as Material's filled icon button is.
-        let shape = style::chrome().play_shape.filter(|_| !self.filled);
-        let fill = self.filled || shape.is_some();
+        let soft = self.soft;
+        let shape = style::chrome().play_shape.filter(|_| !self.filled && !soft);
+        let fill = (self.filled || shape.is_some()) && !soft;
         IconButton::new(self.id, glyph)
             .when_some(swap, |button, shown| button.swap_from(was, shown))
             .size(self.size)
             .glyph(self.glyph)
-            .tone(match fill {
-                true => IconTone::Accent,
-                false => IconTone::Quiet,
+            .tone(match (soft, fill) {
+                (true, _) => IconTone::Soft,
+                (false, true) => IconTone::Accent,
+                (false, false) => IconTone::Quiet,
             })
             .shape(shape)
-            .lit(!fill)
-            .when(!fill, |button| button.accent(cx.theme().foreground))
-            .when(self.filled, |button| {
+            .lit(!fill && !soft)
+            .when(!fill && !soft, |button| {
+                button.accent(cx.theme().foreground)
+            })
+            .when(self.filled && !soft, |button| {
                 button.accent(motion::accent(
                     theme::Surface::Chrome,
                     cx.theme().primary,
@@ -355,6 +367,7 @@ pub struct Transport {
     sides: bool,
     balanced: bool,
     filled: bool,
+    soft: bool,
     playing: bool,
     loaded: bool,
     shuffle: Option<bool>,
@@ -374,6 +387,7 @@ impl Transport {
             sides: false,
             balanced: false,
             filled: false,
+            soft: false,
             playing: false,
             loaded: false,
             shuffle: None,
@@ -411,6 +425,12 @@ impl Transport {
     /// Draw play as a filled accent circle; see [`PlayPauseButton::filled`].
     pub fn filled(mut self, filled: bool) -> Self {
         self.filled = filled;
+        self
+    }
+
+    /// Draw play as a soft wash; see [`PlayPauseButton::soft`].
+    pub fn soft(mut self, soft: bool) -> Self {
+        self.soft = soft;
         self
     }
 
@@ -510,6 +530,7 @@ impl RenderOnce for Transport {
                     .playing(self.playing)
                     .size(metrics.play, metrics.play_glyph)
                     .filled(self.filled)
+                    .soft(self.soft)
                     .disabled(!self.loaded)
                     .on_click(press(self.toggle)),
             )

@@ -510,7 +510,8 @@ impl Render for Shell {
         // A disconnect outranks compact: a mini player with nothing behind it would keep showing
         // the last track it saw, with no way to learn the daemon had gone.
         let compact = chrome.is_compact() && connected;
-        let nav_left = store::layout(cx).nav.position == store::layout::NavPosition::Left;
+        let nav_left = components::skin::nav_position(store::layout(cx).nav.position)
+            == store::layout::NavPosition::Left;
         let rtl = i18n::is_rtl();
         let bar = Some(self.topbar.clone());
         let playlists = self.playlists_panel.read(cx);

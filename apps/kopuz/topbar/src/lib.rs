@@ -9,14 +9,16 @@ mod tabs;
 
 use components::format::t;
 use components::marker::Along;
+use components::skin::{self, Nav};
 use components::{Bar, SearchTrigger, Tab, TabStrip, icons, style};
+use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Disableable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AnyView, App, Context, InteractiveElement as _, IntoElement, MouseButton,
-    MouseDownEvent, NavigationDirection, ParentElement as _, Pixels, Render, SharedString, Styled,
-    Subscription, Window, div, px,
+    AnyElement, AnyView, App, Context, FontWeight, InteractiveElement as _, IntoElement,
+    MouseButton, MouseDownEvent, NavigationDirection, ParentElement as _, Pixels, Render,
+    SharedString, StatefulInteractiveElement as _, Styled, Subscription, Window, div, px,
 };
 use store::layout::{NavPosition, Ordered as _};
 use store::{ConfigModel, LayoutModel, Navigator, Route, SourcesModel};
@@ -35,6 +37,11 @@ const CHROME_GLYPH: Pixels = px(15.);
 const RAIL_TRAFFIC_LIGHTS: Pixels = px(28.);
 // `bg-black/40` and `border-white/5`: the chrome's own scrim, as the rail wore it.
 const SCRIM: f32 = 0.40;
+/// `h-10`: the sectioned sidebar's own room for the window buttons.
+const SIDEBAR_TRAFFIC_LIGHTS: Pixels = px(40.);
+// A section heading's ink and the divider's, as fractions of the sidebar's text colour.
+const SECTION_INK: f32 = 0.25;
+const DIVIDER: f32 = 0.06;
 
 /// The frame a page draws inside, so a table stops stretching and a grid centres.
 pub fn content_frame() -> gpui_kit::Div {
@@ -119,6 +126,11 @@ impl TopBar {
         self.position = nav.position;
     }
 
+    /// Where the bar sits once the skin has had its say.
+    fn position(&self) -> NavPosition {
+        skin::nav_position(self.position)
+    }
+
     fn open(&self, index: usize, cx: &mut App) {
         let Some(name) = self.destinations.get(index) else {
             return;
@@ -129,7 +141,7 @@ impl TopBar {
     }
 
     fn strip(&self, current: Option<&str>, cx: &mut Context<Self>) -> AnyElement {
-        let vertical = self.position == NavPosition::Left;
+        let vertical = self.position() == NavPosition::Left;
         let along = match vertical {
             true => Along::Column,
             false => Along::Row,
@@ -196,7 +208,7 @@ impl TopBar {
     fn cluster(&self, cx: &mut Context<Self>) -> AnyElement {
         let sources = SourcesModel::global(cx).read(cx).sources().to_vec();
         let status = SourcesModel::global(cx).read(cx).active_status();
-        let compact = self.compact && self.position == NavPosition::Top;
+        let compact = self.compact && self.position() == NavPosition::Top;
         let show_source_toggle = ConfigModel::global(cx)
             .read(cx)
             .config()
@@ -214,7 +226,7 @@ impl TopBar {
                 .bare(true),
         );
 
-        match self.position {
+        match self.position() {
             NavPosition::Top => h_flex()
                 .gap_1()
                 .flex_shrink_0()
@@ -256,6 +268,9 @@ impl Render for TopBar {
             .read(cx)
             .current()
             .destination_of(artists_remote);
+        if skin::arrangement().nav == Nav::Sections {
+            return self.sidebar(window, cx);
+        }
         let strip = self.strip(current, cx);
         let search = self.search(cx);
         let history = self.history(cx);
@@ -264,7 +279,7 @@ impl Render for TopBar {
         let traffic_lights = frame::traffic_lights(window, cx);
         let rtl = i18n::is_rtl();
 
-        match self.position {
+        match self.position() {
             NavPosition::Top => h_flex()
                 .w_full()
                 .h(style::chrome().bar_height)
@@ -349,6 +364,134 @@ impl Render for TopBar {
                 .into_any_element(),
         }
     }
+}
+
+impl TopBar {
+    /// The sectioned sidebar: the switcher, each section under its heading, then the tools below a rule.
+    fn sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let history = self.history(cx);
+        let artists_remote = store::SourcesModel::global(cx)
+            .read(cx)
+            .capabilities()
+            .artists
+            == api::ArtistPresentation::Remote;
+        let lit = skin::entry_of(Navigator::global(cx).read(cx).current(), artists_remote);
+        let over_art = theme::ambient(cx).is_some() || {
+            let config = ConfigModel::global(cx);
+            let background = &config.read(cx).config().background;
+            background.cover_art_background || !background.custom_background_path.is_empty()
+        };
+        let show_source_toggle = ConfigModel::global(cx)
+            .read(cx)
+            .config()
+            .ui
+            .show_source_toggle;
+        let sources = SourcesModel::global(cx).read(cx).sources().to_vec();
+        let status = SourcesModel::global(cx).read(cx).active_status();
+        // The sections are fixed, as upstream: what the strip hides is the strip's own choice.
+        let sections = skin::SECTIONS.iter().map(|section| {
+            v_flex()
+                .w_full()
+                .mb_2()
+                .child(
+                    div()
+                        .px_3()
+                        .pt_3()
+                        .pb_1()
+                        .text_size(style::text_10())
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(style::white(SECTION_INK, cx))
+                        .child(t(section.label)),
+                )
+                .child(entry_strip(section.label, section.entries.to_vec(), lit))
+        });
+        let traffic_lights = frame::traffic_lights(window, cx);
+
+        v_flex()
+            .h_full()
+            .w(style::chrome().rail_width)
+            .flex_shrink_0()
+            .map(|sidebar| match over_art {
+                true => sidebar.bg(style::black(SCRIM, cx)),
+                false => sidebar.bg(cx.theme().popover),
+            })
+            .map(|sidebar| match i18n::is_rtl() {
+                true => sidebar.border_l_1(),
+                false => sidebar.border_r_1(),
+            })
+            .border_color(style::white(style::BORDER_SOFT, cx))
+            .when(traffic_lights.is_some(), |sidebar| {
+                sidebar.child(
+                    frame::drag_region("nav-sidebar-drag", window, cx)
+                        .w_full()
+                        .h(SIDEBAR_TRAFFIC_LIGHTS)
+                        .flex_shrink_0(),
+                )
+            })
+            .when(show_source_toggle, |sidebar| {
+                sidebar.child(
+                    div().w_full().px_2().pb_1().child(
+                        SourceSwitcher::new(sources, status)
+                            .collapsed(false)
+                            .bare(true),
+                    ),
+                )
+            })
+            .child(
+                v_flex()
+                    .id("nav-sidebar-entries")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .px_1()
+                    .py_2()
+                    .children(sections)
+                    .child(
+                        div()
+                            .mx_2()
+                            .my_2()
+                            .h(px(1.))
+                            .flex_shrink_0()
+                            .bg(style::white(DIVIDER, cx)),
+                    )
+                    .child(entry_strip("tools", skin::TOOLS.to_vec(), lit)),
+            )
+            .child(
+                h_flex()
+                    .w_full()
+                    .px_2()
+                    .pb_2()
+                    .gap_1()
+                    .items_center()
+                    .justify_between()
+                    .child(history)
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .children(self.activity.clone())
+                            .children(offline::indicator(false, cx)),
+                    ),
+            )
+            .into_any_element()
+    }
+}
+
+/// One section's entries as a roving strip, lit on `lit` when it is one of them.
+fn entry_strip(id: &'static str, entries: Vec<&'static str>, lit: &'static str) -> TabStrip {
+    let current = entries.contains(&lit).then_some(lit);
+    let tabs = entries
+        .iter()
+        .map(|entry| Tab::new(*entry, tabs::icon(entry)).label(Some(t(tabs::label(entry)))));
+    TabStrip::new(id, Along::Column, Bar::Sidebar)
+        .roving("NavBar")
+        .current(current)
+        .tabs(tabs)
+        .on_select(move |index: &usize, _, cx| {
+            if let Some(route) = entries.get(*index).and_then(|entry| skin::route_of(entry)) {
+                Navigator::navigate(route, cx);
+            }
+        })
 }
 
 /// The bar's own icon buttons: no fill of their own, a wash under the pointer.

@@ -27,8 +27,7 @@ use store::{
 
 use crate::{ops, rip};
 
-// `w-64 h-64` on the showcase, `max-w-[300px]` on the catalog-styled page.
-const HERO_COVER: Pixels = px(256.);
+// `max-w-[300px]` on the catalog-styled page.
 const REMOTE_COVER: Pixels = px(300.);
 // `w-12 h-12`, the outlined select-all beside the hero's play.
 const HERO_SECONDARY: Pixels = px(48.);
@@ -407,7 +406,10 @@ impl AlbumDetail {
                 .on_click(move |_, window, cx| rip::open(keys.clone(), window, cx))
         });
         let mut header = DetailHeader::new(SharedString::from(album.title.clone()))
-            .cover(self.cover(&album, HERO_COVER, radius).spot(spot))
+            .cover(
+                self.cover(&album, components::skin::arrangement().pages.hero, radius)
+                    .spot(spot),
+            )
             .cover_menu(cover_menu(&album), picture)
             .eyebrow(Self::artist_link(
                 &album.artist,

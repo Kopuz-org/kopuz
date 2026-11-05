@@ -8,7 +8,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, App, FontWeight, InteractiveElement as _,
     IntoElement, ParentElement as _, Pixels, RenderOnce, SharedString, Styled as _, Window, div,
-    px, rems,
+    px, relative, rems,
 };
 use store::{Route, Target};
 
@@ -16,7 +16,7 @@ use crate::format::t;
 use crate::icon_button::{IconButton, IconTone};
 use crate::link::{Link, Tone};
 use crate::menu_button::{MenuButton, MenuVariant};
-use crate::{icons, menus, motion, style};
+use crate::{icons, menus, motion, skin, style};
 
 const ROOM: u64 = 1;
 const HOVER: u64 = 2;
@@ -216,6 +216,8 @@ impl RenderOnce for PlayingFromLink {
 pub enum MetaLayout {
     /// The bar's block: a marquee title over small links.
     Bar,
+    /// One line for a bar that sets the seek bar under it: the title, then the artist.
+    Inline,
     /// The sheet's: a large centred title over the artist and album.
     Hero,
     /// The mini window's: a truncated bold title over a dim artist.
@@ -315,7 +317,7 @@ impl RenderOnce for NowPlayingMeta {
         let key = |name: &str| SharedString::from(format!("{id}-{name}"));
         let before = self.before;
         let scale = match self.layout {
-            MetaLayout::Bar => self.scale,
+            MetaLayout::Bar | MetaLayout::Inline => self.scale,
             _ => 1.,
         };
         let origin = self.origin.map(|(label, route)| {
@@ -346,6 +348,42 @@ impl RenderOnce for NowPlayingMeta {
                         .text_size(rems(0.75 * scale)),
                 )
                 .children(origin)
+                .into_any_element(),
+            // `text-xs font-semibold`, a faint separator, then the artist at 11px held to 40%.
+            MetaLayout::Inline => h_flex()
+                .min_w_0()
+                .items_baseline()
+                .gap(rems(0.375 * scale))
+                .text_color(style::white(style::TEXT_STRONG, cx))
+                .child(
+                    Link::new(key("title"))
+                        .label(title.clone())
+                        .route(album_route)
+                        .underline(true)
+                        .tooltip(Some(title))
+                        .min_w_0()
+                        .truncate()
+                        .text_size(rems(0.75 * scale))
+                        .font_weight(FontWeight::SEMIBOLD),
+                )
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .text_size(rems(0.625 * scale))
+                        .text_color(style::white(style::TEXT_FAINT, cx))
+                        .child("•"),
+                )
+                .child(
+                    Link::new(key("artist"))
+                        .label(artist)
+                        .route(artist_route)
+                        .tone(Tone::Muted)
+                        .underline(true)
+                        .flex_shrink_0()
+                        .max_w(relative(0.4))
+                        .truncate()
+                        .text_size(rems(0.6875 * scale)),
+                )
                 .into_any_element(),
             MetaLayout::Hero => v_flex()
                 .w_full()
@@ -399,14 +437,22 @@ impl RenderOnce for NowPlayingMeta {
                 .min_w_0()
                 .justify_center()
                 .gap_0p5()
-                .child(
-                    div()
+                .child(match skin::arrangement().mini.caps_title {
+                    // `text-[13px] font-mono font-semibold uppercase`.
+                    true => div()
+                        .truncate()
+                        .text_size(px(13.))
+                        .font_family(SharedString::new_static("monospace"))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(style::white(style::TEXT_STRONG, cx))
+                        .child(SharedString::from(title.to_uppercase())),
+                    false => div()
                         .truncate()
                         .text_sm()
                         .font_weight(FontWeight::BOLD)
                         .text_color(style::white(0.95, cx))
                         .child(title),
-                )
+                })
                 .child(
                     div()
                         .truncate()

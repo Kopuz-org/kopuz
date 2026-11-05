@@ -17,6 +17,7 @@ use crate::format::t;
 use crate::icons;
 use crate::motion;
 use crate::resizer::{Edge, EdgeResizer};
+use crate::skin;
 use crate::style;
 
 // A column's channels, keyed off its spec id.
@@ -163,20 +164,24 @@ impl RenderOnce for TrackHeader {
             .id(self.id.clone())
             .border_b_1()
             .border_color(style::white(style::BORDER, cx))
-            .text_sm()
-            .font_weight(FontWeight::MEDIUM)
+            .map(|header| match skin::arrangement().rows.header_text {
+                Some(size) => header.text_size(size).font_weight(FontWeight::BOLD),
+                None => header.text_sm().font_weight(FontWeight::MEDIUM),
+            })
             .text_color(style::white(style::TEXT_MUTED, cx))
-            .child(columns::fixed(columns::INDEX).justify_center().map(|cell| {
-                match self.select_all {
-                    Some((checked, toggle)) => cell.child(
-                        Checkbox::new(select_id)
-                            .checked(checked)
-                            .accessibility_label(t("select_all_tracks"))
-                            .on_click(move |checked, window, cx| toggle(checked, window, cx)),
-                    ),
-                    None => cell.child("#"),
-                }
-            }));
+            .child(
+                columns::fixed(columns::index())
+                    .justify_center()
+                    .map(|cell| match self.select_all {
+                        Some((checked, toggle)) => cell.child(
+                            Checkbox::new(select_id)
+                                .checked(checked)
+                                .accessibility_label(t("select_all_tracks"))
+                                .on_click(move |checked, window, cx| toggle(checked, window, cx)),
+                        ),
+                        None => cell.child("#"),
+                    }),
+            );
         for shown in self.columns.iter() {
             header = header.child(heading(
                 shown,
