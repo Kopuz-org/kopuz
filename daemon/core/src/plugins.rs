@@ -16,9 +16,12 @@ const INDEX_TTL: Duration = Duration::from_secs(10 * 60);
 
 const MAX_INDEX_BYTES: usize = 4 * 1024 * 1024;
 
+const MAX_REDIRECTS: usize = 5;
+
 pub struct PluginService {
     index_url: String,
-    http: reqwest::Client,
+    /// Nothing when it failed to build, since a client without the https-only redirect policy is no substitute.
+    http: Option<reqwest::Client>,
     index: Mutex<Option<(Instant, Arc<Index>)>>,
     /// Held while the plugin directory changes, since an install and a
     /// removal of one id share its staging paths.
@@ -45,8 +48,18 @@ impl PluginService {
     pub fn new(index_url: String) -> Self {
         let http = utils::http::builder()
             .timeout(Duration::from_secs(60))
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.url().scheme() != "https" {
+                    attempt.error("a marketplace redirect left https")
+                } else if attempt.previous().len() >= MAX_REDIRECTS {
+                    attempt.error("too many redirects")
+                } else {
+                    attempt.follow()
+                }
+            }))
             .build()
-            .unwrap_or_else(|_| utils::http::client());
+            .inspect_err(|error| tracing::warn!(%error, "the plugin marketplace is unreachable"))
+            .ok();
         Self {
             index_url,
             http,
@@ -70,8 +83,11 @@ impl PluginService {
         if parsed.scheme() != "https" {
             return Err(format!("{url} is not an https address"));
         }
-        let mut response = self
+        let http = self
             .http
+            .as_ref()
+            .ok_or("no client to reach the marketplace with")?;
+        let mut response = http
             .get(parsed)
             .send()
             .await
