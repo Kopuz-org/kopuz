@@ -131,14 +131,20 @@ impl SourcesModel {
     }
 
     pub fn refetch(&mut self, cx: &mut Context<Self>) {
+        let started = self.switching.generation();
         let call = Link::global(cx).call(|api| async move { api.sources().await });
         self._fetch = Some(cx.spawn(async move |this, cx| {
             let Ok(sources) = call.await else { return };
-            this.update(cx, |this, cx| this.adopt(sources, cx)).ok();
+            this.update(cx, |this, cx| this.adopt(sources, started, cx))
+                .ok();
         }));
     }
 
-    fn adopt(&mut self, mut sources: Vec<SourceInfo>, cx: &mut Context<Self>) {
+    /// A list asked for before the latest switch began may still name the old source active, so it is dropped.
+    fn adopt(&mut self, mut sources: Vec<SourceInfo>, started: u64, cx: &mut Context<Self>) {
+        if !self.switching.settle(started) {
+            return;
+        }
         let before = self.active().map(|source| source.id.clone());
         for row in &mut sources {
             if let Some(state) = self.heard.get(&row.id) {
@@ -146,7 +152,6 @@ impl SourcesModel {
             }
         }
         self.sources = sources;
-        self.switching.settle();
         let after = self.active().map(|source| source.id.clone());
         let switched = self.loaded && before != after;
         self.loaded = true;
@@ -235,6 +240,7 @@ impl SourcesModel {
         if self.active().is_none_or(|source| source.id != id) {
             self.start_switch(cx);
         }
+        let started = self.switching.generation();
         let call = Link::global(cx).call(move |api| async move { api.switch_source(id).await });
         cx.spawn_in(window, async move |this, cx| {
             let result = call.await;
@@ -245,7 +251,7 @@ impl SourcesModel {
                     crate::signin::start_sign_in(&source, window, cx);
                 }
                 Err(error) => {
-                    this.switching.settle();
+                    this.switching.settle(started);
                     Notices::failed(&error, cx);
                 }
             })
@@ -261,12 +267,13 @@ impl SourcesModel {
         if remote && on != self.network.offline_mode.is_on() {
             self.start_switch(cx);
         }
+        let started = self.switching.generation();
         let call = Link::global(cx).call(move |api| async move { api.set_offline(on).await });
         cx.spawn(async move |this, cx| {
             let result = call.await;
             this.update(cx, |this, cx| match result {
                 Ok(status) => {
-                    this.switching.settle();
+                    this.switching.settle(started);
                     let said = match status.offline_mode.is_on() {
                         true => "offline_mode_on",
                         false => "offline_mode_off",
@@ -276,7 +283,7 @@ impl SourcesModel {
                     Notices::info(i18n::t(said), cx);
                 }
                 Err(error) => {
-                    this.switching.settle();
+                    this.switching.settle(started);
                     Notices::failed(&error, cx);
                 }
             })
@@ -328,8 +335,17 @@ impl Switching {
         self.settling = true;
     }
 
-    fn settle(&mut self) {
-        self.settling = false;
+    fn generation(&self) -> u64 {
+        self.count
+    }
+
+    /// Whether an answer to a call started under `started` is current; only a current one ends the settling.
+    fn settle(&mut self, started: u64) -> bool {
+        let current = started == self.count;
+        if current {
+            self.settling = false;
+        }
+        current
     }
 
     fn epoch(&self) -> Option<u64> {
@@ -361,8 +377,20 @@ mod tests {
         assert_eq!(before, Some(0));
         switching.start();
         assert_eq!(switching.epoch(), None);
-        switching.settle();
+        assert!(switching.settle(switching.generation()));
         assert!(switching.epoch().is_some_and(|epoch| Some(epoch) != before));
+    }
+
+    #[test]
+    fn a_refresh_asked_before_a_switch_and_answered_after_it_is_dropped() {
+        let mut switching = Switching::default();
+        let refresh = switching.generation();
+        switching.start();
+        assert!(!switching.settle(refresh));
+        assert_eq!(switching.epoch(), None);
+        let after = switching.generation();
+        assert!(switching.settle(after));
+        assert_eq!(switching.epoch(), Some(after));
     }
 
     fn back(source: &str) -> Option<NetworkNotice> {
