@@ -1,6 +1,7 @@
 //! The bar across the bottom: the one presentation that is always there.
 
 use components::format::t;
+use components::skin::{self, BarLayout};
 use components::{IconButton, TransportMetrics, icons, lit_accent, style};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -52,6 +53,10 @@ fn affords(width: Pixels, scale: f32) -> Affords {
 // `bg-black/40` when something is painted behind the bar, `bg-black/60` when nothing is.
 const SCRIM_OVER_ART: f32 = 0.4;
 const SCRIM_PLAIN: f32 = 0.6;
+// `bg-black/70`: the inline bar is darker over a bare window.
+const SCRIM_INLINE: f32 = 0.7;
+// `w-px h-5 bg-white/10`: the rules either side of an inline bar's middle.
+const RULE: Pixels = px(20.);
 
 impl NowPlaying {
     pub(crate) fn render_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -64,10 +69,11 @@ impl NowPlaying {
             config.background.cover_art_background
                 || !config.background.custom_background_path.is_empty()
         };
-        let scrim = if over_art {
-            SCRIM_OVER_ART
-        } else {
-            SCRIM_PLAIN
+        let inline = skin::arrangement().bar == BarLayout::Inline;
+        let scrim = match (over_art, inline) {
+            (true, _) => SCRIM_OVER_ART,
+            (false, true) => SCRIM_INLINE,
+            (false, false) => SCRIM_PLAIN,
         };
 
         let skin = style::chrome();
@@ -76,10 +82,12 @@ impl NowPlaying {
             .w_full()
             .h(skin.player_height * scale)
             .flex_shrink_0()
-            // `px-4` and `gap-4`, at the bar's scale.
+            // `px-4`, and `gap-4` or the inline bar's `gap-3`, at the bar's scale.
             .px(rems(scale))
-            .gap(rems(scale))
-            .justify_between()
+            .map(|bar| match inline {
+                true => bar.items_center().gap(rems(0.75 * scale)),
+                false => bar.justify_between().gap(rems(scale)),
+            })
             // A skin with rounded panes floats the bar as one more card: Material's surface container.
             .when(floating, |bar| {
                 bar.rounded(skin.pane_radius)
@@ -90,22 +98,48 @@ impl NowPlaying {
                     .border_color(style::white(style::BORDER_SOFT, cx))
                     .bg(style::black(scrim, cx))
             })
-            .child(self.track_meta(window, cx))
-            .child(
-                v_flex()
-                    .w(relative(
-                        affords(window.viewport_size().width, scale).transport,
-                    ))
-                    // Past this the seek bar sprawls and the title beside it starves.
-                    .max_w(TRANSPORT_WIDTH * scale)
-                    .flex_shrink_0()
-                    .items_center()
-                    .justify_center()
-                    .gap(rems(0.5 * scale))
-                    .child(self.transport(TransportMetrics::COMPACT.scaled(scale), true, cx))
-                    .children(self.seek.clone()),
-            )
-            .child(self.utilities(window, cx));
+            .when(inline, |bar| {
+                let ink = style::white(style::BORDER, cx);
+                let rule = || div().w(px(1.)).h(RULE * scale).flex_shrink_0().bg(ink);
+                bar.child(div().flex_shrink_0().child(self.transport(
+                    TransportMetrics::COMPACT.scaled(scale),
+                    true,
+                    cx,
+                )))
+                .child(rule())
+                .child(self.track_inline(window, cx))
+                .child(rule())
+                .child(
+                    h_flex()
+                        .flex_shrink_0()
+                        .items_center()
+                        .gap(rems(0.5 * scale))
+                        .child(self.bar_marks(window, cx))
+                        .child(self.utilities(window, cx)),
+                )
+            })
+            .when(!inline, |bar| {
+                bar.child(self.track_meta(window, cx))
+                    .child(
+                        v_flex()
+                            .w(relative(
+                                affords(window.viewport_size().width, scale).transport,
+                            ))
+                            // Past this the seek bar sprawls and the title beside it starves.
+                            .max_w(TRANSPORT_WIDTH * scale)
+                            .flex_shrink_0()
+                            .items_center()
+                            .justify_center()
+                            .gap(rems(0.5 * scale))
+                            .child(self.transport(
+                                TransportMetrics::COMPACT.scaled(scale),
+                                true,
+                                cx,
+                            ))
+                            .children(self.seek.clone()),
+                    )
+                    .child(self.utilities(window, cx))
+            });
         match floating {
             true => div()
                 .w_full()
@@ -139,8 +173,10 @@ impl NowPlaying {
 
         h_flex()
             // The same weight the meta block carries, so the transport between them is centred.
-            .flex_1()
-            .min_w_0()
+            .map(|row| match skin::arrangement().bar {
+                BarLayout::Split => row.flex_1().min_w_0(),
+                BarLayout::Inline => row.flex_shrink_0(),
+            })
             .gap(rems(scale))
             .justify_end()
             .when(wanted.volume, |row| {

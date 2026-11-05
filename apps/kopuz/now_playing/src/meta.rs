@@ -4,7 +4,7 @@ use components::{
     Cover, MetaLayout, NowPlayingMeta, Picture, TrackMarks, WithContextMenu as _, menus, style,
 };
 use gpui_kit::base::ElementExt as _;
-use gpui_kit::component::h_flex;
+use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
     App, Context, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, SharedString,
     StatefulInteractiveElement as _, Styled as _, Window, div, px, rems,
@@ -15,8 +15,11 @@ use store::{
 };
 
 use crate::NowPlaying;
+use crate::swap::SwapFrame;
 
 const MARK_GLYPH: Pixels = px(16.);
+/// `w-11 h-11`: the inline bar's cover, whatever size the split bar's preference asks for.
+const INLINE_COVER: Pixels = px(44.);
 
 /// The bar's cover, at whatever size the preference asks for, drawn at the bar's `scale`.
 pub(crate) fn cover_size(scale: f32, cx: &App) -> Pixels {
@@ -64,32 +67,31 @@ pub(crate) fn playing_from(cx: &App) -> Option<(SharedString, Route)> {
 }
 
 impl NowPlaying {
-    /// The block on the left of the bar: cover, title, artist, where it all came from, and the marks.
-    pub(crate) fn track_meta(
+    /// This frame of the track swap; it advances the fade, so a render asks once.
+    fn swap_frame(
         &mut self,
+        track: Option<&api::TrackInfo>,
         window: &mut Window,
-        cx: &mut Context<Self>,
+        cx: &App,
+    ) -> SwapFrame {
+        let artwork = track.and_then(|track| track.artwork.as_ref());
+        self.swap
+            .frame(components::cover::is_ready(artwork, false, cx), window, cx)
+    }
+
+    /// The bar's cover, fading across a track change; the sheet's cover flies out of this slot.
+    fn cover_slot(
+        &self,
+        size: Pixels,
+        track: Option<&api::TrackInfo>,
+        swap: &SwapFrame,
     ) -> impl IntoElement + use<> {
-        let track = self.track(cx);
-        let target = track.as_ref().map(track_target);
-        let picture = track.as_ref().and_then(track_picture);
-        let scale = self.scale(cx);
-        let size = cover_size(scale, cx);
-        let origin = playing_from(cx);
-        let artwork = track.as_ref().and_then(|track| track.artwork.as_ref());
-        let swap = self
-            .swap
-            .frame(components::cover::is_ready(artwork, false, cx), window, cx);
+        let picture = track.and_then(track_picture);
+        let artwork = track.and_then(|track| track.artwork.clone());
         let cover = |artwork: Option<&api::ArtworkRef>| {
             Cover::new(artwork)
                 .size(size)
                 .rounded(style::thumb_radius())
-        };
-        let meta = |id: &'static str, track: &api::TrackInfo| {
-            NowPlayingMeta::new(id, track)
-                .layout(MetaLayout::Bar)
-                .scale(scale)
-                .origin(origin.clone())
         };
         let leaving_cover = swap
             .leaving
@@ -102,6 +104,42 @@ impl NowPlaying {
                     .left_0()
                     .child(cover(old.artwork.as_ref()))
             });
+        div()
+            .flex_shrink_0()
+            .id("bar-cover")
+            .relative()
+            .on_prepaint(|bounds, _, cx| crate::remember_cover_slot(bounds, cx))
+            .cursor_pointer()
+            .on_click(|_, _, cx| {
+                Chrome::global(cx).update(cx, |chrome, cx| chrome.set_sheet(true, cx))
+            })
+            .children(leaving_cover)
+            .child(
+                div()
+                    .opacity(swap.cover)
+                    .child(cover(artwork.as_ref()).spot(picture.as_ref().map(Picture::spot))),
+            )
+    }
+
+    /// The block on the left of the bar: cover, title, artist, where it all came from, and the marks.
+    pub(crate) fn track_meta(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let track = self.track(cx);
+        let target = track.as_ref().map(track_target);
+        let picture = track.as_ref().and_then(track_picture);
+        let scale = self.scale(cx);
+        let origin = playing_from(cx);
+        let swap = self.swap_frame(track.as_ref(), window, cx);
+        let cover = self.cover_slot(cover_size(scale, cx), track.as_ref(), &swap);
+        let meta = |id: &'static str, track: &api::TrackInfo| {
+            NowPlayingMeta::new(id, track)
+                .layout(MetaLayout::Bar)
+                .scale(scale)
+                .origin(origin.clone())
+        };
         let title = match (track.as_ref(), swap.leaving.as_ref()) {
             (Some(track), Some(old)) if swap.title < 1. => Some(
                 crossfade(meta("bar-leaving", old), meta("bar", track), swap.title)
@@ -111,6 +149,24 @@ impl NowPlaying {
             (Some(track), _) => Some(meta("bar", track).into_any_element()),
             (None, _) => None,
         };
+        let marks = self.bar_marks(window, cx);
+
+        let block = h_flex()
+            .id("track-meta")
+            .flex_1()
+            .min_w_0()
+            .gap(rems(scale))
+            .child(cover)
+            .children(title)
+            .child(marks);
+
+        block.with_context_menu(menus::pictured(target.map(menus::menu_for), picture))
+    }
+
+    /// The bar's heart, don't-recommend and dots, at the bar's scale and as the preferences keep them.
+    pub(crate) fn bar_marks(&self, window: &Window, cx: &App) -> TrackMarks {
+        let track = self.track(cx);
+        let scale = self.scale(cx);
         let marks = self
             .marks(
                 "meta",
@@ -121,37 +177,46 @@ impl NowPlaying {
             .size(style::chrome().round_button * scale, MARK_GLYPH * scale)
             .gap(px(16.) * scale);
         // The heart is the preferences' to keep on the bar; the sheet always has it.
-        let marks = match store::layout(cx).player.favorite {
+        match store::layout(cx).player.favorite {
             true => marks,
             false => marks.favorite(None),
-        };
+        }
+    }
 
-        let block = h_flex()
+    /// The middle of an inline bar: the cover, then the title on one line over the seek bar.
+    pub(crate) fn track_inline(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let track = self.track(cx);
+        let target = track.as_ref().map(track_target);
+        let picture = track.as_ref().and_then(track_picture);
+        let scale = self.scale(cx);
+        let swap = self.swap_frame(track.as_ref(), window, cx);
+        let cover = self.cover_slot(INLINE_COVER * scale, track.as_ref(), &swap);
+        let title = track.as_ref().map(|track| {
+            NowPlayingMeta::new("bar", track)
+                .layout(MetaLayout::Inline)
+                .scale(scale)
+        });
+        h_flex()
             .id("track-meta")
             .flex_1()
             .min_w_0()
-            .gap(rems(scale))
+            .items_center()
+            .gap(rems(0.75 * scale))
+            .child(cover)
             .child(
-                div()
-                    .flex_shrink_0()
-                    .id("bar-cover")
-                    .relative()
-                    .on_prepaint(|bounds, _, cx| crate::remember_cover_slot(bounds, cx))
-                    .cursor_pointer()
-                    .on_click(|_, _, cx| {
-                        Chrome::global(cx).update(cx, |chrome, cx| chrome.set_sheet(true, cx))
-                    })
-                    .children(leaving_cover)
-                    .child(
-                        div()
-                            .opacity(swap.cover)
-                            .child(cover(artwork).spot(picture.as_ref().map(Picture::spot))),
-                    ),
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .justify_center()
+                    .gap(rems(0.125 * scale))
+                    .children(title)
+                    .children(self.seek.clone()),
             )
-            .children(title)
-            .child(marks);
-
-        block.with_context_menu(menus::pictured(target.map(menus::menu_for), picture))
+            .with_context_menu(menus::pictured(target.map(menus::menu_for), picture))
     }
 
     /// The marks the preferences and the source allow, acting on `track`; the caller sets their size.

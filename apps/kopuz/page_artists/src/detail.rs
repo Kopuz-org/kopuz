@@ -14,8 +14,8 @@ use config::{AlbumSortField, AlbumViewMode, SortCriterion, SortDirection};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Pixels,
-    Render, SharedString, Styled as _, Subscription, Window, div, px, rems,
+    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
+    SharedString, Styled as _, Subscription, Window, div, rems,
 };
 use store::{
     ConfigModel, DownloadsModel, LayoutModel, Offline, Pictured, PlayerModel, Query, SourcesModel,
@@ -23,9 +23,6 @@ use store::{
 };
 
 use crate::controls::{self, ViewModeKey};
-
-/// `w-64 h-64`: the showcase photo.
-const PHOTO: Pixels = px(256.);
 
 /// One artist from the library: tracks and albums.
 pub struct ArtistDetail {
@@ -304,7 +301,6 @@ impl ArtistDetail {
             .artwork(artwork.as_ref())
             .placeholder(icons::MIC)
             .cover_menu(menu, picture)
-            .size(PHOTO)
             .when(capabilities.edit_tags, |header| {
                 header.on_cover("artist-photo", Some(t("change_photo")), move |_, cx| {
                     store::pick_and_upload(ArtworkTarget::Artist(artist.clone()), cx)

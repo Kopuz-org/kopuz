@@ -818,7 +818,7 @@ pub struct WindowState {
 }
 
 /// Every presentation preference; each top-level field is one stored key holding its JSON.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Layout {
     pub nav: Nav,
@@ -837,7 +837,6 @@ pub struct Layout {
     pub accent: Accent,
     pub ambient: Ambient,
     pub motion: Motion,
-    pub skin: String,
     /// Command id to keystroke, overriding what the registry binds by default.
     pub shortcuts: BTreeMap<String, String>,
     /// The after-setup tips card was closed, so it never shows again.
@@ -845,32 +844,6 @@ pub struct Layout {
     /// The sorts and view modes every Kopuz frontend keeps, under the same keys the daemon seeded.
     #[serde(flatten)]
     pub ui: config::UiPrefs,
-}
-
-impl Default for Layout {
-    fn default() -> Self {
-        Self {
-            nav: Nav::default(),
-            panel: Panel::default(),
-            player: Player::default(),
-            sheet: Sheet::default(),
-            library: Library::default(),
-            library_view: None,
-            home: Home::default(),
-            catalog_home: CatalogHome::default(),
-            interface: Interface::default(),
-            palette: Palette::default(),
-            notifications: Notifications::default(),
-            window: WindowState::default(),
-            accent: Accent::default(),
-            ambient: Ambient::default(),
-            motion: Motion::default(),
-            skin: "normal".into(),
-            shortcuts: BTreeMap::new(),
-            first_use_hint_dismissed: false,
-            ui: config::UiPrefs::default(),
-        }
-    }
 }
 
 /// A group of preferences that resets together.
@@ -886,7 +859,6 @@ pub enum Section {
     Palette,
     Notifications,
     Shortcuts,
-    Skin,
     All,
 }
 
@@ -918,7 +890,6 @@ impl Section {
             Section::Palette => layout.palette = fresh.palette,
             Section::Notifications => layout.notifications = fresh.notifications,
             Section::Shortcuts => layout.shortcuts = fresh.shortcuts,
-            Section::Skin => layout.skin = fresh.skin,
             // The window is where the person left it, not a preference; resetting all keeps it.
             Section::All => {
                 let window = layout.window;
@@ -1262,8 +1233,8 @@ mod tests {
     #[test]
     fn a_key_from_a_later_version_is_ignored() {
         let layout: Layout =
-            toml::from_str("skin = \"neon\"\nwhat_is_this = 3\n").expect("deserialise");
-        assert_eq!(layout.skin, "neon");
+            toml::from_str("what_is_this = 3\n[panel]\nshown = true\n").expect("deserialise");
+        assert!(layout.panel.shown);
         assert_eq!(layout.nav, Nav::default());
     }
 
@@ -1487,20 +1458,20 @@ mod tests {
     fn resetting_a_section_leaves_the_others_alone() {
         let mut layout = Layout::default();
         layout.panel.shown = true;
-        layout.skin = "neon".into();
+        layout.first_use_hint_dismissed = true;
         Section::Panel.reset(&mut layout);
         assert!(!layout.panel.shown);
-        assert_eq!(layout.skin, "neon");
+        assert!(layout.first_use_hint_dismissed);
     }
 
     #[test]
     fn resetting_everything_keeps_where_the_window_was() {
         let mut layout = Layout::default();
         layout.window.width = Some(1200.);
-        layout.skin = "neon".into();
+        layout.first_use_hint_dismissed = true;
         Section::All.reset(&mut layout);
         assert_eq!(layout.window.width, Some(1200.));
-        assert_eq!(layout.skin, "normal");
+        assert!(!layout.first_use_hint_dismissed);
     }
 
     #[test]
@@ -1627,13 +1598,13 @@ mod tests {
     #[test]
     fn a_value_that_no_longer_reads_drops_only_itself() {
         let stored = Fields::from([
-            ("skin".to_string(), "\"neon\"".to_string()),
+            ("library_view".to_string(), "\"albums\"".to_string()),
             ("panel".to_string(), "{\"shown\": \"yes\"}".to_string()),
             ("motion".to_string(), "not json".to_string()),
             (IMPORTED.to_string(), "1".to_string()),
         ]);
         let layout = overlay(&Layout::default(), &stored);
-        assert_eq!(layout.skin, "neon");
+        assert_eq!(layout.library_view.as_deref(), Some("albums"));
         assert_eq!(layout.panel, Panel::default());
         assert_eq!(layout.motion, Motion::default());
     }
@@ -1643,9 +1614,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("kopuz-layout-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         let path = dir.join("layout.toml");
-        std::fs::write(&path, "skin = \"neon\"\n[panel]\nshown = true\n").expect("write");
+        std::fs::write(&path, "library_view = \"albums\"\n[panel]\nshown = true\n").expect("write");
         let layout = read(&path);
-        assert_eq!(layout.skin, "neon");
+        assert_eq!(layout.library_view.as_deref(), Some("albums"));
         assert!(layout.panel.shown);
         std::fs::remove_dir_all(&dir).ok();
     }

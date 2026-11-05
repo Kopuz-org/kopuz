@@ -436,7 +436,24 @@ impl AppearanceSettings {
                 cx,
             );
         }
-        // TODO(parity): ui_style (no Vaxry layout).
+        push(
+            &mut rows,
+            SettingRow::new(t("ui_style")).bind("ui_style", cx).setting(
+                Choice::new(
+                    "ui_style",
+                    cfg.ui.ui_style,
+                    vec![
+                        (UiStyle::Normal, t("ui_normal")),
+                        (UiStyle::Vaxry, t("ui_vaxry")),
+                        (UiStyle::Material3, t("ui_material3")),
+                    ],
+                )
+                .on_change(ConfigModel::writer(|value| {
+                    SettingsEdit::Ui(UiEdit::UiStyle(value))
+                })),
+            ),
+            cx,
+        );
         rows
     }
 

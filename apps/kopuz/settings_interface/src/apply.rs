@@ -1,11 +1,11 @@
-//! Making `layout.interface` real: the rem size every `rems(…)` in the app resolves against, and the face.
+//! Making `layout.interface` and `ui_style` real: the rem size every `rems(…)` resolves against, the face and the skin.
 
 use std::cell::RefCell;
 
 use gpui_kit::component::Theme;
 use gpui_kit::{App, Global, Pixels, SharedString, px};
-use store::LayoutModel;
 use store::layout::SCALE_RANGE;
+use store::{ConfigModel, LayoutModel};
 
 /// What this module last wrote, and the theme's own values under it.
 #[derive(Default)]
@@ -23,6 +23,8 @@ pub fn watch(cx: &mut App) {
     resolve(cx);
     cx.observe(&LayoutModel::global(cx), |_, cx| resolve(cx))
         .detach();
+    cx.observe(&ConfigModel::global(cx), |_, cx| resolve(cx))
+        .detach();
     // `Root::render` pushes the theme's font size into the window every frame, so this is the lever.
     cx.observe_global::<Theme>(resolve).detach();
 }
@@ -32,9 +34,15 @@ pub(super) fn resolve(cx: &mut App) {
     apply(cx);
 }
 
-/// Resolve `layout.skin` once per change, and hand the component library the radii it draws with.
+/// Resolve `ui_style` once per change, and hand the component library the radii it draws with.
 fn skin(cx: &mut App) {
-    components::skin::select(&store::layout(cx).skin);
+    let was = components::skin::active();
+    let style = ConfigModel::global(cx).read(cx).config().ui.ui_style;
+    components::skin::select(style.as_str());
+    // The radii below may not move, but every row, bar and page measures itself by the new skin.
+    if components::skin::active() != was {
+        cx.refresh_windows();
+    }
     let metrics = components::skin::metrics();
     // The kit rounds buttons, fields and the switch by `radius` and dialogs by `radius_lg`.
     let (radius, radius_lg) = match components::skin::material() {

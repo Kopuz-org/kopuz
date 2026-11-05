@@ -3,7 +3,8 @@
 use gpui_kit::component::v_flex;
 use gpui_kit::{Div, Styled as _};
 
-/// `size-full px-8 pt-8`: a page's column, its padding the same on every page; the page adds what follows.
+/// `size-full px-8 pt-8` at the skin's padding: a page's column, the same on every page; the page adds what follows.
 pub fn page() -> Div {
-    v_flex().size_full().px_8().pt_8()
+    let padding = crate::skin::arrangement().pages.padding;
+    v_flex().size_full().px(padding).pt(padding)
 }

@@ -999,9 +999,6 @@ downloader_add_url = Add a URL…
 downloader_url_title = Download from a URL
 downloader_history = URL downloads
 
-interface_skin = Skin
-interface_skin_description = The shape of the interface: how round things are, how tall a row sits.
-
 home_plays =
     { $count ->
         [one] { $count } play

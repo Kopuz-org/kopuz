@@ -276,14 +276,21 @@ impl RenderOnce for TrackRow {
             },
         );
         let spot = picture.as_ref().map(Picture::spot);
+        let rows = crate::skin::arrangement().rows;
         let mut cover = self
             .cover
-            .then(|| thumb(self.artwork.as_ref(), spot, badge, window, cx).mr_4());
+            .then(|| thumb(self.artwork.as_ref(), spot, badge, window, cx).mr(rows.cover_gap));
         let lead_ink = match self.playing {
             true => accent,
-            false => style::white(style::TEXT_SECONDARY, cx),
+            false => style::white(rows.number, cx),
         };
 
+        // Upstream the wash is an inline style, which outranks `hover:bg-white/5`; a refinement does not.
+        let hover_wash = (!self.playing && !self.selected).then(|| style::white(rows.hover, cx));
+        let ring = rows
+            .hover_ring
+            .filter(|_| !self.cursor)
+            .map(|ring| style::white(ring, cx));
         let press = window.use_keyed_state(("track-row-press", slot), cx, |_, _| Press::default());
         let long_press = self.long_press.filter(|_| !self.picking);
         let mut row = columns::frame()
@@ -326,9 +333,21 @@ impl RenderOnce for TrackRow {
                         }
                     })
             })
-            // Upstream the wash is an inline style, which outranks `hover:bg-white/5`; a refinement does not.
-            .when(!self.playing && !self.selected, |row| {
-                row.hover(|row| row.bg(style::white(style::RAISED, cx)))
+            // The ring sits in a border that is always there, so the hover moves nothing.
+            .when(ring.is_some(), |row| {
+                row.border_1().border_color(style::white(0., cx))
+            })
+            .when(hover_wash.is_some() || ring.is_some(), |row| {
+                row.hover(|row| {
+                    let row = match hover_wash {
+                        Some(wash) => row.bg(wash),
+                        None => row,
+                    };
+                    match ring {
+                        Some(ring) => row.border_color(ring),
+                        None => row,
+                    }
+                })
             })
             .when(self.cursor, |row| {
                 row.border_1().border_color(cx.theme().ring)
@@ -342,7 +361,7 @@ impl RenderOnce for TrackRow {
                 })
             })
             .child(
-                columns::fixed(columns::INDEX)
+                columns::fixed(columns::index())
                     .relative()
                     .justify_center()
                     .map(|cell| match (self.picking, self.pick) {

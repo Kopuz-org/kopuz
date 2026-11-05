@@ -74,11 +74,13 @@ impl NowPlaying {
             window,
             cx,
         );
-        let cover = |artwork: Option<&api::ArtworkRef>| {
-            Cover::new(artwork)
-                .size(COVER)
-                .rounded(style::cover_radius())
+        let mini = components::skin::arrangement().mini;
+        let corner = match mini.square_cover {
+            true => px(0.),
+            false => style::cover_radius(),
         };
+        let cover =
+            |artwork: Option<&api::ArtworkRef>| Cover::new(artwork).size(COVER).rounded(corner);
         let leaving_cover = swap
             .leaving
             .as_ref()
@@ -167,7 +169,8 @@ impl NowPlaying {
                             .shuffle(Some(shuffle))
                             .repeat(None)
                             .balanced(false)
-                            .filled(true),
+                            .filled(!mini.soft_play)
+                            .soft(mini.soft_play),
                     )
                     .child(heart),
             )

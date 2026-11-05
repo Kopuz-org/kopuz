@@ -13,7 +13,7 @@ use components::{
 };
 use gpui_kit::component::v_flex;
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Pixels, Render,
+    AnyElement, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
     SharedString, Styled as _, Subscription, Window, div, px,
 };
 use link::Link;
@@ -21,9 +21,6 @@ use store::{
     DownloadsModel, Navigator, Offline, Pictured, PlaylistsModel, Query, Route, SourcesModel,
     Target, actions,
 };
-
-/// `w-64 h-64`: the showcase cover.
-const HERO: Pixels = px(256.);
 
 pub struct PlaylistDetail {
     id: SharedString,
@@ -255,7 +252,8 @@ impl Render for PlaylistDetail {
                     .flex()
                     .into_any_element()
             } else {
-                detail_header_skeleton(HERO, false, cx).into_any_element()
+                detail_header_skeleton(components::skin::arrangement().pages.hero, false, cx)
+                    .into_any_element()
             });
         };
 
