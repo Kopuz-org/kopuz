@@ -11599,6 +11599,7 @@ dependencies = [
  "kopuz-api",
  "kopuz-config",
  "kopuz-i18n",
+ "kopuz-utils",
  "link",
  "store",
  "theme",
@@ -11622,10 +11623,12 @@ name = "settings_playback"
 version = "0.1.0"
 dependencies = [
  "components",
+ "directories",
  "gpui-kit",
  "kopuz-api",
  "kopuz-config",
  "kopuz-i18n",
+ "kopuz-utils",
  "link",
  "store",
  "theme",
@@ -11641,6 +11644,7 @@ dependencies = [
  "kopuz-api",
  "kopuz-config",
  "kopuz-i18n",
+ "kopuz-utils",
  "link",
  "store",
  "theme",
