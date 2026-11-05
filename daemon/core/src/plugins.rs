@@ -409,7 +409,24 @@ fn changed_hosts() -> ApiError {
 
 /// Size and modification time of each plugin's files, to notice a change
 /// without reading or hashing them.
-type Stamps = Vec<(PathBuf, Option<(u64, SystemTime)>)>;
+/// Where it can, the inode and change time too: a file replaced by one of the
+/// same size whose modification time was kept, as `cp -p` does, still changes
+/// them, and reading them costs no more than the size.
+type Stamps = Vec<(PathBuf, Option<(u64, SystemTime, u64, i128)>)>;
+
+#[cfg(unix)]
+fn identity(meta: &std::fs::Metadata) -> (u64, i128) {
+    use std::os::unix::fs::MetadataExt as _;
+    (
+        meta.ino(),
+        i128::from(meta.ctime()) * 1_000_000_000 + i128::from(meta.ctime_nsec()),
+    )
+}
+
+#[cfg(not(unix))]
+fn identity(_meta: &std::fs::Metadata) -> (u64, i128) {
+    (0, 0)
+}
 
 fn stamps(dir: &Path) -> Stamps {
     plugin_host::plugin_dirs(dir)
@@ -418,9 +435,10 @@ fn stamps(dir: &Path) -> Stamps {
             [plugin_host::MANIFEST_FILE, plugin_host::COMPONENT_FILE].map(|file| plugin.join(file))
         })
         .map(|path| {
-            let stamp = std::fs::metadata(&path)
-                .ok()
-                .and_then(|meta| Some((meta.len(), meta.modified().ok()?)));
+            let stamp = std::fs::metadata(&path).ok().and_then(|meta| {
+                let (inode, changed) = identity(&meta);
+                Some((meta.len(), meta.modified().ok()?, inode, changed))
+            });
             (path, stamp)
         })
         .collect()
@@ -439,9 +457,9 @@ where
         return;
     };
     tokio::spawn(async move {
-        // Empty, so the first quiet poll rescans and an edit made between boot
-        // loading the plugins and this task starting is not missed.
-        let mut loaded = Stamps::new();
+        // Nothing yet, so the first quiet poll rescans whatever it finds, even
+        // a directory emptied between boot loading the plugins and now.
+        let mut loaded: Option<Stamps> = None;
         let mut last = stamps(dir);
         loop {
             tokio::time::sleep(WATCH_INTERVAL).await;
@@ -455,10 +473,10 @@ where
             // not read half written.
             let settled = now == last;
             last.clone_from(&now);
-            if !settled || now == loaded {
+            if !settled || loaded.as_ref() == Some(&now) {
                 continue;
             }
-            loaded = now;
+            loaded = Some(now);
             if server::plugins::rescan().await {
                 let Some(owner) = owner.upgrade() else {
                     return;
@@ -493,4 +511,37 @@ fn differs(plugin: &plugin_host::Plugin, listing: &Listing) -> bool {
         || plugin
             .digest()
             .is_some_and(|digest| !digest.eq_ignore_ascii_case(listing.component.sha256.trim()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_same_sized_replacement_keeping_its_modification_time_is_noticed() {
+        let dir = std::env::temp_dir().join(format!("kopuz-stamps-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let plugin = dir.join("radio");
+        std::fs::create_dir_all(&plugin).unwrap();
+        let component = plugin.join(plugin_host::COMPONENT_FILE);
+        std::fs::write(plugin.join(plugin_host::MANIFEST_FILE), "id = \"radio\"").unwrap();
+        std::fs::write(&component, b"old!").unwrap();
+        let modified = std::fs::metadata(&component).unwrap().modified().unwrap();
+        let before = stamps(&dir);
+
+        let staged = plugin.join("staged");
+        std::fs::write(&staged, b"new!").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&staged)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        std::fs::rename(&staged, &component).unwrap();
+        let after = stamps(&dir);
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_ne!(before, after);
+    }
 }
