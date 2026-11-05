@@ -1,6 +1,7 @@
 //! What a source card offers past its options: the account it plays as, a connection test, cloud storage.
 
-use std::path::PathBuf;
+use std::io::{self, Read as _};
+use std::path::{Path, PathBuf};
 
 use api::{CheckOutcome, CheckStep, ConnectionCheck, JobKind, SourceAccount, StorageQuota, Table};
 use components::format::{t, t_with};
@@ -376,14 +377,14 @@ impl CloudStorage {
                 }
                 let read = cx
                     .background_executor()
-                    .spawn(async move { std::fs::read(path) })
+                    .spawn(async move { read_capped(&path, api::MAX_MUSIC_UPLOAD_BYTES) })
                     .await;
                 let content = match read {
-                    Ok(content) if content.len() > api::MAX_MUSIC_UPLOAD_BYTES => {
+                    Ok(Some(content)) => content,
+                    Ok(None) => {
                         cx.update(|cx| Notices::error(t("music_upload_too_large"), cx));
                         break;
                     }
-                    Ok(content) => content,
                     Err(error) => {
                         cx.update(|cx| Notices::error(error.to_string(), cx));
                         break;
@@ -479,4 +480,29 @@ fn is_audio(path: &std::path::Path) -> bool {
                 .iter()
                 .any(|audio| extension.eq_ignore_ascii_case(audio))
         })
+}
+
+/// The file, or `None` when it is over `limit`: sized from metadata first, and never more than `limit + 1` bytes read.
+fn read_capped(path: &Path, limit: usize) -> io::Result<Option<Vec<u8>>> {
+    let file = std::fs::File::open(path)?;
+    if file.metadata()?.len() > limit as u64 {
+        return Ok(None);
+    }
+    let mut content = Vec::new();
+    file.take(limit as u64 + 1).read_to_end(&mut content)?;
+    Ok((content.len() <= limit).then_some(content))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_capped;
+
+    #[test]
+    fn read_capped_refuses_a_file_over_the_limit() {
+        let path = std::env::temp_dir().join(format!("kopuz-upload-{}", std::process::id()));
+        std::fs::write(&path, [7u8; 10]).unwrap();
+        assert_eq!(read_capped(&path, 9).unwrap(), None);
+        assert_eq!(read_capped(&path, 10).unwrap(), Some(vec![7u8; 10]));
+        let _ = std::fs::remove_file(&path);
+    }
 }

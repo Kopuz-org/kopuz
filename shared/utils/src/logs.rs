@@ -213,8 +213,11 @@ pub fn export_logs(dest: &Path) -> io::Result<()> {
 pub fn export_logs_named(dest: &Path, logs: &[&str]) -> io::Result<()> {
     let dir =
         log_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "log dir not set"))?;
+    write_export(&dir, dest, logs)
+}
 
-    let crash = newest_crash(&dir).map(|p| {
+fn write_export(dir: &Path, dest: &Path, logs: &[&str]) -> io::Result<()> {
+    let crash = newest_crash(dir).map(|p| {
         let name = p
             .file_name()
             .and_then(|n| n.to_str())
@@ -264,9 +267,8 @@ mod tests {
         let dir = tmp("export");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(APP_LATEST), "app line\n").unwrap();
-        set_log_dir(dir.clone());
         let dest = dir.join("bundle.txt");
-        export_logs_named(&dest, &[APP_LATEST, DAEMON_LATEST]).unwrap();
+        write_export(&dir, &dest, &[APP_LATEST, DAEMON_LATEST]).unwrap();
         let bundle = std::fs::read_to_string(&dest).unwrap();
         assert!(bundle.contains(&format!("=== {APP_LATEST} ===\napp line")));
         assert!(bundle.contains(&format!("=== {DAEMON_LATEST} ===\n(unavailable:")));
