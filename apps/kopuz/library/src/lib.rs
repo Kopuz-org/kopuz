@@ -5,12 +5,14 @@ mod columns;
 mod facet;
 mod filters;
 mod grid;
+mod playlists;
 mod settings;
 mod states;
 mod tracks;
 
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, Range};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -31,8 +33,8 @@ use gpui_kit::{
 };
 use store::layout::{Column, Density, TileSize, ViewMode};
 use store::{
-    DownloadsModel, LayoutModel, Navigator, Pager, PlayerModel, PlaylistsModel, Query, QueueModel,
-    Route, SourcesModel, Target,
+    DownloadsModel, LayoutModel, Link, Navigator, Pager, PlayerModel, PlaylistsModel, Query,
+    QueueModel, Route, SourcesModel, Target,
 };
 
 pub use facet::Facet;
@@ -91,7 +93,12 @@ pub(crate) struct Tile {
     pub playing: bool,
     pub target: Target,
     pub route: Route,
-    pub pictured: store::Pictured,
+    pub pictured: Option<store::Pictured>,
+    pub placeholder: &'static str,
+    /// A playlist folder, which leads the playlists facet.
+    pub folder: bool,
+    /// A playlist's keys and what the downloads say of them, when the source downloads.
+    pub offline: Option<(Rc<[String]>, store::Offline)>,
 }
 
 /// A line of the tracks table: a group heading, or one row of the loaded listing.
@@ -106,6 +113,42 @@ pub(crate) enum Line {
 struct AlbumMeta {
     year: u16,
     genre: String,
+}
+
+/// How much the library holds, for the stat cards; a count the source could not give is left out.
+#[derive(Clone, Copy, Default)]
+struct Counts {
+    tracks: Option<u32>,
+    albums: Option<u32>,
+    artists: Option<u32>,
+}
+
+async fn counts(api: Arc<dyn KopuzApi>) -> Result<Counts, api::ApiError> {
+    let one = store::paging::page(0, 1);
+    let total = |what: &'static str, read: Result<u32, api::ApiError>| match read {
+        Ok(total) => Some(total),
+        Err(error) => {
+            tracing::debug!(%error, what, "could not count the library");
+            None
+        }
+    };
+    let tracks = api
+        .tracks(Default::default(), one)
+        .await
+        .map(|page| page.total);
+    let albums = api
+        .albums(Default::default(), one)
+        .await
+        .map(|page| page.total);
+    let artists = api
+        .artists(Default::default(), one)
+        .await
+        .map(|page| page.total);
+    Ok(Counts {
+        tracks: total("tracks", tracks),
+        albums: total("albums", albums),
+        artists: total("artists", artists),
+    })
 }
 
 #[derive(Clone)]
@@ -149,6 +192,10 @@ pub struct Library {
     artists: Entity<Query<CatalogWindow<ArtistPage>>>,
     genres: Entity<Query<Vec<String>>>,
     stats: Entity<Query<StatsView>>,
+    counts: Entity<Query<Counts>>,
+    // Every album, read only once a genre column or a year grouping needs what a track row lacks.
+    catalog: Entity<Query<Vec<AlbumInfo>>>,
+    catalog_asked: bool,
 
     // Derived on change, never in render: a notify from the playhead would otherwise rebuild these.
     rows: Vec<TrackInfo>,
@@ -159,6 +206,9 @@ pub struct Library {
     albums_meta: HashMap<String, AlbumMeta>,
     year_span: Option<(u16, u16)>,
     plays: HashMap<String, u64>,
+    playlist_offline: HashMap<String, (Rc<[String]>, store::Offline)>,
+    // Artists already sent for a photo; the daemon remembers its misses, this saves the round trip.
+    asked_artwork: HashSet<String>,
     playing: store::Playing,
     // The playing row lights only while the queue is this listing, judged as the Dioxus table did: by length.
     queued: bool,
@@ -277,6 +327,12 @@ impl Library {
                 cx,
             )
         });
+        let counts = cx.new(|cx| match liked {
+            true => Query::new(&[], |_| async move { Ok(Counts::default()) }, cx),
+            false => Query::new(&[Table::Tracks, Table::Albums, Table::Artists], counts, cx),
+        });
+        let catalog =
+            cx.new(|cx| Query::new(&[Table::Albums], |_| async move { Ok(Vec::new()) }, cx));
 
         let navigator = Navigator::global(cx);
         let playlists = PlaylistsModel::global(cx);
@@ -296,14 +352,22 @@ impl Library {
             cx.observe(&artists, |this, _, cx| this.adopt_artists(cx)),
             cx.observe(&genres, |_, _, cx| cx.notify()),
             cx.observe(&stats, |this, _, cx| this.adopt_stats(cx)),
-            cx.observe(&playlists, |this, _, cx| this.rebuild(cx)),
+            cx.observe(&counts, |this, _, cx| {
+                this.auto_sync(cx);
+                cx.notify();
+            }),
+            cx.observe(&catalog, |this, _, cx| this.adopt_catalog(cx)),
+            cx.observe(&playlists, |this, _, cx| {
+                this.rekey_offline(cx);
+                this.rebuild(cx);
+            }),
             cx.observe(&downloads, |this, _, cx| this.on_downloads(cx)),
             // The playing mark sits on every row and tile, so it is derived here, not in render.
             cx.observe(&player, |this, _, cx| this.adopt_playing(cx)),
             cx.observe(&QueueModel::global(cx), |this, _, cx| this.adopt_queue(cx)),
             cx.observe(&layout, |this, _, cx| this.adopt_layout(cx)),
             cx.observe(&store::ConfigModel::global(cx), |_, _, cx| cx.notify()),
-            cx.observe(&sources, |_, _, cx| cx.notify()),
+            cx.observe(&sources, |this, _, cx| this.on_sources(cx)),
             cx.observe(&store::JobsModel::global(cx), |_, _, cx| cx.notify()),
             cx.observe_in(&navigator, window, |this, _, window, cx| {
                 this.adopt_route(window, cx)
@@ -330,6 +394,9 @@ impl Library {
             artists,
             genres,
             stats,
+            counts,
+            catalog,
+            catalog_asked: false,
             rows: Vec::new(),
             lines: Vec::new(),
             tiles: Vec::new(),
@@ -337,6 +404,8 @@ impl Library {
             albums_meta: HashMap::new(),
             year_span: None,
             plays: HashMap::new(),
+            playlist_offline: HashMap::new(),
+            asked_artwork: HashSet::new(),
             playing: store::Playing::default(),
             queued: false,
             pager: Pager::new(),
@@ -353,6 +422,7 @@ impl Library {
             _subscriptions: subscriptions,
         };
         page.read_layout(cx);
+        page.rekey_offline(cx);
         if !liked {
             page.adopt_intent(cx);
         }
@@ -362,10 +432,19 @@ impl Library {
 
     /// The page's title.
     pub(crate) fn title(&self) -> SharedString {
-        match self.liked {
-            true => t("favorites"),
-            false => t("your_library"),
+        match (self.liked, self.most_played()) {
+            (true, _) => t("favorites"),
+            (false, true) => t("listening_logs"),
+            (false, false) => t("your_library"),
         }
+    }
+
+    /// The tracks by plays, most first: what the Dioxus Activity page was, so it keeps that page's heading.
+    pub(crate) fn most_played(&self) -> bool {
+        !self.liked
+            && self.filters.facet == Facet::Tracks
+            && self.sort.field == "plays"
+            && self.sort.descending
     }
 
     pub(crate) fn is_liked(&self) -> bool {
@@ -394,6 +473,7 @@ impl Library {
             return;
         }
         if held != (self.columns.clone(), self.mode, self.density, self.tile) {
+            self.want_catalog(cx);
             cx.notify();
         }
     }
@@ -412,7 +492,11 @@ impl Library {
                 };
                 let sort = self.sort.to_layout();
                 let mut columns = self.columns.clone();
-                if let Some(column) = columns.iter_mut().find(|column| column.id == "plays") {
+                // The Dioxus Activity table carried a genre column beside the plays.
+                for column in columns
+                    .iter_mut()
+                    .filter(|column| matches!(column.id.as_str(), "plays" | "genre"))
+                {
                     column.visible = true;
                 }
                 self.columns = columns.clone();
@@ -558,6 +642,93 @@ impl Library {
             Facet::Artists => self.fetch_artists(page, false, cx),
             Facet::Playlists => self.rebuild(cx),
         }
+        self.want_catalog(cx);
+        self.auto_sync(cx);
+    }
+
+    /// Read every album once the table shows something only an album knows: its genre, or its year.
+    fn want_catalog(&mut self, cx: &mut Context<Self>) {
+        let genre = self
+            .columns
+            .iter()
+            .any(|column| column.id == "genre" && column.visible);
+        let year = self.group_by.as_deref() == Some("year");
+        if self.catalog_asked || self.filters.facet != Facet::Tracks || !(genre || year) {
+            return;
+        }
+        self.catalog_asked = true;
+        self.catalog.update(cx, |query, cx| {
+            query.set_fetch(
+                |api| async move { Ok(api.albums(Default::default(), store::all()).await?.albums) },
+                cx,
+            )
+        });
+    }
+
+    fn adopt_catalog(&mut self, cx: &mut Context<Self>) {
+        let Some(albums) = self.catalog.read(cx).value() else {
+            return;
+        };
+        if albums.is_empty() {
+            return;
+        }
+        self.albums_meta = albums
+            .iter()
+            .map(|album| {
+                let meta = AlbumMeta {
+                    year: album.year,
+                    genre: album.genre.clone(),
+                };
+                (album.id.clone(), meta)
+            })
+            .collect();
+        self.year_span = span_of(albums);
+        self.rebuild(cx);
+    }
+
+    /// An empty library on a source that syncs fills itself once, and a flat playlist catalog asks the source on sight.
+    fn auto_sync(&mut self, cx: &mut Context<Self>) {
+        if self.liked || self.frozen {
+            return;
+        }
+        let sources = SourcesModel::global(cx).read(cx);
+        let capabilities = sources.capabilities();
+        let Some(source) = sources.active().cloned() else {
+            return;
+        };
+        if !capabilities.sync || sources.offline_reads() || !source.authenticated {
+            return;
+        }
+        let empty = self
+            .counts
+            .read(cx)
+            .value()
+            .is_some_and(|counts| counts.tracks == Some(0));
+        let jobs = store::JobsModel::global(cx).read(cx);
+        let library = empty
+            && !capabilities.scan_folders
+            && jobs.progress(api::JobKind::LibrarySync).is_none();
+        let playlists = self.filters.facet == Facet::Playlists
+            && !capabilities.folders
+            && jobs.progress(api::JobKind::PlaylistSync).is_none();
+        if library {
+            playlists::start_once(api::JobKind::LibrarySync, &source.id, cx);
+        }
+        if playlists {
+            playlists::start_once(api::JobKind::PlaylistSync, &source.id, cx);
+        }
+    }
+
+    fn on_sources(&mut self, cx: &mut Context<Self>) {
+        if self.frozen {
+            return;
+        }
+        self.rekey_offline(cx);
+        if self.filters.facet == Facet::Playlists {
+            self.rebuild(cx);
+        }
+        self.auto_sync(cx);
+        cx.notify();
     }
 
     fn fetch_tracks(&mut self, page: Page, paging: bool, cx: &mut Context<Self>) {
@@ -713,6 +884,19 @@ impl Library {
         {
             let total = page.total.max(page.artists.len() as u32) as usize;
             self.pager.adopt(page.offset, page.artists.len(), total);
+            let missing: Vec<String> = page
+                .artists
+                .iter()
+                .filter(|artist| artist.artwork.is_none())
+                .map(|artist| artist.key.clone())
+                .filter(|key| self.asked_artwork.insert(key.clone()))
+                .collect();
+            // Photos found arrive as a tracks invalidation, which reads this window again.
+            if !missing.is_empty() {
+                Link::global(cx).fire(cx, "refresh artist artwork", move |api| async move {
+                    api.refresh_artist_artwork(missing).await
+                });
+            }
         }
         self.rebuild(cx);
     }
@@ -750,9 +934,11 @@ impl Library {
     }
 
     fn on_downloads(&mut self, cx: &mut Context<Self>) {
-        match self.filters.downloaded {
-            true => self.refetch(cx),
-            false => cx.notify(),
+        self.restate_offline(cx);
+        match (self.filters.downloaded, self.filters.facet) {
+            (true, _) => self.refetch(cx),
+            (false, Facet::Playlists) => self.rebuild(cx),
+            (false, _) => cx.notify(),
         }
     }
 
@@ -1053,12 +1239,13 @@ impl Library {
             if !self.shared.settled {
                 return self.skeleton_body(cx);
             }
-            if self.liked && self.filters == Filters::default().held_to_liked() {
-                return states::no_favorites().into_any_element();
+            let liked = Filters::default().held_to_liked();
+            if self.liked && self.filters == liked {
+                return states::no_favorites(&self.shared.active).into_any_element();
             }
             if self.filters.is_narrowed() {
                 let page = cx.entity().downgrade();
-                return states::no_matches(move |_, window, cx| {
+                let clear = move |_: &gpui_kit::ClickEvent, window: &mut Window, cx: &mut App| {
                     page.update(cx, |this, cx| {
                         let cleared = this.filters.cleared();
                         this.search
@@ -1066,8 +1253,16 @@ impl Library {
                         this.set_filters(cleared, true, cx);
                     })
                     .ok();
-                })
-                .into_any_element();
+                };
+                let searched_only = Filters {
+                    search: String::new(),
+                    ..self.filters.clone()
+                } == liked;
+                if self.liked && searched_only {
+                    return states::no_results(self.filters.search.trim(), clear)
+                        .into_any_element();
+                }
+                return states::no_matches(clear).into_any_element();
             }
             return states::empty_library(self.filters.facet, &self.shared.active)
                 .into_any_element();

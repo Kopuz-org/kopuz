@@ -4,7 +4,9 @@ use std::rc::Rc;
 
 use api::{ArtworkTarget, PlaylistCapability, PlaylistReorder, Table, TrackInfo};
 use components::format::{t, t_with};
-use components::track_list::{TrackActions, TrackList, TrackListEvent};
+use components::track_list::{
+    NowPlaying, TrackActions, TrackList, TrackListEvent, TrackListOptions,
+};
 use components::{
     DetailActions, DetailHeader, EmptyState, Picture, TrackHeader, detail_header_skeleton, icons,
     menus,
@@ -52,7 +54,13 @@ impl PlaylistDetail {
                 cx,
             )
         });
-        let list = cx.new(TrackList::new);
+        // The same song queued from elsewhere should not light up here.
+        let list = cx.new(|cx| {
+            TrackList::new(cx).with_options(TrackListOptions {
+                now_playing: NowPlaying::WhenQueued,
+                ..TrackListOptions::default()
+            })
+        });
         commands::bind_track_list(&list, cx);
         let sources = SourcesModel::global(cx);
         let subscriptions = vec![
@@ -244,6 +252,7 @@ impl Render for PlaylistDetail {
             return components::page().child(if loaded {
                 EmptyState::new(t("playlist_not_found"))
                     .icon(icons::LIST)
+                    .flex()
                     .into_any_element()
             } else {
                 detail_header_skeleton(HERO, false, cx).into_any_element()
@@ -292,19 +301,15 @@ impl PlaylistDetail {
         if rows == 0 {
             if let Some(error) = query.error() {
                 let reason = store::human(error);
-                return v_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .child(
-                        EmptyState::failed(
-                            t("library_read_failed"),
-                            cx.listener(|this, _, _, cx| {
-                                this.tracks.update(cx, |query, cx| query.refresh(cx));
-                            }),
-                        )
-                        .detail(reason),
-                    )
-                    .into_any_element();
+                return EmptyState::failed(
+                    t("library_read_failed"),
+                    cx.listener(|this, _, _, cx| {
+                        this.tracks.update(cx, |query, cx| query.refresh(cx));
+                    }),
+                )
+                .detail(reason)
+                .flex()
+                .into_any_element();
             }
             if expected > 0 && !query.is_settled() {
                 return v_flex()
@@ -313,14 +318,10 @@ impl PlaylistDetail {
                     .child(components::skeleton::rows(10, px(56.), true, 3, cx))
                     .into_any_element();
             }
-            return v_flex()
-                .flex_1()
-                .min_h_0()
-                .child(
-                    EmptyState::new(t("playlist_empty"))
-                        .icon(icons::LIST)
-                        .detail(t("playlist_empty_detail")),
-                )
+            return EmptyState::new(t("playlist_empty"))
+                .icon(icons::LIST)
+                .detail(t("playlist_empty_detail"))
+                .flex()
                 .into_any_element();
         }
         let _ = window;

@@ -1,6 +1,6 @@
 //! The chrome over the listing: the facet switch, the filter bar and the selection pill.
 
-use api::{FavoritesSyncMode, JobKind, SourceCapabilities, TrackFilter};
+use api::{AlbumPresentation, FavoritesSyncMode, JobKind, SourceCapabilities, TrackFilter};
 use commands::Command;
 use components::format::{t, t_with};
 use components::{
@@ -13,8 +13,8 @@ use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, Context, IntoElement, ParentElement as _, SharedString, Styled as _, Window,
-    div,
+    AnyElement, App, Context, FontWeight, IntoElement, ParentElement as _, SharedString,
+    Styled as _, Window, div,
 };
 use store::layout::{Density, TileSize, ViewMode};
 use store::{JobsModel, Link, SourcesModel, Target};
@@ -42,6 +42,18 @@ impl Library {
                 .total(count)
                 .on_refresh(|_, _, cx| start(JobKind::FavoritesSync, cx))
         });
+        // A server's flat playlist catalog is pulled in by a job, whose progress the Dioxus page showed.
+        let playlist_sync = (!self.is_liked()
+            && self.filters().facet == Facet::Playlists
+            && !capabilities.folders
+            && capabilities.albums == AlbumPresentation::Remote)
+            .then(|| {
+                let total = store::PlaylistsModel::global(cx).read(cx).playlists().len();
+                SyncStatus::new(JobKind::PlaylistSync)
+                    .total(total)
+                    .on_refresh(|_, _, cx| start(JobKind::PlaylistSync, cx))
+            });
+        let stats = self.stat_cards(cx);
         let refreshing = (!self.is_liked())
             .then(|| {
                 let jobs = JobsModel::global(cx).read(cx);
@@ -50,21 +62,25 @@ impl Library {
                     .map(ProgressBar::job)
             })
             .flatten();
+        let mut header = PageHeader::new(self.title())
+            .count(t_with("library_count", &[("count", count.into())]))
+            .flush()
+            .when(self.most_played(), |header| {
+                header.subtitle(t("most_played_tracks"))
+            })
+            .action(controls);
+        for button in self.header_buttons(&capabilities, cx) {
+            header = header.action(button);
+        }
         v_flex()
             .w_full()
             .flex_shrink_0()
             .gap_4()
             .pb_4()
-            .child(
-                PageHeader::new(self.title())
-                    .count(t_with("library_count", &[("count", count.into())]))
-                    .flush()
-                    .action(controls)
-                    .when_some(self.header_button(&capabilities, cx), |header, button| {
-                        header.action(button)
-                    }),
-            )
+            .child(header)
+            .children(stats)
             .children(sync)
+            .children(playlist_sync)
             .children(refreshing)
             .children(switch)
             .child(filter_bar)
@@ -250,32 +266,66 @@ impl Library {
             .into_any_element()
     }
 
-    /// Favorites starts the source's radio of them; the library pulls itself in again.
-    fn header_button(
+    /// Favorites starts the source's radio of them; the library pulls itself in again, and playlists are made here.
+    fn header_buttons(
         &self,
         capabilities: &SourceCapabilities,
         cx: &mut Context<Self>,
-    ) -> Option<IconButton> {
+    ) -> Vec<IconButton> {
         if self.is_liked() {
-            let id = capabilities.favorites_playlist.clone()?;
-            return Some(
+            let Some(id) = capabilities.favorites_playlist.clone() else {
+                return Vec::new();
+            };
+            return vec![
                 IconButton::new("favorites-radio", icons::RADIO)
                     .tooltip(t("start_radio"))
                     .on_click(move |_, _, cx| store::actions::start_playlist_radio(id.clone(), cx)),
-            );
+            ];
         }
+        let mut buttons = match self.filters().facet {
+            Facet::Playlists => self.playlist_buttons(cx),
+            _ => Vec::new(),
+        };
         let (kind, label) = match (capabilities.scan_folders, capabilities.sync) {
             (true, _) => (JobKind::Scan, "rescan_library"),
             (false, true) => (JobKind::LibrarySync, "refresh_music_library"),
-            (false, false) => return None,
+            (false, false) => return buttons,
         };
         let running = JobsModel::global(cx).read(cx).progress(kind).is_some();
-        Some(
+        buttons.push(
             IconButton::new("library-refresh", icons::REFRESH)
                 .tooltip(t(label))
                 .loading(running)
                 .disabled(running)
                 .on_click(move |_, _, cx| start(kind, cx)),
+        );
+        buttons
+    }
+
+    /// Tracks, albums, artists and playlists held, the four cards over the Dioxus library.
+    fn stat_cards(&self, cx: &App) -> Option<AnyElement> {
+        if self.is_liked() {
+            return None;
+        }
+        let counts = self.counts.read(cx).value().copied()?;
+        let playlists = store::PlaylistsModel::global(cx).read(cx);
+        let playlists = playlists
+            .is_loaded()
+            .then(|| playlists.playlists().len() as u32);
+        let cards = [
+            ("tracks", icons::MUSIC, counts.tracks),
+            ("albums", icons::DISC, counts.albums),
+            ("artists", icons::MIC, counts.artists),
+            ("playlists", icons::LIST, playlists),
+        ];
+        Some(
+            h_flex()
+                .w_full()
+                .gap_3()
+                .children(cards.into_iter().filter_map(|(key, icon, value)| {
+                    value.map(|value| stat_card(key, icon, value, cx))
+                }))
+                .into_any_element(),
         )
     }
 
@@ -588,12 +638,18 @@ impl Library {
         let picked: Vec<String> = self.selection.picked().to_vec();
         let facet = self.filters().facet;
         let playlists: Vec<(String, Vec<String>)> = match facet {
-            Facet::Playlists => store::PlaylistsModel::global(cx)
-                .read(cx)
-                .playlists()
-                .iter()
-                .map(|playlist| (playlist.id.clone(), playlist.track_keys.clone()))
-                .collect(),
+            Facet::Playlists => {
+                let model = store::PlaylistsModel::global(cx).read(cx);
+                let held = model.playlists();
+                let folders = model.folders().iter().map(|folder| {
+                    let keys = crate::playlists::folder_keys(folder, held);
+                    (folder.id.clone(), keys)
+                });
+                held.iter()
+                    .map(|playlist| (playlist.id.clone(), playlist.track_keys.clone()))
+                    .chain(folders)
+                    .collect()
+            }
             _ => Vec::new(),
         };
         let call = Link::global(cx).call(move |api| {
@@ -647,6 +703,47 @@ async fn gather(
         }
     }
     Ok(keys)
+}
+
+fn stat_card(key: &'static str, icon: &'static str, value: u32, cx: &App) -> AnyElement {
+    h_flex()
+        .flex_1()
+        .min_w_0()
+        .gap_3()
+        .p_4()
+        .items_center()
+        .rounded(style::radius_xl())
+        .border_1()
+        .border_color(style::white(style::BORDER_SOFT, cx))
+        .child(
+            div()
+                .size_10()
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(style::radius_lg())
+                .bg(style::white(style::RAISED, cx))
+                .child(icons::icon(icon).text_color(style::white(style::TEXT_SECONDARY, cx))),
+        )
+        .child(
+            v_flex()
+                .min_w_0()
+                .child(
+                    div()
+                        .text_xs()
+                        .truncate()
+                        .text_color(style::slate_500(cx))
+                        .child(t(key)),
+                )
+                .child(
+                    div()
+                        .text_xl()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(value.to_string()),
+                ),
+        )
+        .into_any_element()
 }
 
 fn chip_is_off(filters: &Filters, chip: Chip) -> bool {

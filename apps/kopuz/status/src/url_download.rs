@@ -1,23 +1,34 @@
 //! Fetching a URL to a file: the tool, the formats and every option are the daemon's.
 
-use api::ApiEvent;
+use std::collections::HashSet;
+
 use api::schema::{ChoiceOption, FieldValue};
-use components::ErrorBanner;
+use api::{ApiEvent, DownloadCandidate};
 use components::dialogs::FormDialog;
-use components::format::{t, text};
-use components::{Chip, ChipSize, FieldChanged, SchemaForm, icons, style};
+use components::format::{duration, t, t_with, text};
+use components::{
+    Chip, ChipSize, Cover, ErrorBanner, FieldChanged, IconButton, Loading, SchemaForm, icons, style,
+};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Disableable as _, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, Render, SharedString, StatefulInteractiveElement as _, Styled,
-    Subscription, Task, Window, div, px,
+    AnyElement, App, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _,
+    IntoElement, ParentElement as _, Pixels, Render, SharedString, StatefulInteractiveElement as _,
+    Styled, Subscription, Task, Window, div, px,
 };
 use store::{Link, Notices, Query};
 
 const OPTIONS_HEIGHT: Pixels = px(240.);
+const RESULTS_HEIGHT: Pixels = px(288.);
+const RESULT_COVER: Pixels = px(40.);
+
+/// What the last search asked for, and what came back once it has.
+struct Search {
+    query: String,
+    found: Option<Result<Vec<DownloadCandidate>, SharedString>>,
+}
 
 /// Wire the box the popover's chip and `downloads.add_url` both open.
 pub fn register(cx: &mut App) {
@@ -43,7 +54,12 @@ pub(crate) struct UrlDownload {
     show_options: bool,
     starting: bool,
     failure: Option<SharedString>,
+    search: Option<Search>,
+    // The candidates already handed to the downloader, so a second press cannot fetch one twice.
+    fetching: HashSet<String>,
+    fetched: HashSet<String>,
     _start: Option<Task<()>>,
+    _search: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -85,7 +101,11 @@ impl UrlDownload {
             show_options: false,
             starting: false,
             failure: None,
+            search: None,
+            fetching: HashSet::new(),
+            fetched: HashSet::new(),
             _start: None,
+            _search: None,
             _subscriptions: subscriptions,
         };
         dialog.load_settings(cx);
@@ -141,6 +161,174 @@ impl UrlDownload {
             })
             .ok();
         }));
+    }
+
+    /// A name finds songs to fetch; a pasted link lists the tracks it stands for.
+    fn search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let query = self.url.read(cx).value().trim().to_string();
+        if query.is_empty() {
+            return;
+        }
+        self.failure = None;
+        self.search = Some(Search {
+            query: query.clone(),
+            found: None,
+        });
+        cx.notify();
+        let call =
+            Link::global(cx).call(move |api| async move { api.search_downloads(query).await });
+        self._search = Some(cx.spawn_in(window, async move |this, cx| {
+            let found = call.await.map_err(|error| store::human(&error));
+            this.update(cx, |this, cx| {
+                if let Some(search) = this.search.as_mut() {
+                    search.found = Some(found);
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    /// One result's own download; the dialog stays open so the next can follow.
+    fn fetch(&mut self, url: String, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.fetching.insert(url.clone()) {
+            return;
+        }
+        self.failure = None;
+        cx.notify();
+        let format = self.format(cx).unwrap_or_default();
+        let call = {
+            let url = url.clone();
+            Link::global(cx).call(move |api| async move { api.download_url(url, format).await })
+        };
+        cx.spawn_in(window, async move |this, cx| {
+            let result = call.await;
+            this.update(cx, |this, cx| {
+                this.fetching.remove(&url);
+                match result {
+                    Ok(_) => {
+                        this.fetched.insert(url);
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "the download was refused");
+                        this.failure = Some(store::human(&error));
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn results(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let search = self.search.as_ref()?;
+        let element = match &search.found {
+            None => Loading::new().compact().into_any_element(),
+            Some(Err(error)) => ErrorBanner::new(error.clone()).icon().into_any_element(),
+            Some(Ok(found)) if found.is_empty() => div()
+                .py_4()
+                .text_sm()
+                .text_center()
+                .text_color(style::slate_500(cx))
+                .child(t_with(
+                    "no_results_found",
+                    &[("query", search.query.clone().into())],
+                ))
+                .into_any_element(),
+            Some(Ok(found)) => {
+                let rows: Vec<_> = found
+                    .iter()
+                    .enumerate()
+                    .map(|(position, candidate)| self.result(position, candidate, cx))
+                    .collect();
+                div()
+                    .id("url-download-results")
+                    .max_h(RESULTS_HEIGHT)
+                    .overflow_y_scroll()
+                    .rounded(style::radius_lg())
+                    .border_1()
+                    .border_color(style::white(style::BORDER, cx))
+                    .child(v_flex().children(rows))
+                    .into_any_element()
+            }
+        };
+        Some(element)
+    }
+
+    fn result(
+        &self,
+        position: usize,
+        candidate: &DownloadCandidate,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let byline = [candidate.artist.as_str(), candidate.album.as_str()]
+            .into_iter()
+            .filter(|part| !part.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let fetching = self.fetching.contains(&candidate.url);
+        let fetched = self.fetched.contains(&candidate.url);
+        let url = candidate.url.clone();
+        let icon = match fetched {
+            true => icons::CHECK,
+            false => icons::DOWNLOAD,
+        };
+        h_flex()
+            .id(SharedString::from(format!(
+                "url-result-{position}-{}",
+                candidate.url
+            )))
+            .gap_3()
+            .px_3()
+            .py_2()
+            .items_center()
+            .hover(|row| row.bg(style::white(style::RAISED, cx)))
+            // The covers are remote URLs, and this app reads pictures only through the daemon.
+            .child(
+                Cover::new(None)
+                    .size(RESULT_COVER)
+                    .rounded(style::cover_radius())
+                    .placeholder(icons::MUSIC),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .truncate()
+                            .child(candidate.title.clone()),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .truncate()
+                            .text_color(style::slate_500(cx))
+                            .child(byline),
+                    ),
+            )
+            .when(candidate.duration_secs > 0, |row| {
+                row.child(
+                    div()
+                        .flex_shrink_0()
+                        .text_xs()
+                        .text_color(style::slate_500(cx))
+                        .child(duration(candidate.duration_secs * 1000)),
+                )
+            })
+            .child(
+                IconButton::new(SharedString::from(format!("url-fetch-{position}")), icon)
+                    .tooltip(t("downloader_download"))
+                    .loading(fetching)
+                    .disabled(fetching || fetched)
+                    .on_click(
+                        cx.listener(move |this, _, window, cx| this.fetch(url.clone(), window, cx)),
+                    ),
+            )
+            .into_any_element()
     }
 
     fn load_settings(&mut self, cx: &mut Context<Self>) {
@@ -206,6 +394,11 @@ impl UrlDownload {
 impl Render for UrlDownload {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let empty = self.url.read(cx).value().trim().is_empty();
+        let searching = self
+            .search
+            .as_ref()
+            .is_some_and(|search| search.found.is_none());
+        let results = self.results(cx);
         let chevron = match self.show_options {
             true => icons::CHEVRON_UP,
             false => icons::CHEVRON_DOWN,
@@ -214,18 +407,32 @@ impl Render for UrlDownload {
             .w_full()
             .gap_3()
             .child(
-                Input::new(&self.url)
-                    .bg(style::white(style::HOVER, cx))
-                    .border_color(style::white(style::BORDER, cx))
-                    .rounded(style::radius_lg())
-                    .px_3()
-                    .py_2()
-                    .text_sm(),
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        Input::new(&self.url)
+                            .flex_1()
+                            .bg(style::white(style::HOVER, cx))
+                            .border_color(style::white(style::BORDER, cx))
+                            .rounded(style::radius_lg())
+                            .px_3()
+                            .py_2()
+                            .text_sm(),
+                    )
+                    .child(
+                        IconButton::new("url-download-search", icons::SEARCH)
+                            .tooltip(t("search"))
+                            .loading(searching)
+                            .disabled(empty || searching)
+                            .on_click(cx.listener(|this, _, window, cx| this.search(window, cx))),
+                    ),
             )
             .child(self.chips(cx))
             .when_some(self.failure.clone(), |body, failure| {
                 body.child(ErrorBanner::new(failure).icon())
             })
+            .children(results)
             .child(
                 h_flex().child(
                     Button::new("url-download-options")
