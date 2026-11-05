@@ -32,6 +32,10 @@ const BLUR_TAPS: usize = 6;
 // Weights of the ink kept at the centre and given to each tap; together under one, so a blurred line reads lighter.
 const BLUR_CENTRE: f32 = 0.35;
 const BLUR_TAP: f32 = 0.05;
+// Wider than this the copies part into ghost lines instead of a blur.
+const BLUR_RING_MAX: Pixels = px(8.);
+/// How much of a sharp line's ink a blurred one shows, whatever its radius.
+pub const BLURRED_INK: f32 = BLUR_CENTRE + BLUR_TAPS as f32 * BLUR_TAP;
 
 type Seek = Rc<dyn Fn(u64, &mut Window, &mut App)>;
 
@@ -237,6 +241,7 @@ fn blurred(
     group: SharedString,
 ) -> impl IntoElement {
     let ring = ink.alpha(ink.a * BLUR_TAP);
+    let radius = radius.min(BLUR_RING_MAX);
     let copies = (0..BLUR_TAPS).map(move |tap| {
         let angle = std::f32::consts::TAU * tap as f32 / BLUR_TAPS as f32;
         (radius * angle.cos(), radius * angle.sin())
