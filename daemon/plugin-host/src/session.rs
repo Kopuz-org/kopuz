@@ -12,6 +12,12 @@ use crate::{PluginError, wit};
 
 const MAX_INSTANCES: usize = 4;
 
+/// Calls running at once across every session, since each instance's memory
+/// can grow to the per-plugin limit while it runs.
+const MAX_RUNNING: usize = 8;
+
+static RUNNING: Semaphore = Semaphore::const_new(MAX_RUNNING);
+
 /// Requests time out on their own; this stops a plugin that never returns.
 /// A first sync of a large library is one call.
 pub(crate) const CALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
@@ -49,6 +55,12 @@ impl Session {
 
     pub fn plugin(&self) -> &Plugin {
         &self.plugin
+    }
+
+    /// Drops the instances waiting for a call. A wasm memory never shrinks,
+    /// so one that grew to hold an upload would otherwise keep it.
+    pub async fn release_idle(&self) {
+        self.idle.lock().await.clear();
     }
 
     pub fn service(&self) -> &str {
@@ -89,6 +101,10 @@ macro_rules! calls {
                         .acquire()
                         .await
                         .map_err(|_| PluginError::Runtime("the session is closed".into()))?;
+                    let _running = RUNNING
+                        .acquire()
+                        .await
+                        .map_err(|_| PluginError::Runtime("plugins have stopped".into()))?;
                     let idle = self.idle.lock().await.pop();
                     let mut live = match idle {
                         Some(live) => live,
