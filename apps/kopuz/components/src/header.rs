@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::cover::{Cover, EditableCover, Scrim};
 use crate::menus::{self, Menu, Picture, WithContextMenu as _};
-use crate::{icons, style};
+use crate::{icons, skin, style};
 use api::ArtworkRef;
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -10,6 +10,7 @@ use gpui_kit::{
     AnyElement, App, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
     Pixels, RenderOnce, SharedString, Styled, Window, div, px, rems,
 };
+use store::{Navigator, SourcesModel};
 
 /// How big a page's title is drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -80,17 +81,43 @@ impl PageHeader {
     }
 }
 
+// `rgba(255,255,255,0.35)`, the ink every Vaxry page heading's section label wears.
+const EYEBROW_INK: f32 = 0.35;
+
+/// The section heading a skin sets over a page's title: the sidebar section the page is in.
+fn eyebrow(cx: &App) -> Option<SharedString> {
+    let artists_remote =
+        SourcesModel::global(cx).read(cx).capabilities().artists == api::ArtistPresentation::Remote;
+    let section = skin::section_of(Navigator::global(cx).read(cx).current(), artists_remote)?;
+    Some(crate::format::t(section))
+}
+
 impl RenderOnce for PageHeader {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let pages = skin::arrangement().pages;
         let quiet =
             |text: SharedString| div().text_sm().text_color(style::slate_400(cx)).child(text);
-        let title = div()
-            .text_color(cx.theme().foreground)
-            .map(|title| match self.size {
-                TitleSize::Page => title.text_3xl().font_weight(FontWeight::SEMIBOLD),
-                TitleSize::Display => title.text_size(rems(2.25)).font_weight(FontWeight::BLACK),
-            })
-            .child(self.title);
+        let display = self.size == TitleSize::Display;
+        // A skin with no greeting leaves the home page's actions on their own.
+        let title = (!display || pages.greeting).then(|| {
+            div()
+                .text_color(cx.theme().foreground)
+                .map(|title| match self.size {
+                    TitleSize::Page => title
+                        .text_size(pages.title)
+                        .font_weight(FontWeight::SEMIBOLD),
+                    TitleSize::Display => {
+                        title.text_size(rems(2.25)).font_weight(FontWeight::BLACK)
+                    }
+                })
+                .child(self.title)
+        });
+        let eyebrow = pages
+            .eyebrow
+            .then(|| eyebrow(cx))
+            .flatten()
+            .filter(|_| !display);
+        let icon = self.icon.filter(|_| eyebrow.is_none());
         h_flex()
             .w_full()
             .justify_between()
@@ -102,11 +129,18 @@ impl RenderOnce for PageHeader {
                 v_flex()
                     .min_w_0()
                     .gap_0p5()
+                    .children(eyebrow.map(|eyebrow| {
+                        div()
+                            .text_size(style::text_10())
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(style::white(EYEBROW_INK, cx))
+                            .child(eyebrow)
+                    }))
                     .child(
                         h_flex()
                             .items_center()
                             .gap_3()
-                            .when_some(self.icon, |line, icon| {
+                            .when_some(icon, |line, icon| {
                                 line.child(
                                     icons::icon(icon)
                                         .size(px(24.))
@@ -117,7 +151,7 @@ impl RenderOnce for PageHeader {
                                 h_flex()
                                     .items_baseline()
                                     .gap_3()
-                                    .child(title)
+                                    .children(title)
                                     .children(self.count.map(quiet)),
                             ),
                     )
@@ -126,9 +160,6 @@ impl RenderOnce for PageHeader {
             .child(h_flex().gap_2().items_center().children(self.actions))
     }
 }
-
-/// `w-64 h-64`: the cover a detail page opens with.
-pub const HERO: Pixels = px(256.);
 
 /// What a page does when its cover is clicked; only it knows what a new picture means.
 type CoverAction = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -259,7 +290,7 @@ impl DetailHeader {
             artwork: None,
             placeholder: crate::icons::DISC,
             round: false,
-            size: HERO,
+            size: skin::arrangement().pages.hero,
             layout: HeaderLayout::Row,
             eyebrow: None,
             kind: None,
@@ -407,11 +438,28 @@ impl DetailHeader {
     }
 
     fn row(mut self, cx: &App) -> AnyElement {
+        let pages = skin::arrangement().pages;
+        let below = pages.hero_actions_below;
         let cover = self.cover_element();
         let facts = self.facts(false, None);
+        let actions = std::mem::take(&mut self.actions);
+        let actions_row = (!actions.is_empty()).then(|| {
+            h_flex()
+                .flex_shrink_0()
+                .map(|row| match below {
+                    true => row.mt_3().gap_2().flex_wrap(),
+                    false => row.gap_4(),
+                })
+                .items_center()
+                .children(actions)
+        });
+        let (under, beside) = match below {
+            true => (actions_row, None),
+            false => (None, actions_row),
+        };
         h_flex()
             .w_full()
-            .gap_8()
+            .gap(pages.hero_gap)
             .items_end()
             .child(div().flex_shrink_0().child(cover))
             .child(
@@ -421,25 +469,21 @@ impl DetailHeader {
                     .children(self.eyebrow.map(|eyebrow| div().mb_2().child(eyebrow)))
                     .child(
                         div()
-                            .mb_6()
+                            .map(|title| match below {
+                                true => title.mb_1(),
+                                false => title.mb_6(),
+                            })
                             .line_clamp(3)
-                            .text_size(rems(4.5))
+                            .text_size(pages.hero_title)
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(self.title),
                     )
                     .children(facts)
-                    .children(self.description.map(|text| description(text, cx))),
+                    .children(self.description.map(|text| description(text, cx)))
+                    .children(under),
             )
             // Upstream the actions are the row's third column, at its bottom-right, not under the facts.
-            .when(!self.actions.is_empty(), |row| {
-                row.child(
-                    h_flex()
-                        .flex_shrink_0()
-                        .gap_4()
-                        .items_center()
-                        .children(self.actions),
-                )
-            })
+            .children(beside)
             .into_any_element()
     }
 

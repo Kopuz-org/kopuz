@@ -6,8 +6,8 @@ use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, div, px, relative, rems,
+    App, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, RenderOnce,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px, relative, rems,
 };
 
 use crate::{KaraokeText, Syllable, icons, motion};
@@ -27,6 +27,15 @@ const LINE_WIDTH: f32 = 20.;
 const TURN_WIDTH: f32 = 18.;
 // `leading-snug` on the small print of a background line.
 const SNUG: f32 = 1.375;
+// GPUI filters no text, so a blur is sampled: the words again around one ring, each copy faint.
+const BLUR_TAPS: usize = 6;
+// Weights of the ink kept at the centre and given to each tap; together under one, so a blurred line reads lighter.
+const BLUR_CENTRE: f32 = 0.35;
+const BLUR_TAP: f32 = 0.05;
+// Wider than this the copies part into ghost lines instead of a blur.
+const BLUR_RING_MAX: Pixels = px(8.);
+/// How much of a sharp line's ink a blurred one shows, whatever its radius.
+pub const BLURRED_INK: f32 = BLUR_CENTRE + BLUR_TAPS as f32 * BLUR_TAP;
 
 type Seek = Rc<dyn Fn(u64, &mut Window, &mut App)>;
 
@@ -51,6 +60,7 @@ pub struct LyricLine {
     opposite: bool,
     paired: bool,
     opacity: f32,
+    blur: Pixels,
     ink: Hsla,
     seek: Option<Seek>,
 }
@@ -68,6 +78,7 @@ impl LyricLine {
             opposite: false,
             paired: false,
             opacity: 1.,
+            blur: px(0.),
             ink: Hsla::default(),
             seek: None,
         }
@@ -102,9 +113,15 @@ impl LyricLine {
         self
     }
 
-    /// How far the line has receded from the one being sung.
+    /// How far the line has faded from the one being sung.
     pub fn opacity(mut self, opacity: f32) -> Self {
         self.opacity = opacity;
+        self
+    }
+
+    /// How far out of focus the line has receded from the one being sung; a lit line stays sharp.
+    pub fn blur(mut self, radius: Pixels) -> Self {
+        self.blur = radius;
         self
     }
 
@@ -142,6 +159,9 @@ impl RenderOnce for LyricLine {
         };
         let turned = opposite || paired;
         let (start_ms, seek) = (self.start_ms, self.seek);
+        let hover = sung.alpha(DIM_HOVER * tint);
+        let blur = Some(self.blur).filter(|radius| !lit && *radius > px(0.));
+        let group = SharedString::from(format!("lyric-{}", self.index));
 
         let body = div()
             .id(("lyric", self.index))
@@ -149,6 +169,7 @@ impl RenderOnce for LyricLine {
             .max_w(rems(if turned { TURN_WIDTH } else { LINE_WIDTH }))
             .py_0p5()
             .opacity(self.opacity)
+            .group(group.clone())
             .text_color(base)
             .when(background, |row| {
                 row.pl_4()
@@ -163,9 +184,7 @@ impl RenderOnce for LyricLine {
             .when(opposite, |row| row.text_right().italic().ml_auto())
             .when(!opposite && paired, |row| row.text_left())
             .when(!opposite && !paired, |row| row.text_center().mx_auto())
-            .when(!lit, |row| {
-                row.hover(move |row| row.text_color(sung.alpha(DIM_HOVER * tint)))
-            })
+            .when(!lit, |row| row.hover(move |row| row.text_color(hover)))
             .on_click(move |_, window, cx| {
                 if let Some(seek) = &seek {
                     seek(start_ms, window, cx);
@@ -203,9 +222,49 @@ impl RenderOnce for LyricLine {
                     fills,
                 ))
                 .into_any_element(),
-            Body::Karaoke(_) | Body::Words => body.child(self.text).into_any_element(),
+            Body::Karaoke(_) | Body::Words => match blur {
+                Some(radius) => body
+                    .child(blurred(self.text, base, hover, radius, group))
+                    .into_any_element(),
+                None => body.child(self.text).into_any_element(),
+            },
         }
     }
+}
+
+/// The words drawn out of focus by `radius`, coming sharp again while the pointer is on the line.
+fn blurred(
+    text: SharedString,
+    ink: Hsla,
+    hover: Hsla,
+    radius: Pixels,
+    group: SharedString,
+) -> impl IntoElement {
+    let ring = ink.alpha(ink.a * BLUR_TAP);
+    let radius = radius.min(BLUR_RING_MAX);
+    let copies = (0..BLUR_TAPS).map(move |tap| {
+        let angle = std::f32::consts::TAU * tap as f32 / BLUR_TAPS as f32;
+        (radius * angle.cos(), radius * angle.sin())
+    });
+    div()
+        .relative()
+        .w_full()
+        .child(
+            div()
+                .text_color(ink.alpha(ink.a * BLUR_CENTRE))
+                .group_hover(group.clone(), move |style| style.text_color(hover))
+                .child(text.clone()),
+        )
+        .children(copies.map(move |(x, y)| {
+            div()
+                .absolute()
+                .top(y)
+                .left(x)
+                .w_full()
+                .text_color(ring)
+                .group_hover(group.clone(), |style| style.opacity(0.))
+                .child(text.clone())
+        }))
 }
 
 /// The text colour a lyric wears when the voice is on it: the sheet's accent, held legible.

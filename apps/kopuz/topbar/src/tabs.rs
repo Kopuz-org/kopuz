@@ -1,6 +1,6 @@
 use components::icons;
 
-/// The glyph a destination wears in the bar.
+/// The glyph a destination, or a sidebar entry, wears in the bar.
 pub(crate) fn icon(name: &str) -> &'static str {
     match name {
         "home" => icons::HOME,
@@ -11,6 +11,9 @@ pub(crate) fn icon(name: &str) -> &'static str {
         "favorites" => icons::HEART,
         "downloader" => icons::DOWNLOAD,
         "activity" => icons::ACTIVITY,
+        "albums" => icons::DISC,
+        "artists" => icons::MIC,
+        "settings" => icons::SETTINGS,
         _ => icons::MUSIC,
     }
 }
@@ -26,6 +29,9 @@ pub(crate) fn label(name: &str) -> &'static str {
         "favorites" => "favorites",
         "downloader" => "downloader",
         "activity" => "activity",
+        "albums" => "albums",
+        "artists" => "artists",
+        "settings" => "settings",
         _ => "home",
     }
 }

@@ -10,7 +10,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use api::{AlbumPage, ApiError, ArtistPage, KopuzApi, SearchRequest, SearchResults, Table};
+use api::{
+    AlbumPage, ApiError, ArtistPage, CatalogItem, CatalogItemKind, KopuzApi, SearchRequest,
+    SearchResults, SearchSuggestion, Table,
+};
 use components::format::{t, t_with};
 use components::{Badge, CommandRow, EmptyState, KeyHint, SearchField, icons, motion, style};
 use gpui_kit::component::input::{Escape, IndentInline, InputEvent, InputState, MoveDown, MoveUp};
@@ -19,11 +22,13 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, AppContext as _, Context, Entity, FocusHandle, FontWeight, InteractiveElement as _,
     IntoElement, ParentElement as _, Pixels, Render, ScrollStrategy, SharedString,
-    StatefulInteractiveElement as _, Styled, Subscription, Task, UniformListScrollHandle, Window,
-    div, px, uniform_list,
+    StatefulInteractiveElement as _, Styled, Subscription, UniformListScrollHandle, Window, div,
+    px, uniform_list,
 };
 use mode::{Mode, Part};
-use store::{Chrome, LayoutModel, Navigator, PlayerModel, PlaylistsModel, Query, Route, Target};
+use store::{
+    Chrome, LayoutModel, Navigator, PlayerModel, PlaylistsModel, Query, Route, SourcesModel, Target,
+};
 
 pub use prefs::register as register_settings;
 
@@ -87,6 +92,8 @@ enum Act {
     },
     /// Play the results themselves, from this row: a hit never costs a library read.
     Play(usize),
+    /// A song the source suggested: a radio from it where the source runs one, else the song alone.
+    Song(String),
     Go(Route),
     Setting {
         slug: &'static str,
@@ -119,16 +126,27 @@ enum Line {
 
 type Answer = Pin<Box<dyn Future<Output = Result<SearchResults, ApiError>> + Send>>;
 
+/// What the source suggested, and for which query, so an answer to an earlier one is never offered for this one.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct Suggested {
+    query: String,
+    items: Vec<SearchSuggestion>,
+}
+
+impl Suggested {
+    fn for_query(&self, query: &str) -> &[SearchSuggestion] {
+        match self.query == query {
+            true => &self.items,
+            false => &[],
+        }
+    }
+}
+
 /// The read behind one query; a blank one answers with nothing rather than asking the daemon.
 fn search_fetch(query: String) -> impl Fn(Arc<dyn KopuzApi>) -> Answer + 'static {
     move |api| {
         let query = query.clone();
-        Box::pin(async move {
-            if query.is_empty() {
-                return Ok(SearchResults::default());
-            }
-            api.search(SearchRequest::new(query)).await
-        })
+        Box::pin(async move { api.search(SearchRequest::new(query)).await })
     }
 }
 
@@ -136,6 +154,7 @@ fn search_fetch(query: String) -> impl Fn(Arc<dyn KopuzApi>) -> Answer + 'static
 pub struct Palette {
     input: Entity<InputState>,
     tracks: Option<Entity<Query<SearchResults>>>,
+    suggestions: Option<Entity<Query<Suggested>>>,
     albums: Option<Entity<Query<AlbumPage>>>,
     artists: Option<Entity<Query<ArtistPage>>>,
     typed: String,
@@ -156,7 +175,7 @@ pub struct Palette {
     scroll: UniformListScrollHandle,
     // Closing hands focus back, or the shell's keys would have nowhere to dispatch from.
     was_focused: Option<FocusHandle>,
-    _debounce: Option<Task<()>>,
+    debounce: store::Debounce,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -191,6 +210,7 @@ impl Palette {
         Self {
             input,
             tracks: None,
+            suggestions: None,
             albums: None,
             artists: None,
             typed: String::new(),
@@ -206,7 +226,7 @@ impl Palette {
             fade: motion::Fade::hidden(),
             scroll: UniformListScrollHandle::new(),
             was_focused: None,
-            _debounce: None,
+            debounce: store::Debounce::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -219,7 +239,7 @@ impl Palette {
         self.mode = Mode::default();
         self.drill = None;
         self.selected = 0;
-        self._debounce = None;
+        self.debounce.cancel();
         self.was_focused = window.focused(cx);
         self.load(cx);
         self.input.update(cx, |state, cx| {
@@ -227,9 +247,10 @@ impl Palette {
             state.focus(window, cx);
         });
         if let Some(tracks) = self.tracks.clone() {
-            tracks.update(cx, |query, cx| {
-                query.set_fetch(search_fetch(String::new()), cx)
-            });
+            tracks.update(cx, |query, cx| query.hold(SearchResults::default(), cx));
+        }
+        if let Some(suggestions) = self.suggestions.clone() {
+            suggestions.update(cx, |query, cx| query.hold(Suggested::default(), cx));
         }
         self.rebuild(cx);
     }
@@ -239,7 +260,8 @@ impl Palette {
         if self.tracks.is_some() {
             return;
         }
-        let tracks = cx.new(|cx| Query::new(&[Table::Tracks], search_fetch(String::new()), cx));
+        let tracks = cx.new(|cx| Query::held(&[Table::Tracks], SearchResults::default(), cx));
+        let suggestions = cx.new(|cx| Query::held(&[], Suggested::default(), cx));
         let albums = cx.new(|cx| {
             Query::new(
                 &[Table::Albums],
@@ -257,10 +279,13 @@ impl Palette {
         self._subscriptions
             .push(cx.observe(&tracks, |this, _, cx| this.rebuild(cx)));
         self._subscriptions
+            .push(cx.observe(&suggestions, |this, _, cx| this.rebuild(cx)));
+        self._subscriptions
             .push(cx.observe(&albums, |this, _, cx| this.rebuild(cx)));
         self._subscriptions
             .push(cx.observe(&artists, |this, _, cx| this.rebuild(cx)));
         self.tracks = Some(tracks);
+        self.suggestions = Some(suggestions);
         self.albums = Some(albums);
         self.artists = Some(artists);
     }
@@ -306,18 +331,38 @@ impl Palette {
             return;
         }
         self.asked = wanted.clone();
-        self._debounce = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(DEBOUNCE).await;
-            this.update(cx, |this, cx| {
-                let Some(tracks) = this.tracks.clone() else {
-                    return;
-                };
-                tracks.update(cx, |query, cx| {
-                    query.set_fetch(search_fetch(wanted.clone()), cx)
-                });
-            })
-            .ok();
-        }));
+        // The read for the previous text must not answer while the timer runs for this one.
+        if let Some(suggestions) = self.suggestions.clone() {
+            suggestions.update(cx, |query, cx| query.hold(Suggested::default(), cx));
+        }
+        self.debounce.run(DEBOUNCE, cx, move |this, cx| {
+            let (Some(tracks), Some(suggestions)) = (this.tracks.clone(), this.suggestions.clone())
+            else {
+                return;
+            };
+            let typed = wanted.clone();
+            tracks.update(cx, |query, cx| match wanted.is_empty() {
+                true => query.hold(SearchResults::default(), cx),
+                false => query.set_fetch(search_fetch(wanted), cx),
+            });
+            // A source that offers none answers with nothing, and a failed ask is no reason to stop typing.
+            suggestions.update(cx, |query, cx| match typed.is_empty() {
+                true => query.hold(Suggested::default(), cx),
+                false => query.set_fetch(
+                    move |api| {
+                        let query = typed.clone();
+                        async move {
+                            let items = api
+                                .search_suggestions(query.clone())
+                                .await
+                                .unwrap_or_default();
+                            Ok(Suggested { query, items })
+                        }
+                    },
+                    cx,
+                ),
+            });
+        });
     }
 
     fn move_selection(&mut self, forward: bool, cx: &mut Context<Self>) {
@@ -395,8 +440,22 @@ impl Palette {
             Act::Play(at) => {
                 let keys = self.keys.clone();
                 self.close(cx);
-                if let Some(key) = keys.get(at).cloned() {
-                    store::actions::play_in_library(key, keys, at as u32, cx);
+                let radio = SourcesModel::global(cx)
+                    .read(cx)
+                    .capabilities()
+                    .search_radio;
+                match keys.get(at).cloned() {
+                    // A hit seeds a radio rather than queueing the unrelated matches around it.
+                    Some(key) if radio => store::actions::start_track_radio(key, cx),
+                    Some(key) => store::actions::play_in_library(key, keys, at as u32, cx),
+                    None => {}
+                }
+            }
+            Act::Song(key) => {
+                self.close(cx);
+                match SourcesModel::global(cx).read(cx).capabilities().track_radio {
+                    true => store::actions::start_track_radio(key, cx),
+                    false => store::actions::play_tracks(vec![key], None, cx),
                 }
             }
             Act::Go(route) => {
@@ -523,6 +582,7 @@ impl Palette {
             Part::Commands => self.command_items(&Target::None, cx),
             Part::RecentCommands => self.recent_command_items(cx),
             Part::RecentSearches => self.recent_search_items(cx),
+            Part::Suggestions => self.suggestion_items(cx),
             Part::Tracks => self.track_items(cx),
             Part::Albums => self.album_items(cx),
             Part::Artists => self.artist_items(cx),
@@ -652,6 +712,38 @@ impl Palette {
             .map(|track| track.key.clone())
             .collect();
         rows
+    }
+
+    fn suggestion_items(&self, cx: &gpui_kit::App) -> Vec<Item> {
+        let Some(suggestions) = self.suggestions.as_ref() else {
+            return Vec::new();
+        };
+        let held = suggestions.read(cx);
+        let faded = held.is_stale();
+        let Some(found) = held.value() else {
+            return Vec::new();
+        };
+        found
+            .for_query(&self.query)
+            .iter()
+            .filter_map(|suggestion| match &suggestion.item {
+                Some(item) => suggested_item(item, cx),
+                None => Some(Item {
+                    title: SharedString::from(suggestion.text.clone()),
+                    subtitle: None,
+                    icon: match suggestion.from_history {
+                        true => icons::HISTORY,
+                        false => icons::SEARCH,
+                    },
+                    hint: None,
+                    act: Act::Browse(SharedString::from(suggestion.text.clone())),
+                    target: None,
+                    faded: false,
+                }),
+            })
+            .map(|item| Item { faded, ..item })
+            .take(MANY)
+            .collect()
     }
 
     fn album_items(&self, cx: &gpui_kit::App) -> Vec<Item> {
@@ -811,6 +903,37 @@ impl Palette {
             .collect();
         ranked(scored, FEW)
     }
+}
+
+/// A direct hit the source suggested: a song plays, anything else opens where its tile would.
+fn suggested_item(item: &CatalogItem, cx: &gpui_kit::App) -> Option<Item> {
+    let (act, icon, target) = match &item.track {
+        Some(track) => (
+            Act::Song(track.key.clone()),
+            icons::MUSIC,
+            Some(Target::track(track.key.clone(), track.title.clone())),
+        ),
+        None => {
+            let icon = match item.kind {
+                CatalogItemKind::Album => icons::DISC,
+                CatalogItemKind::Playlist => icons::LIST,
+                CatalogItemKind::Artist => icons::MIC,
+                _ => icons::COMPASS,
+            };
+            let target =
+                Some(Target::catalog(item)).filter(|target| commands::has_menu(target, cx));
+            (Act::Go(Route::catalog(item)?), icon, target)
+        }
+    };
+    Some(Item {
+        title: SharedString::from(item.title.clone()),
+        subtitle: item.subtitle.clone().map(SharedString::from),
+        icon,
+        hint: None,
+        act,
+        target,
+        faded: false,
+    })
 }
 
 /// Add one block under its heading; a block that matched nothing is not drawn at all.
@@ -1025,5 +1148,35 @@ impl Render for Palette {
                     })
                     .child(self.footer(cx)),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn suggested(query: &str, texts: &[&str]) -> Suggested {
+        Suggested {
+            query: query.to_string(),
+            items: texts
+                .iter()
+                .map(|text| SearchSuggestion {
+                    text: text.to_string(),
+                    ..SearchSuggestion::default()
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn an_answer_to_an_earlier_query_is_never_offered_for_the_current_one() {
+        let late = suggested("porti", &["portis", "portishead"]);
+        assert!(late.for_query("portishead").is_empty());
+        assert_eq!(late.for_query("porti").len(), 2);
+    }
+
+    #[test]
+    fn nothing_held_offers_nothing() {
+        assert!(Suggested::default().for_query("portishead").is_empty());
     }
 }

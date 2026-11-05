@@ -1,6 +1,6 @@
-//! The playlist and folder cards, and the menus they carry.
+//! The playlist card, and the menu it carries.
 
-use api::{PlaylistFolderInfo, PlaylistInfo};
+use api::PlaylistInfo;
 use components::format::t_with;
 use components::{Frame, Tile, icons};
 use gpui_kit::{Pixels, px};
@@ -25,26 +25,5 @@ pub(crate) fn playlist_card(playlist: &PlaylistInfo) -> Tile {
         .menu(Some(Target::Playlist {
             id: playlist.id.clone().into(),
             name: playlist.name.clone().into(),
-        }))
-}
-
-/// The card for one folder; its cover is the first playlist's.
-pub(crate) fn folder_card(folder: &PlaylistFolderInfo, playlists: &[PlaylistInfo]) -> Tile {
-    let cover = folder
-        .playlist_ids
-        .first()
-        .and_then(|id| playlists.iter().find(|playlist| &playlist.id == id))
-        .and_then(|playlist| playlist.artwork.as_ref());
-    // TODO(i18n): the Dioxus card spells this count out in English too.
-    Tile::new(folder.id.clone(), folder.name.clone())
-        .subtitle(format!("{} playlists", folder.playlist_ids.len()))
-        .artwork(cover)
-        .placeholder(icons::FOLDER)
-        .size(COVER)
-        .frame(Frame::Card)
-        .route(Route::PlaylistFolder(folder.id.clone().into()))
-        .menu(Some(Target::Folder {
-            id: folder.id.clone().into(),
-            name: folder.name.clone().into(),
         }))
 }

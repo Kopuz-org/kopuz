@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 i18n = { workspace = true }
 store = { workspace = true }
+config = { workspace = true }
 components = { path = "../components" }
 gpui-kit = { workspace = true }
 fontdb = { version = "0.23", default-features = false }

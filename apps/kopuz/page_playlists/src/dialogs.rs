@@ -1,141 +1,20 @@
-//! The dialogs the playlists page opens: add playlist, rename, move to folder, and the delete confirmations.
+//! The dialogs a playlist or folder menu opens: rename, and move to folder.
 
 use std::rc::Rc;
 
-use api::PlaylistCapability;
 use components::dialogs::{DialogSize, FormDialog, FormFooter};
 use components::format::t;
-use components::{ErrorBanner, PickItem, PickList, QuickCreate};
-use components::{icons, motion, style};
+use components::{PickItem, PickList, QuickCreate};
+use components::{icons, style};
 use gpui_kit::component::button::Button;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::{WindowExt as _, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, PathPromptOptions,
-    Render, SharedString, Styled as _, Subscription, Window, div, px,
+    App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
+    Styled as _, Window, div, px,
 };
-use store::{PlaylistsModel, SourcesModel, actions};
-
-/// Ask for a name and create a playlist, or import a directory as one.
-struct AddPlaylist {
-    name: Entity<InputState>,
-    error: Option<SharedString>,
-    _subscriptions: Vec<Subscription>,
-}
-
-impl AddPlaylist {
-    fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let name = self.name.read(cx).value().to_string();
-        if name.trim().is_empty() {
-            return;
-        }
-        // A source that cannot mutate playlists gets the friendly line, not a raw refusal.
-        if SourcesModel::global(cx).read(cx).capabilities().playlists == PlaylistCapability::None {
-            self.error = Some(t("error_server_not_configured"));
-            cx.notify();
-            return;
-        }
-        PlaylistsModel::global(cx)
-            .update(cx, |playlists, cx| playlists.create(name, Vec::new(), cx));
-        window.close_dialog(cx);
-    }
-
-    fn import_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let picked = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: None,
-        });
-        window.close_dialog(cx);
-        cx.spawn(async move |_, cx| {
-            let Ok(Ok(Some(paths))) = picked.await else {
-                return;
-            };
-            let Some(path) = paths.into_iter().next() else {
-                return;
-            };
-            let name = path
-                .file_name()
-                .map(|name| name.to_string_lossy().to_string())
-                .unwrap_or_else(|| path.to_string_lossy().to_string());
-            let raw = path.to_string_lossy().to_string();
-            let prefix = if raw.ends_with(std::path::MAIN_SEPARATOR) {
-                raw
-            } else {
-                format!("{raw}{}", std::path::MAIN_SEPARATOR)
-            };
-            cx.update(|cx| {
-                actions::run(cx, move |api| async move {
-                    let page = api.folder_tracks(prefix, store::all()).await?;
-                    let keys = page.items.into_iter().map(|track| track.key).collect();
-                    api.create_playlist(name, keys).await
-                });
-            });
-        })
-        .detach();
-    }
-}
-
-impl Render for AddPlaylist {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let folders = SourcesModel::global(cx).read(cx).capabilities().folders;
-        // Asked for every frame, so the channel outlives the banner and the next error fades in.
-        let reveal = motion::amount(
-            "add-playlist-error",
-            if self.error.is_some() { 1. } else { 0. },
-            motion::FAST,
-            window,
-            cx,
-        );
-        v_flex()
-            .gap_4()
-            .w_full()
-            .when_some(self.error.clone(), |column, error| {
-                column.child(ErrorBanner::new(error).reveal(reveal))
-            })
-            .child(Input::new(&self.name))
-            .when(folders, |column| {
-                column.child(
-                    Button::new("import-folder")
-                        .outline()
-                        .text_sm()
-                        .icon(icons::icon(icons::FOLDER))
-                        .label(t("add_folder"))
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.import_folder(window, cx)),
-                        ),
-                )
-            })
-    }
-}
-
-/// Open the add-playlist dialog.
-pub(crate) fn open_add_playlist(window: &mut Window, cx: &mut App) {
-    let dialog = cx.new(|cx| {
-        let name =
-            cx.new(|cx| InputState::new(window, cx).placeholder(t("playlist_name_placeholder")));
-        let subscription = cx.subscribe(&name, |this: &mut AddPlaylist, _, event, cx| {
-            if let InputEvent::Change = event {
-                this.error = None;
-                cx.notify();
-            }
-        });
-        AddPlaylist {
-            name,
-            error: None,
-            _subscriptions: vec![subscription],
-        }
-    });
-    let field = dialog.read(cx).name.clone();
-    let save = dialog.clone();
-    FormDialog::new(t("add_playlist"))
-        .footer(FormFooter::CancelSave)
-        .on_submit(move |window, cx| save.update(cx, |this, cx| this.save(window, cx)))
-        .open(dialog, window, cx);
-    field.update(cx, |state, cx| state.focus(window, cx));
-}
+use store::{PlaylistsModel, actions};
 
 type Save = Rc<dyn Fn(String, &mut App)>;
 

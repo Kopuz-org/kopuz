@@ -33,19 +33,17 @@ pub async fn scan_directory(
         .local_artist_images
         .retain(|_, image_path| !image_path.starts_with(&dir));
 
-    let existing_paths: Arc<HashSet<PathBuf>> = Arc::new(
-        library
-            .tracks
-            .iter()
-            .filter(|track| track_is_current(track))
-            .filter_map(|t| t.id.local_path().map(Path::to_path_buf))
-            .collect(),
-    );
+    let existing_paths: HashSet<PathBuf> = library
+        .tracks
+        .iter()
+        .filter(|track| track_is_current(track))
+        .filter_map(|t| t.id.local_path().map(Path::to_path_buf))
+        .collect();
 
-    let (mut all_audio, artist_image_dirs) = collect_audio_files(&dir, &existing_paths).await;
+    let (mut all_audio, artist_image_dirs) = collect_audio_files(&dir).await;
     all_audio.sort_unstable();
     tracing::info!(
-        new_files = all_audio.len(),
+        audio_files = all_audio.len(),
         existing = existing_paths.len(),
         "scanning library directory"
     );
@@ -338,10 +336,7 @@ fn tagged_releases(library: &Library) -> HashMap<(String, String), BTreeSet<Stri
     releases
 }
 
-async fn collect_audio_files(
-    root: &Path,
-    existing_paths: &HashSet<PathBuf>,
-) -> (Vec<PathBuf>, Vec<(PathBuf, PathBuf)>) {
+async fn collect_audio_files(root: &Path) -> (Vec<PathBuf>, Vec<(PathBuf, PathBuf)>) {
     let mut audio_files = Vec::new();
     let mut artist_image_dirs = Vec::new();
     let mut dirs = vec![root.to_path_buf()];
@@ -362,7 +357,7 @@ async fn collect_audio_files(
                 dirs.push(path);
             } else if is_artist_image_file(&path) {
                 artist_image_dirs.push((dir.clone(), path));
-            } else if is_audio_file(&path) && !existing_paths.contains(&path) {
+            } else if is_audio_file(&path) {
                 audio_files.push(path);
             }
         }
@@ -382,6 +377,8 @@ pub fn is_audio_file(path: &Path) -> bool {
 mod tests {
     use super::*;
     use crate::models::{Album, Track, TrackId};
+    use lofty::file::{AudioFile, TaggedFileExt};
+    use lofty::tag::Accessor;
 
     fn track(path: &str, album_id: &str, title: &str) -> Track {
         Track {
@@ -692,6 +689,73 @@ mod tests {
             album_of(&library, path.to_str().expect("utf-8 path")).title,
             "Untagged"
         );
+    }
+
+    fn write_test_mp3(path: &Path, title: &str, genre: &str) {
+        let mut mp3 = Vec::new();
+        for _ in 0..4 {
+            mp3.extend_from_slice(&[0xff, 0xfb, 0x90, 0x64]);
+            mp3.resize(mp3.len() + 413, 0);
+        }
+        std::fs::write(path, mp3).expect("write mp3 frames");
+
+        let mut tagged_file = lofty::probe::Probe::open(path)
+            .expect("probe mp3")
+            .read()
+            .expect("read mp3");
+        let mut tag = lofty::tag::Tag::new(lofty::tag::TagType::Id3v2);
+        tag.set_title(title.to_string());
+        tag.set_artist("Artist".to_string());
+        tag.set_album("Album".to_string());
+        tag.set_genre(genre.to_string());
+        tagged_file.insert_tag(tag);
+        tagged_file
+            .save_to_path(path, lofty::config::WriteOptions::default())
+            .expect("write mp3 tags");
+    }
+
+    #[tokio::test]
+    async fn rescanning_an_existing_mp3_updates_metadata_without_changing_identity() {
+        let root = std::env::temp_dir().join(format!("kopuz-rescan-mp3-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("folder");
+        let path = root.join("track.mp3");
+        write_test_mp3(&path, "Old Title", "Old Genre");
+        let mut library = Library::default();
+
+        scan_directory(
+            root.clone(),
+            root.join("covers"),
+            &mut library,
+            Arc::new(|_| {}),
+        )
+        .await
+        .expect("initial scan");
+        let original_id = library.tracks[0].id.clone();
+        assert_eq!(library.tracks[0].title, "Old Title");
+        assert_eq!(
+            album_of(&library, path.to_str().expect("utf-8 path")).genre,
+            "Old Genre"
+        );
+
+        write_test_mp3(&path, "Updated Title", "Updated Genre");
+        scan_directory(
+            root.clone(),
+            root.join("covers"),
+            &mut library,
+            Arc::new(|_| {}),
+        )
+        .await
+        .expect("rescan");
+
+        assert_eq!(library.tracks.len(), 1);
+        assert_eq!(library.tracks[0].id, original_id);
+        assert_eq!(library.tracks[0].title, "Updated Title");
+        assert_eq!(library.albums.len(), 1);
+        assert_eq!(
+            album_of(&library, path.to_str().expect("utf-8 path")).genre,
+            "Updated Genre"
+        );
+        std::fs::remove_dir_all(&root).expect("remove test directory");
     }
 
     #[test]

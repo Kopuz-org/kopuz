@@ -19,6 +19,13 @@ pub struct TablesChanged {
 }
 
 impl TablesChanged {
+    pub fn everything() -> Self {
+        Self {
+            tables: Vec::new(),
+            all: true,
+        }
+    }
+
     pub fn touches(&self, tables: &[Table]) -> bool {
         self.all || tables.iter().any(|table| self.tables.contains(table))
     }
@@ -80,10 +87,7 @@ impl Invalidation {
         self.dirty.clear();
         self.flush = None;
         self.flushed_at = Instant::now();
-        cx.emit(TablesChanged {
-            tables: Vec::new(),
-            all: true,
-        });
+        cx.emit(TablesChanged::everything());
     }
 
     fn flush(&mut self, cx: &mut Context<Self>) {

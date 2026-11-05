@@ -87,6 +87,10 @@ pub fn wash_for(surface: Surface, window: &mut Window, cx: &mut App) -> Option<H
 
 /// The cover that lights the window and how far, or `None` where a preference keeps it the theme's.
 pub fn ambient(cx: &App) -> Option<(ArtworkRef, Spread)> {
+    // Album art's gradient is the theme itself, so neither the ambient nor the accent preference turns it off.
+    if store::ConfigModel::global(cx).read(cx).config().ui.theme == crate::ALBUM_ART {
+        return playing_artwork(cx).map(|artwork| (artwork, Spread::Full));
+    }
     let spread = match store::layout(cx).ambient {
         Ambient::Off => return None,
         Ambient::Glow => Spread::Glow,
@@ -115,6 +119,10 @@ fn playing(surface: Surface, cx: &App) -> Option<ArtworkRef> {
     if !surface.allowed(store::layout(cx).accent) {
         return None;
     }
+    playing_artwork(cx)
+}
+
+fn playing_artwork(cx: &App) -> Option<ArtworkRef> {
     PlayerModel::global(cx)
         .read(cx)
         .track()

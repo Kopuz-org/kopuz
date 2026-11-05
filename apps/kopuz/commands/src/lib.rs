@@ -1,6 +1,7 @@
 //! Every verb in the app, once. Menus, the palette, the keymap and the shortcuts sheet project this list.
 
 mod bar;
+mod catalog;
 mod keys;
 mod ops;
 mod playlist_picker;
@@ -122,6 +123,13 @@ pub fn menu(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     build_menu(target, menu, cx)
+}
+
+/// Whether a menu for `target` would list anything, so a surface can leave out an empty dots button.
+pub fn has_menu(target: &Target, cx: &App) -> bool {
+    all()
+        .iter()
+        .any(|command| command.section != Section::Hidden && command.is_available(target, cx))
 }
 
 fn build_menu(target: Target, mut menu: PopupMenu, cx: &mut Context<PopupMenu>) -> PopupMenu {

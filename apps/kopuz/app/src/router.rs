@@ -91,6 +91,13 @@ impl Router {
         }
     }
 
+    /// Whether `view` is a page a source switch keeps, and so hands back as its own replacement.
+    pub fn survives_switch(&self, view: &AnyView) -> bool {
+        self.pages
+            .values()
+            .any(|page| page.survives_switch && page.view.entity_id() == view.entity_id())
+    }
+
     fn touch(&mut self, key: String) {
         self.order.retain(|held| held != &key);
         self.order.push(key);
@@ -123,14 +130,14 @@ fn build(route: &Route, window: &mut Window, cx: &mut Context<Shell>) -> Page {
             .new(|cx| discover::CatalogPage::new(id, window, cx))
             .into(),
         // Both library routes collapse to one cache key, so a chip does not rebuild the page.
-        // The four old listings redirect here, and only reach this arm if one ever slips through.
+        // The three old listings redirect here, and only reach this arm if one ever slips through.
         Route::Library
         | Route::LibraryView(_)
         | Route::Albums
         | Route::Artists
-        | Route::Playlists
-        | Route::Activity => Page::freezable(cx.new(|cx| library::Library::new(window, cx))),
+        | Route::Playlists => Page::freezable(cx.new(|cx| library::Library::new(window, cx))),
         Route::Favorites => Page::freezable(cx.new(|cx| library::Library::favorites(window, cx))),
+        Route::Activity => Page::freezable(cx.new(|cx| library::Library::activity(window, cx))),
         Route::Album(id) => cx
             .new(|cx| page_albums::AlbumDetail::new(id, window, cx))
             .into(),

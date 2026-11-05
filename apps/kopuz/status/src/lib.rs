@@ -135,8 +135,8 @@ impl StatusCluster {
     /// A route that is no longer a place still said what it wanted; this is where it lands.
     fn honour_intent(&mut self, cx: &mut Context<Self>) {
         let navigator = Navigator::global(cx);
+        // "activity" is the library's most-played listing, as the Dioxus Activity page was; the pulse button opens jobs.
         let wanted = match navigator.read(cx).intent() {
-            Some("activity") => Some(Which::Activity),
             Some("downloads") => Some(Which::Downloads),
             _ => None,
         };

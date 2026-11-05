@@ -151,20 +151,26 @@ scan and connecting states are amber, which is `cx.theme().warning`.
 
 ## Skins
 
-A skin is metrics and chrome proportions; a palette is colour, and the two stay
-orthogonal. `components::skin` is the registry: a skin implements the `Skin` trait,
-returning a `Metrics` and a `Chrome` it may fill field by field from
-`Metrics::default()`, plus optional asset swaps. `Normal` is the only one
-registered and is the baseline every value above is measured in.
+A skin is metrics, chrome proportions and an arrangement; a palette is colour,
+and the two stay orthogonal. `components::skin` is the registry: a skin
+implements the `Skin` trait, returning a `Metrics` and a `Chrome` it may fill
+field by field from `Metrics::default()`, an `Arrangement`, plus optional asset
+swaps. `Normal`, `Vaxry` and `Material3` are registered; `Normal` is the
+baseline every value above is measured in.
 
-`layout.skin` names the skin; `settings_interface::apply` resolves it once per
+`ui.ui_style` names the skin; `settings_interface::apply` resolves it once per
 change into the registry and hands the component theme its `radius` /
 `radius_lg`. Nothing above reads it: the helpers in `components::style` already
 answer with the active skin's numbers, which is why `style::radius_lg()`,
 `style::row_height()`, `style::media_row()`, `style::density_row(..)` and
 `style::chrome()` exist. A radius, a row height, a control height or a bar's
-own proportion is one of those calls, never a literal at the call site. Vaxry
-is not ported; it lands as another `impl Skin`, not as a branch.
+own proportion is one of those calls, never a literal at the call site.
+
+Where a skin moves things rather than resizing them, it says so in
+`skin::arrangement()`: `nav` (top strip or sectioned sidebar), `bar` (split or
+inline player bar), `rows` (track row lead, gaps and hover), `pages` (padding,
+eyebrow, title and hero sizes) and `mini` (mini player cover, title and play
+button). A feature reads the field it needs; it never asks which skin is on.
 
 ## The `.hover()` panic
 
