@@ -1005,6 +1005,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn every_extension_root_is_read() {
+        let first = scratch("ext-root-one");
+        write(
+            &first,
+            &radio("radio", "1.0.0", &["a.test"]),
+            EMPTY_COMPONENT,
+        );
+        let second = scratch("ext-root-two");
+        write(
+            &second,
+            &radio("other", "1.0.0", &["b.test"]),
+            EMPTY_COMPONENT,
+        );
+        let registry = Registry::load(&[], None, &[first.clone(), second.clone()]).await;
+        std::fs::remove_dir_all(&first).ok();
+        std::fs::remove_dir_all(&second).ok();
+        let mut ids: Vec<&str> = registry
+            .plugins()
+            .iter()
+            .map(|plugin| plugin.id())
+            .collect();
+        ids.sort_unstable();
+        assert_eq!(ids, ["other", "radio"]);
+    }
+
+    #[tokio::test]
     async fn a_missing_extension_directory_provides_nothing() {
         let dir = scratch("ext-missing");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
