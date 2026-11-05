@@ -159,7 +159,7 @@ impl PlaylistDetail {
         match event {
             TrackListEvent::Play(index) => {
                 let keys = self.list.read(cx).keys();
-                actions::play_tracks(keys, Some(*index as u32), cx);
+                actions::play_listing(keys, *index, cx);
             }
             TrackListEvent::RemoveFromPlaylist(index) => {
                 let index = *index as u32;

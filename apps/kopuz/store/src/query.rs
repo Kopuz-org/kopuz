@@ -15,7 +15,8 @@ type Fetch<T> = Rc<dyn Fn(Arc<dyn KopuzApi>) -> BoxFuture<'static, Result<T, Api
 
 /// One daemon read kept fresh: re-runs when its tables are invalidated, keeps the stale value while it does, and drops answers overtaken by a newer run.
 pub struct Query<T> {
-    fetch: Fetch<T>,
+    // None while held: nothing runs, invalidations included, until `set_fetch` names inputs again.
+    fetch: Option<Fetch<T>>,
     tables: Vec<Table>,
     value: Option<T>,
     error: Option<ApiError>,
@@ -36,27 +37,49 @@ impl<T: Send + 'static> Query<T> {
     where
         Fut: Future<Output = Result<T, ApiError>> + Send + 'static,
     {
+        let mut query = Self::held_with(tables, None, cx);
+        query.fetch = Some(box_fetch(fetch));
+        if Link::connection(cx).read(cx).is_connected() {
+            query.refresh(cx);
+        }
+        query
+    }
+
+    /// A query with nothing to ask yet: it answers `value` until [`Query::set_fetch`] gives it inputs.
+    pub fn held(tables: &[Table], value: T, cx: &mut Context<Self>) -> Self {
+        Self::held_with(tables, Some(value), cx)
+    }
+
+    fn held_with(tables: &[Table], value: Option<T>, cx: &mut Context<Self>) -> Self {
         let invalidation = Invalidation::global(cx);
         let subscription = cx.subscribe(&invalidation, |this, _, event: &TablesChanged, cx| {
             if event.touches(&this.tables) {
                 this.refresh(cx);
             }
         });
-        let mut query = Self {
-            fetch: box_fetch(fetch),
+        Self {
+            fetch: None,
             tables: tables.to_vec(),
-            value: None,
+            value,
             error: None,
             loading: false,
             stale: false,
             generation: 0,
             _task: None,
             _subscription: subscription,
-        };
-        if Link::connection(cx).read(cx).is_connected() {
-            query.refresh(cx);
         }
-        query
+    }
+
+    /// Stop asking: answer `value` until [`Query::set_fetch`] names inputs again, so a blank search costs no call.
+    pub fn hold(&mut self, value: T, cx: &mut Context<Self>) {
+        self.fetch = None;
+        self.generation += 1;
+        self._task = None;
+        self.value = Some(value);
+        self.error = None;
+        self.loading = false;
+        self.stale = false;
+        crate::notify(cx);
     }
 
     /// Point the query at new inputs, keeping the old value on screen — marked [`Query::is_stale`] — until the new one lands.
@@ -67,7 +90,7 @@ impl<T: Send + 'static> Query<T> {
     ) where
         Fut: Future<Output = Result<T, ApiError>> + Send + 'static,
     {
-        self.fetch = box_fetch(fetch);
+        self.fetch = Some(box_fetch(fetch));
         self.error = None;
         self.stale = self.value.is_some();
         self.refresh(cx);
@@ -85,15 +108,17 @@ impl<T: Send + 'static> Query<T> {
     ) where
         Fut: Future<Output = Result<T, ApiError>> + Send + 'static,
     {
-        self.fetch = box_fetch(fetch);
+        self.fetch = Some(box_fetch(fetch));
         self.error = None;
         self.refresh(cx);
     }
 
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        let Some(fetch) = self.fetch.clone() else {
+            return;
+        };
         self.generation += 1;
         let generation = self.generation;
-        let fetch = self.fetch.clone();
         let call = Link::global(cx).call(move |api| fetch(api));
         // A held value is already something to show, so only a first read is waited on.
         let first = self.value.is_none().then(|| FirstRead::begin(cx));

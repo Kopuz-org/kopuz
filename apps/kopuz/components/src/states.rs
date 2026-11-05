@@ -22,6 +22,8 @@ pub enum StateSize {
     Page,
     /// A short centred line inside a popover, a list or a settings card.
     Compact,
+    /// The page form inside a column it shares with siblings: it takes the height they leave, not its parent's.
+    Flex,
 }
 
 /// `max-w-[420px]`, so a long reason wraps instead of running the width of the page.
@@ -94,6 +96,12 @@ impl EmptyState {
         self
     }
 
+    /// For a state under a header or a toolbar in the same column, where filling the parent would overflow it.
+    pub fn flex(mut self) -> Self {
+        self.size = StateSize::Flex;
+        self
+    }
+
     /// The one button that gets out of the state, such as signing in or clearing a filter.
     pub fn action(
         mut self,
@@ -131,12 +139,14 @@ impl RenderOnce for EmptyState {
                     .py_6()
                     .text_xs()
                     .text_color(style::white(style::TEXT_MUTED, cx)),
-                false => column
-                    .size_full()
-                    .gap_1()
-                    .px_6()
-                    .py_12()
-                    .text_color(style::white(style::TEXT_SUBTLE, cx)),
+                false => match self.size {
+                    StateSize::Flex => column.w_full().flex_1().min_h_0(),
+                    _ => column.size_full(),
+                }
+                .gap_1()
+                .px_6()
+                .py_12()
+                .text_color(style::white(style::TEXT_SUBTLE, cx)),
             })
             .when_some(icon, |column, icon| {
                 column.child(
@@ -201,6 +211,12 @@ impl Loading {
         self.size = StateSize::Compact;
         self
     }
+
+    /// For a spinner under a header in the same column, as [`EmptyState::flex`].
+    pub fn flex(mut self) -> Self {
+        self.size = StateSize::Flex;
+        self
+    }
 }
 
 impl RenderOnce for Loading {
@@ -208,8 +224,11 @@ impl RenderOnce for Loading {
         let fade = motion::enter("loading", motion::MEDIUM, window, cx);
         let ink = style::white(style::TEXT_MUTED, cx);
         match self.size {
-            StateSize::Page => v_flex()
-                .size_full()
+            StateSize::Page | StateSize::Flex => v_flex()
+                .map(|column| match self.size {
+                    StateSize::Flex => column.w_full().flex_1().min_h_0(),
+                    _ => column.size_full(),
+                })
                 .items_center()
                 .justify_center()
                 .gap_3()

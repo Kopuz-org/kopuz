@@ -14,8 +14,8 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, IntoElement, ListAlignment, ListOffset,
-    ListState, ParentElement as _, Render, SharedString, Styled, Subscription, Task, Window, div,
-    list, px, rems,
+    ListState, ParentElement as _, Render, SharedString, Styled, Subscription, Window, div, list,
+    px, rems,
 };
 use link::Link;
 use store::{Notices, Query, actions};
@@ -66,7 +66,7 @@ pub struct Radio {
     list: ListState,
     keys: Vec<SharedString>,
     lines: Vec<Line>,
-    _debounce: Option<Task<()>>,
+    debounce: store::Debounce,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -107,17 +107,15 @@ impl Radio {
             list: ListState::new(0, ListAlignment::Top, px(400.)),
             keys: Vec::new(),
             lines: Vec::new(),
-            _debounce: None,
+            debounce: store::Debounce::default(),
             _subscriptions: subscriptions,
         }
     }
 
     /// A newer keystroke replaces the pending task, which cancels it.
     fn debounce(&mut self, value: String, cx: &mut Context<Self>) {
-        self._debounce = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(DEBOUNCE).await;
-            this.update(cx, |this, cx| this.apply(value, cx)).ok();
-        }));
+        self.debounce
+            .run(DEBOUNCE, cx, move |this, cx| this.apply(value, cx));
     }
 
     fn apply(&mut self, value: String, cx: &mut Context<Self>) {

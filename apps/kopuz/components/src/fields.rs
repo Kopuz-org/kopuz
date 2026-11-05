@@ -177,42 +177,43 @@ impl RenderOnce for ComboChoice {
             });
         let allow_custom = self.custom.is_some();
         let (options, pick, start) = (self.options, self.on_pick, self.on_custom);
-        v_flex()
-            .gap_2()
-            .child(
-                Button::new(SharedString::from(format!("choice-{}", self.id)))
-                    .outline()
-                    .label(label)
-                    .disabled(self.locked)
-                    .dropdown_menu(move |mut menu, _, _| {
-                        for (value, label) in &options {
-                            let (value, pick) = (value.clone(), pick.clone());
-                            menu = menu.item(PopupMenuItem::new(label.clone()).on_click(
-                                move |_, window, cx| {
-                                    if let Some(pick) = &pick {
-                                        pick(&value, window, cx);
-                                    }
-                                },
-                            ));
-                        }
-                        if allow_custom {
-                            let start = start.clone();
-                            menu = menu.item(PopupMenuItem::new(t("custom_manual")).on_click(
-                                move |_, window, cx| {
-                                    if let Some(start) = &start {
-                                        start(window, cx);
-                                    }
-                                },
-                            ));
-                        }
-                        menu
-                    }),
-            )
-            .children(
-                self.custom
-                    .filter(|_| typed)
-                    .map(|input| Input::new(&input).disabled(self.locked)),
-            )
+        let trigger = Button::new(SharedString::from(format!("choice-{}", self.id)))
+            .outline()
+            .label(label);
+        // A disabled trigger still opens its dropdown, so a locked one gets none.
+        let trigger = match self.locked {
+            true => trigger.disabled(true).into_any_element(),
+            false => trigger
+                .dropdown_menu(move |mut menu, _, _| {
+                    for (value, label) in &options {
+                        let (value, pick) = (value.clone(), pick.clone());
+                        menu = menu.item(PopupMenuItem::new(label.clone()).on_click(
+                            move |_, window, cx| {
+                                if let Some(pick) = &pick {
+                                    pick(&value, window, cx);
+                                }
+                            },
+                        ));
+                    }
+                    if allow_custom {
+                        let start = start.clone();
+                        menu = menu.item(PopupMenuItem::new(t("custom_manual")).on_click(
+                            move |_, window, cx| {
+                                if let Some(start) = &start {
+                                    start(window, cx);
+                                }
+                            },
+                        ));
+                    }
+                    menu
+                })
+                .into_any_element(),
+        };
+        v_flex().gap_2().child(trigger).children(
+            self.custom
+                .filter(|_| typed)
+                .map(|input| Input::new(&input).disabled(self.locked)),
+        )
     }
 }
 

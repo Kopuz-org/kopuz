@@ -673,6 +673,7 @@ settings_tools = Tools
 share = Share
 share_copied = Link kopiert
 share_no_page = Für diesen Titel wurde keine Seite gefunden
+share_no_album_page = Für dieses Album wurde keine Seite gefunden
 explicit = Explizit
 
 first_run_title = Welcome to Kopuz

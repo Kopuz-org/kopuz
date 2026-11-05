@@ -150,7 +150,7 @@ impl ArtistDetail {
         match event {
             TrackListEvent::Play(index) => {
                 let keys = list.read(cx).keys();
-                actions::play_tracks(keys, Some(*index as u32), cx);
+                actions::play_listing(keys, *index, cx);
             }
             TrackListEvent::Delete(keys) => delete_tracks(keys.clone(), cx),
             _ => cx.notify(),
@@ -164,6 +164,7 @@ impl ArtistDetail {
             show_album: true,
             track_numbers: false,
             selectable: true,
+            ..TrackListOptions::default()
         };
         let row_actions = TrackActions {
             remove_from_playlist: false,

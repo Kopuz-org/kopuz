@@ -2,7 +2,7 @@
 
 use components::format::t;
 use components::{Segment, Segmented, SettingRow};
-use config::SettingsEdit;
+use config::{BackgroundKey, SettingKey, SettingsEdit};
 use gpui_kit::component::v_flex;
 use gpui_kit::{AnyElement, Context, IntoElement, ParentElement as _, SharedString, Styled};
 use store::{ConfigModel, SetupModel};
@@ -40,7 +40,8 @@ impl FirstRun {
     pub(crate) fn appearance_step(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let config = ConfigModel::global(cx).read(cx);
         let settings = config.config().clone();
-        let pinned = config.is_locked("cover_art_background") || config.is_locked("cover_art_blur");
+        let pinned = config.is_pinned(SettingKey::Background(BackgroundKey::CoverArtBackground))
+            || config.is_pinned(SettingKey::Background(BackgroundKey::CoverArtBlur));
         let current = Backdrop::of(&settings.background);
         let backdrop = Segmented::new("onboarding-backdrop")
             .segments(Backdrop::ALL.map(|look| Segment::new(label(look)).label(label(look))))

@@ -8,9 +8,6 @@ use store::{Navigator, Route, SourcesModel};
 
 use crate::facet::Facet;
 
-/// The shared icon set has no sign-in glyph, which is the one an anonymous source wants.
-pub const SIGN_IN: &str = "icons/log-in.svg";
-
 /// A read that failed says so, and offers the one thing worth trying: asking again.
 pub fn failed(
     error: &ApiError,
@@ -56,7 +53,7 @@ pub fn empty_library(facet: Facet, active: &Active) -> EmptyState {
             return EmptyState::new(t("no_tracks_found")).icon(icons::LIBRARY);
         };
         return EmptyState::new(t("library_empty_signed_out"))
-            .icon(SIGN_IN)
+            .icon(icons::SIGN_IN)
             .detail(SharedString::from(source.name.clone()))
             .action(t("library_sign_in"), move |_, window, cx| {
                 store::sign_in_again(&source, window, cx)
