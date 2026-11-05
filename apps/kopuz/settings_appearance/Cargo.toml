@@ -19,3 +19,4 @@ theme = { workspace = true }
 components = { path = "../components" }
 gpui-kit = { workspace = true }
 tracing = { workspace = true }
+utils = { workspace = true }

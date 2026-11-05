@@ -200,9 +200,9 @@ Data: `api.download_formats()`, `api.downloader_settings()`, `api.downloader_his
 - [ ] Search to download: `api.search_downloads(query)` results, each with a download button
 
 ### 2.14 Settings (see §4 for fields)
-- [ ] Category navigation "fan" (8 categories; Tools hidden on Android); `cfg.settings_layout` Cd (fan) vs TopBar (missing: the `cfg.settings_layout` Cd/TopBar choice; there is one rail layout)
+- [x] Category navigation "fan" (8 categories; Tools hidden on Android); `cfg.settings_layout` Cd (fan) vs TopBar (Cd draws the fan as a rail beside the panel: GPUI cannot rotate the disc's clip-paths; Material 3 always uses TopBar, as the Dioxus app did)
 - [x] Managed-settings notice per lock kind when `ConfigView.locks` is non-empty; locked rows show lock + disabled control, citing the pinning file or env var
-- [ ] Build info card (version + commit, copy to clipboard) (missing: no build info card)
+- [x] Build info card (version + commit, copy to clipboard)
 
 ### 2.15 Theme editor (desktop; embedded in Settings → Appearance)
 - [x] Saved custom themes list (sorted by name), "+ New theme"
@@ -357,12 +357,12 @@ Category → rows. **[H]** = hardcoded `Settings` field (applied to the local co
 - [x] [H] `auto_check_updates` toggle
 - [x] [H] `minimize_to_tray` toggle (desktop)
 - [x] [H] `back_behavior` RewindThenPrev / AlwaysPrev
-- [ ] Build info card (missing: no build info card)
+- [x] Build info card
 
 ### 4.2 Appearance (Customization)
 - [x] [H] `language` selector (`i18n::available_languages()`, applies `i18n::set_locale` immediately)
 - [x] [H] `theme` selector: album-art, default, amoled, live (desktop), gruvbox, gruvbox-classic, gruvbox-dark-soft, dracula, nord, catppuccin, ef-night, ayu-dark, ayu-mirage, vague, onedarkpro, osmium, kanagawa-dragon, everforest, rosepine, kettek16, default-light, catppuccin-latte, rosepine-dawn, everforest-light, ayu-light, one-light, gruvbox-light, + custom themes
-- [ ] [H] `live_theme_path` (only when theme = live): shows resolved path, Remove, "Choose palette" (JSON file picker) (missing: no live theme)
+- [x] [H] `live_theme_path` (only when theme = live): shows resolved path, Remove, "Choose palette" (JSON file picker)
 - [x] [H] `cover_art_background` toggle
 - [x] [H] `custom_background_path` image picker + Remove (desktop)
 - [x] [H] `custom_font_path` font picker + Remove (desktop)
@@ -372,10 +372,10 @@ Category → rows. **[H]** = hardcoded `Settings` field (applied to the local co
 - [x] [H] `fullscreen_use_player_bar` toggle (desktop)
 - [x] [H] `show_source_toggle` toggle
 - [x] [H] `show_row_images` toggle
-- [ ] [H] `titlebar_mode` Custom/System/Off (Linux/Windows) (missing: `TODO(parity)` in settings_appearance/src/lib.rs)
+- [x] [H] `titlebar_mode` Custom/System/Off (Linux/Windows)
 - [ ] [H] `ui_style` Normal/Vaxry (missing: no Vaxry layout; Material 3 is the other skin)
 - [x] [H] `player_bar_position` Bottom/Top
-- [ ] [H] `settings_layout` Cd/TopBar (missing: `TODO(parity)` in settings_appearance/src/lib.rs)
+- [x] [H] `settings_layout` Cd/TopBar
 - [x] Theme editor section (§2.15) → `custom_themes`
 - [x] [H] `ui_style` Material 3, and dynamic system colors (`system_colors`)
 
@@ -390,16 +390,16 @@ Category → rows. **[H]** = hardcoded `Settings` field (applied to the local co
 - [x] [A] LoginPopup ("login_to_service{service}", username/password, "logging_in") → `api.login_source{server_id, username, password}`; "username_and_password_required", "login_failed{error}"
 - [x] Sign-in errors "signin_failed{error}" also surface in the playback-error banner
 - [x] [A] Browser sign-in: `api.browser_sessions()` → `api.import_browser_session`
-- [ ] [A] Brand accounts (`caps.accounts`): `api.accounts(id)` list, `api.switch_account`
-- [ ] [A] Test connection: `api.test_source_connection`
-- [ ] [A] Uploads (`caps.uploads`): upload a track with `api.upload_track`; storage quota (`caps.storage_quota` → `api.storage_quota`)
+- [x] [A] Brand accounts (`caps.accounts`): `api.accounts(id)` list, `api.switch_account`
+- [x] [A] Test connection: `api.test_source_connection`
+- [x] [A] Uploads (`caps.uploads`): upload a track with `api.upload_track`; storage quota (`caps.storage_quota` → `api.storage_quota`)
 - [x] [H]+[A] Offline cache: `offline_cache_enabled`, `offline_cache_max_bytes`, `api.offline_cache_status()`, `api.clear_offline_cache()`
 - [x] [H] `sync_interval_minutes`
 
 ### 4.4 Connectivity (integrations)
 - [x] [S] For each `api.integrations()` (refetched on inv:Servers or after change): SchemaForm over `IntegrationInfo.fields` → `api.set_integration_settings(id, [value])`
 - [x] [A] `ConnectKind::WebSignIn` → button "integration_connect{name}" / "integration_connected{name}" → `api.authenticate_integration(id)`
-- [ ] [A] Connect an integration from a browser profile (`api.browser_profiles()`, `api.connect_integration_from_browser`)
+- [x] [A] Connect an integration from a browser profile (`api.browser_profiles()`, `api.connect_integration_from_browser`)
 
 ### 4.5 Offline downloads
 - [x] [H] `offline_quality` select (`OfflineQuality::ALL`, value_str/label)
@@ -416,16 +416,17 @@ Category → rows. **[H]** = hardcoded `Settings` field (applied to the local co
 - [x] [H] `device_change_behavior` Resume/Pause
 - [x] [H] `sample_rate_mode` System/Source
 - [x] [H]+[A] Equalizer panel (`equalizer`): enable/disable, preset (Flat, BassBoost, TrebleBoost, VocalBoost, Loudness, Custom; animated band interpolation; preset preamp default), preamp slider, 10 band sliders on a curve graph; every change → `api.preview_equalizer(eq)` live, commit writes `cfg.equalizer`
-- [ ] [H] `autoplay_radio` toggle
-- [ ] [H] `skip_explicit` toggle (`caps.explicit_flags`)
-- [ ] [H] `stream_quality` select (`caps.stream_quality`)
-- [ ] [H] `pause_watch_history` toggle (`caps.watch_history`) (missing: only in onboarding, not in Settings)
-- [ ] [H]+[A] ReplayGain (`replay_gain`): mode, YouTube loudness, prevent clipping, previewed live with `api.preview_replay_gain`
+- [x] [H] `autoplay_radio` toggle
+- [x] [H] `skip_explicit` toggle (`caps.explicit_flags`)
+- [x] [H] `stream_quality` select (`caps.stream_quality`)
+- [x] [H] `pause_watch_history` toggle (`caps.watch_history`)
+- [x] [H]+[A] ReplayGain (`replay_gain`): mode, YouTube loudness, prevent clipping, previewed live with `api.preview_replay_gain`
 
 ### 4.8 Tools / Logs (desktop)
 - [x] [H] `tracing_enabled` toggle + warning
-- [ ] Open logs folder (`utils::logs::open_log_dir`), Export logs (save dialog → `utils::logs::export_logs`) — local filesystem, not API (missing: `TODO(logs)` in settings_playback/src/lib.rs)
-- [ ] Debug build: "Trigger crash" button; DebugPanel (app-supplied, direct DB handle, debug only) (missing: no Trigger crash button; the debug DB panel cannot cross the socket)
+- [x] Open logs folder (`utils::logs::open_log_dir`), Export logs (save dialog → `utils::logs::export_logs_named`, the app's and the daemon's logs), local filesystem, not API
+- [x] Debug build: "Trigger crash" button
+- [ ] DebugPanel (app-supplied, direct DB handle, debug only) (missing: the debug DB panel cannot cross the socket)
 
 ### 4.9 SchemaForm renderer (`forms/schema_form.rs`) — must match exactly
 - [x] `FieldKind`: Text, Secret (password input, never prefilled), Url, Toggle ("true"/"false"), Directory (text + folder picker), Choice{options, custom} (select + "custom_manual" free-text when value not in list), Radio{options}, Note (help text only)

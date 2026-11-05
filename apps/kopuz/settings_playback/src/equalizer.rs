@@ -258,25 +258,6 @@ fn current(cx: &App) -> EqualizerSettings {
         .clone()
 }
 
-/// How often a drag may preview: `Change` fires per pointer move, and unlike the config write a preview is not debounced.
-const PREVIEW_INTERVAL: std::time::Duration = std::time::Duration::from_millis(40);
-
-/// When the last preview went out.
-#[derive(Default)]
-struct LastPreview(Option<std::time::Instant>);
-
-impl gpui_kit::Global for LastPreview {}
-
-fn preview_due(cx: &mut App) -> bool {
-    let now = std::time::Instant::now();
-    let last = cx.default_global::<LastPreview>().0;
-    let due = last.is_none_or(|last| now.duration_since(last) >= PREVIEW_INTERVAL);
-    if due {
-        cx.default_global::<LastPreview>().0 = Some(now);
-    }
-    due
-}
-
 /// Save the curve and preview it; a `settled` drag always previews, or the engine would sit on a stale curve.
 fn apply(settings: EqualizerSettings, settled: bool, cx: &mut App) {
     let preview = settings.clone();
@@ -284,7 +265,7 @@ fn apply(settings: EqualizerSettings, settled: bool, cx: &mut App) {
         cx,
         SettingsEdit::Playback(PlaybackEdit::Equalizer(settings)),
     );
-    if !settled && !preview_due(cx) {
+    if !settled && !crate::preview_due(cx) {
         return;
     }
     Link::global(cx).fire(cx, "preview equalizer", move |api| async move {

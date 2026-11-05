@@ -1,17 +1,18 @@
 //! Connectivity: everything configured per account rather than per source, as the daemon lists it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use api::schema::FieldValue;
-use api::{ConnectKind, IntegrationInfo, Table};
+use api::{BrowserProfile, ConnectKind, IntegrationInfo, Table};
 use components::format::{t, t_with, text};
+use components::settings::Choice;
 use components::{FieldChanged, SchemaForm, style};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
-    Styled, Subscription, WeakEntity, Window,
+    Styled, Subscription, WeakEntity, Window, div,
 };
 use link::Link;
 use store::{ConfigModel, Notice, Notices, Query};
@@ -55,6 +56,11 @@ struct IntegrationForm {
 pub struct Integrations {
     query: Entity<Query<Vec<IntegrationInfo>>>,
     forms: HashMap<String, IntegrationForm>,
+    /// Read only once an integration connects from a browser, since it walks the host's profiles.
+    profiles: Option<(Entity<Query<Vec<BrowserProfile>>>, Subscription)>,
+    /// The profile picked per integration, before Connect is pressed.
+    picked: HashMap<String, String>,
+    connecting: HashSet<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -81,6 +87,9 @@ impl Integrations {
         Self {
             query,
             forms: HashMap::new(),
+            profiles: None,
+            picked: HashMap::new(),
+            connecting: HashSet::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -93,6 +102,15 @@ impl Integrations {
     fn sync_forms(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let locked = ConfigModel::global(cx).read(cx).locked_names();
         let listed = self.listed(cx);
+        let from_browser = listed
+            .iter()
+            .any(|integration| integration.connect == ConnectKind::BrowserProfile);
+        if from_browser && self.profiles.is_none() {
+            let profiles =
+                cx.new(|cx| Query::new(&[], |api| async move { api.browser_profiles().await }, cx));
+            let subscription = cx.observe(&profiles, |_, _, cx| cx.notify());
+            self.profiles = Some((profiles, subscription));
+        }
         self.forms
             .retain(|id, _| listed.iter().any(|integration| &integration.id == id));
         for integration in listed {
@@ -149,6 +167,118 @@ impl Integrations {
         .detach();
     }
 
+    fn connect_from_browser(&mut self, id: String, profile: String, cx: &mut Context<Self>) {
+        self.connecting.insert(id.clone());
+        cx.notify();
+        let query = self.query.clone();
+        let call = Link::global(cx).call({
+            let id = id.clone();
+            move |api| async move { api.connect_integration_from_browser(id, profile).await }
+        });
+        cx.spawn(async move |this, cx| {
+            let result = call.await;
+            this.update(cx, |this, cx| {
+                this.connecting.remove(&id);
+                match result {
+                    Ok(_) => query.update(cx, |query, cx| query.refresh(cx)),
+                    Err(error) => {
+                        tracing::warn!(%error, %id, "connecting an integration from a browser failed");
+                        Notices::failed(&error, cx);
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Connect from a browser profile already signed in to the service, beside the fields that take a pasted credential.
+    fn browser_row(
+        &self,
+        id: &str,
+        name: &SharedString,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let profiles = self
+            .profiles
+            .as_ref()
+            .and_then(|(query, _)| query.read(cx).value().cloned())
+            .unwrap_or_default();
+        let selected = profiles
+            .iter()
+            .find(|profile| self.picked.get(id) == Some(&profile.id))
+            .or(profiles.first())
+            .map(|profile| profile.id.clone())
+            .unwrap_or_default();
+        let busy = self.connecting.contains(id);
+        let controls = if profiles.is_empty() {
+            ui::hint(t("integration_browser_none"), cx).into_any_element()
+        } else {
+            let options = profiles
+                .iter()
+                .map(|profile| {
+                    let label = t_with(
+                        "integration_browser_profile",
+                        &[
+                            ("name", profile.name.clone().into()),
+                            ("browser", profile.browser.clone().into()),
+                        ],
+                    );
+                    (profile.id.clone(), label)
+                })
+                .collect();
+            let this = cx.entity().downgrade();
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(
+                    Choice::new(
+                        SharedString::from(format!("browser-profile-{id}")),
+                        selected.clone(),
+                        options,
+                    )
+                    .on_change({
+                        let id = id.to_string();
+                        move |profile: String, cx| {
+                            this.update(cx, |this, cx| {
+                                this.picked.insert(id.clone(), profile);
+                                cx.notify();
+                            })
+                            .ok();
+                        }
+                    }),
+                )
+                .child(
+                    Button::new(SharedString::from(format!("connect-browser-{id}")))
+                        .custom(style::soft_button(cx.theme().foreground, cx))
+                        .small()
+                        .label(match busy {
+                            true => t("integration_connecting"),
+                            false => {
+                                t_with("integration_connect", &[("name", name.to_string().into())])
+                            }
+                        })
+                        .disabled(busy)
+                        .on_click(cx.listener({
+                            let id = id.to_string();
+                            move |this: &mut Self, _, _, cx| {
+                                this.connect_from_browser(id.clone(), selected.clone(), cx)
+                            }
+                        })),
+                )
+                .into_any_element()
+        };
+        h_flex()
+            .w_full()
+            .flex_wrap()
+            .gap_3()
+            .justify_between()
+            .items_center()
+            .child(div().text_sm().child(t("integration_browser_title")))
+            .child(controls)
+    }
+
     fn integration(
         &self,
         integration: &IntegrationInfo,
@@ -192,6 +322,9 @@ impl Integrations {
                             })),
                     ),
                 )
+            })
+            .when(integration.connect == ConnectKind::BrowserProfile, |row| {
+                row.child(self.browser_row(&id, &name, cx))
             })
     }
 }
