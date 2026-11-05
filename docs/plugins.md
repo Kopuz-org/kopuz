@@ -147,6 +147,16 @@ plugin in `.approved-hosts.toml` in the plugin directory, so such an update
 still waits after a restart, with nothing of that plugin loaded until it is
 allowed. A plugin the record does not name yet is taken as allowed.
 
+Inside the Flatpak, a plugin can also ship as an extension of the
+`moe.kopuz.kopuz.Plugin` extension point: an extension
+`moe.kopuz.kopuz.Plugin.<name>` on branch `25.08`, built with
+`build-extension: true` and the prefix `/app/plugins/<name>`, that installs
+`kopuz-plugin.toml` and `plugin.wasm` at that prefix's top level. The daemon
+reads these at start, beneath the plugin directory: one replaces an official
+plugin with its id, a plugin installed in the plugin directory replaces it, and
+its hosts wait for the user the same way. Its files are read-only, so the
+Plugins page cannot remove one; `flatpak uninstall` does.
+
 ## Publishing to the marketplace
 
 The marketplace is a JSON index, by default

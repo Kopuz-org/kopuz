@@ -313,6 +313,9 @@ impl PluginService {
         }
         // An update that waited across a restart has files but nothing loaded.
         let copies = registry.dirs_of(id);
+        if copies.is_empty() && registry.from_extension(id) {
+            return Err(market_error(MarketError::Extension(id.to_string())));
+        }
         if copies.is_empty() {
             return Err(ApiError::not_found("no such plugin is installed"));
         }
@@ -346,7 +349,9 @@ fn installed() -> Vec<PluginInfo> {
                 homepage: None,
                 origin: match plugin.origin() {
                     plugin_host::Origin::Bundled => PluginOrigin::Official,
-                    plugin_host::Origin::Installed => PluginOrigin::Community,
+                    plugin_host::Origin::Installed | plugin_host::Origin::Extension => {
+                        PluginOrigin::Community
+                    }
                 },
                 sandboxed: !plugin.is_native(),
                 installed_version: Some(manifest.version.clone()),
