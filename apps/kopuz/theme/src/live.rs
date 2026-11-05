@@ -60,6 +60,8 @@ pub(crate) fn follow(cx: &mut App) {
         loop {
             // Read every turn, so a new path in the settings is followed without a restart.
             let Some(path) = cx.update(configured_path) else {
+                // Left registered, a finished poller would keep `following` true and block a restart.
+                cx.update(stop);
                 return;
             };
             let probe = path.clone();

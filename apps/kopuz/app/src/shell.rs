@@ -683,11 +683,11 @@ fn framed(
     cx: &mut gpui_kit::App,
 ) -> gpui_kit::AnyElement {
     let titlebar = topbar::frame::titlebar(window, cx);
-    let handles = topbar::frame::resize_handles(window, cx);
+    let handles = topbar::frame::resize_handles(window);
     let drag = topbar::frame::traffic_lights(window, cx)
         .filter(|_| bare)
         .map(|_| {
-            topbar::frame::drag_region("window-drag", cx)
+            topbar::frame::drag_region("window-drag", window, cx)
                 .absolute()
                 .top_0()
                 .left_0()

@@ -276,7 +276,7 @@ impl Render for TopBar {
                 // The window buttons stay at the left whichever way the bar reads.
                 .when_some(traffic_lights, |bar, inset| {
                     bar.child(
-                        frame::drag_region("nav-traffic-lights", cx)
+                        frame::drag_region("nav-traffic-lights", window, cx)
                             .h_full()
                             .w(inset)
                             .flex_shrink_0(),
@@ -306,9 +306,17 @@ impl Render for TopBar {
                                 .flex_1()
                                 .min_w_0()
                                 .items_center()
-                                .child(frame::drag_region("nav-drag-start", cx).h_full().flex_1())
+                                .child(
+                                    frame::drag_region("nav-drag-start", window, cx)
+                                        .h_full()
+                                        .flex_1(),
+                                )
                                 .child(search)
-                                .child(frame::drag_region("nav-drag-end", cx).h_full().flex_1()),
+                                .child(
+                                    frame::drag_region("nav-drag-end", window, cx)
+                                        .h_full()
+                                        .flex_1(),
+                                ),
                         )
                         .child(cluster),
                 )
@@ -327,7 +335,7 @@ impl Render for TopBar {
                 .border_color(style::white(style::BORDER_SOFT, cx))
                 .when(traffic_lights.is_some(), |rail| {
                     rail.child(
-                        frame::drag_region("nav-rail-drag", cx)
+                        frame::drag_region("nav-rail-drag", window, cx)
                             .w_full()
                             .h(RAIL_TRAFFIC_LIGHTS)
                             .flex_shrink_0(),

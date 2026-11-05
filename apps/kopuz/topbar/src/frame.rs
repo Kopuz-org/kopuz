@@ -5,8 +5,8 @@ use components::{icons, style};
 use config::TitlebarMode;
 use gpui_kit::component::{ActiveTheme as _, h_flex};
 use gpui_kit::{
-    AnyElement, App, Div, ElementId, InteractiveElement as _, IntoElement, MouseButton,
-    ParentElement as _, Pixels, Point, ResizeEdge, SharedString, Stateful,
+    AnyElement, App, Decorations, Div, ElementId, InteractiveElement as _, IntoElement,
+    MouseButton, ParentElement as _, Pixels, Point, ResizeEdge, SharedString, Stateful,
     StatefulInteractiveElement as _, Styled, TitlebarOptions, Window, WindowControlArea,
     WindowDecorations, WindowOptions, div, point, px,
 };
@@ -82,9 +82,9 @@ pub fn traffic_lights(window: &Window, cx: &App) -> Option<Pixels> {
 }
 
 /// An empty stretch that moves the window when pressed and dragged and zooms it when double-clicked, unless the platform's titlebar is there to.
-pub fn drag_region(id: impl Into<ElementId>, cx: &App) -> Stateful<Div> {
+pub fn drag_region(id: impl Into<ElementId>, window: &Window, cx: &App) -> Stateful<Div> {
     let region = div().id(id);
-    if mode(cx) == TitlebarMode::System {
+    if !app_drags(mode(cx), window.window_decorations()) {
         return region;
     }
     region
@@ -97,6 +97,16 @@ pub fn drag_region(id: impl Into<ElementId>, cx: &App) -> Stateful<Div> {
                 window.start_window_move();
             }
         })
+}
+
+/// Whether the app moves the window itself: asked to, or left without a server titlebar.
+fn app_drags(mode: TitlebarMode, decorations: Decorations) -> bool {
+    mode != TitlebarMode::System || client_side(decorations)
+}
+
+/// Whether the app draws the frame, either by asking or because the compositor offers no server decorations.
+fn client_side(decorations: Decorations) -> bool {
+    matches!(decorations, Decorations::Client { .. })
 }
 
 fn double_click(window: &Window) {
@@ -124,7 +134,7 @@ pub fn titlebar(window: &Window, cx: &App) -> Option<AnyElement> {
             .bg(style::black(STRIP_SCRIM, cx))
             .border_b_1()
             .border_color(style::white(style::BORDER_SOFT, cx))
-            .child(drag_region("titlebar-drag", cx).h_full().flex_1())
+            .child(drag_region("titlebar-drag", window, cx).h_full().flex_1())
             .child(
                 div()
                     .absolute()
@@ -191,8 +201,9 @@ fn window_button(
 }
 
 /// Invisible strips on the window's edges and corners that resize it, while the app draws the frame (Linux).
-pub fn resize_handles(window: &Window, cx: &App) -> Option<AnyElement> {
-    if !client_decorated(mode(cx)) || window.is_maximized() || window.is_fullscreen() {
+pub fn resize_handles(window: &Window) -> Option<AnyElement> {
+    if !client_side(window.window_decorations()) || window.is_maximized() || window.is_fullscreen()
+    {
         return None;
     }
     let handles = [
@@ -252,6 +263,18 @@ mod tests {
         assert!(!client_decorated(TitlebarMode::System));
         assert!(!draws_titlebar(TitlebarMode::System));
         assert_eq!(decorations(TitlebarMode::System), WindowDecorations::Server);
+    }
+
+    #[test]
+    fn a_client_side_fallback_keeps_drag_and_resize() {
+        let client = Decorations::Client {
+            tiling: Default::default(),
+        };
+        assert!(app_drags(TitlebarMode::System, client));
+        assert!(client_side(client));
+        assert!(!app_drags(TitlebarMode::System, Decorations::Server));
+        assert!(!client_side(Decorations::Server));
+        assert!(app_drags(TitlebarMode::Custom, Decorations::Server));
     }
 
     #[test]
