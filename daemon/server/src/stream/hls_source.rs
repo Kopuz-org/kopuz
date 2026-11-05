@@ -19,11 +19,12 @@ use std::time::Duration;
 /// playlist driving unbounded in-memory growth.
 const MAX_TOTAL_BYTES: usize = 1024 * 1024 * 1024;
 
-fn client(guard: Option<utils::http::Guard>) -> reqwest::blocking::Client {
+/// A client that fails to build is no reason to fetch unguarded.
+fn client(guard: Option<utils::http::Guard>) -> Result<reqwest::blocking::Client> {
     utils::http::guarded_blocking_builder(guard)
         .timeout(Duration::from_secs(30))
         .build()
-        .unwrap_or_default()
+        .map_err(|e| Error::other(format!("HLS client: {e}")))
 }
 
 /// Fetch an HLS media-playlist URL and concatenate its init + media segments
@@ -34,7 +35,7 @@ pub fn assemble(
     user_agent: Option<&str>,
     guard: Option<utils::http::Guard>,
 ) -> Result<Vec<u8>> {
-    let http = client(guard.clone());
+    let http = client(guard.clone())?;
 
     let mut playlist_req = http.get(playlist_url);
     if let Some(ua) = user_agent {
