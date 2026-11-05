@@ -953,7 +953,7 @@ fn PluginRow(
                             ),
                             "{i18n::t(\"plugin_install\")}"
                         }
-                    } else {
+                    } else if removable {
                         button {
                             class: "{button}",
                             disabled: !idle,
