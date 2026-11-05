@@ -290,15 +290,17 @@ pub trait Ordered {
         let (order, _) = self.lists();
         // A file written by hand or before a name existed may lack some; fill them in before moving one.
         place_missing(order, Self::KNOWN);
-        let Some(from) = order.iter().position(|held| held == name) else {
+        // Names this build does not draw keep their slots, so every move is one the page shows.
+        let known: Vec<usize> = (0..order.len())
+            .filter(|&at| Self::KNOWN.contains(&order[at].as_str()))
+            .collect();
+        let Some(from) = known.iter().position(|&at| order[at] == name) else {
             return;
         };
-        let Some(to) = from.checked_add_signed(delta) else {
+        let Some(&to) = from.checked_add_signed(delta).and_then(|to| known.get(to)) else {
             return;
         };
-        if to < order.len() {
-            order.swap(from, to);
-        }
+        order.swap(known[from], to);
     }
 }
 
@@ -1341,6 +1343,14 @@ mod tests {
         let mut home = Home::default();
         home.step("jump_back_in", -1);
         assert_eq!(&home.visible()[..3], &["for_you", "jump_back_in", "hero"]);
+    }
+
+    #[test]
+    fn a_move_steps_over_a_name_this_build_does_not_draw() {
+        let mut home = saved(&["for_you", "from_a_newer_build", "hero", "jump_back_in"]);
+        home.step("hero", -1);
+        assert_eq!(&home.visible()[..3], &["hero", "for_you", "jump_back_in"]);
+        assert_eq!(home.order[1], "from_a_newer_build");
     }
 
     #[test]

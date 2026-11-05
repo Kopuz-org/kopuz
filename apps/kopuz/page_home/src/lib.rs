@@ -123,7 +123,7 @@ pub struct Home {
     recently_added: Entity<Query<AlbumPage>>,
     new_releases: Entity<Query<AlbumPage>>,
     // The hero album's track keys, which its heart reads, and the album they belong to.
-    hero_tracks: Entity<Query<Vec<String>>>,
+    hero_tracks: Entity<Query<(Option<String>, Vec<String>)>>,
     hero_album: Option<String>,
     // Customize home: every shelf in its place, hidden ones too, with its controls over it.
     editing: bool,
@@ -195,8 +195,13 @@ impl Home {
                 cx,
             )
         });
-        let hero_tracks =
-            cx.new(|cx| Query::new(&[Table::Tracks], |_| async move { Ok(Vec::new()) }, cx));
+        let hero_tracks = cx.new(|cx| {
+            Query::new(
+                &[Table::Tracks],
+                |_| async move { Ok((None, Vec::new())) },
+                cx,
+            )
+        });
         let artists = cx.new(|cx| {
             Query::new(
                 &[Table::Tracks, Table::Artists],
@@ -420,13 +425,23 @@ impl Render for Home {
         }
         let shared = self.shared.clone();
         let editing = self.editing;
-        let banner = shared.resume.as_ref().map(resume::banner);
         // Edit mode draws the hidden rows too, faded, so they can be shown again where they sit.
         let arranged: Vec<Arranged> = self
             .arranged(cx)
             .into_iter()
             .filter(|row| row.shown || editing)
             .collect();
+        // The hero already offers the last session, so the resume banner would say it twice.
+        let featured = arranged.iter().any(|row| {
+            row.shown
+                && matches!(row.drawn, Some(Drawn::Shelf(index))
+                    if self.shelves[index].form == data::Form::Featured
+                        && !self.shelves[index].tiles.is_empty())
+        });
+        let banner = match featured {
+            true => None,
+            false => shared.resume.as_ref().map(resume::banner),
+        };
         let asks = arranged.iter().any(|row| {
             matches!(row.drawn, Some(Drawn::Shelf(index)) if self.shelves[index].name == "for_you")
         });
@@ -450,12 +465,11 @@ impl Render for Home {
             layout.ui.hero_height,
             layout.ui.listen_now_style == ListenNowStyle::List,
         );
-        let hero_keys = self
-            .hero_tracks
-            .read(cx)
-            .value()
-            .cloned()
-            .unwrap_or_default();
+        // Keys fetched for another album leave the heart off until this one's arrive.
+        let hero_keys = match self.hero_tracks.read(cx).value() {
+            Some((album, keys)) if *album == self.hero_album => keys.clone(),
+            _ => Vec::new(),
+        };
         let mut rows: Vec<AnyElement> = Vec::with_capacity(arranged.len());
         // The chips head For you, or the feed where For you is not shown, whichever comes first.
         let mut chips = catalog.as_ref().map(|views| views.chips.clone());
@@ -727,17 +741,24 @@ fn pill(
         .label(t(label))
 }
 
-fn point_hero(query: &Entity<Query<Vec<String>>>, album: Option<String>, cx: &mut App) {
+fn point_hero(
+    query: &Entity<Query<(Option<String>, Vec<String>)>>,
+    album: Option<String>,
+    cx: &mut App,
+) {
     query.update(cx, |query, cx| {
         query.set_fetch(
             move |api| {
                 let album = album.clone();
                 async move {
-                    let Some(album) = album else {
-                        return Ok(Vec::new());
+                    let Some(id) = album.clone() else {
+                        return Ok((None, Vec::new()));
                     };
-                    let page = api.album_tracks(album, store::all()).await?;
-                    Ok(page.items.into_iter().map(|track| track.key).collect())
+                    let page = api.album_tracks(id, store::all()).await?;
+                    Ok((
+                        album,
+                        page.items.into_iter().map(|track| track.key).collect(),
+                    ))
                 }
             },
             cx,
