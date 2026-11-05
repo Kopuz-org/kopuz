@@ -29,6 +29,13 @@ pub struct CatalogCache {
 
 impl Global for CatalogCache {}
 
+/// The switch and source a page was asked under; an answer is held only while both still hold.
+#[derive(Clone, PartialEq)]
+pub struct Ticket {
+    epoch: u64,
+    key: String,
+}
+
 /// A held page, and whether it is recent enough to skip the fetch.
 pub struct Cached {
     pub detail: CatalogDetail,
@@ -45,10 +52,18 @@ impl CatalogCache {
         )
     }
 
-    /// The source switch and key a fetch belongs to; `None` while a switch is settling.
-    fn ticket(id: &str, cx: &App) -> Option<(u64, String)> {
+    /// Take before asking for a page and hand to `put`; `None` while a switch is settling.
+    pub fn ticket(id: &str, cx: &App) -> Option<Ticket> {
         let epoch = SourcesModel::global(cx).read(cx).switch_epoch()?;
-        Some((epoch, Self::key(id, cx)))
+        Some(Ticket {
+            epoch,
+            key: Self::key(id, cx),
+        })
+    }
+
+    /// Whether no switch began since `ticket` was taken, after which the daemon could answer for another source.
+    fn current(id: &str, ticket: &Ticket, cx: &App) -> bool {
+        Self::ticket(id, cx).as_ref() == Some(ticket)
     }
 
     pub fn get(id: &str, cx: &App) -> Option<Cached> {
@@ -67,9 +82,10 @@ impl CatalogCache {
         entry.detail.shelves.first()?.strapline.clone()
     }
 
-    pub fn put(id: &str, detail: CatalogDetail, cx: &mut App) {
-        let key = Self::key(id, cx);
-        Self::put_at(key, detail, cx);
+    pub fn put(id: &str, ticket: Option<Ticket>, detail: CatalogDetail, cx: &mut App) {
+        if let Some(ticket) = ticket.filter(|ticket| Self::current(id, ticket, cx)) {
+            Self::put_at(ticket.key, detail, cx);
+        }
     }
 
     fn put_at(key: String, detail: CatalogDetail, cx: &mut App) {
@@ -99,11 +115,11 @@ impl CatalogCache {
         let Some(ticket) = Self::ticket(&id, cx) else {
             return;
         };
-        let key = ticket.1.clone();
+        let key = ticket.key.clone();
         let dwell = cx.spawn(async move |cx| {
             cx.background_executor().timer(DWELL).await;
             cx.update(|cx| {
-                if Self::ticket(&id, cx).as_ref() == Some(&ticket) {
+                if Self::current(&id, &ticket, cx) {
                     Self::prefetch(kind, id, ticket, cx);
                 }
             });
@@ -120,26 +136,23 @@ impl CatalogCache {
         }
     }
 
-    /// A switch started since the ask may have reached the daemon first, so its answer could be another source's page.
-    fn prefetch(kind: CatalogItemKind, id: String, ticket: (u64, String), cx: &mut App) {
+    fn prefetch(kind: CatalogItemKind, id: String, ticket: Ticket, cx: &mut App) {
         let request = CatalogDetailRequest::new(kind, id.clone());
         let call =
             Link::global(cx).call(move |api| async move { api.catalog_detail(request).await });
         cx.spawn(async move |cx| match call.await {
-            Ok(detail) => cx.update(|cx| {
-                if Self::ticket(&id, cx).as_ref() == Some(&ticket) {
-                    Self::put_at(ticket.1, detail, cx);
-                }
-            }),
+            Ok(detail) => cx.update(|cx| Self::put(&id, Some(ticket), detail, cx)),
             Err(error) => tracing::debug!(%error, "prefetching a catalog page failed"),
         })
         .detach();
     }
 
     /// A page grew by a continuation: keep what was loaded, without making it look newly fetched.
-    pub fn update(id: &str, detail: CatalogDetail, cx: &mut App) {
-        let key = Self::key(id, cx);
-        if let Some(entry) = cx.default_global::<Self>().pages.get_mut(&key) {
+    pub fn update(id: &str, ticket: Option<Ticket>, detail: CatalogDetail, cx: &mut App) {
+        let Some(ticket) = ticket.filter(|ticket| Self::current(id, ticket, cx)) else {
+            return;
+        };
+        if let Some(entry) = cx.default_global::<Self>().pages.get_mut(&ticket.key) {
             entry.detail = detail;
         }
     }

@@ -40,7 +40,7 @@ use gpui_kit::{App, AppContext as _, Entity, Global};
 pub use artwork::{Arrival, ArtworkBytes, ArtworkKey, Residents, artwork_source};
 pub use artwork_edit::{content_type_for, pick_and_upload, pick_image, remove_artwork};
 pub use backdrop::{blurred_backdrop, resolve_backdrop};
-pub use catalog_cache::{Cached, CatalogCache};
+pub use catalog_cache::{Cached, CatalogCache, Ticket};
 pub use catalog_marks::CatalogMarks;
 pub use chrome::{Chrome, SidePanel, register_mini_player, toggle_mini_player};
 pub use config::{ConfigModel, lock_cause};

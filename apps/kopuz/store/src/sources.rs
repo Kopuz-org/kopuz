@@ -131,20 +131,14 @@ impl SourcesModel {
     }
 
     pub fn refetch(&mut self, cx: &mut Context<Self>) {
-        let started = self.switching.generation();
         let call = Link::global(cx).call(|api| async move { api.sources().await });
         self._fetch = Some(cx.spawn(async move |this, cx| {
             let Ok(sources) = call.await else { return };
-            this.update(cx, |this, cx| this.adopt(sources, started, cx))
-                .ok();
+            this.update(cx, |this, cx| this.adopt(sources, cx)).ok();
         }));
     }
 
-    /// A list asked for before the latest switch began may still name the old source active, so it is dropped.
-    fn adopt(&mut self, mut sources: Vec<SourceInfo>, started: u64, cx: &mut Context<Self>) {
-        if !self.switching.settle(started) {
-            return;
-        }
+    fn adopt(&mut self, mut sources: Vec<SourceInfo>, cx: &mut Context<Self>) {
         let before = self.active().map(|source| source.id.clone());
         for row in &mut sources {
             if let Some(state) = self.heard.get(&row.id) {
@@ -153,6 +147,7 @@ impl SourcesModel {
         }
         self.sources = sources;
         let after = self.active().map(|source| source.id.clone());
+        self.switching.adopted(after.as_deref());
         let switched = self.loaded && before != after;
         self.loaded = true;
         crate::notify(cx);
@@ -199,8 +194,8 @@ impl SourcesModel {
         self.switching.epoch()
     }
 
-    fn start_switch(&mut self, cx: &mut Context<Self>) {
-        self.switching.start();
+    fn start_switch(&mut self, pending: Pending, cx: &mut Context<Self>) {
+        self.switching.start(pending);
         cx.emit(SwitchStarted);
     }
 
@@ -237,10 +232,10 @@ impl SourcesModel {
 
     /// Make `id` active, and start whichever sign-in the daemon says it still needs.
     pub fn switch(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        let target = Pending::Source(id.clone());
         if self.active().is_none_or(|source| source.id != id) {
-            self.start_switch(cx);
+            self.start_switch(target.clone(), cx);
         }
-        let started = self.switching.generation();
         let call = Link::global(cx).call(move |api| async move { api.switch_source(id).await });
         cx.spawn_in(window, async move |this, cx| {
             let result = call.await;
@@ -251,7 +246,7 @@ impl SourcesModel {
                     crate::signin::start_sign_in(&source, window, cx);
                 }
                 Err(error) => {
-                    this.switching.settle(started);
+                    this.switching.end(&target);
                     Notices::failed(&error, cx);
                 }
             })
@@ -265,15 +260,14 @@ impl SourcesModel {
         // Only a source that needs the internet reads differently in offline mode.
         let remote = self.active().is_some_and(|source| !source.works_offline);
         if remote && on != self.network.offline_mode.is_on() {
-            self.start_switch(cx);
+            self.start_switch(Pending::Offline, cx);
         }
-        let started = self.switching.generation();
         let call = Link::global(cx).call(move |api| async move { api.set_offline(on).await });
         cx.spawn(async move |this, cx| {
             let result = call.await;
             this.update(cx, |this, cx| match result {
                 Ok(status) => {
-                    this.switching.settle(started);
+                    this.switching.end(&Pending::Offline);
                     let said = match status.offline_mode.is_on() {
                         true => "offline_mode_on",
                         false => "offline_mode_off",
@@ -283,7 +277,7 @@ impl SourcesModel {
                     Notices::info(i18n::t(said), cx);
                 }
                 Err(error) => {
-                    this.switching.settle(started);
+                    this.switching.end(&Pending::Offline);
                     Notices::failed(&error, cx);
                 }
             })
@@ -323,33 +317,40 @@ impl SourcesModel {
     }
 }
 
+/// A switch under way: to a source, which only a sources answer naming it active ends, or of offline mode.
+#[derive(Clone, PartialEq)]
+enum Pending {
+    Source(String),
+    Offline,
+}
+
 #[derive(Default)]
 struct Switching {
     count: u64,
-    settling: bool,
+    pending: Option<Pending>,
 }
 
 impl Switching {
-    fn start(&mut self) {
+    fn start(&mut self, pending: Pending) {
         self.count += 1;
-        self.settling = true;
+        self.pending = Some(pending);
     }
 
-    fn generation(&self) -> u64 {
-        self.count
-    }
-
-    /// Whether an answer to a call started under `started` is current; only a current one ends the settling.
-    fn settle(&mut self, started: u64) -> bool {
-        let current = started == self.count;
-        if current {
-            self.settling = false;
+    /// Ends `pending` if it is still the latest switch, so an older one failing leaves a newer one alone.
+    fn end(&mut self, pending: &Pending) {
+        if self.pending.as_ref() == Some(pending) {
+            self.pending = None;
         }
-        current
+    }
+
+    fn adopted(&mut self, active: Option<&str>) {
+        if let Some(active) = active {
+            self.end(&Pending::Source(active.to_string()));
+        }
     }
 
     fn epoch(&self) -> Option<u64> {
-        (!self.settling).then_some(self.count)
+        self.pending.is_none().then_some(self.count)
     }
 }
 
@@ -370,27 +371,35 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_switch_reads_unsettled_until_adopted_and_never_matches_the_epoch_before_it() {
+    fn switching_to(target: &str) -> (Switching, Option<u64>) {
         let mut switching = Switching::default();
         let before = switching.epoch();
-        assert_eq!(before, Some(0));
-        switching.start();
+        switching.start(Pending::Source(target.into()));
+        (switching, before)
+    }
+
+    #[test]
+    fn a_refresh_naming_the_old_source_during_a_switch_keeps_it_settling() {
+        let (mut switching, _) = switching_to("b");
+        switching.adopted(Some("a"));
         assert_eq!(switching.epoch(), None);
-        assert!(switching.settle(switching.generation()));
+    }
+
+    #[test]
+    fn adopting_the_target_ends_the_switch_with_a_new_epoch() {
+        let (mut switching, before) = switching_to("b");
+        switching.adopted(Some("b"));
         assert!(switching.epoch().is_some_and(|epoch| Some(epoch) != before));
     }
 
     #[test]
-    fn a_refresh_asked_before_a_switch_and_answered_after_it_is_dropped() {
-        let mut switching = Switching::default();
-        let refresh = switching.generation();
-        switching.start();
-        assert!(!switching.settle(refresh));
+    fn a_failed_switch_ends_it_but_not_a_newer_one() {
+        let (mut switching, _) = switching_to("b");
+        switching.end(&Pending::Source("b".into()));
+        assert!(switching.epoch().is_some());
+        switching.start(Pending::Source("c".into()));
+        switching.end(&Pending::Source("b".into()));
         assert_eq!(switching.epoch(), None);
-        let after = switching.generation();
-        assert!(switching.settle(after));
-        assert_eq!(switching.epoch(), Some(after));
     }
 
     fn back(source: &str) -> Option<NetworkNotice> {
