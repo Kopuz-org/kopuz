@@ -808,6 +808,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_approved_update_in_another_directory_outlives_a_rescan_once_the_old_copy_goes() {
+        let dir = scratch("other-dir");
+        write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
+        let first = Registry::load(&[], Some(&dir), None).await;
+        let update = dir.join("radio-update");
+        std::fs::create_dir_all(&update).unwrap();
+        std::fs::write(
+            update.join(MANIFEST_FILE),
+            radio("radio", "1.1.0", &["a.test", "b.test"]),
+        )
+        .unwrap();
+        std::fs::write(update.join(COMPONENT_FILE), EMPTY_COMPONENT).unwrap();
+        let waiting = first.reload(&dir).await;
+        assert_eq!(serving(&waiting).manifest().version, "1.0.0");
+
+        let allowed = waiting
+            .approve("radio", &["a.test".into(), "b.test".into()])
+            .expect("the hosts shown are the hosts asked for");
+        let kept = allowed.dirs_of("radio");
+        let stale: Vec<PathBuf> = waiting
+            .dirs_of("radio")
+            .into_iter()
+            .filter(|copy| !kept.contains(copy))
+            .collect();
+        assert_eq!(kept, std::slice::from_ref(&update));
+        assert_eq!(stale, [dir.join("radio")]);
+
+        for copy in &stale {
+            crate::market::uninstall(&dir, copy).unwrap();
+        }
+        let rescanned = allowed.reload(&dir).await;
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(serving(&rescanned).manifest().version, "1.1.0");
+        assert!(rescanned.pending().is_empty());
+    }
+
+    #[tokio::test]
     async fn an_update_reaching_new_hosts_still_waits_after_a_restart() {
         let dir = scratch("restart");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
