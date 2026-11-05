@@ -1,5 +1,6 @@
 pub mod bottombar;
 pub mod download_overlay;
+pub mod form_factor;
 pub mod fullscreen;
 pub mod header;
 pub mod normal;

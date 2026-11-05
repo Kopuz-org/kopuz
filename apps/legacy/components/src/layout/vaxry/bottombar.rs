@@ -103,6 +103,12 @@ pub fn BottombarVaxry(
                         i { class: if fav { "fa-solid fa-heart text-sm" } else { "fa-regular fa-heart text-sm" } }
                     }
                     button {
+                        class: "w-11 h-11 hidden tablet:flex items-center justify-center text-white text-lg active:scale-90 transition-transform",
+                        "aria-label": i18n::t("previous_track").to_string(),
+                        onclick: move |evt| { evt.stop_propagation(); ctrl.play_prev(); },
+                        i { class: "fa-solid fa-backward-step" }
+                    }
+                    button {
                         class: "w-11 h-11 flex items-center justify-center text-white text-xl active:scale-90 transition-transform",
                         onclick: move |evt| { evt.stop_propagation(); ctrl.toggle(); },
                         i { class: if *is_playing.read() { "fa-solid fa-pause" } else { "fa-solid fa-play ml-1" } }

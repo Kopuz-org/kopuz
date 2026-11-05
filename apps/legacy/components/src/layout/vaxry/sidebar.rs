@@ -104,6 +104,8 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
     let mut is_resizing = use_signal(|| false);
 
     let is_android = cfg!(target_os = "android");
+    let form_factor = crate::form_factor::use_form_factor();
+    let drawer = is_android && !form_factor.is_tablet();
     let fallback_collapse = use_signal(|| true);
     let mut mobile_collapsed = try_consume_context::<crate::sidebar::SidebarCollapsed>()
         .map(|c| c.0)
@@ -143,8 +145,10 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
     // and only appears when the source lists more than one.
     let caps = hooks::sources::use_capabilities();
     let has_discover = use_memo(move || caps().pages.len() > 1);
-    let collapsed = if is_android {
+    let collapsed = if drawer {
         false
+    } else if is_android {
+        !form_factor.is_wide()
     } else {
         *is_collapsed.read()
     };
@@ -155,7 +159,12 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
     } else {
         "h-full flex flex-col shrink-0 select-none relative border-r border-white/5"
     };
-    let root_style = if is_android {
+    let root_style = if is_android && !drawer {
+        let rail_width = if collapsed { 72 } else { 240 };
+        format!(
+            "position: relative; z-index: auto; height: 100%; width: {rail_width}px; background-color: var(--color-neutral-900); --vaxry-sidebar-fg: var(--color-white);"
+        )
+    } else if is_android {
         let drawer_width = if *mobile_collapsed.read() { 0 } else { 280 };
         format!(
             "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: {drawer_width}px; background-color: var(--color-neutral-900); --vaxry-sidebar-fg: var(--color-white);"
@@ -181,7 +190,7 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                 onmouseup,
             }
         }
-        if is_android && !*mobile_collapsed.read() {
+        if drawer && !*mobile_collapsed.read() {
             div {
                 class: "fixed inset-0 bg-black/80 backdrop-blur-[2px] z-[90]",
                 onclick: move |_| mobile_collapsed.set(true),
@@ -195,12 +204,12 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
         div {
             class: "{root_class}",
             style: "{root_style}",
-            ontouchstart: move |evt| if is_android { drawer_swipe.start(&evt) },
-            ontouchmove: move |evt| if is_android { drawer_swipe.update(&evt) },
-            ontouchend: move |evt| if is_android { on_drawer_swipe(evt) },
+            ontouchstart: move |evt| if drawer { drawer_swipe.start(&evt) },
+            ontouchmove: move |evt| if drawer { drawer_swipe.update(&evt) },
+            ontouchend: move |evt| if drawer { on_drawer_swipe(evt) },
             ontouchcancel: move |_| drawer_swipe.reset(),
 
-            if is_android {
+            if drawer {
                 div {
                     class: "flex items-center justify-between px-5 border-b border-white/5 bg-white/5 shrink-0",
                     style: "padding-top: max(env(safe-area-inset-top), 16px); padding-bottom: 16px;",
@@ -252,7 +261,7 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                         }
                         for item in *items {
                             if (item.route != Route::Discover || has_discover())
-                                && (!is_android || !crate::tabbar::is_tab_route(item.route))
+                                && (!drawer || !crate::tabbar::is_tab_route(item.route))
                             {
                                 VaxryNavItem {
                                     key: "{item.key}",
@@ -261,7 +270,7 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                                     collapsed,
                                     onclick: move |_| {
                                         props.on_navigate.call(item.route);
-                                        if is_android { mobile_collapsed.set(true); }
+                                        if drawer { mobile_collapsed.set(true); }
                                     },
                                 }
                             }
@@ -269,10 +278,10 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                     }
                 }
 
-                if !is_android {
+                if !drawer {
                     div { class: "mx-3 my-2 h-px", style: "background: color-mix(in oklab, var(--vaxry-sidebar-fg) 6%, transparent);" }
                 }
-                for item in TOOL_ITEMS.iter().filter(|item| !is_android || !crate::tabbar::is_tab_route(item.route)) {
+                for item in TOOL_ITEMS.iter().filter(|item| !drawer || !crate::tabbar::is_tab_route(item.route)) {
                     VaxryNavItem {
                         key: "{item.key}",
                         item: item.clone(),
@@ -280,15 +289,15 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                         collapsed,
                         onclick: move |_| {
                             props.on_navigate.call(item.route);
-                            if is_android { mobile_collapsed.set(true); }
+                            if drawer { mobile_collapsed.set(true); }
                         },
                     }
                 }
             }
 
-            if is_android {
+            if drawer {
                 DrawerNowPlaying {}
-            } else {
+            } else if !is_android {
                 div {
                     class: "absolute top-0 right-0 w-2 h-full cursor-col-resize group/handle z-50",
                     onmousedown: move |_| is_resizing.set(true),
@@ -309,7 +318,9 @@ fn VaxryNavItem(
     let phone = cfg!(target_os = "android");
     rsx! {
         a {
-            class: if phone {
+            class: if phone && collapsed {
+                "flex items-center justify-center cursor-pointer transition-all hover:bg-white/10 active:bg-white/15 relative mx-2 rounded-lg"
+            } else if phone {
                 "flex items-center gap-4 cursor-pointer transition-all hover:bg-white/10 active:bg-white/15 relative mx-2 rounded-lg"
             } else {
                 "flex items-center gap-3 cursor-pointer transition-all hover:bg-white/10 active:bg-white/15 relative mx-1 rounded-lg"

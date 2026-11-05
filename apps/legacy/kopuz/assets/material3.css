@@ -1178,6 +1178,13 @@
     border-radius: var(--md-sys-shape-corner-large) 0 0 var(--md-sys-shape-corner-large);
 }
 
+/* On a tablet the sidebar sits in the layout instead of floating over it as a drawer. */
+[data-ui-style="material3"][data-platform="android"][data-form-factor="tablet"] .app-sidebar,
+[data-ui-style="material3"][data-platform="android"][data-form-factor="tablet"][dir="rtl"] .app-sidebar {
+    border-radius: 0;
+    box-shadow: none;
+}
+
 [data-ui-style="material3"] .player-bar-mobile {
     height: 72px;
     margin: 8px;
@@ -1193,6 +1200,11 @@
 [data-ui-style="material3"][data-platform="android"] .showcase-cover {
     width: 176px;
     height: 176px;
+}
+
+[data-ui-style="material3"][data-platform="android"][data-form-factor="tablet"] .showcase-cover {
+    width: 224px;
+    height: 224px;
 }
 
 @media (prefers-reduced-motion: reduce) {
