@@ -116,8 +116,8 @@ Data: `api.catalog(continuation)` · `api.catalog_detail(CatalogDetailRequest)`
 ### 2.6 Library (`pages/library.rs`)
 Data: windowed `api.tracks(TrackFilter{sort: Fields(cfg.library_sort)}, Page{offset,limit})` + count query `{0,1}` for total, both inv:Tracks · `api.albums/artists/playlists` for stat cards · `api.downloads()` + JobProgress(Download)
 - [x] Title "your_library"; refresh button: `caps.scan_folders` → trigger local rescan (shell), else `caps.sync` → JOB(LibrarySync)
-- [ ] Auto-sync once when `caps.sync` and total == 0 (missing: no automatic sync; the empty library offers a refresh button instead)
-- [ ] Stat cards: tracks (total), albums (distinct lowercased titles), artists, playlists (missing: stat cards; the header shows only the current facet's count)
+- [x] Auto-sync once when `caps.sync` and total == 0 (once per source per run, skipped for folder-scanning, signed-out and offline sources)
+- [x] Stat cards: tracks, albums, artists (the daemon's catalog totals), playlists
 - [x] Select-all checkbox (fetches all rows via `api.tracks(filter, all)`, selects keys)
 - [x] SortControl (stacked criteria) over Title/Artist/Album/Duration/DateAdded → `cfg.library_sort`
 - [x] Virtualized list (60 px rows, 10-row buffer), scroll persisted per route; column header
@@ -144,7 +144,7 @@ Grid data: `api.albums(all)` inv:Albums; detail: `api.album(id)` inv:Albums, `ap
 
 ### 2.8 Artists (`pages/artist.rs`, library presentation)
 Data: `api.albums(all)`, `api.artists(all)` (counts + photos), `api.artist_sample_tracks({0,MAX})`, `api.artist_tracks(name, all)`; `api.refresh_artist_artwork(names)` fired when the grid's name set changes (results arrive as inv:Tracks)
-- [x] Grid: artist set = album artists ∪ sample-track `artists`, normalized, dropping joined collab credits whose primary exists; photo = `ArtistInfo.artwork`; placeholder mic icon (upstream no longer calls `api.refresh_artist_artwork`: the daemon sweeps missing photos at boot and on each source switch, `daemon/core/src/library/artist_art.rs`)
+- [x] Grid: artist set = album artists ∪ sample-track `artists`, normalized, dropping joined collab credits whose primary exists; photo = `ArtistInfo.artwork`; placeholder mic icon; `api.refresh_artist_artwork` fired for each loaded window's artists without a photo
 - [x] ViewModeToggle → `cfg.artists_view_mode`; SortControl Name/Tracks/Albums → `cfg.artist_sort` (name breaks ties)
 - [x] Grid scroll persisted (key "artists")
 - [x] Detail: back button; Tracks⇄Albums toggle → `cfg.artist_view_order`
@@ -154,13 +154,13 @@ Data: `api.albums(all)`, `api.artists(all)` (counts + photos), `api.artist_sampl
 
 ### 2.9 Playlists (`pages/playlists.rs`, `components/playlist/*`)
 Data: `api.playlists()` → `PlaylistCatalog` inv:Playlists+Folders; detail tracks `api.tracks_by_keys(track_keys)` inv:Tracks
-- [ ] Header: New folder (`caps.folders` → `api.create_playlist_folder(t("new_folder"))`), Add playlist (popup) (missing: `Route::Playlists` redirects to the library facet, so `page_playlists::Playlists`, which holds these buttons, is never built)
-- [ ] AddPlaylistPopup: name input, Save → `api.create_playlist(name, [])` (refused with "error_server_not_configured" if `caps.playlists == None`), inline error; "Add folder" (desktop, `caps.folders`): pick directory → `api.folder_tracks(prefix, all)` → `create_playlist(dirname, keys)` (missing: reachable only from the unrouted `page_playlists::Playlists`; the add-to-playlist picker can still create a playlist)
-- [ ] Folder layout (`caps.folders`): folders grid (cover = first playlist's), open folder view with breadcrumb/back, root playlists grid under "playlists" heading; empty "no_playlists_yet" (missing: the library Playlists facet lists playlists flat; folders show only in the optional playlists panel)
+- [x] Header: New folder (`caps.folders` → `api.create_playlist_folder(t("new_folder"))`), Add playlist (popup), on the library's Playlists facet
+- [x] AddPlaylistPopup: name input, Save → `api.create_playlist(name, [])` (refused with "error_server_not_configured" if `caps.playlists == None`), inline error; "Add folder" (desktop, `caps.folders`): pick directory → `api.folder_tracks(prefix, all)` → `create_playlist(dirname, keys)`
+- [x] Folder layout (`caps.folders`): folder tiles (cover = first playlist's) lead the Playlists facet and open the folder view with breadcrumb/back, then the playlists outside any folder; a search reaches into folders; empty "no_playlists_yet" (no "playlists" heading: the facet is one virtualized grid)
 - [x] Folder card menu: Rename (RenameTextModal, Enter saves → `api.rename_playlist_folder`), Delete (`api.delete_playlist_folder`)
 - [x] Playlist card menu: Move to folder (FolderPickerModal: pick folder → `api.move_playlist(pid, Some(fid))`; "new folder" inline create → `create_playlist_folder` then `move_playlist`), Remove from folder (`move_playlist(pid, None)`, only inside a folder), Rename (`api.rename_playlist`), Start radio (RADIO_P, `caps.playlist_radio`), Delete (`api.delete_playlist`)
-- [ ] Flat remote layout (`!caps.folders`): JOB(PlaylistSync) on mount when `caps.sync`; if `caps.albums == Remote` sync status row ("Loading tracks — done/total", "N playlists synced", Refresh → JOB(PlaylistSync)) from JobProgress(PlaylistSync); card with "Server • N tracks", radio dots menu, hover download/remove-downloads button (`caps.downloads`, spinner while any key active) (missing: built in the unrouted `page_playlists::Playlists`; the library facet has no PlaylistSync, sync row or per-card download toggle)
-- [ ] Empty: anonymous source → "source_anon_playlists" else "no_playlists_found" (missing: the library facet shows `no_playlists_yet` only; `source_anon_playlists` lives in the unrouted page)
+- [x] Flat remote layout (`!caps.folders`): JOB(PlaylistSync) once per source when `caps.sync`; if `caps.albums == Remote` sync status row from JobProgress(PlaylistSync) with Refresh; card "Server Playlist • N tracks", menu, corner download/remove-downloads toggle (`caps.downloads`)
+- [x] Empty: anonymous source → "source_anon_playlists" else "no_playlists_found" (flat) / "no_playlists_yet" (folders), with Add playlist unless `caps.playlists == None`
 - [x] PlaylistDetail: on mount `api.refresh_playlist(id)` when `caps.sync`; TrackListView with Start radio (RADIO_P), cover click → `upload_artwork{Playlist(id)}`, metadata (`caps.edit_tags`), row "Remove from playlist" → `api.remove_playlist_track(id, index)`, reorder ▲▼ buttons when `caps.playlists == Reorder` → `api.reorder_playlist(id, {from,to})`, delete track (`DELETE([key], caps.delete_from_disk)`), download all/one/remove (`caps.downloads`), "playlist_not_found"
 - [ ] Source playlist menu when `caps.playlist_details`: edit name and description (`api.edit_playlist`), rate, delete on the source (missing: on the catalog playlist page only, and the details dialog edits description and privacy, not the name)
 
@@ -171,12 +171,12 @@ Data: `api.favorites()` inv:Favorites → `api.tracks_by_keys(refs)` inv:Tracks;
 - [x] Select-all, selection bar (queue / playlist / delete)
 - [x] Virtualized rows (60 px), play = PLAY_LIST(sorted filtered list, i); full row menu incl. radio, download, metadata, delete
 - [x] Sync UI: `caps.favorites_sync == Instant` + running → "syncing_with_server" spinner; `Paginated` → status row ("yt_syncing_progress{count}" / "yt_synced_total{count}") + Refresh → JOB(FavoritesSync)
-- [ ] Empty states: loading spinner; "no_results_found{query}"; anonymous source → "source_anon_favorites"; else "no_favorites" + "heart_track_to_add" (missing: `source_anon_favorites` and the `heart_track_to_add` hint)
+- [x] Empty states: loading skeleton; "no_results_found{query}" for a search; anonymous source → "source_anon_favorites"; else "no_favorites" + "heart_track_to_add"
 - [x] Start radio from the source's liked playlist (`caps.favorites_playlist` → RADIO_P)
 
 ### 2.11 Activity (`pages/activity.rs`)
 Data: windowed `api.tracks(TrackFilter{sort: PlayCount})` + count; genre per album from `api.albums(all)`; play counts read from `cfg.listen_counts[source.listen_count_key(uid)]` (not `api.stats()`, see §6)
-- [ ] "listening_logs" / "most_played_tracks" header; columns #, title (cover+artist), album, genre, time, plays (fire icon if >0) (missing: Activity is the library sorted by its plays column, with no header of its own)
+- [x] "listening_logs" / "most_played_tracks" header on an Activity page of its own (no facets or stat cards, its own layout, by plays most first); columns # title artist album genre time plays; genre is the album's, read for the album ids the loaded rows reference
 - [x] Row click → fetch all with same filter → PLAY_LIST(all, idx); virtualized; scroll persisted
 - [x] Spinner / "no_tracks_in_library"
 
@@ -197,7 +197,7 @@ Data: `api.download_formats()`, `api.downloader_settings()`, `api.downloader_his
 - [x] Active row: phase "processing"/"downloading {percent}"/waiting, title = job message or shortened URL, progress bar
 - [x] History rows (finished/failed + error, format label); "Clear history" → `api.clear_downloader_history()`; history reloads when job stops running
 - [x] Empty state "downloader_empty_state"
-- [ ] Search to download: `api.search_downloads(query)` results, each with a download button
+- [x] Search to download: search button in the URL dialog → `api.search_downloads(query)` results, each with its own download button (placeholder covers: the app reads pictures only through the daemon)
 
 ### 2.14 Settings (see §4 for fields)
 - [x] Category navigation "fan" (8 categories; Tools hidden on Android); `cfg.settings_layout` Cd (fan) vs TopBar (Cd draws the fan as a rail beside the panel: GPUI cannot rotate the disc's clip-paths; Material 3 always uses TopBar, as the Dioxus app did)

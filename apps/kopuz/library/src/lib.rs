@@ -5,21 +5,24 @@ mod columns;
 mod facet;
 mod filters;
 mod grid;
+mod playlists;
 mod settings;
 mod states;
 mod tracks;
 
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, Range};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use api::{
-    AlbumInfo, AlbumPage, ArtistPage, ArtworkRef, KopuzApi, Page, StatsView, Table, TrackInfo,
-    TrackPage,
+    AlbumInfo, AlbumPage, AlbumQuery, ArtistPage, ArtworkRef, KopuzApi, Page, StatsView, Table,
+    TrackInfo, TrackPage,
 };
 use components::format::t;
 use components::{skeleton, style};
+use config::{AlbumSortField, SortCriterion, SortDirection};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -31,8 +34,8 @@ use gpui_kit::{
 };
 use store::layout::{Column, Density, TileSize, ViewMode};
 use store::{
-    DownloadsModel, LayoutModel, Navigator, Pager, PlayerModel, PlaylistsModel, Query, QueueModel,
-    Route, SourcesModel, Target,
+    DownloadsModel, LayoutModel, Link, Navigator, Pager, PlayerModel, PlaylistsModel, Query,
+    QueueModel, Route, SourcesModel, Target,
 };
 
 pub use facet::Facet;
@@ -91,7 +94,12 @@ pub(crate) struct Tile {
     pub playing: bool,
     pub target: Target,
     pub route: Route,
-    pub pictured: store::Pictured,
+    pub pictured: Option<store::Pictured>,
+    pub placeholder: &'static str,
+    /// A playlist folder, which leads the playlists facet.
+    pub folder: bool,
+    /// A playlist's keys and what the downloads say of them, when the source downloads.
+    pub offline: Option<(Rc<[String]>, store::Offline)>,
 }
 
 /// A line of the tracks table: a group heading, or one row of the loaded listing.
@@ -106,6 +114,42 @@ pub(crate) enum Line {
 struct AlbumMeta {
     year: u16,
     genre: String,
+}
+
+/// How much the library holds, for the stat cards; a count the source could not give is left out.
+#[derive(Clone, Copy, Default)]
+struct Counts {
+    tracks: Option<u32>,
+    albums: Option<u32>,
+    artists: Option<u32>,
+}
+
+async fn counts(api: Arc<dyn KopuzApi>) -> Result<Counts, api::ApiError> {
+    let one = store::paging::page(0, 1);
+    let total = |what: &'static str, read: Result<u32, api::ApiError>| match read {
+        Ok(total) => Some(total),
+        Err(error) => {
+            tracing::debug!(%error, what, "could not count the library");
+            None
+        }
+    };
+    let tracks = api
+        .tracks(Default::default(), one)
+        .await
+        .map(|page| page.total);
+    let albums = api
+        .albums(Default::default(), one)
+        .await
+        .map(|page| page.total);
+    let artists = api
+        .artists(Default::default(), one)
+        .await
+        .map(|page| page.total);
+    Ok(Counts {
+        tracks: total("tracks", tracks),
+        albums: total("albums", albums),
+        artists: total("artists", artists),
+    })
 }
 
 #[derive(Clone)]
@@ -129,6 +173,8 @@ pub struct Library {
     filters: Filters,
     /// The Favorites page: tracks only, liked only, and none of it written to the library's route.
     liked: bool,
+    /// The Activity page: tracks only, in a layout of its own, and none of it written to the library's route.
+    activity: bool,
     // What the route last said, so adopting a route change cannot fight the page's own edit.
     encoded: String,
     columns: Vec<Column>,
@@ -149,6 +195,9 @@ pub struct Library {
     artists: Entity<Query<CatalogWindow<ArtistPage>>>,
     genres: Entity<Query<Vec<String>>>,
     stats: Entity<Query<StatsView>>,
+    counts: Entity<Query<Counts>>,
+    years: Entity<Query<Option<(u16, u16)>>>,
+    meta_asked: MetaAsks,
 
     // Derived on change, never in render: a notify from the playhead would otherwise rebuild these.
     rows: Vec<TrackInfo>,
@@ -157,8 +206,10 @@ pub struct Library {
     // The letters the tiles start with, only while every tile is held: a paged window cannot say.
     rail_letters: Option<std::collections::HashSet<char>>,
     albums_meta: HashMap<String, AlbumMeta>,
-    year_span: Option<(u16, u16)>,
     plays: HashMap<String, u64>,
+    playlist_offline: HashMap<String, (Rc<[String]>, store::Offline)>,
+    // Artists already sent for a photo; the daemon remembers its misses, this saves the round trip.
+    asked_artwork: HashSet<String>,
     playing: store::Playing,
     // The playing row lights only while the queue is this listing, judged as the Dioxus table did: by length.
     queued: bool,
@@ -206,22 +257,29 @@ impl Focusable for Library {
 
 impl Library {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::build(false, window, cx)
+        Self::build(false, false, window, cx)
     }
 
     /// The Favorites page.
     pub fn favorites(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::build(true, window, cx)
+        Self::build(true, false, window, cx)
     }
 
-    fn build(liked: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let opening = match liked {
+    /// The Activity page: the library's tracks, most played first.
+    pub fn activity(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::build(false, true, window, cx)
+    }
+
+    fn build(liked: bool, activity: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let standalone = liked || activity;
+        let opening = match standalone {
             true => String::new(),
             false => opening_view(cx),
         };
-        let filters = match liked {
-            true => Filters::default().held_to_liked(),
-            false => Filters::decode(&opening),
+        let filters = match (liked, activity) {
+            (true, _) => Filters::default().held_to_liked(),
+            (_, true) => Filters::on(Facet::Tracks),
+            _ => Filters::decode(&opening),
         };
         let search = cx.new(|cx| {
             InputState::new(window, cx)
@@ -277,6 +335,11 @@ impl Library {
                 cx,
             )
         });
+        let years = cx.new(|cx| Query::new(&[Table::Albums], year_span, cx));
+        let counts = cx.new(|cx| match standalone {
+            true => Query::new(&[], |_| async move { Ok(Counts::default()) }, cx),
+            false => Query::new(&[Table::Tracks, Table::Albums, Table::Artists], counts, cx),
+        });
 
         let navigator = Navigator::global(cx);
         let playlists = PlaylistsModel::global(cx);
@@ -296,14 +359,32 @@ impl Library {
             cx.observe(&artists, |this, _, cx| this.adopt_artists(cx)),
             cx.observe(&genres, |_, _, cx| cx.notify()),
             cx.observe(&stats, |this, _, cx| this.adopt_stats(cx)),
-            cx.observe(&playlists, |this, _, cx| this.rebuild(cx)),
+            cx.observe(&counts, |this, _, cx| {
+                this.auto_sync(cx);
+                cx.notify();
+            }),
+            cx.observe(&years, |_, _, cx| cx.notify()),
+            // A retag can move an album's genre; only the albums on screen are asked again.
+            cx.subscribe(
+                &store::Invalidation::global(cx),
+                |this, _, event: &store::TablesChanged, cx| {
+                    if meta_stale(event) {
+                        this.meta_asked.invalidate();
+                        this.request_meta(cx);
+                    }
+                },
+            ),
+            cx.observe(&playlists, |this, _, cx| {
+                this.rekey_offline(cx);
+                this.rebuild(cx);
+            }),
             cx.observe(&downloads, |this, _, cx| this.on_downloads(cx)),
             // The playing mark sits on every row and tile, so it is derived here, not in render.
             cx.observe(&player, |this, _, cx| this.adopt_playing(cx)),
             cx.observe(&QueueModel::global(cx), |this, _, cx| this.adopt_queue(cx)),
             cx.observe(&layout, |this, _, cx| this.adopt_layout(cx)),
             cx.observe(&store::ConfigModel::global(cx), |_, _, cx| cx.notify()),
-            cx.observe(&sources, |_, _, cx| cx.notify()),
+            cx.observe(&sources, |this, _, cx| this.on_sources(cx)),
             cx.observe(&store::JobsModel::global(cx), |_, _, cx| cx.notify()),
             cx.observe_in(&navigator, window, |this, _, window, cx| {
                 this.adopt_route(window, cx)
@@ -314,6 +395,7 @@ impl Library {
         let mut page = Self {
             filters,
             liked,
+            activity,
             encoded: opening,
             columns: Vec::new(),
             sort: Sort::default(),
@@ -330,13 +412,17 @@ impl Library {
             artists,
             genres,
             stats,
+            counts,
+            years,
+            meta_asked: MetaAsks::default(),
             rows: Vec::new(),
             lines: Vec::new(),
             tiles: Vec::new(),
             rail_letters: None,
             albums_meta: HashMap::new(),
-            year_span: None,
             plays: HashMap::new(),
+            playlist_offline: HashMap::new(),
+            asked_artwork: HashSet::new(),
             playing: store::Playing::default(),
             queued: false,
             pager: Pager::new(),
@@ -353,23 +439,31 @@ impl Library {
             _subscriptions: subscriptions,
         };
         page.read_layout(cx);
-        if !liked {
-            page.adopt_intent(cx);
-        }
+        page.rekey_offline(cx);
         page.refetch(cx);
         page
     }
 
     /// The page's title.
     pub(crate) fn title(&self) -> SharedString {
-        match self.liked {
-            true => t("favorites"),
-            false => t("your_library"),
+        match (self.liked, self.activity) {
+            (true, _) => t("favorites"),
+            (_, true) => t("listening_logs"),
+            _ => t("your_library"),
         }
+    }
+
+    pub(crate) fn is_activity(&self) -> bool {
+        self.activity
     }
 
     pub(crate) fn is_liked(&self) -> bool {
         self.liked
+    }
+
+    /// Favorites or Activity: a page of its own, with no facets and nothing written to the library's route.
+    pub(crate) fn standalone(&self) -> bool {
+        self.liked || self.activity
     }
 
     /// How this facet was left: its columns, its order, its density.
@@ -394,45 +488,17 @@ impl Library {
             return;
         }
         if held != (self.columns.clone(), self.mode, self.density, self.tile) {
+            self.request_meta(cx);
             cx.notify();
         }
-    }
-
-    /// `Route::Activity` is no longer a place; it arrives as an intent.
-    fn adopt_intent(&mut self, cx: &mut Context<Self>) {
-        let intent = Navigator::global(cx).update(cx, |navigator, _| navigator.take_intent());
-        match intent {
-            // The most-played page was a listing of the library, which is a sort, not a place.
-            Some("activity") => {
-                self.filters.facet = Facet::Tracks;
-                self.read_layout(cx);
-                self.sort = Sort {
-                    field: "plays".into(),
-                    descending: true,
-                };
-                let sort = self.sort.to_layout();
-                let mut columns = self.columns.clone();
-                if let Some(column) = columns.iter_mut().find(|column| column.id == "plays") {
-                    column.visible = true;
-                }
-                self.columns = columns.clone();
-                self.write_facet(cx, move |facet| {
-                    facet.sort = sort;
-                    facet.columns = columns;
-                });
-            }
-            _ => return,
-        }
-        self.publish(false, cx);
     }
 
     /// Back, forward, or a command that named a view: take what the route says and show it.
     fn adopt_route(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let route = Navigator::global(cx).read(cx).current().clone();
-        if self.liked || !matches!(route, Route::Library | Route::LibraryView(_)) {
+        if self.standalone() || !matches!(route, Route::Library | Route::LibraryView(_)) {
             return;
         }
-        self.adopt_intent(cx);
         let encoded = route
             .library_view()
             .map(|view| view.to_string())
@@ -456,8 +522,8 @@ impl Library {
 
     /// Put the current view in the route, so back, forward and a restart all land back on it.
     fn publish(&mut self, push: bool, cx: &mut Context<Self>) {
-        // Favorites has a route of its own; its search must not become the library's view.
-        if self.liked {
+        // Favorites and Activity have routes of their own; their search must not become the library's view.
+        if self.standalone() {
             return;
         }
         let encoded = self.filters.encode();
@@ -478,9 +544,13 @@ impl Library {
 
     /// Change the filter set: a chip or a facet is a place to come back to, a keystroke is not.
     pub(crate) fn set_filters(&mut self, filters: Filters, push: bool, cx: &mut Context<Self>) {
-        let filters = match self.liked {
-            true => filters.held_to_liked(),
-            false => filters,
+        let filters = match (self.liked, self.activity) {
+            (true, _) => filters.held_to_liked(),
+            (_, true) => Filters {
+                facet: Facet::Tracks,
+                ..filters
+            },
+            _ => filters,
         };
         if filters == self.filters {
             return;
@@ -500,8 +570,8 @@ impl Library {
         &self.filters
     }
 
-    pub(crate) fn year_span(&self) -> Option<(u16, u16)> {
-        self.year_span
+    pub(crate) fn year_span(&self, cx: &App) -> Option<(u16, u16)> {
+        self.years.read(cx).value().copied().flatten()
     }
 
     pub(crate) fn known_genres(&self, cx: &App) -> Vec<String> {
@@ -516,9 +586,10 @@ impl Library {
 
     /// Where this page keeps its columns and order.
     fn layout_name(&self) -> &'static str {
-        match self.liked {
-            true => store::layout::FAVORITES,
-            false => self.filters.facet.name(),
+        match (self.liked, self.activity) {
+            (true, _) => store::layout::FAVORITES,
+            (_, true) => store::layout::ACTIVITY,
+            _ => self.filters.facet.name(),
         }
     }
 
@@ -558,6 +629,88 @@ impl Library {
             Facet::Artists => self.fetch_artists(page, false, cx),
             Facet::Playlists => self.rebuild(cx),
         }
+        self.request_meta(cx);
+        self.auto_sync(cx);
+    }
+
+    /// Read the albums the loaded rows belong to, once the table shows something only an album knows.
+    fn request_meta(&mut self, cx: &mut Context<Self>) {
+        let genre = self
+            .columns
+            .iter()
+            .any(|column| column.id == "genre" && column.visible);
+        let year = self.group_by.as_deref() == Some("year");
+        if self.filters.facet != Facet::Tracks || !(genre || year) {
+            return;
+        }
+        for batch in self.meta_asked.take(&self.rows, Instant::now()) {
+            let query = AlbumQuery {
+                ids: Some(batch.clone()),
+                ..Default::default()
+            };
+            let call = Link::global(cx)
+                .call(move |api| async move { api.albums(query, store::all()).await });
+            cx.spawn(async move |this, cx| {
+                let reply = call.await;
+                this.update(cx, |this, cx| match reply {
+                    Ok(page) => {
+                        merge_meta(&mut this.albums_meta, &batch, &page.albums);
+                        this.rebuild(cx);
+                    }
+                    Err(error) => {
+                        tracing::debug!(%error, "could not read the rows' albums");
+                        this.meta_asked.failed(&batch, Instant::now());
+                    }
+                })
+                .ok();
+            })
+            .detach();
+        }
+    }
+
+    /// An empty library on a source that syncs fills itself once, and a flat playlist catalog asks the source on sight.
+    fn auto_sync(&mut self, cx: &mut Context<Self>) {
+        if self.standalone() || self.frozen {
+            return;
+        }
+        let sources = SourcesModel::global(cx).read(cx);
+        let capabilities = sources.capabilities();
+        let Some(source) = sources.active().cloned() else {
+            return;
+        };
+        if !capabilities.sync || sources.offline_reads() || !source.authenticated {
+            return;
+        }
+        let empty = self
+            .counts
+            .read(cx)
+            .value()
+            .is_some_and(|counts| counts.tracks == Some(0));
+        let jobs = store::JobsModel::global(cx).read(cx);
+        let library = empty
+            && !capabilities.scan_folders
+            && jobs.progress(api::JobKind::LibrarySync).is_none();
+        let playlists = self.filters.facet == Facet::Playlists
+            && !capabilities.folders
+            && jobs.progress(api::JobKind::PlaylistSync).is_none();
+        if library {
+            playlists::start_once(api::JobKind::LibrarySync, &source.id, cx);
+        }
+        if playlists {
+            playlists::start_once(api::JobKind::PlaylistSync, &source.id, cx);
+        }
+    }
+
+    fn on_sources(&mut self, cx: &mut Context<Self>) {
+        if self.frozen {
+            return;
+        }
+        self.rekey_offline(cx);
+        if self.filters.facet == Facet::Playlists {
+            self.rebuild(cx);
+        }
+        self.auto_sync(cx);
+        cx.notify();
     }
 
     fn fetch_tracks(&mut self, page: Page, paging: bool, cx: &mut Context<Self>) {
@@ -661,6 +814,7 @@ impl Library {
         let loaded: HashSet<String> = self.rows.iter().map(|row| row.key.clone()).collect();
         self.selection.retain_loaded(&loaded, self.whole);
         self.queued = self.listing_queued(cx);
+        self.request_meta(cx);
         self.rebuild(cx);
     }
 
@@ -687,18 +841,7 @@ impl Library {
         };
         // A window or a narrowed set is not the whole catalog, so the chip menus only learn from a whole read.
         if !page.narrowed && page.albums.len() as u32 >= page.total {
-            self.albums_meta = page
-                .albums
-                .iter()
-                .map(|album| {
-                    let meta = AlbumMeta {
-                        year: album.year,
-                        genre: album.genre.clone(),
-                    };
-                    (album.id.clone(), meta)
-                })
-                .collect();
-            self.year_span = span_of(&page.albums);
+            self.albums_meta.extend(page.albums.iter().map(album_meta));
         }
         if self.filters.facet == Facet::Albums {
             let total = page.total.max(page.albums.len() as u32) as usize;
@@ -713,6 +856,19 @@ impl Library {
         {
             let total = page.total.max(page.artists.len() as u32) as usize;
             self.pager.adopt(page.offset, page.artists.len(), total);
+            let missing: Vec<String> = page
+                .artists
+                .iter()
+                .filter(|artist| artist.artwork.is_none())
+                .map(|artist| artist.key.clone())
+                .filter(|key| self.asked_artwork.insert(key.clone()))
+                .collect();
+            // Photos found arrive as a tracks invalidation, which reads this window again.
+            if !missing.is_empty() {
+                Link::global(cx).fire(cx, "refresh artist artwork", move |api| async move {
+                    api.refresh_artist_artwork(missing).await
+                });
+            }
         }
         self.rebuild(cx);
     }
@@ -750,9 +906,11 @@ impl Library {
     }
 
     fn on_downloads(&mut self, cx: &mut Context<Self>) {
-        match self.filters.downloaded {
-            true => self.refetch(cx),
-            false => cx.notify(),
+        self.restate_offline(cx);
+        match (self.filters.downloaded, self.filters.facet) {
+            (true, _) => self.refetch(cx),
+            (false, Facet::Playlists) => self.rebuild(cx),
+            (false, _) => cx.notify(),
         }
     }
 
@@ -951,7 +1109,7 @@ impl Library {
     }
 
     fn cycle_facet(&mut self, step: isize, cx: &mut Context<Self>) {
-        if self.liked {
+        if self.standalone() {
             return;
         }
         let at = Facet::ALL
@@ -1053,12 +1211,13 @@ impl Library {
             if !self.shared.settled {
                 return self.skeleton_body(cx);
             }
-            if self.liked && self.filters == Filters::default().held_to_liked() {
-                return states::no_favorites().into_any_element();
+            let liked = Filters::default().held_to_liked();
+            if self.liked && self.filters == liked {
+                return states::no_favorites(&self.shared.active).into_any_element();
             }
             if self.filters.is_narrowed() {
                 let page = cx.entity().downgrade();
-                return states::no_matches(move |_, window, cx| {
+                let clear = move |_: &gpui_kit::ClickEvent, window: &mut Window, cx: &mut App| {
                     page.update(cx, |this, cx| {
                         let cleared = this.filters.cleared();
                         this.search
@@ -1066,8 +1225,16 @@ impl Library {
                         this.set_filters(cleared, true, cx);
                     })
                     .ok();
-                })
-                .into_any_element();
+                };
+                let searched_only = Filters {
+                    search: String::new(),
+                    ..self.filters.clone()
+                } == liked;
+                if self.liked && searched_only {
+                    return states::no_results(self.filters.search.trim(), clear)
+                        .into_any_element();
+                }
+                return states::no_matches(clear).into_any_element();
             }
             return states::empty_library(self.filters.facet, &self.shared.active)
                 .into_any_element();
@@ -1112,15 +1279,96 @@ fn opening_view(cx: &App) -> String {
     store::layout(cx).library_view.clone().unwrap_or_default()
 }
 
-/// The widest span of years a whole albums read turned up, for the year chip's menu.
-fn span_of(albums: &[AlbumInfo]) -> Option<(u16, u16)> {
-    let first = albums
+/// How many album ids one read asks for, so a reply stays far under the client's message limit.
+const META_BATCH: usize = 200;
+
+/// The album ids `rows` reference that nobody has asked about yet, deduplicated, in batches.
+fn unasked_albums(rows: &[TrackInfo], asked: &HashSet<String>) -> Vec<Vec<String>> {
+    let mut seen = HashSet::new();
+    let fresh: Vec<String> = rows
         .iter()
-        .map(|album| album.year)
-        .filter(|year| *year > 0)
-        .min()?;
-    let last = albums.iter().map(|album| album.year).max()?;
-    Some((first, last))
+        .map(|row| row.album_id.as_str())
+        .filter(|id| !id.is_empty() && !asked.contains(*id) && seen.insert(*id))
+        .map(str::to_string)
+        .collect();
+    fresh.chunks(META_BATCH).map(<[String]>::to_vec).collect()
+}
+
+fn album_meta(album: &AlbumInfo) -> (String, AlbumMeta) {
+    let meta = AlbumMeta {
+        year: album.year,
+        genre: album.genre.clone(),
+    };
+    (album.id.clone(), meta)
+}
+
+/// The catalog's first and last year, for the year chip's menu, from one album at each end.
+async fn year_span(api: Arc<dyn KopuzApi>) -> Result<Option<(u16, u16)>, api::ApiError> {
+    let one = store::paging::page(0, 1);
+    let first = api.albums(year_end(SortDirection::Asc), one).await?;
+    let last = api.albums(year_end(SortDirection::Desc), one).await?;
+    Ok(first
+        .albums
+        .first()
+        .zip(last.albums.first())
+        .map(|(first, last)| (first.year, last.year)))
+}
+
+fn year_end(direction: SortDirection) -> AlbumQuery {
+    AlbumQuery {
+        // An album with no year has year 0 and would otherwise open the span.
+        year_from: Some(1),
+        sort: vec![SortCriterion::new(AlbumSortField::Year, direction)],
+        ..Default::default()
+    }
+}
+
+/// Album ids already read for their genre and year; a page of rows asks only about the new ones.
+#[derive(Debug, Default)]
+struct MetaAsks {
+    asked: HashSet<String>,
+    // A failed read gives its ids back, and the next page-in after this asks for them again.
+    retry_at: Option<Instant>,
+}
+
+impl MetaAsks {
+    fn take(&mut self, rows: &[TrackInfo], now: Instant) -> Vec<Vec<String>> {
+        if self.retry_at.is_some_and(|at| now < at) {
+            return Vec::new();
+        }
+        let batches = unasked_albums(rows, &self.asked);
+        for batch in &batches {
+            self.asked.extend(batch.iter().cloned());
+        }
+        batches
+    }
+
+    fn failed(&mut self, batch: &[String], now: Instant) {
+        for id in batch {
+            self.asked.remove(id);
+        }
+        self.retry_at = Some(now + META_BACKOFF);
+    }
+
+    fn invalidate(&mut self) {
+        self.asked.clear();
+        self.retry_at = None;
+    }
+}
+
+const META_BACKOFF: Duration = Duration::from_secs(5);
+
+/// A resync reports every table changed, so it lands here as well as a retag does.
+fn meta_stale(event: &store::TablesChanged) -> bool {
+    event.touches(&[Table::Albums])
+}
+
+/// A reply answers for every id it was asked about: one it leaves out has no album any more.
+fn merge_meta(meta: &mut HashMap<String, AlbumMeta>, asked: &[String], albums: &[AlbumInfo]) {
+    for id in asked {
+        meta.remove(id);
+    }
+    meta.extend(albums.iter().map(album_meta));
 }
 
 /// The order a column the daemon cannot sort by is put in here.
@@ -1154,6 +1402,96 @@ fn text(left: &str, right: &str) -> std::cmp::Ordering {
 #[cfg(test)]
 mod paging_tests {
     use super::*;
+
+    #[test]
+    fn a_large_listing_asks_for_each_new_album_once_in_small_batches() {
+        let rows: Vec<TrackInfo> = (0..50_000)
+            .map(|index| TrackInfo {
+                album_id: match index % 7 {
+                    0 => String::new(),
+                    _ => format!("album-{}", index % 5_000),
+                },
+                ..Default::default()
+            })
+            .collect();
+        let asked: HashSet<String> = (0..1_000).map(|index| format!("album-{index}")).collect();
+        let batches = unasked_albums(&rows, &asked);
+        assert!(batches.iter().all(|batch| batch.len() <= META_BATCH));
+        let ids: Vec<&String> = batches.iter().flatten().collect();
+        let unique: HashSet<&String> = ids.iter().copied().collect();
+        assert_eq!(ids.len(), 4_000);
+        assert_eq!(unique.len(), ids.len());
+        assert!(ids.iter().all(|id| !asked.contains(*id)));
+
+        let all: HashSet<String> = unique.into_iter().cloned().chain(asked).collect();
+        assert!(unasked_albums(&rows, &all).is_empty());
+    }
+
+    fn rows_on(albums: &[&str]) -> Vec<TrackInfo> {
+        albums
+            .iter()
+            .map(|album| TrackInfo {
+                album_id: album.to_string(),
+                ..Default::default()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_failed_read_gives_its_albums_back_after_a_backoff() {
+        let rows = rows_on(&["a", "b"]);
+        let mut asks = MetaAsks::default();
+        let now = Instant::now();
+        let batch = asks.take(&rows, now).concat();
+        assert_eq!(batch.len(), 2);
+        asks.failed(&batch, now);
+        assert!(asks.take(&rows, now + Duration::from_secs(1)).is_empty());
+        assert_eq!(asks.take(&rows, now + META_BACKOFF).concat().len(), 2);
+        assert!(asks.take(&rows, now + META_BACKOFF).is_empty());
+    }
+
+    #[test]
+    fn a_resync_asks_every_album_again_without_waiting_out_a_failure() {
+        assert!(meta_stale(&store::TablesChanged::everything()));
+        assert!(!meta_stale(&store::TablesChanged::default()));
+        let rows = rows_on(&["a", "b", "c"]);
+        let mut asks = MetaAsks::default();
+        let now = Instant::now();
+        let batch = asks.take(&rows, now).concat();
+        asks.failed(&batch[..1], now);
+        asks.invalidate();
+        assert_eq!(asks.take(&rows, now).concat().len(), 3);
+    }
+
+    #[test]
+    fn the_year_span_reads_one_dated_album_from_each_end() {
+        for (direction, first) in [(SortDirection::Asc, true), (SortDirection::Desc, false)] {
+            let query = year_end(direction);
+            assert_eq!(query.year_from, Some(1));
+            assert_eq!(query.sort.len(), 1);
+            assert_eq!(query.sort[0].field, AlbumSortField::Year);
+            assert_eq!(query.sort[0].direction == SortDirection::Asc, first);
+        }
+    }
+
+    #[test]
+    fn a_reply_drops_the_albums_it_no_longer_has() {
+        let album = |id: &str, genre: &str| AlbumInfo {
+            id: id.to_string(),
+            genre: genre.to_string(),
+            ..Default::default()
+        };
+        let mut meta = HashMap::from([
+            album_meta(&album("a", "Rock")),
+            album_meta(&album("b", "Jazz")),
+        ]);
+        meta.insert("c".to_string(), album_meta(&album("c", "Folk")).1);
+        let asked = ["a".to_string(), "b".to_string()];
+        merge_meta(&mut meta, &asked, &[album("a", "Folk")]);
+        assert_eq!(meta.get("a").map(|meta| meta.genre.as_str()), Some("Folk"));
+        assert!(!meta.contains_key("b"));
+        assert!(meta.contains_key("c"));
+    }
 
     #[test]
     fn catalog_windows_keep_the_same_indexes_in_both_scroll_directions() {
