@@ -237,8 +237,12 @@ async fn signing_in_goes_through_the_plugin() {
     );
 }
 
+/// Skipped where 127.0.0.2 is not a loopback address, as on macOS by default.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_redirect_off_the_configured_server_is_refused() {
+    if std::net::TcpListener::bind(("127.0.0.2", 0)).is_err() {
+        return;
+    }
     let elsewhere = FakeServer::start_on(
         "127.0.0.2",
         HashMap::from([("/rest/ping.view", subsonic_ok(serde_json::json!({})))]),

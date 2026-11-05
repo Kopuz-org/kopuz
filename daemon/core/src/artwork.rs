@@ -633,8 +633,12 @@ mod tests {
         (format!("http://{address}"), hits)
     }
 
+    /// Skipped where 127.0.0.2 is not a loopback address, as on macOS by default.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_plugin_cover_never_leaves_the_plugins_hosts() {
+        if std::net::TcpListener::bind(("127.0.0.2", 0)).is_err() {
+            return;
+        }
         let (elsewhere, elsewhere_hits) =
             serve_on("127.0.0.2", vec![("/x.jpg", String::new())]).await;
         let (allowed, _) = serve_on(
