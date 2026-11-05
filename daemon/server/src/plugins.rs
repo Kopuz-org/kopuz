@@ -1,6 +1,7 @@
 //! The plugins this process loaded, and the sessions open on them: the native
-//! ones, the sandboxed ones embedded in the binary, then whatever is installed
-//! in the plugin directory the daemon names at boot.
+//! ones, the sandboxed ones embedded in the binary, those Flatpak extensions
+//! mount, then whatever is installed in the plugin directory the daemon names
+//! at boot.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -14,16 +15,24 @@ use crate::server_ops::ServerConn;
 static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
 static REGISTRY: OnceLock<ArcSwap<Registry>> = OnceLock::new();
 
-/// Name the directory installed plugins are read from, and the read-only
-/// `system` directories read before it, and load them. Only the first call
+/// Where the Flatpak manifest's `moe.kopuz.kopuz.Plugin` extension point mounts each extension.
+pub const FLATPAK_EXTENSION_DIR: &str = "/app/plugins";
+
+/// The plugins Flatpak extensions provide, inside the Flatpak only.
+pub fn flatpak_extensions() -> Option<PathBuf> {
+    crate::cookies::browser::in_flatpak().then(|| PathBuf::from(FLATPAK_EXTENSION_DIR))
+}
+
+/// Name the directory installed plugins are read from and load them, with
+/// those under the read-only `extensions` beneath them. Only the first call
 /// counts.
-pub async fn init(dir: Option<PathBuf>, system: Vec<PathBuf>) {
+pub async fn init(dir: Option<PathBuf>, extensions: Option<PathBuf>) {
     if DIR.set(dir).is_err() {
         tracing::debug!("the plugin directory was already set");
         return;
     }
     let _one_at_a_time = CHANGING.lock().await;
-    let loaded = Arc::new(Registry::load_with_system(&official(), self::dir(), &system).await);
+    let loaded = Arc::new(Registry::load(&official(), self::dir(), extensions.as_deref()).await);
     for plugin in loaded.plugins() {
         tracing::info!(
             plugin = %plugin.id(),
@@ -57,39 +66,6 @@ fn official() -> Vec<Bundled> {
         })
         .chain(bundled_plugins::all().iter().copied())
         .collect()
-}
-
-/// Where a package manager puts plugins: `kopuz/plugins` in each data
-/// directory (`$XDG_DATA_DIRS`, so `/app/share` in a Flatpak, where its
-/// extensions mount), or the list in `KOPUZ_PLUGIN_PATH`. Never `dir`.
-pub fn system_dirs(dir: &std::path::Path) -> Vec<PathBuf> {
-    system_dirs_from(
-        std::env::var_os("KOPUZ_PLUGIN_PATH"),
-        std::env::var_os("XDG_DATA_DIRS"),
-        dir,
-    )
-}
-
-fn system_dirs_from(
-    plugin_path: Option<std::ffi::OsString>,
-    data_dirs: Option<std::ffi::OsString>,
-    dir: &std::path::Path,
-) -> Vec<PathBuf> {
-    let listed = |paths: Option<std::ffi::OsString>| {
-        paths
-            .filter(|paths| !paths.is_empty())
-            .map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
-    };
-    let mut dirs: Vec<PathBuf> = listed(plugin_path).unwrap_or_else(|| {
-        listed(data_dirs)
-            .unwrap_or_else(|| vec!["/usr/local/share".into(), "/usr/share".into()])
-            .into_iter()
-            .map(|data| data.join("kopuz").join("plugins"))
-            .collect()
-    });
-    dirs.retain(|system| system.is_absolute() && system != dir);
-    dirs.dedup();
-    dirs
 }
 
 pub fn dir() -> Option<&'static std::path::Path> {
@@ -334,6 +310,7 @@ pub fn own_service(slug: &str) -> Option<OwnService> {
 
 /// What a plugin may reach. The pictures it names are fetched or read by the
 /// host, outside the sandbox, so they are held to the same hosts.
+#[derive(Clone)]
 pub struct Reach {
     /// Shipped inside kopuz, so its references are ours to trust.
     trusted: bool,
@@ -389,52 +366,38 @@ impl Reach {
         keep.then_some(raw)
     }
 
+    /// What every fetch of this plugin's streams is held to: their redirects,
+    /// the segments they list and where their names lead. Nothing for one
+    /// kopuz ships.
+    pub(crate) fn stream_guard(&self) -> Option<utils::http::Guard> {
+        (!self.trusted).then(|| Arc::new(self.clone()) as utils::http::Guard)
+    }
+
     /// Whether the host may fetch `url` for this plugin.
     pub fn allows(&self, url: &str) -> bool {
-        let Ok(url) = reqwest::Url::parse(url) else {
-            return false;
-        };
-        matches!(url.scheme(), "http" | "https")
-            && url.username().is_empty()
-            && url.password().is_none()
-            && url.host_str().is_some_and(|host| {
-                self.trusted || self.permissions.allows(host, self.server_host.as_deref())
-            })
+        reqwest::Url::parse(url).is_ok_and(|url| utils::http::within(self, &url))
+    }
+}
+
+impl utils::http::Reach for Reach {
+    fn allows_host(&self, host: &str) -> bool {
+        self.trusted || self.permissions.allows(host, self.server_host.as_deref())
+    }
+
+    fn may_be_local(&self, host: &str) -> bool {
+        if self.trusted {
+            return true;
+        }
+        let normal = |host: &str| host.trim_end_matches('.').to_ascii_lowercase();
+        self.server_host
+            .as_deref()
+            .is_some_and(|server| normal(server) == normal(host))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[cfg(unix)]
-    #[test]
-    fn system_plugins_come_from_each_data_directory_or_the_listed_path() {
-        let mine = std::path::Path::new("/home/me/.local/share/kopuz/plugins");
-        assert_eq!(
-            system_dirs_from(None, Some("/app/share:/usr/share".into()), mine),
-            [
-                PathBuf::from("/app/share/kopuz/plugins"),
-                PathBuf::from("/usr/share/kopuz/plugins"),
-            ]
-        );
-        assert_eq!(
-            system_dirs_from(None, None, mine),
-            [
-                PathBuf::from("/usr/local/share/kopuz/plugins"),
-                PathBuf::from("/usr/share/kopuz/plugins"),
-            ]
-        );
-        assert_eq!(
-            system_dirs_from(
-                Some("/opt/plugins:relative:/home/me/.local/share/kopuz/plugins".into()),
-                Some("/usr/share".into()),
-                mine,
-            ),
-            [PathBuf::from("/opt/plugins")],
-            "the listed path wins; a relative entry and the plugin directory are skipped"
-        );
-    }
 
     #[test]
     fn a_server_written_with_a_trailing_dot_still_names_itself() {

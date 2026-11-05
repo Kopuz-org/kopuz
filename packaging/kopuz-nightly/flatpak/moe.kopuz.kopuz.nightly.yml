@@ -4,6 +4,15 @@ runtime: org.freedesktop.Platform
 runtime-version: '25.08'
 sdk: org.freedesktop.Sdk
 command: kopuz-nightly
+add-extensions:
+  # Each plugin extension mounts at /app/plugins/<name>, holding kopuz-plugin.toml and plugin.wasm.
+  moe.kopuz.kopuz.Plugin:
+    # Same as runtime-version; a plugin extension's branch has to match it.
+    version: '25.08'
+    directory: plugins
+    subdirectories: true
+    no-autodownload: true
+    autodelete: true
 finish-args:
   - --share=ipc
   - --share=network
@@ -23,13 +32,6 @@ finish-args:
   - --env=KOPUZ_RUNTIME_DIR=app/moe.kopuz.kopuz.nightly
   # Flatpak delivers the updates, so Kopuz's own check would only point at downloads that do not apply.
   - --env=KOPUZ_CONFIG_AUTO_CHECK_UPDATES=false
-# Plugins shipped as extensions; each mounts at /app/share/kopuz/plugins/<name>/, which Kopuz reads through XDG_DATA_DIRS.
-add-extensions:
-  moe.kopuz.kopuz.nightly.Plugin:
-    directory: share/kopuz/plugins
-    subdirectories: true
-    no-autodownload: true
-    autodelete: true
 modules:
   - name: kopuz-nightly
     buildsystem: simple
@@ -38,7 +40,7 @@ modules:
       - install -Dm644 -t ${FLATPAK_DEST}/share/applications usr/share/applications/${FLATPAK_ID}.desktop
       - install -Dm644 -t ${FLATPAK_DEST}/share/icons/hicolor/256x256/apps usr/share/icons/hicolor/256x256/apps/${FLATPAK_ID}.png
       - install -Dm644 -t ${FLATPAK_DEST}/share/metainfo usr/share/metainfo/${FLATPAK_ID}.metainfo.xml
-      - install -d ${FLATPAK_DEST}/share/kopuz/plugins
+      - mkdir -p ${FLATPAK_DEST}/plugins
     sources:
       - type: dir
         path: payload

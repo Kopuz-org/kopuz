@@ -19,8 +19,8 @@ use std::time::Duration;
 /// playlist driving unbounded in-memory growth.
 const MAX_TOTAL_BYTES: usize = 1024 * 1024 * 1024;
 
-fn client() -> reqwest::blocking::Client {
-    utils::http::blocking_builder()
+fn client(guard: Option<utils::http::Guard>) -> reqwest::blocking::Client {
+    utils::http::guarded_blocking_builder(guard)
         .timeout(Duration::from_secs(30))
         .build()
         .unwrap_or_default()
@@ -28,8 +28,13 @@ fn client() -> reqwest::blocking::Client {
 
 /// Fetch an HLS media-playlist URL and concatenate its init + media segments
 /// into one contiguous (fMP4) byte buffer.
-pub fn assemble(playlist_url: &str, user_agent: Option<&str>) -> Result<Vec<u8>> {
-    let http = client();
+/// Every request, segments included, is held to `guard`.
+pub fn assemble(
+    playlist_url: &str,
+    user_agent: Option<&str>,
+    guard: Option<utils::http::Guard>,
+) -> Result<Vec<u8>> {
+    let http = client(guard.clone());
 
     let mut playlist_req = http.get(playlist_url);
     if let Some(ua) = user_agent {
@@ -51,6 +56,15 @@ pub fn assemble(playlist_url: &str, user_agent: Option<&str>) -> Result<Vec<u8>>
 
     let mut out = Vec::new();
     for url in segments {
+        let off_reach = guard.as_ref().is_some_and(|guard| {
+            !reqwest::Url::parse(&url).is_ok_and(|url| utils::http::within(guard.as_ref(), &url))
+        });
+        if off_reach {
+            return Err(Error::new(
+                ErrorKind::PermissionDenied,
+                "an HLS segment is on a host its plugin may not reach",
+            ));
+        }
         let mut seg_req = http.get(&url);
         if let Some(ua) = user_agent {
             seg_req = seg_req.header("User-Agent", ua);

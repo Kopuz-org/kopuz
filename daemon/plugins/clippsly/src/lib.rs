@@ -125,7 +125,7 @@ impl Source for Clippsly {
         })
     }
 
-    fn upload_track(&self, filename: &str, content: &[u8]) -> Result<()> {
+    fn upload_track(&self, filename: &str, content: Vec<u8>) -> Result<()> {
         self.client()?.upload(filename, content)
     }
 }

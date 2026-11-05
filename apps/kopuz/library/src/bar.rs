@@ -1,10 +1,11 @@
 //! The chrome over the listing: the facet switch, the filter bar and the selection pill.
 
-use api::TrackFilter;
+use api::{FavoritesSyncMode, JobKind, SourceCapabilities, TrackFilter};
 use commands::Command;
 use components::format::{t, t_with};
 use components::{
-    FilterBar, FilterChip, FilterEntry, PageHeader, Segment, Segmented, SortControl, icons, style,
+    FilterBar, FilterChip, FilterEntry, IconButton, PageHeader, ProgressBar, Segment, Segmented,
+    SortControl, SyncStatus, icons, style,
 };
 use config::{SortCriterion, SortDirection};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -16,7 +17,7 @@ use gpui_kit::{
     div,
 };
 use store::layout::{Density, TileSize, ViewMode};
-use store::{Link, Target};
+use store::{JobsModel, Link, SourcesModel, Target};
 
 use crate::Library;
 use crate::facet::Facet;
@@ -30,6 +31,25 @@ impl Library {
         let switch = (!self.is_liked()).then(|| self.facet_switch(cx));
         let controls = self.controls(cx);
         let filter_bar = self.filter_bar(cx);
+        let capabilities = SourcesModel::global(cx).read(cx).capabilities();
+        let syncing = JobsModel::global(cx)
+            .read(cx)
+            .progress(JobKind::FavoritesSync)
+            .is_some();
+        let paginated = capabilities.favorites_sync == FavoritesSyncMode::Paginated;
+        let sync = (self.is_liked() && (paginated || syncing)).then(|| {
+            SyncStatus::new(JobKind::FavoritesSync)
+                .total(count)
+                .on_refresh(|_, _, cx| start(JobKind::FavoritesSync, cx))
+        });
+        let refreshing = (!self.is_liked())
+            .then(|| {
+                let jobs = JobsModel::global(cx).read(cx);
+                jobs.progress(JobKind::Scan)
+                    .or_else(|| jobs.progress(JobKind::LibrarySync))
+                    .map(ProgressBar::job)
+            })
+            .flatten();
         v_flex()
             .w_full()
             .flex_shrink_0()
@@ -39,8 +59,13 @@ impl Library {
                 PageHeader::new(self.title())
                     .count(t_with("library_count", &[("count", count.into())]))
                     .flush()
-                    .action(controls),
+                    .action(controls)
+                    .when_some(self.header_button(&capabilities, cx), |header, button| {
+                        header.action(button)
+                    }),
             )
+            .children(sync)
+            .children(refreshing)
             .children(switch)
             .child(filter_bar)
             .into_any_element()
@@ -223,6 +248,35 @@ impl Library {
                     .child(self.grid_sort_control(cx))
             })
             .into_any_element()
+    }
+
+    /// Favorites starts the source's radio of them; the library pulls itself in again.
+    fn header_button(
+        &self,
+        capabilities: &SourceCapabilities,
+        cx: &mut Context<Self>,
+    ) -> Option<IconButton> {
+        if self.is_liked() {
+            let id = capabilities.favorites_playlist.clone()?;
+            return Some(
+                IconButton::new("favorites-radio", icons::RADIO)
+                    .tooltip(t("start_radio"))
+                    .on_click(move |_, _, cx| store::actions::start_playlist_radio(id.clone(), cx)),
+            );
+        }
+        let (kind, label) = match (capabilities.scan_folders, capabilities.sync) {
+            (true, _) => (JobKind::Scan, "rescan_library"),
+            (false, true) => (JobKind::LibrarySync, "refresh_music_library"),
+            (false, false) => return None,
+        };
+        let running = JobsModel::global(cx).read(cx).progress(kind).is_some();
+        Some(
+            IconButton::new("library-refresh", icons::REFRESH)
+                .tooltip(t(label))
+                .loading(running)
+                .disabled(running)
+                .on_click(move |_, _, cx| start(kind, cx)),
+        )
     }
 
     fn quiet(&self, id: &'static str, icon: &'static str, label: SharedString, cx: &App) -> Button {
@@ -676,6 +730,10 @@ fn tile_label_key(size: TileSize) -> &'static str {
         TileSize::Medium => "library_tile_medium",
         TileSize::Large => "library_tile_large",
     }
+}
+
+fn start(kind: JobKind, cx: &mut App) {
+    JobsModel::global(cx).update(cx, |jobs, cx| jobs.start(kind, cx));
 }
 
 /// `AnyElement` has no builder tail; this keeps `chrome` reading as one expression.

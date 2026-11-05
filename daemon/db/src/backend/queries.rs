@@ -89,6 +89,20 @@ fn order_terms(sort: &TrackSort) -> Vec<Term> {
         TrackSort::DateAdded => vec![("t.added_at", true), ("t.rowid_pk", true)],
         TrackSort::PlayCount => vec![("COALESCE(lc.count, 0)", true), TITLE],
         TrackSort::TrackNumber => vec![DISC, TRACK, TITLE],
+        // A new like takes a rank below every other, so ascending rank is newest first.
+        TrackSort::Liked => vec![
+            (
+                "COALESCE((SELECT f.rank FROM favorites f \
+                 WHERE f.server_id = t.source AND f.ref = t.track_key), 9223372036854775807)",
+                false,
+            ),
+            (
+                "(SELECT f.rowid FROM favorites f \
+                 WHERE f.server_id = t.source AND f.ref = t.track_key)",
+                false,
+            ),
+            TITLE,
+        ],
         TrackSort::Fields(criteria) => {
             if criteria.is_empty() {
                 return order_terms(&TrackSort::ArtistAlbum);
@@ -1675,6 +1689,39 @@ mod tests {
                 .iter()
                 .all(|record| record.last_played_at.is_some_and(|at| at >= before))
         );
+    }
+
+    #[tokio::test]
+    async fn favorites_list_newest_like_first() {
+        let (pool, source) = seeded().await;
+        sqlx::query(
+            "INSERT INTO favorites (server_id, ref, rank) \
+             VALUES (?1, '/a.flac', 0), (?1, '/b.flac', 1), (?1, '/c.flac', -1)",
+        )
+        .bind(source.as_str())
+        .execute(&pool)
+        .await
+        .unwrap();
+        let filter = TrackFilter {
+            source: source.clone(),
+            favorite: Some(true),
+            sort: TrackSort::Liked,
+            ..TrackFilter::default()
+        };
+
+        let listed = tracks_page(
+            &pool,
+            &filter,
+            Page {
+                offset: 0,
+                limit: 10,
+            },
+        )
+        .await
+        .unwrap();
+
+        let order: Vec<String> = listed.iter().map(|t| t.id.key().into_owned()).collect();
+        assert_eq!(order, ["/c.flac", "/a.flac", "/b.flac"]);
     }
 
     #[tokio::test]

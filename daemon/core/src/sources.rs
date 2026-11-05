@@ -214,6 +214,10 @@ fn capabilities(source: &dyn server::source::MediaSource) -> SourceCapabilities 
         music_videos: caps.music_videos,
         track_radio: caps.radio.track,
         playlist_radio: caps.radio.playlist,
+        favorites_playlist: source
+            .favorites_playlist()
+            .filter(|_| caps.radio.playlist)
+            .map(str::to_string),
         search_radio: caps.radio.track && caps.radio.search,
         playlists: match caps.playlists {
             PlaylistOps::None => PlaylistCapability::None,
@@ -304,6 +308,13 @@ impl SourceService {
                 "audio files must be between 1 byte and 500 MiB",
             ));
         }
+        // A plugin holds an upload in its sandbox, which can grow to hold the
+        // largest; one at a time keeps several from adding up.
+        static ONE_AT_A_TIME: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+        let _turn = ONE_AT_A_TIME
+            .acquire()
+            .await
+            .map_err(|_| ApiError::internal("uploads have stopped"))?;
         let (_, source) = self.resolve(&upload.source_id).await?;
         source
             .upload_track(upload.filename, upload.content)
@@ -1349,7 +1360,7 @@ impl SourceService {
         }
         #[cfg(not(target_os = "android"))]
         {
-            let scratch = server::ytmusic::browser_sessions::scratch_dir();
+            let scratch = server::cookies::scratch_dir();
             Ok(server::ytmusic::browser_sessions::signed_in(&scratch)
                 .await
                 .into_iter()
@@ -1389,13 +1400,14 @@ impl SourceService {
         }
         #[cfg(not(target_os = "android"))]
         {
-            let scratch = server::ytmusic::browser_sessions::scratch_dir();
+            let scratch = server::cookies::scratch_dir();
             let (browser, cookies) = server::ytmusic::browser_sessions::import(session, &scratch)
                 .await
                 .map_err(|error| {
                     use server::ytmusic::browser_sessions::ImportError;
                     let reason = match error {
                         ImportError::ProfileGone => ErrorReason::BrowserProfileGone,
+                        ImportError::BrowserOpen { .. } => ErrorReason::BrowserOpen,
                         ImportError::CookiesUnreadable(_) => ErrorReason::BrowserCookiesUnreadable,
                         ImportError::SignedOut { .. } => ErrorReason::BrowserProfileSignedOut,
                     };
@@ -2163,7 +2175,7 @@ async fn resume_from_profiles(
             return Some(cookies);
         }
     }
-    let scratch = server::ytmusic::browser_sessions::scratch_dir();
+    let scratch = server::cookies::scratch_dir();
     let (_, cookies) = server::ytmusic::browser_sessions::import(imported?, &scratch)
         .await
         .ok()?;

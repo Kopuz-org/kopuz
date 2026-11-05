@@ -8,8 +8,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use config::{Browser, BrowserEngine};
 
+use super::store::Cookie;
 #[cfg(not(target_os = "android"))]
-use super::store::{Cookie, host_matches_domain};
+use super::store::host_matches_domain;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BrowserProfile {
@@ -25,6 +26,35 @@ impl BrowserProfile {
     /// Stable across listings, so a client can name the one it picked.
     pub fn id(&self) -> String {
         format!("{}:{}", self.browser.id(), self.dir.display())
+    }
+}
+
+/// Where a profile's store is copied while it is read.
+pub fn scratch_dir() -> PathBuf {
+    super::profile_dir("browser-import", "")
+}
+
+/// Why a profile's cookies could not be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfileError {
+    /// The browser is running and holds its store open, which only Chromium
+    /// on Windows does.
+    BrowserOpen,
+    Unreadable(String),
+}
+
+impl std::fmt::Display for ProfileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BrowserOpen => f.write_str("the browser holds its cookie store open"),
+            Self::Unreadable(error) => f.write_str(error),
+        }
+    }
+}
+
+impl From<String> for ProfileError {
+    fn from(error: String) -> Self {
+        Self::Unreadable(error)
     }
 }
 
@@ -319,6 +349,27 @@ fn copy_store(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(not(target_os = "android"))]
+fn copy_error(store: &Path, error: std::io::Error) -> ProfileError {
+    if held_open(&error) {
+        ProfileError::BrowserOpen
+    } else {
+        ProfileError::Unreadable(format!("copy {}: {error}", store.display()))
+    }
+}
+
+/// `ERROR_SHARING_VIOLATION` or `ERROR_LOCK_VIOLATION`: a running Chromium
+/// opens its store exclusively.
+#[cfg(target_os = "windows")]
+fn held_open(error: &std::io::Error) -> bool {
+    matches!(error.raw_os_error(), Some(32 | 33))
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "android")))]
+fn held_open(_error: &std::io::Error) -> bool {
+    false
+}
+
+#[cfg(not(target_os = "android"))]
 fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(suffix);
@@ -371,7 +422,7 @@ pub async fn holds_cookies(
     scratch: &Path,
     domain: &str,
     names: &[&str],
-) -> Result<bool, String> {
+) -> Result<bool, ProfileError> {
     use sqlx::{ConnectOptions, Row};
 
     let (store, query) = match profile.browser.engine() {
@@ -389,7 +440,7 @@ pub async fn holds_cookies(
     let store = store.ok_or_else(|| format!("no cookie store in {}", profile.dir.display()))?;
     let copy = Scratch::new(scratch)?;
     let db = copy.dir.join("cookies");
-    copy_store(&store, &db).map_err(|e| format!("copy {}: {e}", store.display()))?;
+    copy_store(&store, &db).map_err(|e| copy_error(&store, e))?;
     // Read-write, so opening the copy replays the journal copied with it.
     let mut conn = sqlx::sqlite::SqliteConnectOptions::new()
         .filename(&db)
@@ -427,39 +478,45 @@ pub async fn read_cookies(
     profile: &BrowserProfile,
     scratch: &Path,
     domain: &str,
-) -> Result<Vec<Cookie>, String> {
+) -> Result<Vec<Cookie>, ProfileError> {
     let browser = profile.browser;
     if browser.engine() == BrowserEngine::Gecko {
-        return super::mozilla::read_cookies(browser, &profile.dir, domain).await;
+        return Ok(super::mozilla::read_cookies(browser, &profile.dir, domain).await?);
     }
     let store = chromium_store(&profile.dir)
         .ok_or_else(|| format!("no cookie store in {}", profile.dir.display()))?;
     let copy = Scratch::new(scratch)?;
-    // Windows Chromium holds its store open exclusively while it runs.
-    let locked = |e: std::io::Error| {
-        format!(
-            "could not copy {}'s cookies ({e}). Close {} and try again.",
-            browser.label(),
-            browser.label()
-        )
-    };
     let relative = store
         .strip_prefix(&profile.dir)
         .unwrap_or(Path::new("Cookies"));
-    copy_store(&store, &copy.dir.join("Default").join(relative)).map_err(locked)?;
+    copy_store(&store, &copy.dir.join("Default").join(relative))
+        .map_err(|e| copy_error(&store, e))?;
     if let Some(root) = profile.dir.parent() {
         let state = root.join("Local State");
         if state.is_file() {
-            std::fs::copy(&state, copy.dir.join("Local State")).map_err(locked)?;
+            std::fs::copy(&state, copy.dir.join("Local State"))
+                .map_err(|e| copy_error(&state, e))?;
         }
     }
-    super::store::read_profile_cookies(
+    Ok(super::store::read_profile_cookies(
         browser,
         &copy.dir,
         domain,
         &["--profile-directory=Default".to_string()],
     )
-    .await
+    .await?)
+}
+
+#[cfg(target_os = "android")]
+pub async fn read_cookies(
+    profile: &BrowserProfile,
+    _scratch: &Path,
+    _domain: &str,
+) -> Result<Vec<Cookie>, ProfileError> {
+    Err(ProfileError::Unreadable(format!(
+        "browser cookie import is desktop-only ({})",
+        profile.browser.label()
+    )))
 }
 
 #[cfg(test)]
@@ -489,6 +546,22 @@ mod tests {
             .map(|p| p.name)
             .collect();
         assert_eq!(names, ["Work", "Personal"]);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn a_store_the_browser_holds_open_reads_as_browser_open() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join("Cookies");
+        write(&store, "");
+        let _held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&store)
+            .unwrap();
+        let error = copy_store(&store, &dir.path().join("copy").join("Cookies")).unwrap_err();
+        assert_eq!(copy_error(&store, error), ProfileError::BrowserOpen);
     }
 
     #[test]

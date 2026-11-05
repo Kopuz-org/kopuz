@@ -1,21 +1,21 @@
 # Shared-layer follow-ups (apply AFTER all agents finish)
 
 From page_library (a519fcea):
-- [ ] `TrackList`: windowed mode — `set_window(rows, offset, total)` + emit
+- [x] `TrackList`: windowed mode — `set_window(rows, offset, total)` + emit
       `TrackListEvent::RangeChanged { offset, limit }` from the uniform_list range
       processor. Library and Activity both need it (§5.8). Note: with windowing,
       `TrackListEvent::Play(index)` must stay a *listing* index, not a row index.
-- [ ] `TrackList`: a way to ENTER selection mode from a row (long-press or hover
+- [x] `TrackList`: a way to ENTER selection mode from a row (long-press or hover
       checkbox) — today only a page-level select-all can start it, so §3.9's
       long-press is unreachable.
-- [ ] `TrackList`: `selected_count()` so pages don't build a Vec just to count.
+- [x] `TrackList`: `selected_count()` so pages don't build a Vec just to count.
 - [ ] `TrackListOptions`: `now_playing` flag — §2.6 wants the highlight only when
       the queue IS this listing; today it always highlights by key.
-- [ ] `store::actions`: `delete_tracks(keys, from_disk, cx)` helper; albums,
+- [x] `store::actions`: `delete_tracks(keys, from_disk, cx)` helper; albums,
       playlists and favorites all want it.
-- [ ] `components`: shared `SelectionBar` (§5.6 — every list page has the same one).
+- [x] `components`: shared `SelectionBar` (§5.6 — every list page has the same one).
       page_library has a local one to lift.
-- [ ] `en.ftl`: no key for "{n} selected" (hardcoded English in Dioxus too).
+- [x] `en.ftl`: no key for "{n} selected" (hardcoded English in Dioxus too).
 
 From page_downloader (af13edfe) — first SchemaForm consumer:
 - [ ] `SchemaForm`: specs arrive async, so every consumer does `new(vec![], ..)`
@@ -28,7 +28,7 @@ From page_downloader (af13edfe) — first SchemaForm consumer:
 - [ ] `FieldChanged(pub FieldValue)` has a pub field, against our own rule; make it
       `value()`. Consider carrying the full `values()` snapshot too — some
       `set_*_settings` endpoints want the whole set.
-- [ ] `FieldKind::Choice { custom }` is ignored, so §4.9's `custom_manual`
+- [x] `FieldKind::Choice { custom }` is ignored, so §4.9's `custom_manual`
       free-text is missing. Harmless for the downloader (all `custom: false`) but
       sources/integrations use `custom: true` — settings_sources will hit this.
 - [ ] Document that SchemaForm text fields answer on Blur/PressEnter only: a form
@@ -38,10 +38,10 @@ From page_downloader (af13edfe) — first SchemaForm consumer:
 - [ ] `components::icons`: no "sliders"/options or "gears"/processing glyph.
 
 From page_activity + page_radio (ac29020c):
-- [ ] `TrackList`: extra trailing columns (`Vec<(header, per-row element)>`) so a
+- [x] `TrackList`: extra trailing columns (`Vec<(header, per-row element)>`) so a
       page like Activity (genre, plays) can use it instead of hand-rolling a row
       and losing the menu, selection, drag, highlight and cfg.show_row_images.
-- [ ] `store`: a windowed-list helper (`Window<T>`), or make `Query::set_fetch`
+- [x] `store`: a windowed-list helper (`Window<T>`), or make `Query::set_fetch`
       KEEP the stale value instead of dropping it — that drop is what forces every
       windowed page to keep its own rows/offset/total mirror. Activity hand-rolled
       it; Library skipped it. Unify before more pages copy either.
@@ -62,13 +62,13 @@ SPACE KEY (fixed in app/src/main.rs, verify at integration):
   `NoAction` is the real escape hatch: it suppresses weaker bindings and
   dispatches nothing, so the character reaches the input.
   Bound `space -> NoAction` in the "Input" context.
-- [ ] Remove page_search's local duplicate of this (it registers a
+- [x] Remove page_search's local duplicate of this (it registers a
       process-wide binding from inside a page — works, but wrong home).
 
 From page_search (ad20cd74):
-- [ ] `TrackList`: no column sort/header at all — §2.2 and §2.6 both want it.
-- [ ] `PageHeader`: no cover slot (genre detail wants the hero image).
-- [ ] No scroll persistence (§5.7): TrackList owns its scroll handle privately
+- [x] `TrackList`: no column sort/header at all — §2.2 and §2.6 both want it.
+- [x] `PageHeader`: no cover slot (genre detail wants the hero image).
+- [x] No scroll persistence (§5.7): TrackList owns its scroll handle privately
       and grids use plain overflow scroll, so positions reset on navigation.
 - [ ] `Query`: no "don't run yet" mode; pages short-circuit inside the fetch.
 - [ ] No "focus on route enter" hook, so search can't autofocus its input safely.
@@ -76,16 +76,16 @@ From page_search (ad20cd74):
 From page_discover (a1c78fcb):
 - [ ] `Route::DiscoverPlaylist` should carry a `CatalogItemKind` (removes the
       album-retry, replaces the old "MPRE" id sniff properly).
-- [ ] `PageHeader::back` takes a fixed Route; detail pages want
+- [x] `PageHeader::back` takes a fixed Route; detail pages want
       `Navigator::go_back`. Add a back_button() variant.
-- [ ] Lift the horizontal carousel (scroll handle + arrows + clamping) into
+- [x] Lift the horizontal carousel (scroll handle + arrows + clamping) into
       `components::cards`; Home wants it too.
-- [ ] `Tile`: add `on_click` — song cards need a command, not a route.
+- [x] `Tile`: add `on_click` — song cards need a command, not a route.
 - [ ] `TrackList` is size_full+uniform_list, so embedding in a scrolling page
       needs a reserved height; expose ROW_HEIGHT or add an intrinsic-height mode.
-- [ ] `DiscoverNowPlaying` should live in `store` to survive navigation.
-- [ ] `en.ftl`: no plain `pause` key.
-- [ ] No scroll-position paging primitive (every paged page re-rolls it).
+- [x] `DiscoverNowPlaying` should live in `store` to survive navigation.
+- [x] `en.ftl`: no plain `pause` key.
+- [x] No scroll-position paging primitive (every paged page re-rolls it).
 
 From overlays (a90d7d49):
 - [ ] Banners float over the page (covering its top ~28-40px) instead of taking
@@ -97,12 +97,12 @@ From overlays (a90d7d49):
       filter by kind instead of waking on every job.
 
 From settings_appearance + palettes (a3e9425b):
-- [ ] **theme::apply_named only knows BUILT_IN**, so a `custom-*` id silently
+- [x] **theme::apply_named only knows BUILT_IN**, so a `custom-*` id silently
       falls back to "default": the theme editor is WRITE-ONLY today. Needs a path
       building a Palette from `cfg.custom_themes[id].vars` (same 13 keys, infer
       `dark` from bg lightness). Same gap blocks the `album-art` and `live`
       pseudo-themes. theme/src/lib.rs is mine — PRIORITISE.
-- [ ] `components`: a settings-row vocabulary (row/toggle/choice/slider/path + the
+- [x] `components`: a settings-row vocabulary (row/toggle/choice/slider/path + the
       locked hint). Three settings crates each built their own.
 - [ ] `Button::disabled` does NOT disable `dropdown_menu` (the popover ignores the
       trigger's disabled flag), so a locked choice row still opens. Needs a shared
@@ -119,9 +119,9 @@ From page_favorites (a449e9a4) — mostly CONFIRMING earlier requests:
 - [ ] `TrackList`: expose `options()`; make it read `cfg.show_row_images` itself
       (§3.9) instead of each page wiring it.
 - [ ] `TrackList::scroll_to` only does Center/non-strict; add `scroll_to_top()`.
-- [ ] `TrackList` never installs a drag source, so `TrackDrag` is a type nothing
+- [x] `TrackList` never installs a drag source, so `TrackDrag` is a type nothing
       emits — queue drop (§3.7) cannot work until it does.
-- [ ] `PageHeader`: no icon slot (favorites heart dropped).
+- [x] `PageHeader`: no icon slot (favorites heart dropped).
 - [ ] `components::icons`: no sign-in glyph; set is curated so pages use raw paths.
 
 RECURRING (implement first, in this order):
@@ -134,14 +134,14 @@ RECURRING (implement first, in this order):
  7. Banner layout space (overlays covers the page top)
 
 From settings_playback (a82359b1):
-- [ ] **MY BUG in page_settings**: the 8-entry rail maps 4 categories onto one
+- [x] **MY BUG in page_settings**: the 8-entry rail maps 4 categories onto one
       entity with no way to say which, so Offline/Metadata/Player/Tools all show
       the same stacked page (same for General/Appearance and Library/Connectivity).
       Fix: add a `show(category, cx)` to each of the three settings crates (safe
       to edit once their agents are done) and have the shell call it.
 - CONFIRMED FIXED: SchemaForm's `managed_by_settings_file` key did not exist;
   already repointed to `setting_managed_by_system`.
-- [ ] `store`: a one-line "edit one config field" helper — every settings row
+- [x] `store`: a one-line "edit one config field" helper — every settings row
       repeats `ConfigModel::global(cx).update(cx, |m, cx| m.update(cx, |c| ...))`.
 - [ ] `SchemaForm`: add `specs()` getter + windowless `set_specs` so a save's
       authoritative response can be adopted without a refetch round-trip.
@@ -153,12 +153,12 @@ From page_artists (ae99b324) — 4th/5th independent request for the same items:
 - PageHeader back-in-history variant (3rd request).
 - [ ] `TrackListEvent::Play(index)` should carry the keys (or key) — every page
       re-reads `keys()` to rebuild the queue.
-- [ ] `Cover`: no click/hover-overlay, so artwork upload is hand-assembled;
+- [x] `Cover`: no click/hover-overlay, so artwork upload is hand-assembled;
       albums needs the identical thing + trash. Add `EditableCover`.
-- [ ] `Tile::route()` covers the whole tile, so a per-card dots menu double-fires
+- [x] `Tile::route()` covers the whole tile, so a per-card dots menu double-fires
       navigation; add a `Tile::menu(..)` slot with its own click region. (This is
       why artists wrote its own card instead of using Tile.)
-- [ ] `store::actions`: no library mutations — delete_tracks, delete_album,
+- [x] `store::actions`: no library mutations — delete_tracks, delete_album,
       upload_artwork, remove_artwork, with_album_keys are all raw `actions::run`
       here and albums/favorites need them too.
 - [ ] `DownloadsModel::remove` is single-key → "remove all" makes N round trips;
@@ -174,21 +174,21 @@ From fullscreen (af979caf):
       WRONG during a crossfade (the outgoing track is shown). Either add
       album_id to NowPlaying upstream (daemon+proto change) or add
       `store::current_track_info() -> Option<TrackInfo>`. AFFECTS player_bar too.
-- [ ] **GPUI has no image blur / backdrop filter** (checked gpui-pre, -base,
+- [x] **GPUI has no image blur / backdrop filter** (checked gpui-pre, -base,
       -component: only shadow blur_radius). `cfg.cover_art_blur` cannot be
       honoured as-is; needs a downsampling custom element or a blurred variant
       produced at decode time in `store::artwork`. PARITY gap, tell the user.
 - [ ] `store::actions::dont_recommend(key, cx)` — hand-rolled here, player_bar
       needs the identical thing (call, toast, then Next regardless).
-- [ ] A shared seek-slider wrapper: SliderState's range is fixed at construction,
+- [x] A shared seek-slider wrapper: SliderState's range is fixed at construction,
       so every seek bar works in 0..1 fractions and re-implements the drag latch
       and the "don't overwrite while dragging" rule. Written 3x in this crate
       alone; player_bar will make it 4.
-- [ ] Mute memory lives in view state → lost on drop, not shared with player_bar.
+- [x] Mute memory lives in view state → lost on drop, not shared with player_bar.
       Belongs on PlayerModel or ConfigModel.
-- [ ] `Cover` takes a fixed Pixels size; fullscreen hero wants fill-container.
-- [ ] Slider has no underlay slot → no buffered-range underlay on seek bars.
-- [ ] fullscreen's queue+lyrics tabs DUPLICATE side_panel; collapse into one
+- [x] `Cover` takes a fixed Pixels size; fullscreen hero wants fill-container.
+- [x] Slider has no underlay slot → no buffered-range underlay on seek bars.
+- [x] fullscreen's queue+lyrics tabs DUPLICATE side_panel; collapse into one
       implementation parameterised by layout once both have landed.
 
 From page_albums (a7e130dc):
@@ -199,7 +199,7 @@ From page_albums (a7e130dc):
 - [ ] `TrackList`: no disc/section headers, ROW_HEIGHT private (albums duplicates
       the 60px constant and stacks one list per disc), and `set_rows` cannot
       preserve selection across a rebuild.
-- [ ] `Tile` is RenderOnce so `.context_menu` does not apply, and nothing inside
+- [x] `Tile` is RenderOnce so `.context_menu` does not apply, and nothing inside
       stops click propagation — a menu slot should own both.
 - [ ] `actions::run` drops the answer, so "fetch keys then act" is hand-rolled;
       add a with_album_keys-style helper.
@@ -213,12 +213,12 @@ NOTE: my mid-flight theme edit briefly broke every crate that links theme (the
 sidebar agent saw 41 errors from it). Don't edit shared crates while agents run.
 
 From side_panel (a91606ac):
-- [ ] **shell.rs hardcodes the panel slot at w(px(320.))** while the panel drags
+- [x] **shell.rs hardcodes the panel slot at w(px(320.))** while the panel drags
       itself 280-600; read `SidePanelView::width()` (exposed for this) or move the
       width into `Chrome` so it persists. MY FILE — fix at integration.
-- [ ] TrackDrag drop targets are wired and INERT until TrackList installs a drag
+- [x] TrackDrag drop targets are wired and INERT until TrackList installs a drag
       source (already on the list).
-- [ ] `QueueModel`: add total-duration and is-station helpers (fullscreen wants
+- [x] `QueueModel`: add total-duration and is-station helpers (fullscreen wants
       the same summary).
 - [ ] Note on `Playhead`: 250ms is right for a seek bar, useless for lyrics —
       lyrics drives its own animation frames.
@@ -227,10 +227,10 @@ From side_panel (a91606ac):
   interlude is a note+progress bar, depth blur is opacity. Tell the user.
 
 From sidebar (a06906296):
-- [ ] `SourcesModel` should own connection status + auto-probe on active change;
+- [x] `SourcesModel` should own connection status + auto-probe on active change;
       sidebar, settings_sources and the player bar would otherwise each probe
       `validate_source` independently. PRIORITISE.
-- [ ] No shared `api::Icon` -> element helper (Svg wrapping + FontAwesome
+- [x] No shared `api::Icon` -> element helper (Svg wrapping + FontAwesome
       fallback table). sidebar and settings_sources both need it; belongs in
       components next to `icons`.
 - [ ] `ConfigModel::is_locked` key spelling is undocumented, so sidebar left the
@@ -252,26 +252,26 @@ From quick_search + metadata_dialog (af54a6cb):
   Input context and bindings beat key-down listeners (same root cause as space).
 
 From page_playlists (ab9e5d8a):
-- [ ] **`TrackActions::reorder` is a DEAD FLAG** in components/track_list.rs: the
+- [x] **`TrackActions::reorder` is a DEAD FLAG** in components/track_list.rs: the
       event exists, the page handles it, but the row never renders the up/down
       controls. Render them (or expose a per-row trailing slot). MY BUG.
-- [ ] `Tile::on_click` covers the whole tile, so anything in `.overlay()` (dots
+- [x] `Tile::on_click` covers the whole tile, so anything in `.overlay()` (dots
       menu, download button) also navigates — playlists wrote a local Card, as
       artists and albums did. THIRD crate to work around this; fix Tile.
-- [ ] `PlaylistsModel` only has create/add_tracks; rename/delete/move/folder
+- [x] `PlaylistsModel` only has create/add_tracks; rename/delete/move/folder
       mutations are re-spelled per page. Add store::playlist_actions.
-- [ ] `store`: no offline/connectivity signal, so §2.9 offline filtering is out.
+- [x] `store`: no offline/connectivity signal, so §2.9 offline filtering is out.
 - Deviation: deletes now confirm via open_alert_dialog (Dioxus deleted silently).
 
 From page_home (ac7feb70):
-- [ ] `Tile` overlay is always visible and declares no hover group → every card
+- [x] `Tile` overlay is always visible and declares no hover group → every card
       page wraps it by hand. Add `Tile::hover_overlay(..)`. (4th Tile complaint.)
-- [ ] Lift `AlbumPlayButton` into components — §2.1 says "everywhere".
-- [ ] Lift the horizontal scroller + row heading into components (discover too).
-- [ ] `components::track_list::row_menu` is private and row-shaped; expose a
+- [x] Lift `AlbumPlayButton` into components — §2.1 says "everywhere".
+- [x] Lift the horizontal scroller + row heading into components (discover too).
+- [x] `components::track_list::row_menu` is private and row-shaped; expose a
       `track_menu(track, entries)` builder (Home song cards, Discover SongCard,
       fullscreen actions menu all duplicate it).
-- [ ] `store::actions::set_favorite_many(keys, on)` + aggregate failure toast.
+- [x] `store::actions::set_favorite_many(keys, on)` + aggregate failure toast.
 - Home shuffles with a per-page seed: stable while open, not per frame. Correct.
 
 UNVERIFIED (seen once, not reproduced):
@@ -301,7 +301,7 @@ MOTION PASS (after all motion agents land):
       `motion::reveal` (wrapping `MotionReveal`) into `components::motion`:
       overlays, quick_search and metadata_dialog all reach past the facade into
       `gpui_kit::base::motion` for entrance fades and the collapse reveal.
-- [ ] A hover helper for view-less render paths (`RenderOnce`, `Popover::content`
+- [x] A hover helper for view-less render paths (`RenderOnce`, `Popover::content`
       have no entity for `cx.listener`); switcher.rs hand-rolls
       `use_keyed_state` + a track() closure factory.
 - [ ] `motion::INSTANT` (Duration::ZERO) — load-bearing in the sidebar, where a
@@ -314,10 +314,10 @@ MOTION PASS (after all motion agents land):
       on hover-in and only tweens on the way out; the fix is a
       ButtonCustomVariant whose `hover`/`active` get the SAME tweened colour.
       Without it half of `transition-colors` is silently lost on every button.
-- [ ] **`motion::hover_flag(id, window, cx)`** + its listener — five private
+- [x] **`motion::hover_flag(id, window, cx)`** + its listener — five private
       copies now exist. Must be built on `window.use_keyed_state`, since a
       `RenderOnce` (Card, Tile, SettingRow) has no `cx.listener`.
-- [ ] `motion::SNAP` (120ms) and `SLOWER` (500ms): the settings rows are 120ms
+- [x] `motion::SNAP` (120ms) and `SLOWER` (500ms): the settings rows are 120ms
       and several covers are `duration-500`; feature crates import
       `std::time::Duration` to say so.
 - [ ] A zoom clip frame helper — `div().size(base).rounded(r).overflow_hidden()

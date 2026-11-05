@@ -989,6 +989,8 @@ message SourceCapabilities {
   // Every play of its tracks goes through kopuz, so kopuz's play counts are its whole listening history.
   bool complete_play_history = 33;
   bool rip_audio = 34;
+  // The playlist holding the account's favorites; a playlist radio of it is the favorites radio.
+  optional string favorites_playlist = 35;
 }
 
 message SearchFilter {
@@ -2160,8 +2162,6 @@ message PluginInfo {
   repeated string network = 10;
   bool sandboxed = 11;
   optional PluginUpdate update = 12;
-  // Installed by a package manager, which updates and removes it.
-  bool system = 13;
 }
 
 message PluginCatalog {
@@ -2531,6 +2531,7 @@ enum ErrorReason {
   ERROR_REASON_INVALID_SERVER_URL = 21;
   ERROR_REASON_NETWORK_DOWN = 22;
   ERROR_REASON_OFFLINE_MODE = 23;
+  ERROR_REASON_BROWSER_OPEN = 24;
 }
 
 enum ErrorCode {

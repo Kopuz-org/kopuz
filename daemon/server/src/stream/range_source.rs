@@ -176,17 +176,22 @@ pub struct RangeStreamSource {
 impl RangeStreamSource {
     /// Probe the URL with a one-byte range to learn its size and confirm range support; nothing more is fetched until it is read.
     pub fn new(url: String, user_agent: Option<String>) -> IoResult<Self> {
-        Self::new_with_progress(url, user_agent, None)
+        Self::new_with_progress(url, user_agent, None, None)
     }
 
+    /// Every request, redirects included, is held to `guard`.
     pub fn new_with_progress(
         url: String,
         user_agent: Option<String>,
         progress: Option<BufferProgressCallback>,
+        guard: Option<utils::http::Guard>,
     ) -> IoResult<Self> {
         let ua =
             user_agent.unwrap_or_else(|| concat!("Kopuz/", env!("CARGO_PKG_VERSION")).to_string());
-        let client = shared_client(&ua)?;
+        let client = match guard {
+            None => shared_client(&ua)?,
+            Some(guard) => configured(utils::http::guarded_blocking_builder(Some(guard)), &ua)?,
+        };
 
         // The first request after the gap between tracks, so the one a dead pooled connection strands.
         let resp = send_range(&client, &url, "bytes=0-0")?;
@@ -346,16 +351,23 @@ fn shared_client(ua: &str) -> IoResult<reqwest::blocking::Client> {
     if let Some(client) = clients.get(ua) {
         return Ok(client.clone());
     }
-    let client = utils::http::blocking_builder()
+    let client = configured(utils::http::blocking_builder(), ua)?;
+    clients.insert(ua.to_string(), client.clone());
+    Ok(client)
+}
+
+fn configured(
+    builder: reqwest::blocking::ClientBuilder,
+    ua: &str,
+) -> IoResult<reqwest::blocking::Client> {
+    builder
         .tcp_nodelay(true)
         .user_agent(ua)
         .timeout(REQUEST_TIMEOUT)
         .connect_timeout(CONNECT_TIMEOUT)
         .pool_idle_timeout(POOL_IDLE_TIMEOUT)
         .build()
-        .map_err(IoError::other)?;
-    clients.insert(ua.to_string(), client.clone());
-    Ok(client)
+        .map_err(IoError::other)
 }
 
 /// Send a range request, once more if the connection failed before answering.

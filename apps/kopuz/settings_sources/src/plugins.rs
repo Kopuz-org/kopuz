@@ -174,8 +174,7 @@ impl Plugins {
                     })),
                 );
         }
-        // A package manager's plugin is its own to remove.
-        if community && !plugin.system && on_disk(plugin) {
+        if community && on_disk(plugin) {
             actions = actions.child(
                 Button::new(SharedString::from(format!("plugin-remove-{id}")))
                     .custom(style::tint_text_button(cx.theme().danger, cx))
@@ -202,9 +201,6 @@ impl Plugins {
                             .gap_2()
                             .child(ui::label(SharedString::from(plugin.name.clone())))
                             .child(Badge::new(origin).tone(BadgeTone::Neutral))
-                            .when(plugin.system, |line| {
-                                line.child(Badge::new(t("plugin_system")).tone(BadgeTone::Neutral))
-                            })
                             .when(!plugin.sandboxed, |line| {
                                 line.child(Badge::new(t("plugin_native")).tone(BadgeTone::Neutral))
                             })

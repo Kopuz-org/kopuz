@@ -2,6 +2,7 @@ name: commit message
 
 on:
   pull_request:
+    types: [opened, edited, reopened, synchronize]
   push:
     branches: [master]
 
@@ -28,30 +29,12 @@ jobs:
             range="$BASE_SHA..$HEAD_SHA"
           fi
 
-          conventional_re='^(feat|fix|refactor|perf|test|style|ci|revert)(\([^)]+\)!?|!): '
-          scoped_re='^[a-z0-9][a-z0-9._-]*(/[a-z0-9][a-z0-9._-]*)?: .+'
           checked=0
           failed=0
           # First parent only: a subtree merge brings in another repo's history, written under its own rules.
           while IFS=$'\t' read -r sha subject; do
             checked=$((checked + 1))
-            if ((${#subject} > 80)); then
-              echo "::error title=Commit subject too long::$sha has ${#subject} characters: $subject"
-              failed=1
-              continue
-            fi
-
-            if [[ "$subject" =~ $conventional_re ]]; then
-              echo "::error title=Conventional Commit subject::$sha looks like Conventional Commits; Kopuz uses scoped commits: $subject"
-              failed=1
-              continue
-            fi
-
-            if ! [[ "$subject" =~ $scoped_re ]]; then
-              echo "::error title=Invalid commit subject::$sha must use 'scope: description': $subject"
-              failed=1
-              continue
-            fi
+            scripts/check_subject.sh "$sha" "$subject" || failed=1
           done < <(git log --first-parent --format='%h%x09%s' "$range")
 
           if ((checked == 0)); then
@@ -61,6 +44,14 @@ jobs:
           else
             echo "Checked $checked commit subject(s)."
           fi
+
+      # A squash merge lands the title, with " (#N)" appended, as the commit subject.
+      - name: Check PR title
+        if: github.event_name == 'pull_request'
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: scripts/check_subject.sh "PR title" "$TITLE (#$NUMBER)"
 
       # Push events would rescan history that predates the rule, so this only gates new PR commits.
       - name: Check for AI attribution

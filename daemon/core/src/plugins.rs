@@ -1,7 +1,7 @@
 //! The plugins the daemon runs, and the community marketplace it installs
 //! more from.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -24,6 +24,9 @@ pub struct PluginService {
     index_url: String,
     http: reqwest::Client,
     index: Mutex<Option<(Instant, Arc<Index>)>>,
+    /// Held while the plugin directory changes, since an install and a
+    /// removal of one id share its staging paths.
+    changing: Mutex<()>,
 }
 
 impl Default for PluginService {
@@ -52,6 +55,7 @@ impl PluginService {
             index_url,
             http,
             index: Mutex::new(None),
+            changing: Mutex::new(()),
         }
     }
 
@@ -169,7 +173,6 @@ impl PluginService {
                     homepage: None,
                     origin: PluginOrigin::Community,
                     sandboxed: true,
-                    system: registry.is_system(waiting.dir()),
                     installed_version: None,
                     available_version: Some(manifest.version.clone()),
                     services: manifest
@@ -191,6 +194,7 @@ impl PluginService {
     /// Install or update `id`, swapping it in while sources keep running.
     /// `network` is what the user agreed to; anything else is refused.
     pub async fn install(&self, id: &str, network: &[String]) -> Result<PluginInfo, ApiError> {
+        let _changing = self.changing.lock().await;
         if server::plugins::registry()
             .pending()
             .iter()
@@ -302,6 +306,7 @@ impl PluginService {
     }
 
     pub async fn uninstall(&self, id: &str) -> Result<(), ApiError> {
+        let _changing = self.changing.lock().await;
         let registry = server::plugins::registry();
         if registry
             .plugins()
@@ -314,20 +319,11 @@ impl PluginService {
         }
         // An update that waited across a restart has files but nothing loaded.
         let copies = registry.dirs_of(id);
+        if copies.is_empty() && registry.from_extension(id) {
+            return Err(market_error(MarketError::Extension(id.to_string())));
+        }
         if copies.is_empty() {
-            let by_system =
-                registry.plugins().iter().any(|plugin| {
-                    plugin.id() == id && plugin.origin() == plugin_host::Origin::System
-                }) || registry
-                    .pending()
-                    .iter()
-                    .any(|waiting| waiting.plugin.id() == id && registry.is_system(waiting.dir()));
-            return Err(match by_system {
-                true => ApiError::invalid_input(
-                    "a package manager installed this plugin; remove it there",
-                ),
-                false => ApiError::not_found("no such plugin is installed"),
-            });
+            return Err(ApiError::not_found("no such plugin is installed"));
         }
         let dir = server::plugins::dir()
             .ok_or_else(|| ApiError::unsupported("this daemon has no plugin directory"))?
@@ -359,12 +355,11 @@ fn installed() -> Vec<PluginInfo> {
                 homepage: None,
                 origin: match plugin.origin() {
                     plugin_host::Origin::Bundled => PluginOrigin::Official,
-                    plugin_host::Origin::Installed | plugin_host::Origin::System => {
+                    plugin_host::Origin::Installed | plugin_host::Origin::Extension => {
                         PluginOrigin::Community
                     }
                 },
                 sandboxed: !plugin.is_native(),
-                system: plugin.origin() == plugin_host::Origin::System,
                 installed_version: Some(manifest.version.clone()),
                 available_version: None,
                 services: manifest
@@ -397,10 +392,9 @@ fn changed_hosts() -> ApiError {
 /// without reading or hashing them.
 type Stamps = Vec<(PathBuf, Option<(u64, SystemTime)>)>;
 
-/// Of every plugin in the plugin directory and in the system ones.
-fn stamps(dirs: &[PathBuf]) -> Stamps {
-    dirs.iter()
-        .flat_map(|dir| plugin_host::plugin_dirs(dir))
+fn stamps(dir: &Path) -> Stamps {
+    plugin_host::plugin_dirs(dir)
+        .into_iter()
         .flat_map(|plugin| {
             [plugin_host::MANIFEST_FILE, plugin_host::COMPONENT_FILE].map(|file| plugin.join(file))
         })
@@ -425,24 +419,17 @@ where
     let Some(dir) = server::plugins::dir() else {
         return;
     };
-    let dirs: Arc<[PathBuf]> = server::plugins::registry()
-        .system_dirs()
-        .iter()
-        .cloned()
-        .chain([dir.to_path_buf()])
-        .collect();
     tokio::spawn(async move {
         // Empty, so the first quiet poll rescans and an edit made between boot
         // loading the plugins and this task starting is not missed.
         let mut loaded = Stamps::new();
-        let mut last = stamps(&dirs);
+        let mut last = stamps(dir);
         loop {
             tokio::time::sleep(WATCH_INTERVAL).await;
             if owner.strong_count() == 0 {
                 return;
             }
-            let polled = Arc::clone(&dirs);
-            let Ok(now) = tokio::task::spawn_blocking(move || stamps(&polled)).await else {
+            let Ok(now) = tokio::task::spawn_blocking(move || stamps(dir)).await else {
                 continue;
             };
             // Wait for one quiet interval, so files still being copied in are
@@ -472,7 +459,6 @@ fn listed(listing: &Listing) -> PluginInfo {
         homepage: listing.homepage.clone(),
         origin: PluginOrigin::Community,
         sandboxed: true,
-        system: false,
         installed_version: None,
         available_version: Some(listing.version.clone()),
         services: listing.services.clone(),

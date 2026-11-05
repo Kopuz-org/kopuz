@@ -251,6 +251,10 @@ impl MediaSource for YtSource {
         Ok(radio_page(page))
     }
 
+    fn favorites_playlist(&self) -> Option<&str> {
+        self.client.is_authenticated().then_some(LIKED_MUSIC_ID)
+    }
+
     async fn more_radio(&self, cursor: &str) -> Result<RadioPage, SourceError> {
         let (playlist_id, token) = cursor
             .split_once(RADIO_CURSOR_SEPARATOR)
@@ -648,6 +652,7 @@ impl MediaSource for YtSource {
             player::AudioFormat::M4a => crate::stream::AudioFormat::M4a,
         };
         Ok(StreamInfo {
+            guard: None,
             url: info.url,
             format: Some((format, info.range_safe)),
             user_agent: Some(info.user_agent),

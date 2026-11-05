@@ -356,6 +356,8 @@ pub enum AuthOutcome {
 
 pub struct StreamInfo {
     pub url: String,
+    /// A community plugin's hosts, which every fetch of `url` is held to.
+    pub guard: Option<utils::http::Guard>,
     pub format: Option<(AudioFormat, bool)>,
     pub user_agent: Option<String>,
     pub duration_secs: Option<u64>,

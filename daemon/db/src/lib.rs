@@ -88,6 +88,8 @@ pub enum TrackSort {
     PlayCount,
     /// Disc → track → title: the order an album plays in.
     TrackNumber,
+    /// The favorites' own order, newest like first; tracks that are not favorites come last.
+    Liked,
     /// Stacked user criteria (library sort control): the first field decides,
     /// the rest break ties. Empty falls back to [`TrackSort::ArtistAlbum`].
     Fields(Vec<config::SortCriterion<config::TrackSortField>>),

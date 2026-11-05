@@ -16,7 +16,6 @@ pub fn plugin_info_to_proto(value: &api::PluginInfo) -> PluginInfo {
         services: value.services.clone(),
         network: value.network.clone(),
         sandboxed: value.sandboxed,
-        system: value.system,
         update: value.update.as_ref().map(|update| PluginUpdate {
             version: update.version.clone(),
             network: update.network.clone(),
@@ -42,7 +41,6 @@ pub fn plugin_info_from_proto(value: &PluginInfo) -> api::PluginInfo {
         services: value.services.clone(),
         network: value.network.clone(),
         sandboxed: value.sandboxed,
-        system: value.system,
         update: value.update.as_ref().map(|update| api::PluginUpdate {
             version: update.version.clone(),
             network: update.network.clone(),
@@ -95,13 +93,11 @@ mod tests {
                     services: vec!["bandcamp".into()],
                     network: vec!["*.bandcamp.com".into()],
                     update: None,
-                    system: false,
                 },
                 api::PluginInfo {
                     id: "radio".into(),
                     origin: api::PluginOrigin::Community,
                     sandboxed: true,
-                    system: true,
                     installed_version: Some("1.0.0".into()),
                     network: vec!["a.test".into()],
                     update: Some(api::PluginUpdate {
