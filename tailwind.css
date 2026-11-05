@@ -13,6 +13,9 @@
 @source "./shared/config/**/*.rs";
 @source "./apps/legacy/kopuz_route/**/*.rs";
 
+/* An Android build on a tablet-sized window; `FormFactor` stamps the attribute on the app root. */
+@custom-variant tablet (&:where([data-form-factor="tablet"] *));
+
 /* Hover and press feedback should feel immediate; 150ms reads as lag. */
 @theme {
   --default-transition-duration: 100ms;

@@ -18,8 +18,8 @@ pub use common::controls::{
 };
 pub use common::{catalog_actions, constants, gestures, shared, virtual_scroll};
 pub use layout::{
-    bottombar, download_overlay, fullscreen, header, normal, rightbar, showcase, sidebar,
-    stat_card, titlebar, vaxry,
+    bottombar, download_overlay, form_factor, fullscreen, header, normal, rightbar, showcase,
+    sidebar, stat_card, titlebar, vaxry,
 };
 pub use navigation::controller::{CatalogPageRef, NavSnapshot, NavigationController};
 pub use navigation::removable_prompt::RemovablePrompt;
