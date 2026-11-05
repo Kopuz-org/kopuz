@@ -36,6 +36,13 @@ pub struct Pending {
     dir: PathBuf,
 }
 
+impl Pending {
+    /// Where its files are.
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Registry {
     plugins: Vec<Arc<Plugin>>,
@@ -47,6 +54,9 @@ pub struct Registry {
     approved: Approved,
     /// A plugin directory failed to read, so any recorded id may be its.
     unreadable: bool,
+    /// Read-only directories a package manager installs plugins into, read
+    /// before the plugin directory so a copy installed there wins.
+    system: Vec<PathBuf>,
 }
 
 enum Reread {
@@ -65,15 +75,24 @@ impl Registry {
     /// beyond those agreed to for its id waits in [`Self::pending`], as on a
     /// reload; one with no record is taken as agreed, as before records.
     pub async fn load(bundled: &[Bundled], dir: Option<&Path>) -> Self {
+        Self::load_with_system(bundled, dir, &[]).await
+    }
+
+    /// [`Self::load`], with the plugins in the read-only `system` directories
+    /// before those in `dir`.
+    pub async fn load_with_system(
+        bundled: &[Bundled],
+        dir: Option<&Path>,
+        system: &[PathBuf],
+    ) -> Self {
         let approved = dir.map(read_approved).unwrap_or_default();
         let mut installed = Vec::new();
         let mut pending = Vec::new();
         let mut unreadable = false;
-        for path in dir.map(plugin_dirs).unwrap_or_default() {
+        for (path, origin) in every_plugin_dir(system, dir) {
             match read_plugin(&path) {
                 Ok((manifest, wasm)) => {
-                    let plugin =
-                        Plugin::new(manifest, Code::Wasm(Cow::Owned(wasm)), Origin::Installed);
+                    let plugin = Plugin::new(manifest, Code::Wasm(Cow::Owned(wasm)), origin);
                     match plugin.prepare().await {
                         Ok(()) => {
                             let plugin = Arc::new(plugin);
@@ -114,6 +133,7 @@ impl Registry {
             pending,
             &approved,
             unreadable,
+            system.to_vec(),
         )
     }
 
@@ -125,6 +145,7 @@ impl Registry {
             Vec::new(),
             &Approved::new(),
             false,
+            Vec::new(),
         )
     }
 
@@ -153,6 +174,7 @@ impl Registry {
         pending: Vec<Pending>,
         approved: &Approved,
         unreadable: bool,
+        system: Vec<PathBuf>,
     ) -> Self {
         // A record is dropped only once no directory can hold its plugin: a
         // waiting plugin keeps it, and while a directory fails to read every
@@ -170,6 +192,7 @@ impl Registry {
             pending,
             approved: agreed,
             unreadable,
+            system,
             ..Self::default()
         };
         for plugin in bundled {
@@ -227,13 +250,13 @@ impl Registry {
         let mut installed = Vec::new();
         let mut pending = Vec::new();
         let mut unreadable = false;
-        for path in plugin_dirs(dir) {
+        for (path, origin) in every_plugin_dir(&self.system, Some(dir)) {
             let here = self
                 .installed
                 .iter()
                 .find(|(loaded, _)| *loaded == path)
                 .map(|(_, plugin)| Arc::clone(plugin));
-            match self.reread(&path, here.as_ref()).await {
+            match self.reread(&path, origin, here.as_ref()).await {
                 Reread::Load(plugin) => installed.push((path, plugin)),
                 Reread::Keep(reason) => {
                     tracing::warn!(plugin = %path.display(), %reason, "plugin files not loaded");
@@ -261,10 +284,11 @@ impl Registry {
             pending,
             &self.approved,
             unreadable,
+            self.system.clone(),
         )
     }
 
-    async fn reread(&self, path: &Path, here: Option<&Arc<Plugin>>) -> Reread {
+    async fn reread(&self, path: &Path, origin: Origin, here: Option<&Arc<Plugin>>) -> Reread {
         let (manifest, wasm) = match read_plugin(path) {
             Ok(files) => files,
             Err(reason) => return Reread::Keep(reason),
@@ -289,7 +313,7 @@ impl Registry {
                 manifest.id
             ));
         }
-        let candidate = Plugin::new(manifest, Code::Wasm(Cow::Owned(wasm)), Origin::Installed);
+        let candidate = Plugin::new(manifest, Code::Wasm(Cow::Owned(wasm)), origin);
         if let Err(error) = candidate.prepare().await {
             return Reread::Keep(error.to_string());
         }
@@ -346,13 +370,15 @@ impl Registry {
             .cloned()
             .collect();
         installed.push((dir, plugin));
-        installed.sort_by(|a, b| a.0.cmp(&b.0));
+        // The order they are read in, so the same copy wins as after a reload.
+        installed.sort_by_key(|(dir, _)| (!self.is_system(dir), dir.clone()));
         Self::assemble(
             self.bundled.clone(),
             installed,
             pending,
             &self.approved,
             self.unreadable,
+            self.system.clone(),
         )
     }
 
@@ -369,7 +395,20 @@ impl Registry {
         &self.pending
     }
 
-    /// Every directory holding a copy of `id`, loaded or waiting. The
+    /// Whether `dir` is in a read-only directory a package manager owns.
+    pub fn is_system(&self, dir: &Path) -> bool {
+        self.system
+            .iter()
+            .any(|root| dir.parent() == Some(root.as_path()))
+    }
+
+    /// The read-only directories plugins are also read from.
+    pub fn system_dirs(&self) -> &[PathBuf] {
+        &self.system
+    }
+
+    /// Every directory in the plugin directory holding a copy of `id`, loaded
+    /// or waiting; a package manager's copies are its own to remove. The
     /// directory name need not be the id.
     pub fn dirs_of(&self, id: &str) -> Vec<PathBuf> {
         let mut dirs: Vec<PathBuf> = self
@@ -384,6 +423,7 @@ impl Registry {
                     .map(|waiting| waiting.dir.clone()),
             )
             .collect();
+        dirs.retain(|dir| !self.is_system(dir));
         dirs.sort();
         dirs.dedup();
         dirs
@@ -447,6 +487,25 @@ fn added_hosts(agreed: &BTreeSet<String>, candidate: &Plugin) -> Vec<String> {
     host_set(&candidate.manifest().permissions.network)
         .into_iter()
         .filter(|host| !agreed.contains(host))
+        .collect()
+}
+
+/// Each plugin directory in the `system` directories, then in `dir`, with the
+/// origin of what it holds.
+fn every_plugin_dir(system: &[PathBuf], dir: Option<&Path>) -> Vec<(PathBuf, Origin)> {
+    system
+        .iter()
+        .flat_map(|root| {
+            plugin_dirs(root)
+                .into_iter()
+                .map(|path| (path, Origin::System))
+        })
+        .chain(
+            dir.map(plugin_dirs)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|path| (path, Origin::Installed)),
+        )
         .collect()
 }
 
@@ -524,6 +583,54 @@ mod tests {
             registry.for_service("custom").is_none(),
             "the fork dropped the custom service, so nothing serves it"
         );
+    }
+
+    #[tokio::test]
+    async fn a_system_plugin_loads_below_the_plugin_directory_and_is_not_removable() {
+        let bundled = [Bundled {
+            manifest: Box::leak(manifest("radio", "1.0.0", &["radio"]).into_boxed_str()),
+            wasm: Some(b""),
+        }];
+        let root =
+            std::env::temp_dir().join(format!("kopuz-plugins-system-{}", std::process::id()));
+        let write = |dir: &Path, version: &str| {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(
+                dir.join(MANIFEST_FILE),
+                manifest("radio", version, &["radio"]),
+            )
+            .unwrap();
+            std::fs::write(dir.join(COMPONENT_FILE), EMPTY_COMPONENT).unwrap();
+        };
+        let system = root.join("system");
+        let user = root.join("user");
+        write(&system.join("moe.kopuz.kopuz.Plugin.Radio"), "2.0.0");
+
+        let registry =
+            Registry::load_with_system(&bundled, Some(&user), std::slice::from_ref(&system)).await;
+        let serving = registry.for_service("radio").expect("radio served");
+        assert_eq!(
+            serving.manifest().version,
+            "2.0.0",
+            "a system copy beats the bundled one"
+        );
+        assert_eq!(serving.origin(), Origin::System);
+        assert!(
+            registry.dirs_of("radio").is_empty(),
+            "a package manager removes its own"
+        );
+
+        write(&user.join("radio"), "3.0.0");
+        let registry = registry.reload(&user).await;
+        std::fs::remove_dir_all(&root).ok();
+        let serving = registry.for_service("radio").expect("radio served");
+        assert_eq!(
+            serving.manifest().version,
+            "3.0.0",
+            "a copy in the plugin directory wins"
+        );
+        assert_eq!(serving.origin(), Origin::Installed);
+        assert_eq!(registry.dirs_of("radio"), [user.join("radio")]);
     }
 
     #[test]

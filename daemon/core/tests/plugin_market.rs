@@ -95,7 +95,8 @@ fn temp(name: &str) -> PathBuf {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
     let plugins = temp("installed");
-    server::plugins::init(Some(plugins.clone())).await;
+    let system = temp("system");
+    server::plugins::init(Some(plugins.clone()), vec![system.clone()]).await;
 
     // A tampered component is refused before anything is written.
     let tampered = PluginService::new(marketplace(
@@ -272,5 +273,23 @@ async fn a_community_plugin_installs_offers_its_service_and_uninstalls() {
     assert_eq!(loaded().as_deref(), Some("1.1.0"));
     market.uninstall("echo").await.expect("removed");
 
+    // A plugin a package manager put in a system directory loads, is listed
+    // as such, and only that package manager removes it.
+    write(&system.join("Echo"), MANIFEST);
+    assert!(server::plugins::rescan().await);
+    let catalog = market.catalog().await;
+    let echo = catalog
+        .plugins
+        .iter()
+        .find(|plugin| plugin.id == "echo")
+        .expect("the system plugin is listed");
+    assert!(echo.system);
+    assert_eq!(
+        market.uninstall("echo").await.expect_err("refused").code,
+        ErrorCode::InvalidInput
+    );
+    assert!(system.join("Echo").exists());
+
     std::fs::remove_dir_all(&plugins).ok();
+    std::fs::remove_dir_all(&system).ok();
 }

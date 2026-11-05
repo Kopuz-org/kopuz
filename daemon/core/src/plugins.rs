@@ -1,7 +1,7 @@
 //! The plugins the daemon runs, and the community marketplace it installs
 //! more from.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -169,6 +169,7 @@ impl PluginService {
                     homepage: None,
                     origin: PluginOrigin::Community,
                     sandboxed: true,
+                    system: registry.is_system(waiting.dir()),
                     installed_version: None,
                     available_version: Some(manifest.version.clone()),
                     services: manifest
@@ -314,7 +315,19 @@ impl PluginService {
         // An update that waited across a restart has files but nothing loaded.
         let copies = registry.dirs_of(id);
         if copies.is_empty() {
-            return Err(ApiError::not_found("no such plugin is installed"));
+            let by_system =
+                registry.plugins().iter().any(|plugin| {
+                    plugin.id() == id && plugin.origin() == plugin_host::Origin::System
+                }) || registry
+                    .pending()
+                    .iter()
+                    .any(|waiting| waiting.plugin.id() == id && registry.is_system(waiting.dir()));
+            return Err(match by_system {
+                true => ApiError::invalid_input(
+                    "a package manager installed this plugin; remove it there",
+                ),
+                false => ApiError::not_found("no such plugin is installed"),
+            });
         }
         let dir = server::plugins::dir()
             .ok_or_else(|| ApiError::unsupported("this daemon has no plugin directory"))?
@@ -346,9 +359,12 @@ fn installed() -> Vec<PluginInfo> {
                 homepage: None,
                 origin: match plugin.origin() {
                     plugin_host::Origin::Bundled => PluginOrigin::Official,
-                    plugin_host::Origin::Installed => PluginOrigin::Community,
+                    plugin_host::Origin::Installed | plugin_host::Origin::System => {
+                        PluginOrigin::Community
+                    }
                 },
                 sandboxed: !plugin.is_native(),
+                system: plugin.origin() == plugin_host::Origin::System,
                 installed_version: Some(manifest.version.clone()),
                 available_version: None,
                 services: manifest
@@ -381,9 +397,10 @@ fn changed_hosts() -> ApiError {
 /// without reading or hashing them.
 type Stamps = Vec<(PathBuf, Option<(u64, SystemTime)>)>;
 
-fn stamps(dir: &Path) -> Stamps {
-    plugin_host::plugin_dirs(dir)
-        .into_iter()
+/// Of every plugin in the plugin directory and in the system ones.
+fn stamps(dirs: &[PathBuf]) -> Stamps {
+    dirs.iter()
+        .flat_map(|dir| plugin_host::plugin_dirs(dir))
         .flat_map(|plugin| {
             [plugin_host::MANIFEST_FILE, plugin_host::COMPONENT_FILE].map(|file| plugin.join(file))
         })
@@ -408,17 +425,24 @@ where
     let Some(dir) = server::plugins::dir() else {
         return;
     };
+    let dirs: Arc<[PathBuf]> = server::plugins::registry()
+        .system_dirs()
+        .iter()
+        .cloned()
+        .chain([dir.to_path_buf()])
+        .collect();
     tokio::spawn(async move {
         // Empty, so the first quiet poll rescans and an edit made between boot
         // loading the plugins and this task starting is not missed.
         let mut loaded = Stamps::new();
-        let mut last = stamps(dir);
+        let mut last = stamps(&dirs);
         loop {
             tokio::time::sleep(WATCH_INTERVAL).await;
             if owner.strong_count() == 0 {
                 return;
             }
-            let Ok(now) = tokio::task::spawn_blocking(move || stamps(dir)).await else {
+            let polled = Arc::clone(&dirs);
+            let Ok(now) = tokio::task::spawn_blocking(move || stamps(&polled)).await else {
                 continue;
             };
             // Wait for one quiet interval, so files still being copied in are
@@ -448,6 +472,7 @@ fn listed(listing: &Listing) -> PluginInfo {
         homepage: listing.homepage.clone(),
         origin: PluginOrigin::Community,
         sandboxed: true,
+        system: false,
         installed_version: None,
         available_version: Some(listing.version.clone()),
         services: listing.services.clone(),

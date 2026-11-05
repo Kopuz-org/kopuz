@@ -128,7 +128,7 @@ fn plugin_service_info(own: &server::plugins::OwnService) -> ServiceInfo {
             .accent
             .clone()
             .unwrap_or_else(|| PLUGIN_ACCENT.to_string()),
-        experimental: own.origin == plugin_host::Origin::Installed,
+        experimental: own.origin != plugin_host::Origin::Bundled,
         fields: match service.url {
             Some(_) => Vec::new(),
             None => vec![url_field("server_url_placeholder")],

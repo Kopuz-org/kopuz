@@ -14,15 +14,16 @@ use crate::server_ops::ServerConn;
 static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
 static REGISTRY: OnceLock<ArcSwap<Registry>> = OnceLock::new();
 
-/// Name the directory installed plugins are read from and load them. Only the
-/// first call counts.
-pub async fn init(dir: Option<PathBuf>) {
+/// Name the directory installed plugins are read from, and the read-only
+/// `system` directories read before it, and load them. Only the first call
+/// counts.
+pub async fn init(dir: Option<PathBuf>, system: Vec<PathBuf>) {
     if DIR.set(dir).is_err() {
         tracing::debug!("the plugin directory was already set");
         return;
     }
     let _one_at_a_time = CHANGING.lock().await;
-    let loaded = Arc::new(Registry::load(&official(), self::dir()).await);
+    let loaded = Arc::new(Registry::load_with_system(&official(), self::dir(), &system).await);
     for plugin in loaded.plugins() {
         tracing::info!(
             plugin = %plugin.id(),
@@ -56,6 +57,39 @@ fn official() -> Vec<Bundled> {
         })
         .chain(bundled_plugins::all().iter().copied())
         .collect()
+}
+
+/// Where a package manager puts plugins: `kopuz/plugins` in each data
+/// directory (`$XDG_DATA_DIRS`, so `/app/share` in a Flatpak, where its
+/// extensions mount), or the list in `KOPUZ_PLUGIN_PATH`. Never `dir`.
+pub fn system_dirs(dir: &std::path::Path) -> Vec<PathBuf> {
+    system_dirs_from(
+        std::env::var_os("KOPUZ_PLUGIN_PATH"),
+        std::env::var_os("XDG_DATA_DIRS"),
+        dir,
+    )
+}
+
+fn system_dirs_from(
+    plugin_path: Option<std::ffi::OsString>,
+    data_dirs: Option<std::ffi::OsString>,
+    dir: &std::path::Path,
+) -> Vec<PathBuf> {
+    let listed = |paths: Option<std::ffi::OsString>| {
+        paths
+            .filter(|paths| !paths.is_empty())
+            .map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
+    };
+    let mut dirs: Vec<PathBuf> = listed(plugin_path).unwrap_or_else(|| {
+        listed(data_dirs)
+            .unwrap_or_else(|| vec!["/usr/local/share".into(), "/usr/share".into()])
+            .into_iter()
+            .map(|data| data.join("kopuz").join("plugins"))
+            .collect()
+    });
+    dirs.retain(|system| system.is_absolute() && system != dir);
+    dirs.dedup();
+    dirs
 }
 
 pub fn dir() -> Option<&'static std::path::Path> {
@@ -372,6 +406,35 @@ impl Reach {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn system_plugins_come_from_each_data_directory_or_the_listed_path() {
+        let mine = std::path::Path::new("/home/me/.local/share/kopuz/plugins");
+        assert_eq!(
+            system_dirs_from(None, Some("/app/share:/usr/share".into()), mine),
+            [
+                PathBuf::from("/app/share/kopuz/plugins"),
+                PathBuf::from("/usr/share/kopuz/plugins"),
+            ]
+        );
+        assert_eq!(
+            system_dirs_from(None, None, mine),
+            [
+                PathBuf::from("/usr/local/share/kopuz/plugins"),
+                PathBuf::from("/usr/share/kopuz/plugins"),
+            ]
+        );
+        assert_eq!(
+            system_dirs_from(
+                Some("/opt/plugins:relative:/home/me/.local/share/kopuz/plugins".into()),
+                Some("/usr/share".into()),
+                mine,
+            ),
+            [PathBuf::from("/opt/plugins")],
+            "the listed path wins; a relative entry and the plugin directory are skipped"
+        );
+    }
 
     #[test]
     fn a_server_written_with_a_trailing_dot_still_names_itself() {

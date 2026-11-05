@@ -18,6 +18,9 @@ pub enum Origin {
     Bundled,
     /// Installed into the plugin directory.
     Installed,
+    /// Put in a read-only plugin directory by a package manager, such as a
+    /// Flatpak extension, which updates and removes it.
+    System,
 }
 
 /// How a plugin runs.

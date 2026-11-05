@@ -147,6 +147,42 @@ plugin in `.approved-hosts.toml` in the plugin directory, so such an update
 still waits after a restart, with nothing of that plugin loaded until it is
 allowed. A plugin the record does not name yet is taken as allowed.
 
+## Installing through a package manager
+
+Kopuz also reads plugins from `kopuz/plugins` in each data directory on
+`XDG_DATA_DIRS` (`/usr/local/share` and `/usr/share` when it is unset), or
+from the directories listed in `KOPUZ_PLUGIN_PATH` instead. A distribution
+package, a Nix profile or a Flatpak extension installs a plugin there, in a
+directory of its own as above. These directories are read-only to Kopuz:
+
+- The Plugins page marks such a plugin as a system one and offers no Remove;
+  the package manager that installed it removes it.
+- They are read before the plugin directory, so a copy installed by hand or
+  from the marketplace wins, and they win over the plugin Kopuz ships.
+- A plugin the host record does not name yet is taken as allowed, as one
+  installed by hand is; an update that reaches new hosts waits on the
+  Plugins page as any other does.
+
+The Flatpak declares the `moe.kopuz.kopuz.nightly.Plugin` extension point.
+An extension holds a plugin's two files at its root, which Flatpak mounts at
+`/app/share/kopuz/plugins/<name>/`:
+
+```yaml
+id: moe.kopuz.kopuz.nightly.Plugin.InternetArchive
+runtime: moe.kopuz.kopuz.nightly
+runtime-version: stable # the branch of the app it extends
+sdk: org.freedesktop.Sdk//25.08
+build-extension: true
+modules:
+  - name: internet-archive
+    buildsystem: simple
+    build-commands:
+      - install -Dm644 -t ${FLATPAK_DEST} kopuz-plugin.toml plugin.wasm
+    sources:
+      - type: dir
+        path: .
+```
+
 ## Publishing to the marketplace
 
 The marketplace is a JSON index, by default
