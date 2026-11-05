@@ -727,8 +727,12 @@ fn whole_stream(
         None => {
             let stream = server::stream::stream_buffer::StreamBuffer::capturing(
                 url,
-                server::stream::stream_buffer::guarded_stream_client(info.user_agent, info.guard)
-                    .map_err(|error| error.to_string())?,
+                server::stream::stream_buffer::guarded_stream_client(
+                    info.user_agent,
+                    info.guard.clone(),
+                )
+                .map_err(|error| error.to_string())?,
+                info.guard,
                 runtime,
                 None,
                 Some(sink),
