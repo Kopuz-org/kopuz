@@ -91,6 +91,13 @@ impl Router {
         }
     }
 
+    /// Whether `view` is a page a source switch keeps, and so hands back as its own replacement.
+    pub fn survives_switch(&self, view: &AnyView) -> bool {
+        self.pages
+            .values()
+            .any(|page| page.survives_switch && page.view.entity_id() == view.entity_id())
+    }
+
     fn touch(&mut self, key: String) {
         self.order.retain(|held| held != &key);
         self.order.push(key);

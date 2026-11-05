@@ -72,6 +72,7 @@ pub mod track_list;
 pub mod track_meta;
 pub mod track_row;
 pub mod track_section;
+pub mod track_sort;
 pub mod transport;
 pub mod volume_control;
 

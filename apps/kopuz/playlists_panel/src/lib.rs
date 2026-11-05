@@ -10,6 +10,7 @@ use components::{
 };
 use gpui_kit::base::StyledExt as _;
 use gpui_kit::component::v_flex;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, Context, ElementId, InteractiveElement as _, IntoElement, KeyDownEvent,
     ParentElement as _, Pixels, Render, SharedString, Styled, Subscription,
@@ -22,8 +23,22 @@ use order::Entry;
 pub use settings::register as register_settings;
 
 // The bounds the panel drags between, matching the right-hand queue panel's feel.
-const MIN_WIDTH: Pixels = px(180.);
 const MAX_WIDTH: Pixels = px(420.);
+/// Collapsed, the panel is a rail of glyphs this wide.
+const RAIL_WIDTH: Pixels = px(72.);
+/// Dragged narrower than this it collapses to the rail, and it opens again only past `EXPAND_ABOVE`, so it never flickers between the two.
+const COLLAPSE_BELOW: Pixels = px(150.);
+const EXPAND_ABOVE: Pixels = px(180.);
+
+/// The width a drag to `dragged` leaves the panel at, from `current`.
+fn settle(current: Pixels, dragged: Pixels) -> Pixels {
+    match current <= RAIL_WIDTH {
+        true if dragged > EXPAND_ABOVE => dragged,
+        true => RAIL_WIDTH,
+        false if dragged < COLLAPSE_BELOW => RAIL_WIDTH,
+        false => dragged,
+    }
+}
 /// A window narrower than this opens with the panel closed.
 pub const NARROW_WINDOW: Pixels = px(1100.);
 
@@ -128,6 +143,10 @@ impl PlaylistsPanel {
         self.width
     }
 
+    fn collapsed(&self) -> bool {
+        self.width <= RAIL_WIDTH
+    }
+
     /// Whether the shell should give the panel a slot at all.
     pub fn is_open(&self, cx: &App) -> bool {
         store::layout(cx).panel.shown && !self.suppressed
@@ -229,6 +248,7 @@ impl PlaylistsPanel {
             })
             .detail(row.detail.clone())
             .active(current == route)
+            .collapsed(self.collapsed())
             .focused(self.roving.is_active(index, window))
             .menu(row.target())
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -260,8 +280,9 @@ impl PlaylistsPanel {
             .child(t("playlists"))
     }
 
-    /// The right edge drags the panel between 180 and 420 px.
-    fn on_resize(&mut self, width: Pixels, cx: &mut Context<Self>) {
+    /// The bordering edge drags the panel up to 420 px, or down to the rail.
+    fn on_resize(&mut self, dragged: Pixels, cx: &mut Context<Self>) {
+        let width = settle(self.width, dragged);
         if width != self.width {
             self.width = width;
             LayoutModel::edit(cx, move |layout| layout.panel.width = width.as_f32());
@@ -275,7 +296,9 @@ impl Render for PlaylistsPanel {
         let _timing = profile::render("playlists-panel");
         components::scroll::smooth_list("playlists-panel-scroll", &self.scroll, window, cx);
         let count = self.rows.len();
+        let collapsed = self.collapsed();
         let body = match count {
+            0 if collapsed => div().flex_1().min_h_0().into_any_element(),
             0 => div()
                 .flex_1()
                 .min_h_0()
@@ -296,6 +319,11 @@ impl Render for PlaylistsPanel {
             .into_any_element(),
         };
         let panel = cx.entity().downgrade();
+        // Right to left the panel sits right of the content, so it borders it on its left.
+        let edge = match i18n::is_rtl() {
+            true => Edge::Left,
+            false => Edge::Right,
+        };
 
         self.roving
             .group(v_flex().id("playlists-panel"), "PlaylistsPanel")
@@ -303,14 +331,31 @@ impl Render for PlaylistsPanel {
             .w_full()
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.key(event, cx)))
             .child(
-                DockPanel::new("playlists-panel", Edge::Right)
+                DockPanel::new("playlists-panel", edge)
                     .size(DockSize::Compact)
-                    .header(self.header(cx))
+                    .when(!collapsed, |dock| dock.header(self.header(cx)))
                     .body(v_flex().size_full().child(body))
                     .on_close(|_, cx| toggle(cx))
-                    .resizable(self.width, MIN_WIDTH, MAX_WIDTH, move |width, _, cx| {
+                    .resizable(self.width, RAIL_WIDTH, MAX_WIDTH, move |width, _, cx| {
                         panel.update(cx, |this, cx| this.on_resize(width, cx)).ok();
                     }),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dragging_under_the_threshold_collapses_to_the_rail() {
+        assert_eq!(settle(px(260.), px(149.)), RAIL_WIDTH);
+        assert_eq!(settle(px(260.), px(160.)), px(160.));
+    }
+
+    #[test]
+    fn the_rail_opens_only_past_the_upper_threshold() {
+        assert_eq!(settle(RAIL_WIDTH, px(170.)), RAIL_WIDTH);
+        assert_eq!(settle(RAIL_WIDTH, px(190.)), px(190.));
     }
 }

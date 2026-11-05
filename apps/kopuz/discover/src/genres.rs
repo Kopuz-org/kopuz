@@ -3,9 +3,9 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use api::{AlbumInfo, ArtworkRef, Table, TrackInfo, TrackPage};
-use components::album_collection::compare_text;
+use api::{AlbumInfo, ArtworkRef, Table, TrackPage};
 use components::format::{t, t_with};
+use components::track_sort::{Column, next_sort, sort_tracks};
 use components::{
     DetailActions, EmptyState, Loading, Look, PageHeader, TrackActions, TrackHeader, TrackList,
     TrackListEvent, TrackListOptions, icons,
@@ -20,69 +20,6 @@ use gpui_kit::{
 use store::{Query, SourcesModel, actions, all};
 
 use crate::states;
-
-/// A sortable column of the genre's tracks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Column {
-    Title,
-    Artist,
-    Album,
-    Duration,
-}
-
-impl Column {
-    const ALL: [Self; 4] = [Self::Title, Self::Artist, Self::Album, Self::Duration];
-
-    /// The table column it sorts, by the id the shared header names it with.
-    fn id(self) -> &'static str {
-        match self {
-            Self::Title => "title",
-            Self::Artist => "artist",
-            Self::Album => "album",
-            Self::Duration => "duration",
-        }
-    }
-
-    fn parse(id: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|column| column.id() == id)
-    }
-}
-
-/// A press on a heading sorts by it ascending, then descending, then back to the order the daemon gave.
-fn next_sort(
-    current: Option<(Column, SortDirection)>,
-    pressed: Column,
-) -> Option<(Column, SortDirection)> {
-    match current {
-        Some((column, SortDirection::Asc)) if column == pressed => {
-            Some((pressed, SortDirection::Desc))
-        }
-        Some((column, SortDirection::Desc)) if column == pressed => None,
-        _ => Some((pressed, SortDirection::Asc)),
-    }
-}
-
-fn sort_tracks(tracks: &mut [TrackInfo], column: Column, direction: SortDirection) {
-    tracks.sort_by(|left, right| {
-        let ordering = match column {
-            Column::Title => compare_text(&left.title, &right.title),
-            Column::Artist => compare_text(&left.artist, &right.artist),
-            Column::Album => compare_text(&left.album, &right.album),
-            Column::Duration => left.duration_ms.cmp(&right.duration_ms),
-        };
-        let ordering = match direction {
-            SortDirection::Asc => ordering,
-            SortDirection::Desc => ordering.reverse(),
-        };
-        // An album keeps its own running order inside the sort.
-        match column {
-            Column::Album => ordering
-                .then_with(|| left.disc_number.cmp(&right.disc_number))
-                .then_with(|| left.track_number.cmp(&right.track_number)),
-            _ => ordering,
-        }
-    });
-}
 
 /// Every genre the albums are filed under, by name, each with the first cover filed under it.
 pub(crate) fn genres_of(albums: &[AlbumInfo]) -> Vec<(SharedString, Option<ArtworkRef>)> {
@@ -284,20 +221,6 @@ mod tests {
         }
     }
 
-    fn track(title: &str, album: &str, disc: u32, number: u32) -> TrackInfo {
-        TrackInfo {
-            title: title.to_string(),
-            album: album.to_string(),
-            disc_number: Some(disc),
-            track_number: Some(number),
-            ..TrackInfo::default()
-        }
-    }
-
-    fn titles(tracks: &[TrackInfo]) -> Vec<&str> {
-        tracks.iter().map(|track| track.title.as_str()).collect()
-    }
-
     #[test]
     fn a_genre_field_splits_on_every_separator_and_lists_each_name_once() {
         let albums = [
@@ -329,32 +252,5 @@ mod tests {
                 ))
             )]
         );
-    }
-
-    #[test]
-    fn a_heading_sorts_up_then_down_then_lets_go() {
-        let up = next_sort(None, Column::Title);
-        assert_eq!(up, Some((Column::Title, SortDirection::Asc)));
-        let down = next_sort(up, Column::Title);
-        assert_eq!(down, Some((Column::Title, SortDirection::Desc)));
-        assert_eq!(next_sort(down, Column::Title), None);
-        assert_eq!(
-            next_sort(down, Column::Artist),
-            Some((Column::Artist, SortDirection::Asc))
-        );
-    }
-
-    #[test]
-    fn an_album_sort_keeps_each_album_in_running_order() {
-        let mut tracks = [
-            track("b2", "B", 1, 2),
-            track("a2", "A", 2, 1),
-            track("a1", "A", 1, 5),
-            track("b1", "B", 1, 1),
-        ];
-        sort_tracks(&mut tracks, Column::Album, SortDirection::Asc);
-        assert_eq!(titles(&tracks), ["a1", "a2", "b1", "b2"]);
-        sort_tracks(&mut tracks, Column::Album, SortDirection::Desc);
-        assert_eq!(titles(&tracks), ["b1", "b2", "a1", "a2"]);
     }
 }

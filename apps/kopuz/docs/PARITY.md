@@ -215,13 +215,13 @@ Data: `api.download_formats()`, `api.downloader_settings()`, `api.downloader_his
 ## 3. Global chrome
 
 ### 3.1 App shell / window (`kopuz/src/main.rs`)
-- [ ] Window 1350×800, title "Kopuz", app icon; decorations = `cfg.titlebar_mode == System` (Linux/Windows), updated live (missing: decorations ignore `cfg.titlebar_mode`)
-- [ ] macOS: hidden title, transparent titlebar, fullsize content; 40 px drag region atop sidebar; app menu (Window: fullscreen/hide/hide others/show all/maximize/close/quit; Edit: undo/redo/cut/copy/paste/select all) (missing: the title is not hidden and the titlebar is not transparent; the app menu is there)
-- [ ] Custom titlebar (`TitlebarMode::Custom`, Linux/Windows): drag area, "Kopuz", minimize/maximize-toggle/close; Windows WM_NCHITTEST subclass for snap (missing: no custom titlebar)
-- [ ] Linux resize handles (8 edges/corners) when not System titlebar and not maximized (missing: no resize handles)
+- [x] Window 1350×800, title "Kopuz", app icon; decorations = `cfg.titlebar_mode == System` (Linux/Windows), updated live (Linux redecorates in place; macOS and Windows reopen the window at the same bounds)
+- [x] macOS: hidden title, transparent titlebar, fullsize content; 40 px drag region atop sidebar; app menu (Window: fullscreen/hide/hide others/show all/maximize/close/quit; Edit: undo/redo/cut/copy/paste/select all) (the top bar's empty stretches and the rail's top drag; `titlebar_mode = System` in the settings file brings the system titlebar back)
+- [x] Custom titlebar (`TitlebarMode::Custom`, Linux/Windows): drag area, "Kopuz", minimize/maximize-toggle/close; Windows WM_NCHITTEST subclass for snap (GPUI's own hit test, from `window_control_area`)
+- [x] Linux resize handles (8 edges/corners) when not System titlebar and not maximized
 - [x] Top-of-content banners: scan progress (local source, "Scanning library…"/current file, from ev:JobProgress{Scan}/JobFinished{Scan}); playback error (`PlayerState.error.message`, dismissable); offline banner (connectivity probe, "Keep server mode" switches back); update banner (GitHub latest release check if `cfg.auto_check_updates`, "View release" opens browser)
 - [x] Player bar placed Top or Bottom per `cfg.player_bar_position`
-- [ ] RTL support: `dir=rtl` from `i18n::is_rtl()`; transport/sliders forced LTR; sidebar border/resize handle mirrored (missing: `i18n::is_rtl` is never read)
+- [ ] RTL support: `dir=rtl` from `i18n::is_rtl()`; transport/sliders forced LTR; sidebar border/resize handle mirrored (missing: the shell, top bar, rail and playlists panel mirror, but GPUI has no text direction, so rows inside pages still read left to right)
 - [x] Global image error fallback → default cover SVG
 - [x] Fade-in after stylesheets load (cosmetic)
 - [x] Offline mode: enter and leave with `api.set_offline(on)`; a banner says so while it is on and offers the way out; the library shows the offline empty state
@@ -240,7 +240,7 @@ Data: `api.download_formats()`, `api.downloader_settings()`, `api.downloader_his
 - [x] Normal: order from `cfg.sidebar_order`, hover ▲▼ reorder buttons per item (writes `cfg.sidebar_order`)
 - [ ] Vaxry style: sections "discover" (Home, Search, Discover, Radio) and "library" (Library, Albums, Artists, Favorites, Activity, Playlists), then Downloader + Settings; no reorder (missing: no Vaxry skin)
 - [x] Discover item hidden unless `caps.discover`
-- [ ] Drag-to-resize width (Normal default 240, Vaxry 200; collapse to 72 px icon rail under 150 px, expand over 180; max 450); collapsed items show tooltips (missing: the sidebar is gone; the optional playlists panel resizes but never collapses to an icon rail)
+- [x] Drag-to-resize width (Normal default 240, Vaxry 200; collapse to 72 px icon rail under 150 px, expand over 180; max 450); collapsed items show tooltips (the playlists panel, up to 420 px)
 - [x] Active item indicator bar
 - [x] Source switcher at top when `cfg.show_source_toggle` (§3.4)
 
@@ -336,15 +336,15 @@ Shown only when active source has `caps.external_devices` and `authenticated`
 - [x] Download overlay (bottom-right): "Downloading done/total", Stop → `api.cancel_job(id)` for running Download jobs, collapsible, progress bar, "{n} failed", per-item rows from `api.download_statuses()` + titles via `api.tracks_by_keys` (Queued/Downloading/Failed icons)
 
 ### 3.16 Theme application
-- [ ] `#app-root` class `theme-<cfg.theme>`; "album-art" → `theme-default` + palette gradient background; "live" → `theme-default theme-live` (missing: `album-art` and `live` render as the default theme (theme/src/lib.rs))
+- [x] `#app-root` class `theme-<cfg.theme>`; "album-art" → `theme-default` + palette gradient background; "live" → `theme-default theme-live` (album art casts the cover's light at full spread whatever the ambient setting)
 - [x] Custom themes (`cfg.custom_themes`) injected as `.theme-<id>` CSS
-- [ ] Live theme (`cfg.theme == "live"`, desktop): matugen/pywal JSON at `cfg.live_theme_path` (or default) polled every 400 ms (2 s idle), recolors in place (missing: no live theme)
+- [x] Live theme (`cfg.theme == "live"`, desktop): matugen/pywal JSON at `cfg.live_theme_path` (or default) polled every 400 ms (2 s idle), recolors in place (polled only while selected; a half-written file keeps the colours up)
 - [x] Custom UI font `cfg.custom_font_path` (ttf/otf/woff/woff2, ≤32 MB) applied app-wide
 - [x] `cfg.reduce_animations` → reduced-animation stylesheet
 - [ ] `cfg.ui_style` Normal vs Vaxry switches sidebar, bar, showcase, headers, compact skin, page paddings (missing: no Vaxry layout; `TODO(parity)` in settings_appearance/src/lib.rs)
 
 ### 3.17 Tray / close behavior (desktop)
-- [ ] `cfg.minimize_to_tray`: tray icon with "Show / Hide Kopuz" and "Quit Kopuz"; window close hides instead of quitting; Linux checks appindicator libs and warns/popups if missing (missing: no tray; `minimize_to_tray` is a settings row with no effect)
+- [ ] `cfg.minimize_to_tray`: tray icon with "Show / Hide Kopuz" and "Quit Kopuz"; window close hides instead of quitting; Linux checks appindicator libs and warns/popups if missing (missing: Linux has no tray, since appindicator needs a GTK main loop and GPUI runs none; macOS and Windows have it)
 - [x] On quit: final `set_config` flush (volume folded in) on a fresh thread
 
 ---

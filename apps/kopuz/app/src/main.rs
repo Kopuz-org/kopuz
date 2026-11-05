@@ -9,13 +9,15 @@ mod menus;
 mod router;
 mod shell;
 mod system_ease;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod tray;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui_kit::component::Root;
 use gpui_kit::{
-    App, AppContext as _, Bounds, KeyBinding, TitlebarOptions, WindowBounds, WindowOptions, px,
-    size,
+    App, AppContext as _, Bounds, Global, KeyBinding, TitlebarOptions, WindowBounds, WindowHandle,
+    WindowOptions, px, size,
 };
 use shell::{Back, Escape, Forward, QuickSearch, Shell, TogglePlayback, TogglePlaylistsPanel};
 
@@ -103,108 +105,143 @@ fn main() -> anyhow::Result<()> {
     let (address, start_own) = daemon_address()?;
     let args = args::Args::parse(std::env::args_os().skip(1));
 
-    gpui_kit::application()
-        .with_assets(gpui_kit::assets::AllAssets)
-        .run(move |cx| {
-            gpui_kit::init(cx);
-            i18n::init("en");
-            // Quitting here would look like the icon did nothing; say why instead.
-            if let Err(error) = link::init(address, start_own, cx) {
-                tracing::error!(%error, "could not set up the daemon link");
-                theme::apply_named("default", None, cx);
-                let reason = error.to_string();
-                cx.open_window(
-                    WindowOptions {
-                        app_id: Some(config::flavor::Flavor::current().name().into()),
-                        titlebar: Some(TitlebarOptions {
-                            title: Some(config::flavor::Flavor::current().display_name().into()),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    },
-                    |window, cx| {
-                        let screen: gpui_kit::AnyView =
-                            cx.new(|_| status::StartupError::new(reason)).into();
-                        cx.new(|cx| Root::new(screen, window, cx))
-                    },
-                )
-                .expect("failed to open the error window");
-                return;
-            }
-            store::init(cx);
-            if args.offline {
-                store::SourcesModel::global(cx)
-                    .update(cx, |sources, cx| sources.offline_on_connect(cx));
-            }
-            metadata_dialog::register(cx);
-            settings_sources::register(cx);
-            settings_interface::init(cx);
-            shortcuts::init(cx);
-            library::register(cx);
-            page_home::register(cx);
-            page_home::register_catalog(
-                |id, scroll, window, cx| {
-                    let feed = cx.new(|cx| discover::CatalogPage::embedded(id, scroll, window, cx));
-                    let chips = cx.new(|cx| discover::CatalogChips::new(feed.clone(), cx));
-                    let page = feed.clone();
-                    page_home::CatalogViews {
-                        chips: chips.into(),
-                        feed: feed.into(),
-                        strapline_to_host: std::rc::Rc::new(move |on, cx| {
-                            page.update(cx, |page, cx| page.hand_strapline_to_host(on, cx));
-                        }),
-                    }
-                },
-                cx,
-            );
-            topbar::register_settings(cx);
-            playlists_panel::register_settings(cx);
-            palette::register_settings(cx);
-            now_playing::register_settings(cx);
-            store::register_mini_player(now_playing::toggle_mini, cx);
-            status::register_settings(cx);
-            status::register_url_download(cx);
-            page_playlists::register(cx);
-            commands::init(cx);
+    let application = gpui_kit::application().with_assets(gpui_kit::assets::AllAssets);
+    // A window closed to the tray, or with the red button, comes back from the Dock icon.
+    application.on_reopen(|cx| {
+        if main_window(cx).is_none() && cx.has_global::<Booted>() {
+            open_main_window(Instant::now(), None, cx);
+        }
+    });
+    application.run(move |cx| {
+        gpui_kit::init(cx);
+        i18n::init("en");
+        // Quitting here would look like the icon did nothing; say why instead.
+        if let Err(error) = link::init(address, start_own, cx) {
+            tracing::error!(%error, "could not set up the daemon link");
             theme::apply_named("default", None, cx);
-            keymap(cx);
-            #[cfg(target_os = "macos")]
-            menus::init(cx);
-            let ready = store::LayoutModel::global(cx).update(cx, |layout, _| layout.take_ready());
-            cx.spawn(async move |cx| {
-                let timer = cx.background_executor().timer(PREFS_WAIT);
-                if let Some(ready) = ready {
-                    futures::future::select(Box::pin(ready), Box::pin(timer)).await;
+            let reason = error.to_string();
+            cx.open_window(
+                WindowOptions {
+                    app_id: Some(config::flavor::Flavor::current().name().into()),
+                    titlebar: Some(TitlebarOptions {
+                        title: Some(config::flavor::Flavor::current().display_name().into()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                |window, cx| {
+                    let screen: gpui_kit::AnyView =
+                        cx.new(|_| status::StartupError::new(reason)).into();
+                    cx.new(|cx| Root::new(screen, window, cx))
+                },
+            )
+            .expect("failed to open the error window");
+            return;
+        }
+        store::init(cx);
+        if args.offline {
+            store::SourcesModel::global(cx)
+                .update(cx, |sources, cx| sources.offline_on_connect(cx));
+        }
+        metadata_dialog::register(cx);
+        settings_sources::register(cx);
+        settings_interface::init(cx);
+        shortcuts::init(cx);
+        library::register(cx);
+        page_home::register(cx);
+        page_home::register_catalog(
+            |id, scroll, window, cx| {
+                let feed = cx.new(|cx| discover::CatalogPage::embedded(id, scroll, window, cx));
+                let chips = cx.new(|cx| discover::CatalogChips::new(feed.clone(), cx));
+                let page = feed.clone();
+                page_home::CatalogViews {
+                    chips: chips.into(),
+                    feed: feed.into(),
+                    strapline_to_host: std::rc::Rc::new(move |on, cx| {
+                        page.update(cx, |page, cx| page.hand_strapline_to_host(on, cx));
+                    }),
                 }
-                cx.update(|cx| open_main_window(started, cx));
-            })
-            .detach();
-        });
+            },
+            cx,
+        );
+        topbar::register_settings(cx);
+        playlists_panel::register_settings(cx);
+        palette::register_settings(cx);
+        now_playing::register_settings(cx);
+        store::register_mini_player(now_playing::toggle_mini, cx);
+        status::register_settings(cx);
+        status::register_url_download(cx);
+        page_playlists::register(cx);
+        commands::init(cx);
+        theme::apply_named("default", None, cx);
+        keymap(cx);
+        #[cfg(target_os = "macos")]
+        menus::init(cx);
+        let ready = store::LayoutModel::global(cx).update(cx, |layout, _| layout.take_ready());
+        cx.spawn(async move |cx| {
+            let timer = cx.background_executor().timer(PREFS_WAIT);
+            if let Some(ready) = ready {
+                futures::future::select(Box::pin(ready), Box::pin(timer)).await;
+            }
+            cx.update(|cx| {
+                // After the preferences load, since the registry reads the saved keystroke overrides.
+                commands::keymap(cx);
+                cx.set_global(Booted);
+                open_main_window(started, None, cx);
+                #[cfg(any(target_os = "macos", target_os = "windows"))]
+                tray::init(cx);
+            });
+        })
+        .detach();
+    });
     Ok(())
+}
+
+/// The app is set up and the main window may be opened again after it was closed.
+struct Booted;
+
+impl Global for Booted {}
+
+/// The main window, so the tray and the Dock can tell whether it is open.
+struct MainWindow(WindowHandle<Root>);
+
+impl Global for MainWindow {}
+
+/// The main window while it is open.
+pub(crate) fn main_window(cx: &App) -> Option<WindowHandle<Root>> {
+    let handle = cx.try_global::<MainWindow>()?.0;
+    cx.windows()
+        .iter()
+        .any(|window| window.window_id() == handle.window_id())
+        .then_some(handle)
 }
 
 /// How long the window waits for the daemon to say where it was left before opening anyway.
 const PREFS_WAIT: Duration = Duration::from_millis(1500);
 
-fn open_main_window(started: std::time::Instant, cx: &mut App) {
-    // After the preferences load, since the registry reads the saved keystroke overrides.
-    commands::keymap(cx);
-    let options = WindowOptions {
-        window_bounds: Some(topbar::saved_bounds(cx).unwrap_or_else(|| {
-            WindowBounds::Windowed(Bounds::centered(None, size(px(1350.), px(800.)), cx))
-        })),
+/// Open the main window at `bounds`, or where it was left; `started` times the loader.
+pub(crate) fn open_main_window(started: Instant, bounds: Option<WindowBounds>, cx: &mut App) {
+    let mode = topbar::frame::mode(cx);
+    let mut options = WindowOptions {
+        window_bounds: Some(
+            bounds
+                .or_else(|| topbar::saved_bounds(cx))
+                .unwrap_or_else(|| {
+                    WindowBounds::Windowed(Bounds::centered(None, size(px(1350.), px(800.)), cx))
+                }),
+        ),
         window_min_size: Some(MAIN_WINDOW_MIN_SIZE),
         window_background: gpui_kit::WindowBackgroundAppearance::Opaque,
         app_id: Some(config::flavor::Flavor::current().name().into()),
-        titlebar: Some(TitlebarOptions {
-            title: Some(config::flavor::Flavor::current().display_name().into()),
-            ..Default::default()
-        }),
         ..Default::default()
     };
-    cx.open_window(options, |window, cx| {
-        let shell = cx.new(|cx| Shell::new(started, window, cx));
+    topbar::frame::window_options(mode, components::style::chrome().bar_height, &mut options);
+    tracing::info!(?mode, "opening the main window");
+    match cx.open_window(options, |window, cx| {
+        let shell = cx.new(|cx| Shell::new(started, mode, window, cx));
         cx.new(|cx| Root::new(shell, window, cx))
-    })
-    .expect("failed to open the main window");
+    }) {
+        Ok(handle) => cx.set_global(MainWindow(handle)),
+        Err(error) => tracing::error!(%error, "could not open the main window"),
+    }
 }
