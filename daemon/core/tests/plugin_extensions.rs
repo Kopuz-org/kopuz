@@ -93,10 +93,22 @@ async fn an_extension_plugin_loads_yields_to_an_install_and_is_never_removed() {
         subsonic_component(),
     )
     .unwrap();
-    server::plugins::init(Some(plugins.clone()), Some(extensions.clone())).await;
+    server::plugins::init(Some(plugins.clone()), vec![extensions.clone()]).await;
     assert_eq!(serving_origin(), Some(plugin_host::Origin::Extension));
 
     let market = PluginService::new(marketplace(&temp("market")));
+    let listed = |catalog: &api::PluginCatalog| {
+        catalog
+            .plugins
+            .iter()
+            .find(|plugin| plugin.id == "echo")
+            .map(|plugin| plugin.system)
+    };
+    assert_eq!(
+        listed(&market.catalog().await),
+        Some(true),
+        "listed as the package manager's"
+    );
     let refused = market
         .uninstall("echo")
         .await
@@ -112,6 +124,7 @@ async fn an_extension_plugin_loads_yields_to_an_install_and_is_never_removed() {
     assert_eq!(installed.installed_version.as_deref(), Some("1.0.0"));
     assert_eq!(serving_origin(), Some(plugin_host::Origin::Installed));
     assert!(mounted.join(plugin_host::COMPONENT_FILE).is_file());
+    assert_eq!(listed(&market.catalog().await), Some(false));
 
     market
         .uninstall("echo")

@@ -1155,6 +1155,7 @@ plugins_marketplace_empty = The marketplace has no community plugins to offer ye
 plugin_official = Official
 plugin_native = In Kopuz
 plugin_community = Community
+plugin_system = System
 plugin_by = by { $author }
 plugin_reaches = Reaches { $hosts }
 plugin_update_reaches = The update also reaches { $hosts }

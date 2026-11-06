@@ -873,7 +873,8 @@ fn PluginRow(
         });
     let install_network = plugin.network.clone();
     let update = plugin.update.clone();
-    let removable = community && on_disk(&plugin);
+    // A package manager's plugin is its own to remove.
+    let removable = community && !plugin.system && on_disk(&plugin);
     let byline = (!plugin.author.is_empty())
         .then(|| i18n::t_with("plugin_by", &[("author", plugin.author.clone().into())]));
     let install_id = plugin.id.clone();
@@ -886,6 +887,9 @@ fn PluginRow(
                 div { class: "flex items-center gap-2 flex-wrap",
                     p { class: "text-sm text-white/90 font-medium", "{plugin.name}" }
                     span { class: "text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/10 text-white/60", "{origin}" }
+                    if plugin.system {
+                        span { class: "text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/10 text-white/60", "{i18n::t(\"plugin_system\")}" }
+                    }
                     if !plugin.sandboxed {
                         span { class: "text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/10 text-white/60", "{i18n::t(\"plugin_native\")}" }
                     }
@@ -949,7 +953,7 @@ fn PluginRow(
                             ),
                             "{i18n::t(\"plugin_install\")}"
                         }
-                    } else {
+                    } else if removable {
                         button {
                             class: "{button}",
                             disabled: !idle,
