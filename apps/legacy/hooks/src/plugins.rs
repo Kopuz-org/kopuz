@@ -3,13 +3,17 @@
 use dioxus::prelude::*;
 
 use crate::api::{consume_api, use_api};
+use crate::db_reactivity::{Table, use_generations};
 use crate::toast::toast_api_error;
 
-/// Bump `changed` to ask again.
+/// Bump `changed` to ask again. The daemon's word that plugins changed, such
+/// as files dropped into the plugin directory, asks again too.
 pub fn use_plugins(changed: Signal<u64>) -> Resource<Option<api::PluginCatalog>> {
     let api = use_api();
+    let generations = use_generations();
     use_resource(move || {
         let _ = changed();
+        let _ = generations.generation(Table::Plugins);
         let api = api.clone();
         async move {
             api.plugins()

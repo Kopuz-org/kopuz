@@ -29,7 +29,8 @@ pub struct PluginInfo {
 }
 
 /// A different build of an installed plugin: the marketplace lists another
-/// version, or the same version with another component.
+/// version or another component, or new files were dropped into the plugin
+/// directory and reach hosts the installed version does not.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PluginUpdate {
     pub version: String,

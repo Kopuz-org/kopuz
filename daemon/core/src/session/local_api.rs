@@ -812,6 +812,14 @@ impl LocalApi {
             sources.plugins_changed().await;
         }
         self.session.invalidate(api::Table::Servers);
+        self.session.invalidate(api::Table::Plugins);
+    }
+
+    /// Swap in plugins dropped into the plugin directory while the daemon runs.
+    pub fn watch_plugins(self: &Arc<Self>) {
+        crate::plugins::watch(Arc::downgrade(self), |api: Arc<Self>| async move {
+            api.plugins_changed().await;
+        });
     }
 }
 

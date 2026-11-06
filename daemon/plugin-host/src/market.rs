@@ -61,6 +61,8 @@ pub enum MarketError {
     NotListed(String),
     #[error("`{0}` is an official plugin; it ships with kopuz and is updated with it")]
     Official(String),
+    #[error("`{0}` comes from a Flatpak extension; remove it with `flatpak uninstall`")]
+    Extension(String),
     #[error("the download does not match the hash the marketplace lists")]
     HashMismatch,
     #[error("the download is larger than a plugin may be")]
@@ -435,9 +437,9 @@ mod tests {
 
         uninstall(&dir, &dir.join("bandcamp")).unwrap();
         assert!(!installed.exists());
+        uninstall(&dir, &dir.join("bandcamp")).expect("removing what is gone is not an error");
         assert!(uninstall(&dir, &dir.join("a").join("b")).is_err());
         assert!(uninstall(&dir, dir.parent().unwrap()).is_err());
-        uninstall(&dir, &dir.join("bandcamp")).expect("removing what is gone is not an error");
         std::fs::remove_dir_all(&dir).ok();
     }
 

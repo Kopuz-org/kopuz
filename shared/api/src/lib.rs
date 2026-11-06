@@ -686,10 +686,11 @@ pub trait PluginApi: Send + Sync {
     /// cannot be reached leaves the installed ones listed and says why.
     async fn plugins(&self) -> Result<PluginCatalog, ApiError>;
 
-    /// Download, verify and install the marketplace's version of a community
-    /// plugin, replacing the installed one. Its services are offered at once.
-    /// `network` is the hosts the user was shown; a listing that now reaches
-    /// any other set is refused.
+    /// Install a community plugin, or update an installed one, while sources
+    /// keep running: the marketplace's version, or the update waiting in the
+    /// plugin directory. `network` is the hosts the user was shown; a plugin
+    /// reaching any other set is refused. Calls already running finish on the
+    /// old version and its sources keep their rows and credentials.
     async fn install_plugin(
         &self,
         id: String,

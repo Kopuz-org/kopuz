@@ -851,6 +851,7 @@ fn App() -> Element {
                                     api::Table::Recents => Some(Table::Recents),
                                     api::Table::Stations => Some(Table::Stations),
                                     api::Table::Artists => Some(Table::Artists),
+                                    api::Table::Plugins => Some(Table::Plugins),
                                     _ => None,
                                 };
                                 if let Some(table) = mapped {

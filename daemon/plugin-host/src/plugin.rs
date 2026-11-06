@@ -18,6 +18,8 @@ pub enum Origin {
     Bundled,
     /// Installed into the plugin directory.
     Installed,
+    /// Mounted read-only by a Flatpak extension; Flatpak owns its files.
+    Extension,
 }
 
 /// How a plugin runs.
@@ -171,21 +173,6 @@ impl Plugin {
                     .map_err(|error| PluginError::Runtime(error.to_string()))?
             })
             .await
-    }
-
-    /// Compile the plugin on this thread, so one that does not compile is
-    /// known before it is offered.
-    pub fn compile(&self) -> Result<(), PluginError> {
-        let Code::Wasm(wasm) = &self.code else {
-            return Ok(());
-        };
-        if self.component.initialized() {
-            return Ok(());
-        }
-        let component = compile(&runtime()?.engine, wasm)?;
-        // A first call racing this one compiled the same code; keep either.
-        let _ = self.component.set(component);
-        Ok(())
     }
 
     /// Compile the plugin now, so the first call to it does not wait.

@@ -795,10 +795,7 @@ pub(super) fn PluginsSection() -> Element {
             &[("error", error.into())],
         )
     });
-    let (installed, available): (Vec<_>, Vec<_>) = catalog
-        .plugins
-        .into_iter()
-        .partition(|plugin| plugin.installed_version.is_some());
+    let (installed, available): (Vec<_>, Vec<_>) = catalog.plugins.into_iter().partition(on_disk);
 
     rsx! {
         SettingsSection { title: i18n::t("plugins").to_string(),
@@ -820,6 +817,13 @@ pub(super) fn PluginsSection() -> Element {
             }
         }
     }
+}
+
+/// An update is only ever a build in the plugin directory or a newer listing
+/// of an installed plugin, so a plugin with one is on disk even when an
+/// update that waited across a restart left nothing of it loaded.
+fn on_disk(plugin: &api::PluginInfo) -> bool {
+    plugin.installed_version.is_some() || plugin.update.is_some()
 }
 
 #[component]
@@ -867,9 +871,9 @@ fn PluginRow(
                 &[("hosts", shown(&update.added_hosts).into())],
             )
         });
-    // Each button agrees to the hosts shown beside it.
     let install_network = plugin.network.clone();
-    let update_network = plugin.update.as_ref().map(|update| update.network.clone());
+    let update = plugin.update.clone();
+    let removable = community && on_disk(&plugin);
     let byline = (!plugin.author.is_empty())
         .then(|| i18n::t_with("plugin_by", &[("author", plugin.author.clone().into())]));
     let install_id = plugin.id.clone();
@@ -906,10 +910,33 @@ fn PluginRow(
                     }
                 }
             }
-            if community {
+            // An update waiting for its hosts can replace an official plugin
+            // too, so it is approved whatever the origin; only removal is
+            // limited to community plugins.
+            if community || update.is_some() {
                 div { class: "flex items-center gap-2 shrink-0",
                     if working {
                         span { class: "text-sm text-white/60", "{i18n::t(\"plugin_working\")}" }
+                    } else if let Some(update) = update {
+                        button {
+                            class: "{button}",
+                            disabled: !idle,
+                            onclick: move |_| hooks::plugins::install(
+                                install_id.clone(),
+                                update.network.clone(),
+                                busy,
+                                changed,
+                            ),
+                            "{i18n::t(\"plugin_update\")}"
+                        }
+                        if removable {
+                            button {
+                                class: "{button}",
+                                disabled: !idle,
+                                onclick: move |_| hooks::plugins::uninstall(remove_id.clone(), busy, changed),
+                                "{i18n::t(\"plugin_remove\")}"
+                            }
+                        }
                     } else if plugin.installed_version.is_none() {
                         button {
                             class: "{button}",
@@ -923,19 +950,6 @@ fn PluginRow(
                             "{i18n::t(\"plugin_install\")}"
                         }
                     } else {
-                        if let Some(update_network) = update_network {
-                            button {
-                                class: "{button}",
-                                disabled: !idle,
-                                onclick: move |_| hooks::plugins::install(
-                                    install_id.clone(),
-                                    update_network.clone(),
-                                    busy,
-                                    changed,
-                                ),
-                                "{i18n::t(\"plugin_update\")}"
-                            }
-                        }
                         button {
                             class: "{button}",
                             disabled: !idle,
