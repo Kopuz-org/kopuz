@@ -95,7 +95,7 @@ pub fn validate_upload(filename: &str, length: usize) -> Result<(), SourceError>
 }
 
 /// A `multipart/form-data` body with one file part, and its content type.
-/// Built around `content` itself, so the file is never held twice. The
+/// Built around `content` itself rather than a copy of it. The
 /// boundary is short and fixed in length whatever the file holds: a name drawn
 /// from the file's hash, tried again with a counter where the file happens to
 /// contain it.
