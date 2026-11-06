@@ -677,8 +677,12 @@ fn whole_stream(
 ) -> Result<Captured, String> {
     let url = match ResolvedStreamRef::parse(&info.url) {
         ResolvedStreamRef::SoundCloudHls(url) => {
-            let bytes = server::stream::hls_source::assemble(url, info.user_agent.as_deref())
-                .map_err(|error| error.to_string())?;
+            let bytes = server::stream::hls_source::assemble(
+                url,
+                info.user_agent.as_deref(),
+                info.guard.clone(),
+            )
+            .map_err(|error| error.to_string())?;
             return Ok(Captured {
                 bytes,
                 content_type: Some("audio/mp4".into()),
@@ -695,9 +699,11 @@ fn whole_stream(
     });
     let ranged = match info.format {
         Some((_, false)) => None,
-        _ => server::stream::range_source::RangeStreamSource::new(
+        _ => server::stream::range_source::RangeStreamSource::new_with_progress(
             url.clone(),
             info.user_agent.clone(),
+            None,
+            info.guard.clone(),
         )
         .and_then(|range| {
             if info.format.is_some() {
@@ -721,7 +727,12 @@ fn whole_stream(
         None => {
             let stream = server::stream::stream_buffer::StreamBuffer::capturing(
                 url,
-                server::stream::stream_buffer::stream_client(info.user_agent),
+                server::stream::stream_buffer::guarded_stream_client(
+                    info.user_agent,
+                    info.guard.clone(),
+                )
+                .map_err(|error| error.to_string())?,
+                info.guard,
                 runtime,
                 None,
                 Some(sink),

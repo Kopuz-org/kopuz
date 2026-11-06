@@ -1,0 +1,23 @@
+[package]
+name = "kopuz-plugin-subsonic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "The Subsonic and OpenSubsonic source, as a kopuz plugin."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+getrandom = "0.3"
+kopuz-plugin-sdk = { path = "../sdk" }
+md5 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

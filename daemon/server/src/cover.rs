@@ -30,6 +30,44 @@ pub(crate) fn jellyfin_item_url(
     )
 }
 
+/// A signed Subsonic `getCoverArt` URL. The Subsonic source itself is a
+/// plugin, but covers resolve per row on a synchronous path that cannot call
+/// into one, so the signing it needs lives here.
+pub(crate) fn subsonic_cover_art_url(
+    base_url: &str,
+    username: &str,
+    password: &str,
+    cover_art_id: &str,
+    max_size: Option<u32>,
+) -> Result<String, String> {
+    use rand::{RngExt, distr::Alphanumeric};
+
+    let base_url = base_url.trim_end_matches('/');
+    let mut url = reqwest::Url::parse(&format!("{base_url}/rest/getCoverArt.view"))
+        .map_err(|e| format!("Invalid Subsonic base URL '{base_url}': {e}"))?;
+    let salt: String = rand::rng()
+        .sample_iter(&Alphanumeric)
+        .take(16)
+        .map(char::from)
+        .collect();
+    let token = format!("{:x}", md5::compute(format!("{password}{salt}")));
+    {
+        let mut pairs = url.query_pairs_mut();
+        pairs
+            .append_pair("u", username)
+            .append_pair("t", &token)
+            .append_pair("s", &salt)
+            .append_pair("v", "1.16.1")
+            .append_pair("c", "kopuz")
+            .append_pair("f", "json")
+            .append_pair("id", cover_art_id);
+        if let Some(size) = max_size {
+            pairs.append_pair("size", &size.to_string());
+        }
+    }
+    Ok(url.to_string())
+}
+
 pub fn remote_artwork_url_at_size(url: String, max_width: u32) -> String {
     let Ok(mut parsed) = reqwest::Url::parse(&url) else {
         return url;
@@ -111,14 +149,8 @@ pub fn resolve(server: Option<&MusicServer>, cover: CoverRef, max_width: u32) ->
             else {
                 return None;
             };
-            crate::subsonic::cover_art_url(
-                &server.url,
-                username,
-                password,
-                &item_id,
-                Some(max_width),
-            )
-            .ok()?
+            subsonic_cover_art_url(&server.url, username, password, &item_id, Some(max_width))
+                .ok()?
         }
         CoverRef::None => return None,
     };

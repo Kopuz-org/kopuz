@@ -357,8 +357,13 @@ impl Session {
         #[cfg(target_os = "macos")]
         if let Some((url, key, mut meta)) = artwork_fetch {
             let artwork_tx = self.cmd_tx.clone();
+            let reach = self
+                .sources
+                .server
+                .as_ref()
+                .and_then(server::plugins::Reach::of_installed);
             tokio::spawn(async move {
-                let Some(path) = fetch_cover_to_temp(&url, &key).await else {
+                let Some(path) = fetch_cover_to_temp(&url, &key, reach.as_ref()).await else {
                     return;
                 };
                 meta.artwork = Some(path);
@@ -568,7 +573,11 @@ pub(super) fn temp_cover_key(track: &Track, url: &str) -> String {
 /// Download a cover to a temp file named by a hash of `key`, so repeated plays
 /// of the same album reuse the file instead of growing the temp dir. MPRIS
 /// `mpris:artUrl` wants a file too, not just macOS Now Playing.
-pub(super) async fn fetch_cover_to_temp(url: &str, key: &str) -> Option<String> {
+pub(super) async fn fetch_cover_to_temp(
+    url: &str,
+    key: &str,
+    reach: Option<&server::plugins::Reach>,
+) -> Option<String> {
     use sha2::{Digest as _, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(key.as_bytes());
@@ -584,9 +593,7 @@ pub(super) async fn fetch_cover_to_temp(url: &str, key: &str) -> Option<String> 
         return Some(path.to_string_lossy().to_string());
     }
     let fetch = async {
-        let response = utils::http::client()
-            .get(url)
-            .send()
+        let response = crate::artwork::get(&utils::http::client(), url, reach)
             .await
             .ok()?
             .error_for_status()
@@ -750,9 +757,12 @@ impl ClassifiedLoad {
                             .block_on(source.resolve_stream(&item_id, quality))
                             .map_err(source_io_error)?;
                         network_factory(
-                            info.url,
-                            info.format,
-                            info.user_agent,
+                            NetworkStream {
+                                url: info.url,
+                                format: info.format,
+                                user_agent: info.user_agent,
+                                guard: info.guard,
+                            },
                             false,
                             None,
                             rt_handle.clone(),
@@ -763,37 +773,41 @@ impl ClassifiedLoad {
                 })
             }
             ClassifiedSource::Remote { stream_ref, source } => {
-                let (stream_url, format, user_agent) = match ResolvedStreamRef::parse(&stream_ref) {
-                    ResolvedStreamRef::Pending(item_id) => {
-                        let source = source.ok_or_else(|| LoadFailure {
-                            token: self.token,
-                            code: api::ErrorCode::Internal,
-                            message: "no active source for remote track".to_string(),
-                        })?;
-                        let info = source
-                            .resolve_stream(item_id, self.stream_quality)
-                            .await
-                            .map_err(|error| {
-                                tracing::error!(error = %error, "stream URL resolve failed");
-                                LoadFailure::from_source(self.token, &error)
+                let (stream_url, format, user_agent, guard) =
+                    match ResolvedStreamRef::parse(&stream_ref) {
+                        ResolvedStreamRef::Pending(item_id) => {
+                            let source = source.ok_or_else(|| LoadFailure {
+                                token: self.token,
+                                code: api::ErrorCode::Internal,
+                                message: "no active source for remote track".to_string(),
                             })?;
-                        duration_secs = info.duration_secs;
-                        bitrate = info.bitrate;
-                        loudness_db = info.loudness_db;
-                        (info.url, info.format, info.user_agent)
-                    }
-                    ResolvedStreamRef::SoundCloudHls(_)
-                    | ResolvedStreamRef::AppleMusicFmp4(_)
-                    | ResolvedStreamRef::Direct(_) => (stream_ref, None, None),
-                };
+                            let info = source
+                                .resolve_stream(item_id, self.stream_quality)
+                                .await
+                                .map_err(|error| {
+                                    tracing::error!(error = %error, "stream URL resolve failed");
+                                    LoadFailure::from_source(self.token, &error)
+                                })?;
+                            duration_secs = info.duration_secs;
+                            bitrate = info.bitrate;
+                            loudness_db = info.loudness_db;
+                            (info.url, info.format, info.user_agent, info.guard)
+                        }
+                        ResolvedStreamRef::SoundCloudHls(_)
+                        | ResolvedStreamRef::AppleMusicFmp4(_)
+                        | ResolvedStreamRef::Direct(_) => (stream_ref, None, None, None),
+                    };
 
                 // The factory runs on the decode worker (no runtime), so hand
                 // every blocking stream/decrypt path this task's handle.
                 let rt_handle = tokio::runtime::Handle::current();
                 network_factory(
-                    stream_url,
-                    format,
-                    user_agent,
+                    NetworkStream {
+                        url: stream_url,
+                        format,
+                        user_agent,
+                        guard,
+                    },
                     self.is_radio,
                     icy_tx,
                     rt_handle,

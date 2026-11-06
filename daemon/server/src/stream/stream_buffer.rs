@@ -62,6 +62,19 @@ pub fn stream_client(user_agent: Option<String>) -> reqwest::Client {
     configured(utils::http::builder(), user_agent).unwrap_or_else(|_| utils::http::client())
 }
 
+/// [`stream_client`], held to a plugin's hosts where it names the stream. A
+/// guarded client that fails to build is no reason to fetch unguarded.
+pub fn guarded_stream_client(
+    user_agent: Option<String>,
+    guard: Option<utils::http::Guard>,
+) -> std::io::Result<reqwest::Client> {
+    match guard {
+        None => Ok(stream_client(user_agent)),
+        Some(guard) => configured(utils::http::guarded_builder(Some(guard)), user_agent)
+            .map_err(std::io::Error::other),
+    }
+}
+
 /// The client a radio stream is fetched with: native TLS on desktop, since some broadcaster CDNs reset rustls's handshake.
 pub fn radio_client(user_agent: Option<String>) -> reqwest::Client {
     #[cfg(not(target_os = "android"))]
@@ -98,24 +111,29 @@ impl StreamBuffer {
         runtime: tokio::runtime::Handle,
         progress: Option<BufferProgressCallback>,
     ) -> Self {
-        Self::open(url, is_radio, client, icy_tx, runtime, progress, None)
+        Self::open(url, is_radio, client, None, icy_tx, runtime, progress, None)
     }
 
-    /// A track's progressive stream that hands its whole file to `complete` once the body has arrived in full.
+    /// A track's progressive stream that hands its whole file to `complete`
+    /// once the body has arrived in full. A playlist it opens may only lead
+    /// where `guard` allows.
     pub fn capturing(
         url: String,
         client: reqwest::Client,
+        guard: Option<utils::http::Guard>,
         runtime: tokio::runtime::Handle,
         progress: Option<BufferProgressCallback>,
         complete: Option<CompleteSink>,
     ) -> Self {
-        Self::open(url, false, client, None, runtime, progress, complete)
+        Self::open(url, false, client, guard, None, runtime, progress, complete)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn open(
         url: String,
         is_radio: bool,
         client: reqwest::Client,
+        guard: Option<utils::http::Guard>,
         icy_tx: Option<tokio::sync::watch::Sender<super::icy::IcyMeta>>,
         runtime: tokio::runtime::Handle,
         progress: Option<BufferProgressCallback>,
@@ -169,6 +187,19 @@ impl StreamBuffer {
                                 utils::playlist::first_stream_url(text)
                                     .filter(|next| !utils::playlist::is_playlist(None, next))
                             }) {
+                                Some(next)
+                                    if guard.as_ref().is_some_and(|guard| {
+                                        !reqwest::Url::parse(&next).is_ok_and(|next| {
+                                            utils::http::within(guard.as_ref(), &next)
+                                        })
+                                    }) =>
+                                {
+                                    break Err((
+                                        ErrorKind::PermissionDenied,
+                                        "the playlist leads to a host its plugin may not reach"
+                                            .to_string(),
+                                    ));
+                                }
                                 Some(next) => {
                                     tracing::debug!(
                                         from = %utils::redact::redact_url(&url),
@@ -561,6 +592,58 @@ mod tests {
         waiter.join().expect("join header waiter");
 
         assert_eq!(result, None);
+    }
+
+    /// Reaches 127.0.0.1 and nothing else.
+    struct LoopbackOnly;
+
+    impl utils::http::Reach for LoopbackOnly {
+        fn allows_host(&self, host: &str) -> bool {
+            host == "127.0.0.1"
+        }
+
+        fn may_be_local(&self, host: &str) -> bool {
+            host == "127.0.0.1"
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_guarded_playlist_may_not_lead_off_its_hosts() {
+        use std::io::{Read as _, Write as _};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let served = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept");
+            let mut request = [0u8; 1024];
+            let _ = socket.read(&mut request);
+            let body = "http://elsewhere.example/stream.mp3\n";
+            let _ = write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Type: audio/x-mpegurl\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        });
+        let guard: utils::http::Guard = Arc::new(LoopbackOnly);
+        let client = guarded_stream_client(None, Some(Arc::clone(&guard))).expect("client");
+        let stream = StreamBuffer::capturing(
+            format!("http://127.0.0.1:{port}/list.m3u"),
+            client,
+            Some(guard),
+            tokio::runtime::Handle::current(),
+            None,
+            None,
+        );
+        let error = tokio::task::spawn_blocking(move || {
+            stream.wait_for_response_headers();
+            stream.response_error()
+        })
+        .await
+        .expect("join");
+        served.join().expect("server");
+        assert_eq!(
+            error.map(|error| error.kind()),
+            Some(ErrorKind::PermissionDenied)
+        );
     }
 
     /// The extension types of the first ClientHello `client` sends to a local listener that never answers.
