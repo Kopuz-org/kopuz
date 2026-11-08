@@ -265,7 +265,7 @@ impl RenderOnce for PlayPauseButton {
             .when(!fill && !soft, |button| {
                 button.accent(cx.theme().foreground)
             })
-            .when(self.filled && !soft, |button| {
+            .when(fill, |button| {
                 button.accent(motion::accent(
                     theme::Surface::Chrome,
                     cx.theme().primary,

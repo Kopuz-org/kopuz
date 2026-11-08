@@ -74,6 +74,7 @@ pub struct Segmented {
     segments: Vec<Segment>,
     pill: bool,
     select: Option<OnSelect>,
+    surface: Option<theme::Surface>,
 }
 
 impl Segmented {
@@ -84,6 +85,7 @@ impl Segmented {
             segments: Vec::new(),
             pill: false,
             select: None,
+            surface: None,
         }
     }
 
@@ -109,6 +111,12 @@ impl Segmented {
         self
     }
 
+    /// Wash the picked segment in the accent `surface` wears rather than the theme's.
+    pub fn surface(mut self, surface: theme::Surface) -> Self {
+        self.surface = Some(surface);
+        self
+    }
+
     /// What picking the segment at an index does.
     pub fn on_select(mut self, select: impl Fn(&usize, &mut Window, &mut App) + 'static) -> Self {
         self.select = Some(Rc::new(select));
@@ -130,11 +138,15 @@ impl Segmented {
         let focus = focus::handle(format!("segment-focus:{key}"), window, cx);
         let ringed = focus.is_focused(window) && focus::keyboard(cx);
         let lit = hovered || ringed;
+        let accent = match self.surface {
+            Some(surface) => motion::accent(surface, cx.theme().primary, window, cx),
+            None => cx.theme().primary,
+        };
         let wash = motion::color(
             motion::channel(&key, WASH),
             match (material, active, lit) {
                 // Material's picked segment is the secondary container.
-                (true, true, _) => cx.theme().primary.opacity(M3_CONTAINER),
+                (true, true, _) => accent.opacity(M3_CONTAINER),
                 (_, true, _) => style::white(style::HOVER, cx),
                 (_, false, true) => style::white(style::RAISED, cx),
                 (_, false, false) => style::white(0., cx),

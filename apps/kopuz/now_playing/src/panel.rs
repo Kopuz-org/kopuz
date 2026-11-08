@@ -79,6 +79,7 @@ impl NowPlaying {
         }
         let page = cx.entity().downgrade();
         Segmented::new("now-playing-tabs")
+            .surface(theme::Surface::Sheet)
             .segments(tabs.iter().map(|(_, key)| Segment::new(*key).label(t(key))))
             .selected(tabs.iter().position(|(tab, _)| *tab == showing))
             .on_select(move |index, _, cx| {
