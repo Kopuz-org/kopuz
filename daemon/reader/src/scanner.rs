@@ -4,7 +4,7 @@ use super::metadata::{
 };
 use super::models::{Album, Library, Track};
 use super::utils::is_artist_image_file;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -222,6 +222,7 @@ fn positions_collide(tracks: &[&Track]) -> bool {
 
 /// Settle what one file cannot: untagged files join the folder's lone tagged release, colliding same-titled albums split by artist.
 pub(crate) fn settle_local_albums(library: &mut Library) {
+    join_releases_split_by_album_artist(library);
     let mut groups: HashMap<(String, String), Vec<usize>> = HashMap::new();
     for (index, track) in library.tracks.iter().enumerate() {
         let Some(path) = track.id.local_path() else {
@@ -316,6 +317,94 @@ pub(crate) fn settle_local_albums(library: &mut Library) {
     for (index, credit) in credits {
         library.albums[index].artist = credit;
     }
+}
+
+/// One folder holding one album title whose files disagree on the album artist ("A", "A feat. B") is one release, not one per credit, unless two files claim the same disc and track.
+fn join_releases_split_by_album_artist(library: &mut Library) {
+    let mut groups: HashMap<(String, String), Vec<usize>> = HashMap::new();
+    for (index, track) in library.tracks.iter().enumerate() {
+        let Some(path) = track.id.local_path() else {
+            continue;
+        };
+        if is_folder_album(&track.album_id) || !album_id_is_current(&track.album_id) {
+            continue;
+        }
+        groups
+            .entry((folder_key(path), title_key(track.album.trim())))
+            .or_default()
+            .push(index);
+    }
+
+    let mut retired: HashMap<String, String> = HashMap::new();
+    for members in groups.values() {
+        let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+        for &index in members {
+            *counts
+                .entry(library.tracks[index].album_id.as_str())
+                .or_default() += 1;
+        }
+        if counts.len() < 2 {
+            continue;
+        }
+        let tracks: Vec<&Track> = members
+            .iter()
+            .map(|&index| &library.tracks[index])
+            .collect();
+        if positions_collide(&tracks) {
+            continue;
+        }
+        let Some((&release, &count)) = counts
+            .iter()
+            .max_by(|a, b| a.1.cmp(b.1).then_with(|| b.0.cmp(a.0)))
+        else {
+            continue;
+        };
+        let shared = count * 2 > members.len();
+        let release = release.to_string();
+        let others: Vec<String> = counts
+            .keys()
+            .filter(|id| **id != release)
+            .map(|id| id.to_string())
+            .collect();
+        for &index in members {
+            library.tracks[index].album_id = release.clone();
+        }
+        if !shared && let Some(row) = library.albums.iter_mut().find(|row| row.id == release) {
+            row.artist = crate::VARIOUS_ARTISTS.to_string();
+        }
+        for other in others {
+            retired.insert(other, release.clone());
+        }
+    }
+    if retired.is_empty() {
+        return;
+    }
+
+    let covers: Vec<(String, Album)> = library
+        .albums
+        .iter()
+        .filter_map(|row| Some((retired.get(&row.id)?.clone(), row.clone())))
+        .collect();
+    for (release, old) in covers {
+        if let Some(row) = library.albums.iter_mut().find(|row| row.id == release)
+            && row.cover_path.is_none()
+            && old.cover_path.is_some()
+        {
+            row.cover_path = old.cover_path;
+            row.manual_cover = old.manual_cover;
+        }
+    }
+    let in_use: HashSet<&str> = library
+        .tracks
+        .iter()
+        .map(|track| track.album_id.as_str())
+        .collect();
+    let gone: HashSet<String> = retired
+        .keys()
+        .filter(|id| !in_use.contains(id.as_str()))
+        .cloned()
+        .collect();
+    library.albums.retain(|row| !gone.contains(&row.id));
 }
 
 /// The tagged releases in each (album folder, title): the albums an untagged file there could belong to.
@@ -592,6 +681,100 @@ mod tests {
         assert_eq!(
             album_of(&library, "/music/load/2.flac").id,
             album_of(&library, "/music/load/1.flac").id
+        );
+    }
+
+    #[test]
+    fn a_release_whose_files_disagree_on_the_album_artist_is_one_album() {
+        let mut library = Library::default();
+        scanned(
+            &mut library,
+            "/music/duets/1.flac",
+            "Duets",
+            Some("Ana"),
+            "Ana",
+            1,
+        );
+        scanned(
+            &mut library,
+            "/music/duets/2.flac",
+            "Duets",
+            Some("Ana feat. Bo"),
+            "Ana feat. Bo",
+            2,
+        );
+        scanned(
+            &mut library,
+            "/music/duets/3.flac",
+            "Duets",
+            Some("Ana"),
+            "Ana",
+            3,
+        );
+        settle_local_albums(&mut library);
+
+        let first = album_of(&library, "/music/duets/1.flac");
+        assert_eq!(album_of(&library, "/music/duets/2.flac").id, first.id);
+        assert_eq!(album_of(&library, "/music/duets/3.flac").id, first.id);
+        assert_eq!(first.artist, "Ana", "the credit most files share");
+        assert_eq!(
+            library
+                .albums
+                .iter()
+                .filter(|row| row.title == "Duets")
+                .count(),
+            1,
+            "the merged credit leaves no empty album behind"
+        );
+    }
+
+    #[test]
+    fn a_release_with_no_majority_album_artist_is_credited_to_various_artists() {
+        let mut library = Library::default();
+        scanned(
+            &mut library,
+            "/music/mix/1.flac",
+            "Mix",
+            Some("Ana"),
+            "Ana",
+            1,
+        );
+        scanned(
+            &mut library,
+            "/music/mix/2.flac",
+            "Mix",
+            Some("Bo"),
+            "Bo",
+            2,
+        );
+        settle_local_albums(&mut library);
+
+        let first = album_of(&library, "/music/mix/1.flac");
+        assert_eq!(album_of(&library, "/music/mix/2.flac").id, first.id);
+        assert_eq!(first.artist, crate::VARIOUS_ARTISTS);
+    }
+
+    #[test]
+    fn same_titled_releases_with_their_own_album_artists_stay_apart() {
+        let mut library = Library::default();
+        for (artist, file) in [("Metallica", "m"), ("2Pac", "p")] {
+            for number in 1..=2 {
+                let path = format!("/music/{file}{number}.mp3");
+                scanned(
+                    &mut library,
+                    &path,
+                    "Greatest Hits",
+                    Some(artist),
+                    artist,
+                    number,
+                );
+            }
+        }
+        settle_local_albums(&mut library);
+
+        assert_ne!(
+            album_of(&library, "/music/m1.mp3").id,
+            album_of(&library, "/music/p1.mp3").id
         );
     }
 
