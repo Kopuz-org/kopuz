@@ -12,8 +12,17 @@ const ORIGIN: &str = "https://music.youtube.com";
 /// other playlist ref seeds a new `RDAMPL…` mix.
 const ISSUED_MIX: &str = "mix:";
 
+/// Joins an issued mix id to the channel whose songs alone it should play.
+const ARTIST_ONLY: char = '@';
+
 pub fn issued_mix_ref(playlist_id: &str) -> String {
     format!("{ISSUED_MIX}{playlist_id}")
+}
+
+/// An artist's Shuffle. YT's mix plays their songs, then runs on into other
+/// artists once those are spent, so the ref keeps the channel to stop at.
+pub fn artist_shuffle_ref(playlist_id: &str, channel_id: &str) -> String {
+    format!("{ISSUED_MIX}{playlist_id}{ARTIST_ONLY}{channel_id}")
 }
 
 /// What a mix is generated from. The `RD…` id and whether the request pins a
@@ -25,14 +34,27 @@ pub(super) enum MixSeed<'a> {
     /// A whole playlist — YT's own "Start radio" on a playlist. The queue is
     /// generated, so it bears no relation to the playlist's track list.
     Playlist(&'a str),
-    /// A mix YouTube already built, played under its own id.
-    Issued(&'a str),
+    /// A mix YouTube already built, played under its own id, kept to one
+    /// artist's songs when `artist` names their channel.
+    Issued {
+        id: &'a str,
+        artist: Option<&'a str>,
+    },
 }
 
 impl<'a> MixSeed<'a> {
     pub(super) fn from_playlist_ref(playlist_ref: &'a str) -> Self {
         match playlist_ref.strip_prefix(ISSUED_MIX) {
-            Some(id) => Self::Issued(id),
+            Some(issued) => match issued.split_once(ARTIST_ONLY) {
+                Some((id, artist)) => Self::Issued {
+                    id,
+                    artist: Some(artist),
+                },
+                None => Self::Issued {
+                    id: issued,
+                    artist: None,
+                },
+            },
             None => Self::Playlist(playlist_ref),
         }
     }
@@ -42,7 +64,7 @@ impl<'a> MixSeed<'a> {
         match self {
             Self::Video(id) => format!("RDAMVM{id}"),
             Self::Playlist(id) => format!("RDAMPL{}", id.strip_prefix("VL").unwrap_or(id)),
-            Self::Issued(id) => id.to_string(),
+            Self::Issued { id, .. } => id.to_string(),
         }
     }
 
@@ -52,7 +74,15 @@ impl<'a> MixSeed<'a> {
     fn pinned_video_id(&self) -> Option<&str> {
         match self {
             Self::Video(id) => Some(id),
-            Self::Playlist(_) | Self::Issued(_) => None,
+            Self::Playlist(_) | Self::Issued { .. } => None,
+        }
+    }
+
+    /// The channel whose songs alone the mix plays.
+    fn artist(&self) -> Option<&'a str> {
+        match self {
+            Self::Issued { artist, .. } => *artist,
+            Self::Video(_) | Self::Playlist(_) => None,
         }
     }
 }
@@ -62,7 +92,11 @@ impl std::fmt::Display for MixSeed<'_> {
         match self {
             Self::Video(id) => write!(f, "video:{id}"),
             Self::Playlist(id) => write!(f, "playlist:{id}"),
-            Self::Issued(id) => write!(f, "{ISSUED_MIX}{id}"),
+            Self::Issued {
+                id,
+                artist: Some(artist),
+            } => write!(f, "{ISSUED_MIX}{id}{ARTIST_ONLY}{artist}"),
+            Self::Issued { id, artist: None } => write!(f, "{ISSUED_MIX}{id}"),
         }
     }
 }
@@ -73,6 +107,46 @@ pub struct MixPage {
     /// The `RD…` id YT built the mix under; a continuation names it again.
     pub playlist_id: Option<String>,
     pub continuation: Option<String>,
+    /// The channel the mix is kept to; a continuation is kept to it too.
+    pub artist: Option<String>,
+}
+
+impl MixPage {
+    /// Keeps only `artist`'s songs. The first song by anyone else means the
+    /// mix has run past theirs, so there is no page after this one.
+    pub(super) fn confined_to(mut self, artist: &str) -> Self {
+        let before = self.tracks.len();
+        self.tracks.retain(|track| {
+            track
+                .credits
+                .iter()
+                .any(|credit| credit.id.as_deref() == Some(artist))
+        });
+        if self.tracks.len() < before {
+            self.continuation = None;
+        }
+        self.artist = Some(artist.to_string());
+        self
+    }
+
+    /// A first page names the channel it is kept to only when the mix
+    /// credits that channel at all; one that never links it plays unconfined.
+    fn first_confined_to(self, artist: Option<&str>) -> Self {
+        let Some(artist) = artist else {
+            return self;
+        };
+        let credits_artist = self.tracks.iter().any(|track| {
+            track
+                .credits
+                .iter()
+                .any(|credit| credit.id.as_deref() == Some(artist))
+        });
+        if credits_artist {
+            self.confined_to(artist)
+        } else {
+            self
+        }
+    }
 }
 
 /// Ask YT to generate a radio queue from `seed` and return its first page.
@@ -101,13 +175,14 @@ pub(super) async fn fetch(seed: MixSeed<'_>, cookies: &str) -> Result<MixPage, S
         obj.insert("videoId".into(), json!(video_id));
     }
     let resp = post_next(&body, cookies).await?;
-    Ok(walk_queue(&resp))
+    Ok(walk_queue(&resp).first_confined_to(seed.artist()))
 }
 
 #[tracing::instrument(name = "yt.mix_continuation", skip(token, cookies), fields(playlist = %playlist_id))]
 pub(super) async fn fetch_continuation(
     playlist_id: &str,
     token: &str,
+    artist: Option<&str>,
     cookies: &str,
 ) -> Result<MixPage, String> {
     let client = WEB_REMIX;
@@ -127,7 +202,11 @@ pub(super) async fn fetch_continuation(
         },
     });
     let resp = post_next(&body, cookies).await?;
-    Ok(walk_continuation(&resp))
+    let page = walk_continuation(&resp);
+    Ok(match artist {
+        Some(artist) => page.confined_to(artist),
+        None => page,
+    })
 }
 
 /// Works without auth (anonymous radio for any public video), so empty cookies
@@ -250,6 +329,7 @@ fn walk_panel(panel: &Value) -> MixPage {
             .and_then(|v| v.as_str())
             .map(str::to_string),
         continuation,
+        artist: None,
     }
 }
 
@@ -535,6 +615,63 @@ mod tests {
         assert_eq!(seed.pinned_video_id(), None);
         let playlist = MixSeed::from_playlist_ref("PLabc");
         assert_eq!(playlist.mix_playlist_id(), "RDAMPLPLabc");
+    }
+
+    #[test]
+    fn an_artist_shuffle_plays_under_its_mix_id_kept_to_the_channel() {
+        let shuffle = artist_shuffle_ref("RDAOabc", "UCada");
+        let seed = MixSeed::from_playlist_ref(&shuffle);
+        assert_eq!(seed.mix_playlist_id(), "RDAOabc");
+        assert_eq!(seed.artist(), Some("UCada"));
+        assert_eq!(seed.to_string(), shuffle);
+        assert_eq!(
+            MixSeed::from_playlist_ref(&issued_mix_ref("RDEMabc")).artist(),
+            None
+        );
+    }
+
+    fn credited(key: &str, channel: &str) -> Track {
+        let mut track = parse_queue_row(&json!({
+            "videoId": key,
+            "navigationEndpoint": { "watchEndpoint": { "watchEndpointMusicSupportedConfigs": {
+                "watchEndpointMusicConfig": { "musicVideoType": "MUSIC_VIDEO_TYPE_ATV" }
+            } } },
+            "title": { "runs": [{ "text": key }] },
+        }))
+        .expect("a song row");
+        track.credits = vec![reader::models::ArtistCredit::linked(channel, channel)];
+        track
+    }
+
+    fn page(tracks: Vec<Track>) -> MixPage {
+        MixPage {
+            tracks,
+            playlist_id: Some("RDAOabc".into()),
+            continuation: Some("next".into()),
+            artist: None,
+        }
+    }
+
+    #[test]
+    fn an_artist_shuffle_ends_where_other_artists_begin() {
+        let mixed = page(vec![credited("a1", "UCada"), credited("b1", "UCbo")]);
+        let kept = mixed.confined_to("UCada");
+        let keys: Vec<String> = kept.tracks.iter().map(|t| t.id.key().to_string()).collect();
+        assert_eq!(keys, ["a1"]);
+        assert_eq!(kept.continuation, None, "no page after the artist's songs");
+
+        let own = page(vec![credited("a1", "UCada"), credited("a2", "UCada")]);
+        let kept = own.confined_to("UCada");
+        assert_eq!(kept.tracks.len(), 2);
+        assert_eq!(kept.continuation.as_deref(), Some("next"));
+        assert_eq!(kept.artist.as_deref(), Some("UCada"));
+    }
+
+    #[test]
+    fn a_shuffle_that_never_links_its_artist_plays_unconfined() {
+        let first = page(vec![credited("b1", "UCbo")]).first_confined_to(Some("UCada"));
+        assert_eq!(first.tracks.len(), 1);
+        assert_eq!(first.artist, None);
     }
 }
 
