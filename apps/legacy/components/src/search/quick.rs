@@ -93,6 +93,8 @@ pub fn QuickSearch(
                     input {
                         id: "quick-search-input",
                         r#type: "text",
+                        "enterkeyhint": "search",
+                        "autocorrect": "off",
                         placeholder: "{i18n::t(\"quick_search_placeholder\")}",
                         class: "w-full bg-transparent text-white py-4 text-base focus:outline-none placeholder:text-white/30",
                         autofocus: true,

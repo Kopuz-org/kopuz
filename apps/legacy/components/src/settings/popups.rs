@@ -319,6 +319,9 @@ pub fn LoginPopup(
                 }
 
                 input {
+                    "autocapitalize": "off",
+                    "autocorrect": "off",
+                    "spellcheck": "false",
                     placeholder: "{username_placeholder}",
                     value: "{username()}",
                     oninput: move |e| username.set(e.value()),
@@ -382,6 +385,10 @@ pub fn AddRegistryPopup(
 
                 // Uncontrolled: echoing `value` back over the bridge overwrote keys typed meanwhile.
                 input {
+                    "inputmode": "url",
+                    "autocapitalize": "off",
+                    "autocorrect": "off",
+                    "spellcheck": "false",
                     placeholder: "{url_placeholder}",
                     initial_value: "{registry_url()}",
                     oninput: move |e| registry_url.set(e.value()),
