@@ -1209,6 +1209,10 @@ pub struct System {
     #[serde(default = "default_connectivity_check_urls")]
     #[garde(inner(custom(http_url)))]
     pub connectivity_check_urls: Vec<String>,
+    /// Desktop-only: an `<ip>:<port>` the app's daemon also serves the API on, for `kopuzctl --address` and other clients; empty serves the local socket alone. Read at startup, so a change needs a restart.
+    #[serde(default)]
+    #[garde(custom(valid_listen_address))]
+    pub listen_address: String,
 }
 
 impl Default for System {
@@ -1218,7 +1222,28 @@ impl Default for System {
             auto_check_updates: default_auto_check_updates(),
             minimize_to_tray: false,
             connectivity_check_urls: default_connectivity_check_urls(),
+            listen_address: String::new(),
         }
+    }
+}
+
+impl System {
+    /// The TCP address to serve on, if one is set and parses.
+    pub fn listen_socket_address(&self) -> Option<std::net::SocketAddr> {
+        let address = self.listen_address.trim();
+        if address.is_empty() {
+            return None;
+        }
+        address.parse().ok()
+    }
+}
+
+fn valid_listen_address(value: &str, _: &()) -> garde::Result {
+    let value = value.trim();
+    if value.is_empty() || value.parse::<std::net::SocketAddr>().is_ok() {
+        Ok(())
+    } else {
+        Err(garde::Error::new("not an <ip>:<port> address"))
     }
 }
 

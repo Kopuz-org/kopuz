@@ -85,6 +85,7 @@ pub fn setting_key_to_proto(value: config::SettingKey) -> SettingKey {
             SystemKey::AutoCheckUpdates => SettingKey::AutoCheckUpdates,
             SystemKey::MinimizeToTray => SettingKey::MinimizeToTray,
             SystemKey::ConnectivityCheckUrls => SettingKey::ConnectivityCheckUrls,
+            SystemKey::ListenAddress => SettingKey::ListenAddress,
         },
     }
 }
@@ -152,6 +153,7 @@ pub fn setting_key_from_proto(value: i32) -> Option<config::SettingKey> {
         SettingKey::AutoCheckUpdates => K::System(SystemKey::AutoCheckUpdates),
         SettingKey::MinimizeToTray => K::System(SystemKey::MinimizeToTray),
         SettingKey::ConnectivityCheckUrls => K::System(SystemKey::ConnectivityCheckUrls),
+        SettingKey::ListenAddress => K::System(SystemKey::ListenAddress),
     })
 }
 
@@ -265,6 +267,7 @@ pub fn config_edit_to_proto(value: &config::SettingsEdit) -> ConfigEdit {
             Sy::AutoCheckUpdates(value) => Edit::AutoCheckUpdates(value),
             Sy::MinimizeToTray(value) => Edit::MinimizeToTray(value),
             Sy::ConnectivityCheckUrls(values) => Edit::ConnectivityCheckUrls(StringList { values }),
+            Sy::ListenAddress(value) => Edit::ListenAddress(value),
         },
     };
     ConfigEdit { edit: Some(edit) }
@@ -374,6 +377,7 @@ pub fn config_edit_from_proto(value: &ConfigEdit) -> Option<config::SettingsEdit
         Edit::AutoCheckUpdates(value) => Se::System(Sy::AutoCheckUpdates(value)),
         Edit::MinimizeToTray(value) => Se::System(Sy::MinimizeToTray(value)),
         Edit::ConnectivityCheckUrls(list) => Se::System(Sy::ConnectivityCheckUrls(list.values)),
+        Edit::ListenAddress(value) => Se::System(Sy::ListenAddress(value)),
     })
 }
 

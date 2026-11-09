@@ -432,6 +432,7 @@ pub fn config_to_proto(value: &config::Settings) -> Config {
         connectivity_check_urls: Some(StringList {
             values: system.connectivity_check_urls.clone(),
         }),
+        listen_address: system.listen_address.clone(),
         show_source_toggle: ui.show_source_toggle,
         show_row_images: ui.show_row_images,
         volume_scroll_step: playback.volume_scroll_step,
@@ -576,6 +577,7 @@ pub fn config_from_proto(value: &Config) -> config::Settings {
                 Some(list) => list.values.clone(),
                 None => config::System::default().connectivity_check_urls,
             },
+            listen_address: value.listen_address.clone(),
         },
     }
 }
