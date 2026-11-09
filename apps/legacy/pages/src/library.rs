@@ -267,6 +267,14 @@ pub fn LibraryPage(
 
     let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
     rsx! {
+        if is_selection_mode() {
+            components::BackDismiss {
+                on_back: move |_| {
+                    is_selection_mode.set(false);
+                    selected_tracks.write().clear();
+                },
+            }
+        }
         div {
             class: crate::layout::page_container_class(&settings.read().ui.ui_style),
 

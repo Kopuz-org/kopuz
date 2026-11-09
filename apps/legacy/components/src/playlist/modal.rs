@@ -39,6 +39,7 @@ pub fn PlaylistModal(props: PlaylistModalProps) -> Element {
         .collect();
 
     rsx! {
+        crate::BackDismiss { on_back: move |_| props.on_close.call(()) }
         div {
             class: overlay_class,
             onclick: move |_| props.on_close.call(()),

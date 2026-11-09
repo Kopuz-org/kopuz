@@ -30,7 +30,15 @@ pub fn RemovablePrompt() -> Element {
         return rsx! {};
     };
     let ignore = source.id.clone();
+    let ignore_on_back = source.id.clone();
     rsx! {
+        crate::BackDismiss {
+            on_back: move |_| {
+                if !busy() {
+                    dismissed.write().insert(ignore_on_back.clone());
+                }
+            },
+        }
         div { class: "fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6 text-white",
             div { class: "bg-stone-900 border border-white/15 rounded-xl p-6 w-full max-w-md flex flex-col gap-4",
                 role: "dialog",

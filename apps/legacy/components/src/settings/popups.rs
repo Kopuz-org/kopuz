@@ -61,6 +61,7 @@ pub fn AddSourcePopup(
     answered.extend(secrets());
 
     rsx! {
+        crate::BackDismiss { on_back: move |_| on_close.call(()) }
         div {
             class: "overlay",
             onclick: move |_| on_close.call(()),
@@ -241,6 +242,7 @@ pub fn BrowserSignInPopup(
 ) -> Element {
     let busy = importing.is_some();
     rsx! {
+        crate::BackDismiss { on_back: move |_| if !busy { on_close.call(()) } }
         div {
             class: "overlay",
             onclick: move |_| if !busy { on_close.call(()) },
@@ -301,6 +303,7 @@ pub fn LoginPopup(
     );
 
     rsx! {
+        crate::BackDismiss { on_back: move |_| on_close.call(()) }
         div {
             class: "overlay",
             onclick: move |_| on_close.call(()),
@@ -362,6 +365,7 @@ pub fn AddRegistryPopup(
     let save_text = i18n::t("save").to_string();
 
     rsx! {
+        crate::BackDismiss { on_back: move |_| if !loading() { on_close.call(()) } }
         div {
             class: "overlay",
             onclick: move |_| { if !loading() { on_close.call(()) } },

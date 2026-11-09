@@ -236,6 +236,14 @@ pub fn Artist(
     };
 
     rsx! {
+        if is_selection_mode() {
+            components::BackDismiss {
+                on_back: move |_| {
+                    is_selection_mode.set(false);
+                    selected_tracks.write().clear();
+                },
+            }
+        }
         div {
             class: page_container_class,
 

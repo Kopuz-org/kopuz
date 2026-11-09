@@ -166,6 +166,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
     };
 
     rsx! {
+        crate::BackDismiss { on_back: move |_| props.on_close.call(()) }
         div {
             class: "fixed inset-0 bg-black/80 flex items-center justify-center z-50",
             onclick: move |_| props.on_close.call(()),

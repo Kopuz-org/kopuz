@@ -882,6 +882,7 @@ fn RenameTextModal(
     on_save: EventHandler<()>,
 ) -> Element {
     rsx! {
+        components::BackDismiss { on_back: move |_| on_close.call(()) }
         div {
             class: "fixed inset-0 bg-black/70 flex items-center justify-center z-50",
             onclick: move |_| on_close.call(()),

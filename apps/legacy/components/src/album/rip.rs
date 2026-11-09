@@ -18,6 +18,7 @@ pub fn RipAudio(keys: Vec<String>) -> Element {
             "{i18n::t(\"cd_rip_flac\")}"
         }
         if open() {
+            crate::BackDismiss { on_back: move |_| open.set(false) }
             div { class: "fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6",
                 div { class: "bg-stone-900 border border-white/15 rounded-xl p-6 w-full max-w-md flex flex-col gap-4",
                     role: "dialog",

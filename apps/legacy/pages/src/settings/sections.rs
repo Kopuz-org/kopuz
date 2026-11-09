@@ -322,6 +322,7 @@ pub(super) fn OfflineCacheSection(settings: Signal<Settings>) -> Element {
             }
         }
         if confirming() {
+            components::BackDismiss { on_back: move |_| confirming.set(false) }
             div {
                 class: "overlay",
                 onclick: move |_| confirming.set(false),

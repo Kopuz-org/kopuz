@@ -19,6 +19,13 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
     let pid_btn = pid.clone();
 
     rsx! {
+        crate::BackDismiss {
+            on_back: move |_| {
+                if !*is_submitting.peek() {
+                    on_close.call(());
+                }
+            },
+        }
         div {
             class: "fixed inset-0 z-50 flex items-center justify-center bg-black/60",
             onclick: move |_| {

@@ -1261,6 +1261,9 @@ fn App() -> Element {
             if components::dots_menu::close_open_sheet().await {
                 continue;
             }
+            if components::back_stack::dismiss_top() {
+                continue;
+            }
             if *show_quick_search.peek() {
                 show_quick_search.set(false);
             } else if *is_devices_open.peek() {
