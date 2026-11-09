@@ -45,7 +45,6 @@ class MainActivity : WryActivity() {
         if (!requestNotificationPermission()) {
             requestMediaPermission()
         }
-        requestBatteryOptimizationExemption()
     }
 
     // Draw under the status/navigation bars and make them transparent so the app's
@@ -136,6 +135,23 @@ class MainActivity : WryActivity() {
         fun moveToBack() {
             val act = instance ?: return
             act.runOnUiThread { act.moveTaskToBack(true) }
+        }
+
+        @Volatile
+        private var askedBatteryExemption = false
+
+        /**
+         * Asked when playback first starts rather than on first launch: a cold
+         * start already queues the notification and media prompts, and the
+         * battery request only makes sense to someone who has just pressed play
+         * and wants it to keep going with the screen off.
+         */
+        @JvmStatic
+        fun requestBatteryExemptionOnce() {
+            if (askedBatteryExemption) return
+            val act = instance ?: return
+            askedBatteryExemption = true
+            act.runOnUiThread { act.requestBatteryOptimizationExemption() }
         }
     }
 
