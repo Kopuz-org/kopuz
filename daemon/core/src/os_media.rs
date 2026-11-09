@@ -60,6 +60,7 @@ pub fn spawn(session: &SessionHandle) {
     let mut events = session.subscribe();
     tokio::spawn(async move {
         let mut last_modes: Option<(bool, LoopMode)> = None;
+        let mut last_volume: Option<f64> = None;
         loop {
             tokio::select! {
 
@@ -91,6 +92,9 @@ pub fn spawn(session: &SessionHandle) {
                                 RepeatMode::Track => LoopMode::Track,
                             }),
                         },
+                        SystemEvent::SetVolume(volume) => PlayerCommand::SetVolume {
+                            volume: volume as f32,
+                        },
                     };
                     command(&session, mapped).await;
                 }
@@ -108,6 +112,11 @@ pub fn spawn(session: &SessionHandle) {
                                         LoopMode::Track => RepeatMode::Track,
                                     },
                                 );
+                            }
+                            let volume = if state.muted { 0.0 } else { f64::from(state.volume) };
+                            if last_volume != Some(volume) {
+                                last_volume = Some(volume);
+                                player::systemint::update_volume(volume);
                             }
                         }
                         Ok(_) => {}
