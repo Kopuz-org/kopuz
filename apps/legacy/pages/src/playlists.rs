@@ -59,6 +59,55 @@ pub fn PlaylistsPage(
         });
     };
 
+    let import_m3u = move || {
+        #[cfg(not(target_os = "android"))]
+        spawn(async move {
+            let Some(file) = rfd::AsyncFileDialog::new()
+                .add_filter("M3U", &["m3u", "m3u8"])
+                .pick_file()
+                .await
+            else {
+                return;
+            };
+            let path = file.path().to_path_buf();
+            let text = match tokio::fs::read(&path).await {
+                Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+                Err(error) => {
+                    hooks::toast::toast_error(&error.to_string());
+                    return;
+                }
+            };
+            let name = path
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+                .unwrap_or_else(|| i18n::t("import_playlist"));
+            let base_dir = path.parent().map(|dir| dir.to_string_lossy().into_owned());
+            match hooks::consume_api()
+                .import_playlist(name, text, base_dir)
+                .await
+            {
+                Ok(import) => {
+                    if caps().sync {
+                        hooks::jobs::start(hooks::JobKind::PlaylistSync);
+                    }
+                    let key = if import.missing.is_empty() {
+                        "playlist_imported"
+                    } else {
+                        "playlist_imported_partly"
+                    };
+                    hooks::toast::toast(&i18n::t_with(
+                        key,
+                        &[
+                            ("matched", import.matched.into()),
+                            ("missing", import.missing.len().into()),
+                        ],
+                    ));
+                }
+                Err(error) => hooks::toast::toast_api_error(&error),
+            }
+        });
+    };
+
     let downloads = hooks::downloads::use_downloads();
 
     let active_source = hooks::use_db_queries::use_active_source();
@@ -169,6 +218,15 @@ pub fn PlaylistsPage(
                                     );
                                 },
                                 i { class: "fa-solid fa-folder-plus" }
+                            }
+                        }
+                        if !cfg!(target_os = "android") && caps().playlists != api::PlaylistCapability::None {
+                            button {
+                                class: "app-icon-button w-10 h-10 flex items-center justify-center text-white/60 hover:text-white rounded-full hover:bg-white/10 transition-colors active:scale-95",
+                                title: i18n::t("import_playlist").to_string(),
+                                aria_label: i18n::t("import_playlist").to_string(),
+                                onclick: move |_| import_m3u(),
+                                i { class: "fa-solid fa-file-import" }
                             }
                         }
                         button {

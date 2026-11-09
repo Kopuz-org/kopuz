@@ -52,8 +52,8 @@ pub use player::{
     PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind, VideoChunk, VideoRequest,
 };
 pub use playlists::{
-    PlaylistCatalog, PlaylistEdit, PlaylistFolderInfo, PlaylistInfo, PlaylistPrivacy,
-    PlaylistReorder,
+    PlaylistCatalog, PlaylistEdit, PlaylistFolderInfo, PlaylistImport, PlaylistInfo,
+    PlaylistPrivacy, PlaylistReorder,
 };
 pub use prefs::{
     FrontendPref, MAX_PREF_ENTRIES_PER_CALL, MAX_PREF_FRONTEND_BYTES, MAX_PREF_KEY_BYTES,
@@ -357,6 +357,17 @@ pub trait PlaylistApi: Send + Sync {
 
     /// Create a playlist and return its id.
     async fn create_playlist(&self, name: String, keys: Vec<String>) -> Result<String, ApiError>;
+
+    /// Create a playlist from an M3U file's text, matching each entry to a
+    /// library track by its path, then its file name and folders, then its
+    /// `#EXTINF` artist and title. `base_dir` is the file's folder, for
+    /// entries written relative to it.
+    async fn import_playlist(
+        &self,
+        name: String,
+        m3u: String,
+        base_dir: Option<String>,
+    ) -> Result<PlaylistImport, ApiError>;
 
     async fn rename_playlist(&self, id: String, name: String) -> Result<(), ApiError>;
 

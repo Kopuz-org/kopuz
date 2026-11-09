@@ -1209,3 +1209,6 @@ removable_listen = Listen
 removable_temporary = Temporary — until ejected
 discord_presence_upload_cover = Upload local covers for Discord
 discord_presence_upload_cover_help = When a local song has no cover MusicBrainz or iTunes can find, its embedded art is shrunk and uploaded to Litterbox (or Uguu) for a day so Discord can show it. The image leaves your computer.
+import_playlist = Import M3U playlist
+playlist_imported = Imported { $matched } songs.
+playlist_imported_partly = Imported { $matched } songs. { $missing } are not in your library.
