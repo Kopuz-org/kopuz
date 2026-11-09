@@ -17,6 +17,7 @@ pub use common::back_stack::BackDismiss;
 pub use common::controls::{
     dots_menu, reorder_buttons, selection_bar, sort_control, view_mode_toggle,
 };
+pub use common::pull_refresh::PullToRefresh;
 pub use common::{
     back_stack, catalog_actions, constants, gestures, haptics, shared, virtual_scroll,
 };

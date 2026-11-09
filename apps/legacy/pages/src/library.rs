@@ -471,31 +471,43 @@ pub fn LibraryPage(
                 }
             }
             Header { is_vaxry: is_vaxry, is_album: false, sort_state: Some(header_sort) }
-            VirtualScrollView {
-                id: "library-scroll".to_string(),
-                class: if cfg!(target_os = "android") { "flex-1 overflow-y-auto overflow-x-hidden pb-20".to_string() } else { "flex-1 overflow-y-auto pb-20".to_string() },
-                scroll_stat,
-                container_height,
-                item_height: ITEM_HEIGHT,
-                saved_scroll,
-                top_pad,
-                bottom_pad,
-                onscroll: move |scroll| {
-                    scroll_positions.write().insert(Route::Library, scroll);
+            components::PullToRefresh {
+                scroller_id: "library-scroll".to_string(),
+                class: "flex-1 min-h-0 flex flex-col".to_string(),
+                refreshing: is_loading(),
+                on_refresh: move |_| {
+                    if caps().scan_folders {
+                        on_rescan.call(());
+                    } else if caps().sync {
+                        sync_server();
+                    }
                 },
-                if is_empty {
-                    if window.total.read().is_none() || *is_loading.read() {
-                        div { class: "flex items-center justify-center py-12",
-                            i { class: "fa-solid fa-spinner fa-spin text-3xl text-white/20" }
+                VirtualScrollView {
+                    id: "library-scroll".to_string(),
+                    class: if cfg!(target_os = "android") { "flex-1 overflow-y-auto overflow-x-hidden pb-20".to_string() } else { "flex-1 overflow-y-auto pb-20".to_string() },
+                    scroll_stat,
+                    container_height,
+                    item_height: ITEM_HEIGHT,
+                    saved_scroll,
+                    top_pad,
+                    bottom_pad,
+                    onscroll: move |scroll| {
+                        scroll_positions.write().insert(Route::Library, scroll);
+                    },
+                    if is_empty {
+                        if window.total.read().is_none() || *is_loading.read() {
+                            div { class: "flex items-center justify-center py-12",
+                                i { class: "fa-solid fa-spinner fa-spin text-3xl text-white/20" }
+                            }
+                        } else {
+                            p { class: "text-slate-500 italic", "{i18n::t(\"no_tracks_found\")}" }
                         }
                     } else {
-                        p { class: "text-slate-500 italic", "{i18n::t(\"no_tracks_found\")}" }
-                    }
-                } else {
-                    {tracks_nodes.into_iter()}
-                    if *is_loading.read() {
-                        div { class: "flex items-center justify-center py-4",
-                            i { class: "fa-solid fa-spinner fa-spin text-xl text-white/20" }
+                        {tracks_nodes.into_iter()}
+                        if *is_loading.read() {
+                            div { class: "flex items-center justify-center py-4",
+                                i { class: "fa-solid fa-spinner fa-spin text-xl text-white/20" }
+                            }
                         }
                     }
                 }
