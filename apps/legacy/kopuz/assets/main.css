@@ -413,6 +413,20 @@ body {
     -webkit-tap-highlight-color: transparent !important;
 }
 
+/* Material 3 draws its own seek handle and hit area. */
+[data-platform="android"]:not([data-ui-style="material3"]) .playback-seek .slider-hit {
+    top: -10px;
+    height: calc(100% + 20px);
+}
+
+[data-platform="android"]:not([data-ui-style="material3"]) .playback-seek-handle {
+    transition: transform 120ms ease-out;
+}
+
+[data-platform="android"]:not([data-ui-style="material3"]) .seek-dragging .playback-seek-handle {
+    transform: scale(1.75);
+}
+
 [data-platform="android"] input,
 [data-platform="android"] textarea,
 [data-platform="android"] [contenteditable="true"] {

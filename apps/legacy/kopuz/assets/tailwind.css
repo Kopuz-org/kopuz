@@ -378,6 +378,9 @@
   .bottom-24 {
     bottom: calc(var(--spacing) * 24);
   }
+  .bottom-full {
+    bottom: 100%;
+  }
   .-left-1 {
     left: calc(var(--spacing) * -1);
   }

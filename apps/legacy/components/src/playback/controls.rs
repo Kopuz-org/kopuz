@@ -8,6 +8,9 @@ pub struct SeekDrag {
     pub progress_percent: f64,
     /// No known length to seek within: a radio stream, or a track whose source gave none.
     pub no_length: bool,
+    /// A finger or pointer is holding the thumb; the position shown is the
+    /// drag target, not playback.
+    pub dragging: bool,
     pub on_commit: Callback<FormEvent>,
     pub on_input: Callback<FormEvent>,
 }
@@ -108,6 +111,7 @@ pub fn use_seek_drag(
         display_progress,
         progress_percent,
         no_length,
+        dragging: *is_dragging.read(),
         on_commit,
         on_input,
     }
@@ -336,6 +340,10 @@ pub fn SeekSlider(
     let is_loading = *ctrl.is_loading.read();
     let buffered_ranges = ctrl.buffered_ranges.read().clone();
     let can_seek = !no_length && !is_loading;
+    // A fingertip hides the 12px thumb and gives no sense of where a drag will
+    // land, so on touch a time bubble rides above it while held. main.css grows
+    // the thumb and the input's hit area from the same `seek-dragging` class.
+    let touch_dragging = cfg!(target_os = "android") && seek.dragging;
 
     match variant {
         ControlsVariant::Fullscreen => rsx! {
@@ -347,7 +355,11 @@ pub fn SeekSlider(
                     class: "flex items-center gap-3",
                     span { class: "playback-time text-xs text-white/70 font-mono", style: "width: 50px; text-align: left;", "{fmt_time(display_progress)}" }
                     div {
-                        class: format!("playback-seek flex-1 h-5 {} relative group", if can_seek { "cursor-pointer" } else { "" }),
+                        class: format!(
+                            "playback-seek flex-1 h-5 {} {} relative group",
+                            if can_seek { "cursor-pointer" } else { "" },
+                            if touch_dragging { "seek-dragging" } else { "" },
+                        ),
                         style: "--seek-progress: {progress_percent}%;",
                         div { class: "playback-seek-track absolute inset-x-0 top-2 h-1 bg-white/20 rounded-full" }
                         div { class: "playback-seek-track absolute inset-x-0 top-2 h-1 overflow-hidden rounded-full",
@@ -369,6 +381,13 @@ pub fn SeekSlider(
                                     "playback-seek-handle absolute top-1 w-3 h-3 bg-white rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
                                 },
                                 style: "left: calc({progress_percent}% - 6px);"
+                            }
+                        }
+                        if touch_dragging {
+                            div {
+                                class: "playback-seek-bubble absolute bottom-full mb-2 px-2 py-1 rounded-md bg-white text-black text-xs font-mono font-semibold pointer-events-none shadow-lg",
+                                style: "left: {progress_percent}%; transform: translateX(-50%);",
+                                "{fmt_time(display_progress)}"
                             }
                         }
                         input {
