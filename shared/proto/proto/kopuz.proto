@@ -1952,6 +1952,7 @@ message ConfigEdit {
     uint32 sync_interval_minutes = 78;
     OptionalBool discord_presence = 79;
     OptionalBool discord_presence_source = 80;
+    OptionalBool discord_presence_upload_cover = 87;
     RadioRegistryOp radio_registries = 61;
     string downloader_output_dir = 76;
     DownloaderOptions downloader_options = 77;
@@ -2085,6 +2086,7 @@ enum SettingKey {
   SETTING_KEY_CONNECTIVITY_CHECK_URLS = 83;
   SETTING_KEY_OFFLINE_CACHE_ENABLED = 84;
   SETTING_KEY_OFFLINE_CACHE_MAX_BYTES = 85;
+  SETTING_KEY_DISCORD_PRESENCE_UPLOAD_COVER = 87;
 }
 
 message GetFrontendPrefsRequest {
@@ -2220,6 +2222,7 @@ message Config {
   optional uint32 sync_interval_minutes = 78;
   optional bool discord_presence = 79;
   optional bool discord_presence_source = 80;
+  optional bool discord_presence_upload_cover = 87;
   optional string spotify_browser = 81;
   bool spotify_prefer_active_device = 82;
   string downloader_output_dir = 76;

@@ -69,6 +69,7 @@ pub fn setting_key_to_proto(value: config::SettingKey) -> SettingKey {
         K::Integrations(key) => match key {
             IntegrationsKey::DiscordPresence => SettingKey::DiscordPresence,
             IntegrationsKey::DiscordPresenceSource => SettingKey::DiscordPresenceSource,
+            IntegrationsKey::DiscordPresenceUploadCover => SettingKey::DiscordPresenceUploadCover,
             IntegrationsKey::RadioRegistries => SettingKey::RadioRegistries,
         },
         K::Downloads(key) => match key {
@@ -138,6 +139,9 @@ pub fn setting_key_from_proto(value: i32) -> Option<config::SettingKey> {
         SettingKey::DiscordPresence => K::Integrations(IntegrationsKey::DiscordPresence),
         SettingKey::DiscordPresenceSource => {
             K::Integrations(IntegrationsKey::DiscordPresenceSource)
+        }
+        SettingKey::DiscordPresenceUploadCover => {
+            K::Integrations(IntegrationsKey::DiscordPresenceUploadCover)
         }
         SettingKey::RadioRegistries => K::Integrations(IntegrationsKey::RadioRegistries),
         SettingKey::DownloaderOutputDir => K::Downloads(DownloadsKey::DownloaderOutputDir),
@@ -232,6 +236,9 @@ pub fn config_edit_to_proto(value: &config::SettingsEdit) -> ConfigEdit {
         Se::Integrations(edit) => match edit {
             In::DiscordPresence(value) => Edit::DiscordPresence(OptionalBool { value }),
             In::DiscordPresenceSource(value) => Edit::DiscordPresenceSource(OptionalBool { value }),
+            In::DiscordPresenceUploadCover(value) => {
+                Edit::DiscordPresenceUploadCover(OptionalBool { value })
+            }
             In::RadioRegistries(op) => Edit::RadioRegistries(RadioRegistryOp {
                 op: Some(match op {
                     RegistryOp::Put(entry) => {
@@ -349,6 +356,9 @@ pub fn config_edit_from_proto(value: &ConfigEdit) -> Option<config::SettingsEdit
         Edit::DiscordPresence(value) => Se::Integrations(In::DiscordPresence(value.value)),
         Edit::DiscordPresenceSource(value) => {
             Se::Integrations(In::DiscordPresenceSource(value.value))
+        }
+        Edit::DiscordPresenceUploadCover(value) => {
+            Se::Integrations(In::DiscordPresenceUploadCover(value.value))
         }
         Edit::RadioRegistries(value) => Se::Integrations(In::RadioRegistries(match value.op? {
             radio_registry_op::Op::Put(entry) => RegistryOp::Put(registry_entry_from_proto(&entry)),

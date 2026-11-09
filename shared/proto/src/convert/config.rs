@@ -475,6 +475,7 @@ pub fn config_to_proto(value: &config::Settings) -> Config {
         offline_cache_max_bytes: Some(library.offline_cache_max_bytes),
         discord_presence: integrations.discord_presence,
         discord_presence_source: integrations.discord_presence_source,
+        discord_presence_upload_cover: integrations.discord_presence_upload_cover,
         spotify_browser: spotify.spotify_browser.clone(),
         spotify_prefer_active_device: spotify.spotify_prefer_active_device,
         downloader_output_dir: downloads.downloader_output_dir.clone(),
@@ -552,6 +553,7 @@ pub fn config_from_proto(value: &Config) -> config::Settings {
         integrations: config::Integrations {
             discord_presence: value.discord_presence,
             discord_presence_source: value.discord_presence_source,
+            discord_presence_upload_cover: value.discord_presence_upload_cover,
             radio_registries: value
                 .radio_registries
                 .iter()
