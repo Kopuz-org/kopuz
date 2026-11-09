@@ -77,6 +77,7 @@ pub fn BottombarNormal(
         return rsx! {
             div {
                 class: "player-bar player-bar-mobile shrink-0 mx-2 mb-2 h-[68px] bg-(--surface-chrome-raised)/95 backdrop-blur-3xl border border-white/10 rounded-[24px] flex items-center px-3 gap-3 relative overflow-hidden shadow-[0_12px_40px_rgba(0,0,0,0.8)]",
+                style: bar_swipe.follow_transform(),
                 onclick: move |_| is_fullscreen.set(true),
                 ontouchstart: move |evt| bar_swipe.start(&evt),
                 ontouchmove: move |evt| bar_swipe.update(&evt),

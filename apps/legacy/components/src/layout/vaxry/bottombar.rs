@@ -78,6 +78,7 @@ pub fn BottombarVaxry(
         return rsx! {
             div {
                 class: "shrink-0 h-[68px] bg-black/85 backdrop-blur-2xl border-t border-white/10 flex items-center px-3 gap-3 relative overflow-hidden",
+                style: bar_swipe.follow_transform(),
                 onclick: move |_| is_fullscreen.set(true),
                 ontouchstart: move |evt| bar_swipe.start(&evt),
                 ontouchmove: move |evt| bar_swipe.update(&evt),

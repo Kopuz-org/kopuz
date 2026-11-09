@@ -106,6 +106,27 @@ impl Swipe {
         *self.delta.read()
     }
 
+    /// Where a surface that can be flicked sideways (skip) or up (expand)
+    /// should sit under the finger: it follows the dominant axis, damped and
+    /// capped, so the drag reads as a drag before it commits on release.
+    pub fn follow_transform(&self) -> String {
+        const SIDEWAYS_MAX: f64 = 72.0;
+        const UP_MAX: f64 = 48.0;
+        let (dx, dy) = self.delta();
+        if dx == 0.0 && dy == 0.0 {
+            return "transform: translate(0, 0); transition: transform 200ms ease-out;".into();
+        }
+        if dx.abs() > dy.abs() {
+            let x = (dx * 0.6).clamp(-SIDEWAYS_MAX, SIDEWAYS_MAX);
+            format!("transform: translateX({x}px);")
+        } else if dy < 0.0 {
+            let y = (dy * 0.4).max(-UP_MAX);
+            format!("transform: translateY({y}px);")
+        } else {
+            String::new()
+        }
+    }
+
     /// Downward travel only, clamped at zero — the offset for a pull-to-dismiss
     /// sheet, which should not follow a finger dragging back up past the top.
     pub fn pull_down(&self) -> f64 {
