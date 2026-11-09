@@ -33,7 +33,15 @@ pub enum Command {
     /// Show daemon and playback status.
     Status,
     /// Resume playback, or replace the queue with library track keys.
-    Play { keys: Vec<String> },
+    Play {
+        keys: Vec<String>,
+        /// Queue the tracks right after the current one instead of replacing the queue.
+        #[arg(long, requires = "keys", conflicts_with = "append")]
+        next: bool,
+        /// Queue the tracks at the end instead of replacing the queue.
+        #[arg(long, requires = "keys")]
+        append: bool,
+    },
     /// Pause playback.
     Pause,
     /// Toggle playback.
@@ -282,7 +290,7 @@ pub async fn execute(
         Command::Volume { percent } => Some(PlayerCommand::SetVolume {
             volume: f32::from(percent) / 100.0,
         }),
-        Command::Play { ref keys } if keys.is_empty() => Some(PlayerCommand::Play),
+        Command::Play { ref keys, .. } if keys.is_empty() => Some(PlayerCommand::Play),
         _ => None,
     };
     if let Some(command) = player_command {
@@ -301,12 +309,17 @@ pub async fn execute(
                 "track": state.track.map(|track| format!("{} — {}", track.artist, track.title)),
             }))
         }
-        Command::Play { keys } => {
+        Command::Play { keys, next, append } => {
+            let (mode, start_index) = match (next, append) {
+                (true, _) => (api::QueueMode::PlayNext, None),
+                (false, true) => (api::QueueMode::Append, None),
+                (false, false) => (api::QueueMode::Replace, Some(0)),
+            };
             let ack = api
                 .set_queue(api::SetQueueRequest {
-                    mode: api::QueueMode::Replace,
+                    mode,
                     context: api::QueueContext::Tracks { keys },
-                    start_index: Some(0),
+                    start_index,
                     shuffle: None,
                 })
                 .await?;
@@ -621,10 +634,13 @@ mod tests {
             vec!["kopuzctl", "volume", "101"],
             vec!["kopuzctl", "source", "login", "id", "--password-stdin"],
             vec!["kopuzctl", "queue", "--limit", "0"],
+            vec!["kopuzctl", "play", "--next"],
+            vec!["kopuzctl", "play", "--next", "--append", "a"],
         ] {
             assert!(Cli::try_parse_from(args).is_err());
         }
         assert!(Cli::try_parse_from(["kopuzctl", "--address", "localhost:9000", "status"]).is_ok());
+        assert!(Cli::try_parse_from(["kopuzctl", "play", "--next", "a", "b"]).is_ok());
         assert_eq!(
             Cli::try_parse_from(["kopuzctl", "--help"])
                 .err()
