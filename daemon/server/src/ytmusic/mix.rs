@@ -1,4 +1,4 @@
-use reader::models::{Counterpart, SharedSegment, Track};
+use reader::models::{ArtistCredit, Counterpart, SharedSegment, Track};
 use serde_json::{Value, json};
 
 use super::clients::WEB_REMIX;
@@ -390,7 +390,16 @@ fn parse_queue_row(row: &Value) -> Option<Track> {
         .first()
         .map(|(text, _)| text.clone())
         .unwrap_or_default();
-    let artists = if primary_artist.is_empty() {
+    let credits: Vec<ArtistCredit> = byline
+        .iter()
+        .filter_map(|(text, browse_id)| match browse_id.as_deref() {
+            Some(id) if id.starts_with("UC") => Some(ArtistCredit::linked(text, id)),
+            _ => None,
+        })
+        .collect();
+    let artists = if !credits.is_empty() {
+        credits.iter().map(|credit| credit.name.clone()).collect()
+    } else if primary_artist.is_empty() {
         Vec::new()
     } else {
         vec![primary_artist.clone()]
@@ -443,7 +452,7 @@ fn parse_queue_row(row: &Value) -> Option<Track> {
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
-        credits: Vec::new(),
+        credits,
         artists,
         replay_gain: config::ReplayGainInfo::default(),
         explicit: super::has_explicit_badge(row),
@@ -543,6 +552,22 @@ mod album_tests {
             "title": { "runs": [{ "text": "Song" }] },
             "longBylineText": { "runs": byline },
         })
+    }
+
+    #[test]
+    fn a_queue_row_credits_the_artists_its_byline_links() {
+        let track = parse_queue_row(&queue_row(json!([
+            { "text": "Ada", "navigationEndpoint": { "browseEndpoint": { "browseId": "UCada" } } },
+            { "text": " & " },
+            { "text": "Boris", "navigationEndpoint": { "browseEndpoint": { "browseId": "UCboris" } } },
+            { "text": " • " },
+            { "text": "Hits", "navigationEndpoint": { "browseEndpoint": { "browseId": "MPREb_one" } } }
+        ])))
+        .expect("a song row");
+        let ids: Vec<Option<&str>> = track.credits.iter().map(|c| c.id.as_deref()).collect();
+        assert_eq!(ids, [Some("UCada"), Some("UCboris")]);
+        assert_eq!(track.artists, ["Ada", "Boris"]);
+        assert_eq!(track.artist, "Ada");
     }
 
     #[test]
