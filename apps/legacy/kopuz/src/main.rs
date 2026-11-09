@@ -151,6 +151,14 @@ fn init_android_tls() -> Result<(), String> {
     .map_err(|e: ::jni::errors::Error| e.to_string())
 }
 
+/// The element whose scroll position each page keeps. Android scrolls an inner
+/// container so the top bar stays put; desktop scrolls the shell itself.
+const PAGE_SCROLLER_ID: &str = if cfg!(target_os = "android") {
+    "android-page-scroll"
+} else {
+    "main-scroll-area"
+};
+
 fn main() -> std::process::ExitCode {
     // Core startup can fail before Dioxus installs its logger at launch.
     #[cfg(target_os = "android")]
@@ -888,6 +896,21 @@ fn App() -> Element {
         });
     }
 
+    let mut save_page_scroll = move |pos: f64| {
+        let route = *current_route.peek();
+        let album_sel = selected_album_id.peek().clone();
+        let artist_sel = selected_artist.peek().clone();
+        let page_sel = catalog_page.peek().clone();
+        match detail_scroll_key(route, &album_sel, artist_sel.as_ref(), page_sel.as_ref()) {
+            Some(key) => {
+                detail_scroll_positions.write().insert(key, pos);
+            }
+            None => {
+                scroll_positions.write().insert(route, pos);
+            }
+        }
+    };
+
     // A language change remounts the scroll area at the top, so it is restored like a navigation.
     let shown_language = use_memo(move || settings.read().ui.language.clone());
     use_effect(move || {
@@ -910,7 +933,7 @@ fn App() -> Element {
             }
             .unwrap_or(0.0);
         let _ = dioxus::document::eval(&format!(
-            "let el = document.getElementById('main-scroll-area'); if (el) el.scrollTop = {pos};"
+            "let el = document.getElementById('{PAGE_SCROLLER_ID}'); if (el) el.scrollTop = {pos};"
         ));
     });
 
@@ -1578,21 +1601,7 @@ fn App() -> Element {
                 div {
                     id: "main-scroll-area",
                     class: if cfg!(target_os = "android") { "flex-1 min-h-0 flex flex-col overflow-hidden relative" } else { "flex-1 overflow-y-auto" },
-                    onscroll: move |evt| {
-                        let pos = evt.scroll_top();
-                        let route = *current_route.peek();
-                        let album_sel = selected_album_id.peek().clone();
-                        let artist_sel = selected_artist.peek().clone();
-                        let page_sel = catalog_page.peek().clone();
-                        match detail_scroll_key(route, &album_sel, artist_sel.as_ref(), page_sel.as_ref()) {
-                            Some(key) => {
-                                detail_scroll_positions.write().insert(key, pos);
-                            }
-                            None => {
-                                scroll_positions.write().insert(route, pos);
-                            }
-                        }
-                    },
+                    onscroll: move |evt| save_page_scroll(evt.scroll_top()),
 
                     if cfg!(target_os = "android") {
                         {
@@ -1659,7 +1668,16 @@ fn App() -> Element {
                         }
                     }
 
-                    div { class: if cfg!(target_os = "android") { "relative flex-1 min-h-0 overflow-y-auto" } else { "contents" },
+                    // On Android the page scrolls here, under the fixed top bar,
+                    // so this is where the position is saved and restored.
+                    div {
+                        id: if cfg!(target_os = "android") { PAGE_SCROLLER_ID },
+                        class: if cfg!(target_os = "android") { "relative flex-1 min-h-0 overflow-y-auto" } else { "contents" },
+                        onscroll: move |evt| {
+                            if cfg!(target_os = "android") {
+                                save_page_scroll(evt.scroll_top());
+                            }
+                        },
                     match *current_route.read() {
                         Route::Home => rsx! {
                             pages::home::Home {
