@@ -27,6 +27,17 @@ pub fn ExplicitBadge() -> Element {
 const CACHED_MARK_STYLE: &str =
     "background: color-mix(in oklab, var(--color-white) 30%, transparent);";
 
+/// How far (px) a finger may drift before a held press stops counting.
+const LONG_PRESS_SLOP_PX: f64 = 10.0;
+
+fn touch_point(evt: &TouchEvent) -> Option<(f64, f64)> {
+    let touches = evt.touches();
+    let changed = evt.touches_changed();
+    let point = touches.first().or_else(|| changed.first())?;
+    let at = point.client_coordinates();
+    Some((at.x, at.y))
+}
+
 /// The artist the row's artist cell opens; a row crediting nobody opens nothing.
 fn billed_artist(track: &Track) -> Option<String> {
     track.primary_credit().and_then(|credit| credit.key.clone())
@@ -86,11 +97,14 @@ pub fn TrackRow(
     let mut long_press_task = use_signal(|| None);
     let mut long_press_occurred = use_signal(|| false);
 
-    let mut start_long_press = move || {
+    let mut long_press_origin = use_signal(|| None::<(f64, f64)>);
+
+    let mut start_long_press = move |origin: Option<(f64, f64)>| {
         if is_selection_mode {
             return;
         }
         long_press_occurred.set(false);
+        long_press_origin.set(origin);
         if let Some(handler) = on_long_press {
             let mut occurred = long_press_occurred;
             let task = spawn(async move {
@@ -104,8 +118,23 @@ pub fn TrackRow(
     };
 
     let mut cancel_long_press = move || {
+        long_press_origin.set(None);
         if let Some(task) = long_press_task.write().take() {
             task.cancel();
+        }
+    };
+
+    // A finger that starts on a row and scrolls the list is not a press; without
+    // this a slow scroll opens the menu of whichever row it began on.
+    let mut track_long_press = move |evt: &TouchEvent| {
+        let Some((ox, oy)) = *long_press_origin.peek() else {
+            return;
+        };
+        let Some((x, y)) = touch_point(evt) else {
+            return;
+        };
+        if (x - ox).hypot(y - oy) > LONG_PRESS_SLOP_PX {
+            cancel_long_press();
         }
     };
 
@@ -144,7 +173,8 @@ pub fn TrackRow(
                         on_play.call(());
                     }
                 },
-                ontouchstart: move |_| start_long_press(),
+                ontouchstart: move |evt| start_long_press(touch_point(&evt)),
+                ontouchmove: move |evt| track_long_press(&evt),
                 ontouchend: move |_| cancel_long_press(),
                 ontouchcancel: move |_| cancel_long_press(),
 
@@ -251,7 +281,7 @@ pub fn TrackRow(
                         let coords = evt.client_coordinates();
                         pending_queue_drag.set(Some((coords.x, coords.y)));
                     }
-                    start_long_press();
+                    start_long_press(Some((evt.client_coordinates().x, evt.client_coordinates().y)));
                 },
                 onmousemove: move |evt| {
                     let drag_start = *pending_queue_drag.read();
@@ -284,8 +314,10 @@ pub fn TrackRow(
                     clear_dragged_queue_track();
                 },
                 onmouseleave: move |_| cancel_long_press(),
-                ontouchstart: move |_| start_long_press(),
+                ontouchstart: move |evt| start_long_press(touch_point(&evt)),
+                ontouchmove: move |evt| track_long_press(&evt),
                 ontouchend: move |_| cancel_long_press(),
+                ontouchcancel: move |_| cancel_long_press(),
                 oncontextmenu: move |evt| {
                     evt.prevent_default();
                     if !is_selection_mode {
@@ -508,7 +540,7 @@ pub fn TrackRow(
                     let coords = evt.client_coordinates();
                     pending_queue_drag_normal.set(Some((coords.x, coords.y)));
                 }
-                start_long_press();
+                start_long_press(Some((evt.client_coordinates().x, evt.client_coordinates().y)));
             },
             onmousemove: move |evt| {
                 let drag_start = *pending_queue_drag_normal.read();
@@ -541,8 +573,10 @@ pub fn TrackRow(
                 clear_dragged_queue_track();
             },
             onmouseleave: move |_| cancel_long_press(),
-            ontouchstart: move |_| start_long_press(),
+            ontouchstart: move |evt| start_long_press(touch_point(&evt)),
+            ontouchmove: move |evt| track_long_press(&evt),
             ontouchend: move |_| cancel_long_press(),
+            ontouchcancel: move |_| cancel_long_press(),
             oncontextmenu: move |evt| {
                 evt.prevent_default();
                 if !is_selection_mode {
