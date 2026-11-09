@@ -16,7 +16,7 @@ pub use album::actions as album_actions;
 pub use common::controls::{
     dots_menu, reorder_buttons, selection_bar, sort_control, view_mode_toggle,
 };
-pub use common::{catalog_actions, constants, gestures, shared, virtual_scroll};
+pub use common::{catalog_actions, constants, gestures, haptics, shared, virtual_scroll};
 pub use layout::{
     bottombar, download_overlay, form_factor, fullscreen, header, normal, rightbar, showcase,
     sidebar, stat_card, titlebar, vaxry,

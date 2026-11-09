@@ -96,6 +96,7 @@ pub fn TrackRow(
             let task = spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(600)).await;
                 occurred.set(true);
+                crate::haptics::perform(crate::haptics::Haptic::LongPress);
                 handler.call(());
             });
             long_press_task.set(Some(task));

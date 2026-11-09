@@ -14,6 +14,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import moe.kopuz.kopuz.Haptics
 import moe.kopuz.kopuz.MediaReceiver
 import moe.kopuz.kopuz.MediaSessionHelper
 import moe.kopuz.kopuz.SystemColors
@@ -92,6 +93,7 @@ class MainActivity : WryActivity() {
     override fun onWebViewCreate(webView: android.webkit.WebView) {
         this.webView = webView
         webView.addJavascriptInterface(SystemColors(this), "KopuzSystemColors")
+        webView.addJavascriptInterface(Haptics(this), "KopuzHaptics")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             webView.setRendererPriorityPolicy(
                 android.webkit.WebView.RENDERER_PRIORITY_IMPORTANT,

@@ -51,8 +51,14 @@ pub fn BottombarNormal(
         use crate::gestures::SwipeDirection;
         match bar_swipe.finish(&evt) {
             Some(SwipeDirection::Up) => is_fullscreen.set(true),
-            Some(SwipeDirection::Left) => ctrl.play_next(),
-            Some(SwipeDirection::Right) => ctrl.play_prev(),
+            Some(SwipeDirection::Left) => {
+                crate::haptics::perform(crate::haptics::Haptic::Tick);
+                ctrl.play_next();
+            }
+            Some(SwipeDirection::Right) => {
+                crate::haptics::perform(crate::haptics::Haptic::Tick);
+                ctrl.play_prev();
+            }
             _ => {}
         }
     };
@@ -214,7 +220,10 @@ pub fn BottombarNormal(
                 button {
                     class: "{heart_class}",
                     title: if is_favorite { i18n::t("remove_from_favorites").to_string() } else { i18n::t("add_to_favorites").to_string() },
-                    onclick: move |_| { toggle_favorite(hooks::favorites::current(&ctrl)) },
+                    onclick: move |_| {
+                        crate::haptics::perform(crate::haptics::Haptic::Confirm);
+                        toggle_favorite(hooks::favorites::current(&ctrl));
+                    },
                     i { class: "{heart_icon}" }
                 }
                 crate::dont_recommend::DontRecommendButton {
