@@ -1218,3 +1218,4 @@ playlist_imported = Imported { $matched } songs.
 playlist_imported_partly = Imported { $matched } songs. { $missing } are not in your library.
 swiped_play_next = "{ $title }" spelas härnäst
 swiped_add_to_queue = "{ $title }" lades till i kön
+open_software_center = Open in Software

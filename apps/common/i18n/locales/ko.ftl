@@ -1192,3 +1192,4 @@ playlist_imported = Imported { $matched } songs.
 playlist_imported_partly = Imported { $matched } songs. { $missing } are not in your library.
 swiped_play_next = 다음에 "{ $title }" 재생
 swiped_add_to_queue = "{ $title }"을(를) 대기열에 추가했습니다
+open_software_center = Open in Software

@@ -15,6 +15,8 @@ pub struct AvailableUpdate {
     pub release_url: String,
     /// Set only when this install can replace itself.
     pub install: Option<InstallPlan>,
+    /// The software center link for a Flatpak, which updates through its remote rather than the release page.
+    pub software_center: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -130,13 +132,84 @@ pub async fn fetch_available() -> Option<AvailableUpdate> {
     if !is_newer_version(CURRENT_VERSION, &release.tag_name) {
         return None;
     }
+    if let Some(app_id) = flatpak_id() {
+        let published = flathub_version(&client, &app_id).await?;
+        if !is_newer_version(CURRENT_VERSION, &published) {
+            return None;
+        }
+        return Some(AvailableUpdate {
+            version: published.trim_start_matches(['v', 'V']).to_string(),
+            release_url: release.html_url,
+            install: None,
+            software_center: Some(format!("appstream://{app_id}")),
+        });
+    }
     let install = detect_install()
         .and_then(|kind| select_asset(kind, std::env::consts::ARCH, &release.assets));
     Some(AvailableUpdate {
         version: release.tag_name.trim_start_matches(['v', 'V']).to_string(),
         release_url: release.html_url,
         install,
+        software_center: None,
     })
+}
+
+/// The app id this runs under as a Flatpak.
+fn flatpak_id() -> Option<String> {
+    if !Path::new("/.flatpak-info").exists() {
+        return None;
+    }
+    std::env::var("FLATPAK_ID").ok().filter(|id| !id.is_empty())
+}
+
+#[derive(serde::Deserialize)]
+struct FlathubAppstream {
+    #[serde(default)]
+    releases: Vec<FlathubRelease>,
+}
+
+#[derive(serde::Deserialize)]
+struct FlathubRelease {
+    version: String,
+}
+
+/// The newest version Flathub publishes, which lags a GitHub release until its build lands; a Flatpak offers only that.
+async fn flathub_version(client: &reqwest::Client, app_id: &str) -> Option<String> {
+    let appstream = client
+        .get(format!("https://flathub.org/api/v2/appstream/{app_id}"))
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json::<FlathubAppstream>()
+        .await
+        .ok()?;
+    newest_published(&appstream.releases)
+}
+
+fn newest_published(releases: &[FlathubRelease]) -> Option<String> {
+    releases
+        .iter()
+        .map(|release| release.version.as_str())
+        .filter(|version| parse_version_parts(version).is_some())
+        .reduce(|newest, version| {
+            if is_newer_version(newest, version) {
+                version
+            } else {
+                newest
+            }
+        })
+        .map(str::to_string)
+}
+
+#[cfg(not(target_os = "android"))]
+/// Hands an `appstream://` link to the desktop's software center; inside the sandbox `xdg-open` goes through the portal.
+pub fn open_software_center(link: &str) -> std::io::Result<()> {
+    std::process::Command::new("xdg-open")
+        .arg(link)
+        .spawn()
+        .map(drop)
 }
 
 /// Releases also carry the GPUI app as `Kopuz_<version>_…`, which this app must never install over itself.
@@ -607,6 +680,18 @@ mod tests {
         assert!(!is_newer_version("0.19.1", "0.19.0"));
         assert!(!is_newer_version("0.19.0", "0.19.0-rc1"));
         assert!(!is_newer_version("0.19.0", "nightly"));
+    }
+
+    #[test]
+    fn a_flatpak_is_offered_the_newest_version_flathub_publishes() {
+        let releases: Vec<FlathubRelease> = ["0.67.0", "0.67.1", "garbage", "0.22.0"]
+            .into_iter()
+            .map(|version| FlathubRelease {
+                version: version.to_string(),
+            })
+            .collect();
+        assert_eq!(newest_published(&releases).as_deref(), Some("0.67.1"));
+        assert_eq!(newest_published(&[]), None);
     }
 
     #[test]

@@ -1240,3 +1240,4 @@ playlist_imported = Imported { $matched } songs.
 playlist_imported_partly = Imported { $matched } songs. { $missing } are not in your library.
 swiped_play_next = «{ $title }» буде наступним
 swiped_add_to_queue = «{ $title }» додано до черги
+open_software_center = Open in Software

@@ -1543,16 +1543,29 @@ fn App() -> Element {
                                     class: "ml-2 text-xs underline opacity-80 hover:opacity-100 transition-opacity",
                                     onclick: {
                                         let release_url = update.release_url.clone();
+                                        let software_center = update.software_center.clone();
                                         move |_| {
                                             #[cfg(not(target_os = "android"))]
-                                            if let Err(e) = webbrowser::open(&release_url) {
-                                                tracing::error!("Failed to open release page: {}", e);
+                                            {
+                                                if let Some(link) = &software_center {
+                                                    match updates::open_software_center(link) {
+                                                        Ok(()) => return,
+                                                        Err(error) => tracing::warn!(%error, "could not open the software center"),
+                                                    }
+                                                }
+                                                if let Err(e) = webbrowser::open(&release_url) {
+                                                    tracing::error!("Failed to open release page: {}", e);
+                                                }
                                             }
                                             #[cfg(target_os = "android")]
-                                            let _ = &release_url;
+                                            let _ = (&release_url, &software_center);
                                         }
                                     },
-                                    "{i18n::t(\"view_release\")}"
+                                    if update.software_center.is_some() {
+                                        "{i18n::t(\"open_software_center\")}"
+                                    } else {
+                                        "{i18n::t(\"view_release\")}"
+                                    }
                                 }
                             }
                         }

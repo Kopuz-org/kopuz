@@ -1192,3 +1192,4 @@ playlist_imported = Imported { $matched } songs.
 playlist_imported_partly = Imported { $matched } songs. { $missing } are not in your library.
 swiped_play_next = "{ $title }" li kalama lon poka
 swiped_add_to_queue = "{ $title }" li tawa nasin kalama
+open_software_center = Open in Software

@@ -1224,3 +1224,4 @@ playlist_imported = Imported { $matched } songs.
 playlist_imported_partly = Imported { $matched } songs. { $missing } are not in your library.
 swiped_play_next = "{ $title }" יתנגן הבא
 swiped_add_to_queue = "{ $title }" נוסף לתור
+open_software_center = Open in Software

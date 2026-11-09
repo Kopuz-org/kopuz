@@ -1186,3 +1186,4 @@ playlist_imported = Imported { $matched } songs.
 playlist_imported_partly = Imported { $matched } songs. { $missing } are not in your library.
 swiped_play_next = Susunod na tutugtugin ang "{ $title }"
 swiped_add_to_queue = Idinagdag ang "{ $title }" sa queue
+open_software_center = Open in Software
