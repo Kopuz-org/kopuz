@@ -27,6 +27,29 @@ pub fn ExplicitBadge() -> Element {
 const CACHED_MARK_STYLE: &str =
     "background: color-mix(in oklab, var(--color-white) 30%, transparent);";
 
+/// How far (px) a finger may drift before a held press stops counting.
+const LONG_PRESS_SLOP_PX: f64 = 10.0;
+
+fn touch_point(evt: &TouchEvent) -> Option<(f64, f64)> {
+    let touches = evt.touches();
+    let changed = evt.touches_changed();
+    let point = touches.first().or_else(|| changed.first())?;
+    let at = point.client_coordinates();
+    Some((at.x, at.y))
+}
+
+/// Furthest a row slides under the finger while swiping to queue.
+const ROW_SWIPE_MAX_PX: f64 = 96.0;
+
+/// How far the row follows a horizontal drag. A vertical drag is the list
+/// scrolling, so the row stays put.
+fn row_swipe_offset((dx, dy): (f64, f64), is_selection_mode: bool) -> f64 {
+    if is_selection_mode || dx.abs() <= dy.abs() * 1.5 || dx.abs() < 8.0 {
+        return 0.0;
+    }
+    dx.clamp(-ROW_SWIPE_MAX_PX, ROW_SWIPE_MAX_PX)
+}
+
 /// The artist the row's artist cell opens; a row crediting nobody opens nothing.
 fn billed_artist(track: &Track) -> Option<String> {
     track.primary_credit().and_then(|credit| credit.key.clone())
@@ -86,16 +109,20 @@ pub fn TrackRow(
     let mut long_press_task = use_signal(|| None);
     let mut long_press_occurred = use_signal(|| false);
 
-    let mut start_long_press = move || {
+    let mut long_press_origin = use_signal(|| None::<(f64, f64)>);
+
+    let mut start_long_press = move |origin: Option<(f64, f64)>| {
         if is_selection_mode {
             return;
         }
         long_press_occurred.set(false);
+        long_press_origin.set(origin);
         if let Some(handler) = on_long_press {
             let mut occurred = long_press_occurred;
             let task = spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(600)).await;
                 occurred.set(true);
+                crate::haptics::perform(crate::haptics::Haptic::LongPress);
                 handler.call(());
             });
             long_press_task.set(Some(task));
@@ -103,8 +130,23 @@ pub fn TrackRow(
     };
 
     let mut cancel_long_press = move || {
+        long_press_origin.set(None);
         if let Some(task) = long_press_task.write().take() {
             task.cancel();
+        }
+    };
+
+    // A finger that starts on a row and scrolls the list is not a press; without
+    // this a slow scroll opens the menu of whichever row it began on.
+    let mut track_long_press = move |evt: &TouchEvent| {
+        let Some((ox, oy)) = *long_press_origin.peek() else {
+            return;
+        };
+        let Some((x, y)) = touch_point(evt) else {
+            return;
+        };
+        if (x - ox).hypot(y - oy) > LONG_PRESS_SLOP_PX {
+            cancel_long_press();
         }
     };
 
@@ -121,14 +163,80 @@ pub fn TrackRow(
         COLUMNS_VAXRY
     };
 
+    let mut row_swipe = crate::gestures::use_swipe();
+    let player = use_context::<hooks::use_player_controller::PlayerController>();
+    let swipe_track = track.clone();
+    let mut on_row_swipe = move |evt: TouchEvent| {
+        if is_selection_mode {
+            row_swipe.reset();
+            return;
+        }
+        let mut ctrl = player;
+        match row_swipe.finish(&evt) {
+            Some(crate::gestures::SwipeDirection::Right) => {
+                crate::haptics::perform(crate::haptics::Haptic::Tick);
+                toast(&i18n::t_with(
+                    "swiped_play_next",
+                    &[("title", swipe_track.title.clone().into())],
+                ));
+                ctrl.queue_play_next(vec![swipe_track.clone()]);
+            }
+            Some(crate::gestures::SwipeDirection::Left) => {
+                crate::haptics::perform(crate::haptics::Haptic::Tick);
+                toast(&i18n::t_with(
+                    "swiped_add_to_queue",
+                    &[("title", swipe_track.title.clone().into())],
+                ));
+                ctrl.add_to_queue(vec![swipe_track.clone()]);
+            }
+            _ => {}
+        }
+    };
+
     if cfg!(target_os = "android") {
+        let swipe_offset = row_swipe_offset(row_swipe.delta(), is_selection_mode);
+        let swipe_hint = if swipe_offset > 0.0 {
+            Some((
+                "justify-start",
+                "fa-solid fa-arrow-turn-up rotate-90",
+                swipe_offset >= crate::gestures::SWIPE_THRESHOLD,
+            ))
+        } else if swipe_offset < 0.0 {
+            Some((
+                "justify-end",
+                "fa-solid fa-list",
+                -swipe_offset >= crate::gestures::SWIPE_THRESHOLD,
+            ))
+        } else {
+            None
+        };
+        let row_transform = if swipe_offset != 0.0 {
+            format!("transform: translateX({swipe_offset}px);")
+        } else {
+            "transform: translateX(0); transition: transform 180ms ease-out;".to_string()
+        };
         return rsx! {
+            div { class: "relative overflow-hidden rounded-lg",
+            if let Some((side, icon, armed)) = swipe_hint {
+                div {
+                    class: "absolute inset-0 flex items-center px-5 {side}",
+                    style: if armed {
+                        "background: color-mix(in oklab, var(--color-indigo-500) 35%, transparent);"
+                    } else {
+                        "background: rgba(255,255,255,0.06);"
+                    },
+                    "aria-hidden": "true",
+                    i { class: if armed { "{icon} text-white" } else { "{icon} text-white/50" } }
+                }
+            }
             div {
-                class: "track-row flex items-center gap-3 px-2 h-14 rounded-lg active:bg-white/10 transition-colors select-none",
+                class: "track-row relative flex items-center gap-3 px-2 h-14 rounded-lg active:bg-white/10 transition-colors select-none",
                 style: if is_currently_playing {
-                    format!("background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
+                    format!("background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow}; {row_transform}")
+                } else if swipe_offset != 0.0 {
+                    format!("background: var(--surface-chrome, #111); box-shadow: {selection_shadow}; {row_transform}")
                 } else {
-                    format!("box-shadow: {selection_shadow};")
+                    format!("box-shadow: {selection_shadow}; {row_transform}")
                 },
                 onclick: move |_| {
                     if *long_press_occurred.peek() {
@@ -143,9 +251,22 @@ pub fn TrackRow(
                         on_play.call(());
                     }
                 },
-                ontouchstart: move |_| start_long_press(),
-                ontouchend: move |_| cancel_long_press(),
-                ontouchcancel: move |_| cancel_long_press(),
+                ontouchstart: move |evt| {
+                    row_swipe.start(&evt);
+                    start_long_press(touch_point(&evt));
+                },
+                ontouchmove: move |evt| {
+                    row_swipe.update(&evt);
+                    track_long_press(&evt);
+                },
+                ontouchend: move |evt| {
+                    cancel_long_press();
+                    on_row_swipe(evt);
+                },
+                ontouchcancel: move |_| {
+                    row_swipe.reset();
+                    cancel_long_press();
+                },
 
                 if is_selection_mode {
                     div {
@@ -219,6 +340,7 @@ pub fn TrackRow(
                     }
                 }
             }
+            }
         };
     }
 
@@ -250,7 +372,7 @@ pub fn TrackRow(
                         let coords = evt.client_coordinates();
                         pending_queue_drag.set(Some((coords.x, coords.y)));
                     }
-                    start_long_press();
+                    start_long_press(Some((evt.client_coordinates().x, evt.client_coordinates().y)));
                 },
                 onmousemove: move |evt| {
                     let drag_start = *pending_queue_drag.read();
@@ -283,8 +405,10 @@ pub fn TrackRow(
                     clear_dragged_queue_track();
                 },
                 onmouseleave: move |_| cancel_long_press(),
-                ontouchstart: move |_| start_long_press(),
+                ontouchstart: move |evt| start_long_press(touch_point(&evt)),
+                ontouchmove: move |evt| track_long_press(&evt),
                 ontouchend: move |_| cancel_long_press(),
+                ontouchcancel: move |_| cancel_long_press(),
                 oncontextmenu: move |evt| {
                     evt.prevent_default();
                     if !is_selection_mode {
@@ -507,7 +631,7 @@ pub fn TrackRow(
                     let coords = evt.client_coordinates();
                     pending_queue_drag_normal.set(Some((coords.x, coords.y)));
                 }
-                start_long_press();
+                start_long_press(Some((evt.client_coordinates().x, evt.client_coordinates().y)));
             },
             onmousemove: move |evt| {
                 let drag_start = *pending_queue_drag_normal.read();
@@ -540,8 +664,10 @@ pub fn TrackRow(
                 clear_dragged_queue_track();
             },
             onmouseleave: move |_| cancel_long_press(),
-            ontouchstart: move |_| start_long_press(),
+            ontouchstart: move |evt| start_long_press(touch_point(&evt)),
+            ontouchmove: move |evt| track_long_press(&evt),
             ontouchend: move |_| cancel_long_press(),
+            ontouchcancel: move |_| cancel_long_press(),
             oncontextmenu: move |evt| {
                 evt.prevent_default();
                 if !is_selection_mode {
@@ -819,5 +945,23 @@ mod tests {
         assert_eq!(duration_label(&track), "");
         track.duration_ms = Some(225_000);
         assert_eq!(duration_label(&track), "3:45");
+    }
+
+    #[test]
+    fn a_row_only_follows_a_horizontal_drag() {
+        assert_eq!(row_swipe_offset((40.0, 5.0), false), 40.0);
+        assert_eq!(row_swipe_offset((-40.0, 5.0), false), -40.0);
+        // Scrolling the list, or a diagonal that is not clearly sideways.
+        assert_eq!(row_swipe_offset((5.0, 80.0), false), 0.0);
+        assert_eq!(row_swipe_offset((30.0, 25.0), false), 0.0);
+        // A twitch under the tap slop.
+        assert_eq!(row_swipe_offset((4.0, 0.0), false), 0.0);
+    }
+
+    #[test]
+    fn a_row_swipe_is_capped_and_off_in_selection_mode() {
+        assert_eq!(row_swipe_offset((400.0, 0.0), false), ROW_SWIPE_MAX_PX);
+        assert_eq!(row_swipe_offset((-400.0, 0.0), false), -ROW_SWIPE_MAX_PX);
+        assert_eq!(row_swipe_offset((80.0, 0.0), true), 0.0);
     }
 }

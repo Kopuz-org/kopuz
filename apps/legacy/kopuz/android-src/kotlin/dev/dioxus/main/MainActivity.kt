@@ -14,6 +14,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import moe.kopuz.kopuz.Haptics
 import moe.kopuz.kopuz.MediaReceiver
 import moe.kopuz.kopuz.MediaSessionHelper
 import moe.kopuz.kopuz.SystemColors
@@ -44,7 +45,6 @@ class MainActivity : WryActivity() {
         if (!requestNotificationPermission()) {
             requestMediaPermission()
         }
-        requestBatteryOptimizationExemption()
     }
 
     // Draw under the status/navigation bars and make them transparent so the app's
@@ -92,6 +92,7 @@ class MainActivity : WryActivity() {
     override fun onWebViewCreate(webView: android.webkit.WebView) {
         this.webView = webView
         webView.addJavascriptInterface(SystemColors(this), "KopuzSystemColors")
+        webView.addJavascriptInterface(Haptics(this), "KopuzHaptics")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             webView.setRendererPriorityPolicy(
                 android.webkit.WebView.RENDERER_PRIORITY_IMPORTANT,
@@ -108,14 +109,27 @@ class MainActivity : WryActivity() {
     // own threads. Resuming it right back keeps that loop turning in the background.
     override fun onPause() {
         super.onPause()
+        resumed = false
         webView?.onResume()
         webView?.resumeTimers()
         MediaReceiver.nativeOnAction("bg-enter")
     }
 
+    private var resumed = false
+
     override fun onResume() {
         super.onResume()
+        resumed = true
         MediaReceiver.nativeOnAction("bg-exit")
+        askPendingBatteryExemption()
+    }
+
+    /** UI thread only. */
+    private fun askPendingBatteryExemption() {
+        if (!resumed || !batteryExemptionPending || askedBatteryExemption) return
+        batteryExemptionPending = false
+        askedBatteryExemption = true
+        requestBatteryOptimizationExemption()
     }
 
     override fun onDestroy() {
@@ -134,6 +148,29 @@ class MainActivity : WryActivity() {
         fun moveToBack() {
             val act = instance ?: return
             act.runOnUiThread { act.moveTaskToBack(true) }
+        }
+
+        @Volatile
+        private var askedBatteryExemption = false
+
+        @Volatile
+        private var batteryExemptionPending = false
+
+        /**
+         * Asked when playback first starts rather than on first launch: a cold
+         * start already queues the notification and media prompts, and the
+         * battery request only makes sense to someone who has just pressed play
+         * and wants it to keep going with the screen off.
+         *
+         * Android blocks activity launches from the background, so playback
+         * started from the notification or a headset only marks the request
+         * pending and onResume makes it once the activity is visible.
+         */
+        @JvmStatic
+        fun requestBatteryExemptionOnce() {
+            if (askedBatteryExemption) return
+            batteryExemptionPending = true
+            instance?.let { act -> act.runOnUiThread { act.askPendingBatteryExemption() } }
         }
     }
 

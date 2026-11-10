@@ -210,6 +210,9 @@ fn Field(
                     div { class: "{TEXT_WRAP}",
                         input {
                             class: "{TEXT_INPUT}",
+                            "autocapitalize": "off",
+                            "autocorrect": "off",
+                            "spellcheck": "false",
                             placeholder: "{placeholder}",
                             value: "{value}",
                             onkeydown: move |e| e.stop_propagation(),
@@ -257,12 +260,17 @@ fn Field(
         }
         kind => {
             let secret = matches!(kind, api::FieldKind::Secret);
+            let url = matches!(kind, api::FieldKind::Url);
             let key = field.key.clone();
             rsx! {
                 div { class: "{TEXT_WRAP}",
                     input {
                         class: "{TEXT_INPUT}",
                         r#type: if secret { "password" } else { "text" },
+                        "inputmode": if url { "url" },
+                        "autocapitalize": "off",
+                        "autocorrect": "off",
+                        "spellcheck": "false",
                         placeholder: "{placeholder}",
                         value: "{value}",
                         onkeydown: move |e| e.stop_propagation(),

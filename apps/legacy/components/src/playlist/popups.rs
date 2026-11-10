@@ -13,6 +13,7 @@ pub fn AddPlaylistPopup(
     #[props(default)] on_add_folder: EventHandler<String>,
 ) -> Element {
     rsx! {
+        crate::BackDismiss { on_back: move |_| on_close.call(()) }
         div {
             class: "overlay",
             onclick: move |_| on_close.call(()),

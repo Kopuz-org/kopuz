@@ -17,6 +17,7 @@ mod android_media {
         Prev,
         ToggleShuffle,
         CycleRepeat,
+        Seek(std::time::Duration),
     }
 
     pub(super) static BG_CMD_TX: std::sync::OnceLock<
@@ -99,6 +100,9 @@ pub fn use_player_task(
                     SystemEvent::Stop => BgCmd::Pause,
                     SystemEvent::ToggleShuffle => BgCmd::ToggleShuffle,
                     SystemEvent::CycleRepeat => BgCmd::CycleRepeat,
+                    SystemEvent::Seek(seconds) => {
+                        BgCmd::Seek(std::time::Duration::from_secs_f64(seconds.max(0.0)))
+                    }
                 };
                 android_media::send_bg_cmd(cmd);
             });
@@ -116,6 +120,7 @@ pub fn use_player_task(
                             BgCmd::Prev => ctrl.play_prev(),
                             BgCmd::ToggleShuffle => ctrl.toggle_shuffle(),
                             BgCmd::CycleRepeat => ctrl.toggle_loop(),
+                            BgCmd::Seek(position) => ctrl.seek(position),
                         }
                     }
                     let notified = async {

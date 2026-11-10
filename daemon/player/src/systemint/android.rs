@@ -109,6 +109,8 @@ pub enum SystemEvent {
     Next,
     Prev,
     Stop,
+    /// Dragging the notification's progress bar: absolute target in seconds.
+    Seek(f64),
     /// Notification shuffle button. The notification has no authority over the
     /// mode — the queue does — so a tap asks for a flip rather than a value.
     ToggleShuffle,
@@ -745,6 +747,12 @@ fn clear_jni_exception(env: &mut JNIEnv) {
     }
 }
 
+/// `seek:<ms>` from `MediaSessionHelper.onSeekTo`, as seconds.
+fn parse_seek(action: &str) -> Option<f64> {
+    let ms: u64 = action.strip_prefix("seek:")?.parse().ok()?;
+    Some(ms as f64 / 1000.0)
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_moe_kopuz_kopuz_MediaReceiver_nativeOnAction(
     mut env: JNIEnv,
@@ -777,7 +785,11 @@ pub extern "system" fn Java_moe_kopuz_kopuz_MediaReceiver_nativeOnAction(
             tracing::warn!("media permission denied — the library scan cannot read shared storage");
             set_media_permission(PERMISSION_DENIED);
         }
-        _ => {}
+        other => {
+            if let Some(seconds) = parse_seek(other) {
+                dispatch_event(SystemEvent::Seek(seconds));
+            }
+        }
     }
 }
 

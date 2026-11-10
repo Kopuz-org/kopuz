@@ -23,6 +23,9 @@ object MediaSessionHelper {
     private const val CHANNEL_ID = "kopuz_playback"
     const val NOTIF_ID = 42
 
+    /** Longer than any real track; a stream reports an effectively endless duration. */
+    private const val MAX_SEEKABLE_MS = 24L * 60 * 60 * 1000
+
     @Volatile var pendingNotification: Notification? = null
 
     // Last reported playing state — read by the focus listener to decide whether a
@@ -120,6 +123,8 @@ object MediaSessionHelper {
                 override fun onSkipToNext() = MediaReceiver.nativeOnAction("next")
                 override fun onSkipToPrevious() = MediaReceiver.nativeOnAction("prev")
                 override fun onStop() = MediaReceiver.nativeOnAction("stop")
+                override fun onSeekTo(pos: Long) =
+                    MediaReceiver.nativeOnAction("seek:${pos.coerceAtLeast(0)}")
                 // Where the shuffle/repeat taps land: the system media player builds
                 // its buttons from the session, so those two are custom actions.
                 override fun onCustomAction(action: String, extras: android.os.Bundle?) {
@@ -281,17 +286,21 @@ object MediaSessionHelper {
         s.setMetadata(metaBuilder.build())
 
         val stateVal = if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED
+        var actions = PlaybackState.ACTION_PLAY or
+            PlaybackState.ACTION_PAUSE or
+            PlaybackState.ACTION_PLAY_PAUSE or
+            PlaybackState.ACTION_STOP or
+            PlaybackState.ACTION_SKIP_TO_NEXT or
+            PlaybackState.ACTION_SKIP_TO_PREVIOUS
+        // SEEK_TO is what makes the notification's progress bar draggable. A
+        // radio stream or a track with no known length has nothing to seek in.
+        if (durationMs in 1 until MAX_SEEKABLE_MS) {
+            actions = actions or PlaybackState.ACTION_SEEK_TO
+        }
         s.setPlaybackState(
             PlaybackState.Builder()
                 .setState(stateVal, positionMs, if (playing) 1f else 0f)
-                .setActions(
-                    PlaybackState.ACTION_PLAY or
-                    PlaybackState.ACTION_PAUSE or
-                    PlaybackState.ACTION_PLAY_PAUSE or
-                    PlaybackState.ACTION_STOP or
-                    PlaybackState.ACTION_SKIP_TO_NEXT or
-                    PlaybackState.ACTION_SKIP_TO_PREVIOUS
-                )
+                .setActions(actions)
                 .addCustomAction(
                     PlaybackState.CustomAction.Builder(
                         "shuffle", shuffleLabel(), shuffleIcon()

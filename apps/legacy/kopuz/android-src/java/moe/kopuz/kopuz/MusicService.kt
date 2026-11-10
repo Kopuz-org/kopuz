@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import dev.dioxus.main.MainActivity
 
 class MusicService : Service() {
 
@@ -16,6 +17,7 @@ class MusicService : Service() {
 
         /** Start/refresh the foreground service, carrying the current playing state. */
         fun update(context: Context, playing: Boolean) {
+            if (playing) MainActivity.requestBatteryExemptionOnce()
             try {
                 val intent = Intent(context, MusicService::class.java)
                     .putExtra(EXTRA_PLAYING, playing)

@@ -236,6 +236,15 @@ pub fn Artist(
     };
 
     rsx! {
+        if is_selection_mode() {
+            components::BackDismiss {
+                background: true,
+                on_back: move |_| {
+                    is_selection_mode.set(false);
+                    selected_tracks.write().clear();
+                },
+            }
+        }
         div {
             class: page_container_class,
 
@@ -312,6 +321,7 @@ pub fn Artist(
                         if *show_playlist_modal.read() {
                             PlaylistModal {
                                 overlay_class: Some("absolute inset-0 bg-black/80 flex items-center justify-center z-50".to_string()),
+                                on_back: move |_| show_playlist_modal.set(false),
                                 on_close: move |_| {
                                     show_playlist_modal.set(false);
                                     is_selection_mode.set(false);

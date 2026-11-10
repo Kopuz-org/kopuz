@@ -108,7 +108,19 @@ pub(crate) fn FullscreenAndroid(
         "kopuz-sheet-in"
     };
     const DISMISS_AT: f64 = 140.0;
+    let mut past_dismiss = use_signal(|| false);
+    let mut on_pull_move = move |evt: &TouchEvent| {
+        swipe.update(evt);
+        let past = *pull_armed.peek() && swipe.pull_down() >= DISMISS_AT;
+        if past != *past_dismiss.peek() {
+            past_dismiss.set(past);
+            if past {
+                crate::haptics::perform(crate::haptics::Haptic::Tick);
+            }
+        }
+    };
     let on_pull_end = move |evt: TouchEvent| {
+        past_dismiss.set(false);
         let armed = *pull_armed.peek();
         let travelled = swipe.pull_down();
         let dismissed = armed && travelled >= DISMISS_AT;
@@ -147,9 +159,12 @@ pub(crate) fn FullscreenAndroid(
             div {
                 class: "flex items-center gap-2 px-3 pt-[env(safe-area-inset-top)] pb-1 shrink-0",
                 ontouchstart: move |evt| begin_pull(&evt),
-                ontouchmove: move |evt| swipe.update(&evt),
+                ontouchmove: move |evt| on_pull_move(&evt),
                 ontouchend: on_pull_end,
-                ontouchcancel: move |_| swipe.reset(),
+                ontouchcancel: move |_| {
+                    past_dismiss.set(false);
+                    swipe.reset();
+                },
                 button {
                     class: "w-10 h-10 flex items-center justify-center text-white/60 active:scale-95 transition-all shrink-0",
                     "aria-label": "{close_text}",
@@ -181,9 +196,12 @@ pub(crate) fn FullscreenAndroid(
                 div {
                     class: "flex-1 min-w-0 min-h-0 flex flex-col",
                     ontouchstart: move |evt| begin_pull(&evt),
-                    ontouchmove: move |evt| swipe.update(&evt),
+                    ontouchmove: move |evt| on_pull_move(&evt),
                     ontouchend: on_pull_end,
-                    ontouchcancel: move |_| swipe.reset(),
+                    ontouchcancel: move |_| {
+                        past_dismiss.set(false);
+                        swipe.reset();
+                    },
 
                     if tab == 0 {
                         div {
@@ -201,8 +219,14 @@ pub(crate) fn FullscreenAndroid(
                                     ontouchend: move |evt| {
                                         let mut ctrl = ctrl;
                                         match skip_swipe.finish(&evt) {
-                                            Some(crate::gestures::SwipeDirection::Left) => ctrl.play_next(),
-                                            Some(crate::gestures::SwipeDirection::Right) => ctrl.play_prev(),
+                                            Some(crate::gestures::SwipeDirection::Left) => {
+                                                crate::haptics::perform(crate::haptics::Haptic::Tick);
+                                                ctrl.play_next();
+                                            }
+                                            Some(crate::gestures::SwipeDirection::Right) => {
+                                                crate::haptics::perform(crate::haptics::Haptic::Tick);
+                                                ctrl.play_prev();
+                                            }
                                             _ => {}
                                         }
                                     },

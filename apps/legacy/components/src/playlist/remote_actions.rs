@@ -145,6 +145,7 @@ pub fn RemotePlaylistMenu(
                 };
                 let id = playlist_id.clone();
                 rsx! {
+                    crate::BackDismiss { on_back: move |_| confirming.set(false) }
                     div {
                         class: "overlay",
                         onclick: move |_| confirming.set(false),
@@ -207,6 +208,7 @@ fn EditDetailsPopup(
         (PlaylistPrivacy::Private, "playlist_privacy_private"),
     ];
     rsx! {
+        crate::BackDismiss { on_back: move |_| on_close.call(()) }
         div {
             class: "overlay",
             onclick: move |_| on_close.call(()),

@@ -1172,3 +1172,5 @@ discord_presence_upload_cover_help = When a local song has no cover MusicBrainz 
 import_playlist = Import M3U playlist
 playlist_imported = Imported { $matched } songs.
 playlist_imported_partly = Imported { $matched } songs. { $missing } are not in your library.
+swiped_play_next = 接下来播放“{ $title }”
+swiped_add_to_queue = 已将“{ $title }”添加到队列

@@ -7,6 +7,10 @@ const DEFAULT_OVERLAY_CLASS: &str =
 #[derive(PartialEq, Clone, Props)]
 pub struct PlaylistModalProps {
     pub on_close: EventHandler,
+    /// Android back. Callers whose `on_close` also drops a selection pass a
+    /// handler that only hides the modal; without one, back is `on_close`.
+    #[props(default)]
+    pub on_back: Option<EventHandler>,
     pub on_add_to_playlist: EventHandler<String>,
     pub on_create_playlist: EventHandler<String>,
     #[props(default)]
@@ -39,6 +43,12 @@ pub fn PlaylistModal(props: PlaylistModalProps) -> Element {
         .collect();
 
     rsx! {
+        crate::BackDismiss {
+            on_back: move |_| match props.on_back {
+                Some(on_back) => on_back.call(()),
+                None => props.on_close.call(()),
+            },
+        }
         div {
             class: overlay_class,
             onclick: move |_| props.on_close.call(()),

@@ -210,10 +210,20 @@ pub fn FavoritesBody(
         .all(|(track, _)| selected_tracks.read().contains(&track.key));
 
     rsx! {
+        if is_selection_mode() {
+            components::BackDismiss {
+                background: true,
+                on_back: move |_| {
+                    is_selection_mode.set(false);
+                    selected_tracks.write().clear();
+                },
+            }
+        }
         div {
             class: "flex-1 min-h-0 flex flex-col",
             if *show_playlist_modal.read() {
                 PlaylistModal {
+                    on_back: move |_| show_playlist_modal.set(false),
                     on_close: move |_| {
                         show_playlist_modal.set(false);
                         if is_selection_mode() {

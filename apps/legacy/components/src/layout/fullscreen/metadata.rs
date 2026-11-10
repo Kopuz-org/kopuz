@@ -141,7 +141,10 @@ pub(crate) fn TrackMetadata(
                     },
                     title: "{favorite_label}",
                     "aria-label": "{favorite_label}",
-                    onclick: move |_| { toggle_favorite(hooks::favorites::current(&ctrl)) },
+                    onclick: move |_| {
+                        crate::haptics::perform(crate::haptics::Haptic::Confirm);
+                        toggle_favorite(hooks::favorites::current(&ctrl));
+                    },
                     i {
                         class: if is_favorite { "fa-solid fa-heart" } else { "fa-regular fa-heart" },
                         "aria-hidden": "true",
