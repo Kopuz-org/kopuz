@@ -164,6 +164,13 @@ pub fn extract_embedded_cover<'a>(
         })
 }
 
+/// The picture a local file carries for its cover, read straight from its tags.
+pub fn embedded_cover_bytes(track_path: &Path) -> Option<Vec<u8>> {
+    let tagged = Probe::open(track_path).ok()?.read().ok()?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
+    extract_embedded_cover(&tagged, tag).map(|picture| picture.data().to_vec())
+}
+
 pub fn extract_metadata(
     tag: Option<&Tag>,
     properties: &FileProperties,

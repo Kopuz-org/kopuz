@@ -116,7 +116,7 @@
     border-radius: var(--md-sys-shape-corner-full);
     color: var(--md-sys-color-on-surface-variant);
     background: transparent;
-    transition: background-color var(--md-sys-motion-duration-short) linear;
+    transition: none;
 }
 
 [data-ui-style="material3"] .app-sidebar-link:hover {
@@ -178,7 +178,7 @@
     height: 32px;
     font-size: 20px;
     border-radius: var(--md-sys-shape-corner-full);
-    transition: background-color var(--md-sys-motion-duration-short) linear;
+    transition: none;
 }
 
 [data-ui-style="material3"] .app-tabbar button:hover > i {
@@ -291,9 +291,7 @@
     border-radius: var(--md-sys-shape-corner-large);
     background: var(--md-sys-color-primary);
     color: var(--md-sys-color-on-primary);
-    transition:
-        border-radius var(--md-sys-motion-duration-medium) var(--md-sys-motion-easing-standard),
-        background-color var(--md-sys-motion-duration-short) linear;
+    transition: border-radius var(--md-sys-motion-duration-medium) var(--md-sys-motion-easing-standard);
 }
 
 [data-ui-style="material3"] .playback-play:hover {
@@ -572,7 +570,7 @@
     font-weight: 500;
     letter-spacing: 0.1px;
     box-shadow: none;
-    transition: background-color var(--md-sys-motion-duration-short) linear;
+    transition: none;
 }
 
 [data-ui-style="material3"] .app-button-filled {
@@ -614,7 +612,7 @@
     line-height: 20px;
     font-weight: 500;
     letter-spacing: 0.1px;
-    transition: background-color var(--md-sys-motion-duration-short) linear;
+    transition: none;
 }
 
 [data-ui-style="material3"] .app-button-text.app-button-danger {
@@ -678,7 +676,7 @@
     line-height: 20px;
     font-weight: 500;
     letter-spacing: 0.1px;
-    transition: background-color var(--md-sys-motion-duration-short) linear;
+    transition: none;
 }
 
 [data-ui-style="material3"] .app-button-outlined:hover {
@@ -723,7 +721,7 @@
     font-weight: 500;
     letter-spacing: 0.1px;
     color: var(--md-sys-color-on-surface);
-    transition: background-color var(--md-sys-motion-duration-short) linear;
+    transition: none;
 }
 
 [data-ui-style="material3"] :is(.settings-toggle, .app-segmented) button + button {
@@ -779,7 +777,7 @@
     line-height: 20px;
     font-weight: 500;
     letter-spacing: 0.1px;
-    transition: background-color var(--md-sys-motion-duration-short) linear;
+    transition: none;
 }
 
 /* Override icon sizes set inline by the markup. */

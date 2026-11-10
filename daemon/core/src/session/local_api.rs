@@ -287,6 +287,17 @@ impl api::PlaylistApi for LocalApi {
             .await
     }
 
+    async fn import_playlist(
+        &self,
+        name: String,
+        m3u: String,
+        base_dir: Option<String>,
+    ) -> Result<api::PlaylistImport, ApiError> {
+        let (name, m3u, base_dir) = (&name, &m3u, base_dir.as_deref());
+        self.recovering(|| async move { self.playlists()?.import(name, m3u, base_dir).await })
+            .await
+    }
+
     async fn rename_playlist(&self, id: String, name: String) -> Result<(), ApiError> {
         let (id, name) = (&id, &name);
         self.recovering(|| async move { self.playlists()?.rename(id, name).await })

@@ -40,6 +40,16 @@ pub enum PlaylistPrivacy {
     Public,
 }
 
+/// What importing a playlist file made of it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PlaylistImport {
+    /// The new playlist, holding the entries the library has.
+    pub id: String,
+    pub matched: u32,
+    /// The entries no library track answered to, as the file wrote them.
+    pub missing: Vec<String>,
+}
+
 /// A field left `None` keeps its value.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlaylistEdit {

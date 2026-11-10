@@ -1121,6 +1121,10 @@ pub struct Integrations {
     #[serde(default = "default_discord_presence_source")]
     #[garde(skip)]
     pub discord_presence_source: Option<bool>,
+    /// Upload a local file's embedded cover to a temporary image host so Discord can show it, when no public cover is found; off unless asked for, since the art leaves this machine.
+    #[serde(default = "default_discord_presence_upload_cover")]
+    #[garde(skip)]
+    pub discord_presence_upload_cover: Option<bool>,
     #[serde(default = "default_radio_registries")]
     #[garde(skip)]
     pub radio_registries: Vec<RegistryEntry>,
@@ -1131,6 +1135,7 @@ impl Default for Integrations {
         Self {
             discord_presence: Some(true),
             discord_presence_source: Some(true),
+            discord_presence_upload_cover: Some(false),
             radio_registries: default_radio_registries(),
         }
     }
@@ -1259,6 +1264,10 @@ fn default_discord_presence() -> Option<bool> {
 
 fn default_discord_presence_source() -> Option<bool> {
     Some(true)
+}
+
+fn default_discord_presence_upload_cover() -> Option<bool> {
+    Some(false)
 }
 
 fn default_show_source_toggle() -> bool {
