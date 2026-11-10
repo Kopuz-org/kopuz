@@ -20,6 +20,7 @@ pub mod folder_scan;
 pub mod integrations;
 pub mod jobs;
 pub mod library;
+mod m3u;
 pub mod mutations;
 mod network;
 mod nightly_seed;

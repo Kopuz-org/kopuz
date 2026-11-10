@@ -149,6 +149,70 @@ impl PlaylistService {
         Ok(id)
     }
 
+    /// A playlist of the M3U entries the library has, in the file's order.
+    pub async fn import(
+        &self,
+        name: &str,
+        m3u: &str,
+        base_dir: Option<&str>,
+    ) -> Result<api::PlaylistImport, ApiError> {
+        let entries = crate::m3u::parse(m3u);
+        if entries.is_empty() {
+            return Err(ApiError::invalid_input("the playlist file lists no songs"));
+        }
+        let library = self.library_for_matching().await?;
+        let matched = crate::m3u::match_entries(&entries, base_dir, &library);
+        let missing: Vec<String> = entries
+            .iter()
+            .zip(&matched)
+            .filter(|(_, key)| key.is_none())
+            .map(|(entry, _)| entry.location.clone())
+            .collect();
+        let keys: Vec<String> = matched.into_iter().flatten().collect();
+        if keys.is_empty() {
+            return Err(ApiError::not_found(
+                "none of the playlist's songs are in the library",
+            ));
+        }
+        let matched = u32::try_from(keys.len()).unwrap_or(u32::MAX);
+        let id = self.create(name, &keys).await?;
+        Ok(api::PlaylistImport {
+            id,
+            matched,
+            missing,
+        })
+    }
+
+    async fn library_for_matching(&self) -> Result<Vec<crate::m3u::LibraryTrack>, ApiError> {
+        const PAGE: u32 = 2_000;
+        let filter = db::TrackFilter::new(self.active());
+        let mut library = Vec::new();
+        let mut offset = 0;
+        loop {
+            let page = self
+                .db
+                .tracks_page(
+                    &filter,
+                    db::Page {
+                        offset,
+                        limit: PAGE,
+                    },
+                )
+                .await
+                .map_err(db_error)?;
+            let fetched = page.len();
+            library.extend(page.into_iter().map(|track| crate::m3u::LibraryTrack {
+                key: track.id.key().into_owned(),
+                title: track.title,
+                artist: track.artist,
+            }));
+            if fetched < PAGE as usize {
+                return Ok(library);
+            }
+            offset += PAGE;
+        }
+    }
+
     pub async fn rename(&self, id: &str, name: &str) -> Result<(), ApiError> {
         self.active_source()
             .upsert_playlist_meta(id, name, None, None)

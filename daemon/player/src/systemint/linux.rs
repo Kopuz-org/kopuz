@@ -42,6 +42,8 @@ pub enum SystemEvent {
     Seek(f64),
     SetShuffle(bool),
     SetRepeat(RepeatMode),
+    /// Output level, 0.0 to 1.0.
+    SetVolume(f64),
 }
 
 /// MPRIS SetPosition requires a `mpris:trackid`; we expose a constant one
@@ -54,6 +56,7 @@ struct MprisState {
     position: Time,
     shuffle: bool,
     repeat: RepeatMode,
+    volume: f64,
 }
 
 /// The MPRIS `Identity` and `DesktopEntry`: a spawning frontend's, else Kopuz's.
@@ -90,6 +93,7 @@ fn state() -> Arc<Mutex<MprisState>> {
                 position: Time::ZERO,
                 shuffle: false,
                 repeat: RepeatMode::Off,
+                volume: 1.0,
             }))
         })
         .clone()
@@ -229,9 +233,19 @@ impl PlayerInterface for P {
             .unwrap_or_default())
     }
     async fn volume(&self) -> fdo::Result<f64> {
-        Ok(1.0)
+        Ok(self.0.lock().map(|s| s.volume).unwrap_or(1.0))
     }
-    async fn set_volume(&self, _: f64) -> mpris_server::zbus::Result<()> {
+    async fn set_volume(&self, volume: f64) -> mpris_server::zbus::Result<()> {
+        let volume = if volume.is_finite() {
+            volume.clamp(0.0, 1.0)
+        } else {
+            return Ok(());
+        };
+        if let Ok(mut s) = self.0.lock() {
+            s.volume = volume;
+        }
+        self.1.send(SystemEvent::SetVolume(volume)).ok();
+        notify();
         Ok(())
     }
     async fn position(&self) -> fdo::Result<Time> {
@@ -278,6 +292,22 @@ pub fn update_modes(shuffle: bool, repeat: RepeatMode) {
         let changed = s.shuffle != shuffle || s.repeat != repeat;
         s.shuffle = shuffle;
         s.repeat = repeat;
+        changed
+    } else {
+        false
+    };
+    if changed {
+        notify();
+    }
+}
+
+/// Push the output level (0.0 when muted) to MPRIS clients so their volume
+/// sliders follow the one in Kopuz.
+pub fn update_volume(volume: f64) {
+    setup();
+    let changed = if let Ok(mut s) = state().lock() {
+        let changed = s.volume != volume;
+        s.volume = volume;
         changed
     } else {
         false
@@ -387,21 +417,24 @@ fn setup() {
                             }
                         };
                         if seeked {
-                            let (metadata, status, position, shuffle, repeat) = match st.lock() {
-                                Ok(s) => (
-                                    s.metadata.clone(),
-                                    s.status,
-                                    s.position,
-                                    s.shuffle,
-                                    s.repeat.to_mpris(),
-                                ),
-                                Err(_) => continue,
-                            };
+                            let (metadata, status, position, shuffle, repeat, volume) =
+                                match st.lock() {
+                                    Ok(s) => (
+                                        s.metadata.clone(),
+                                        s.status,
+                                        s.position,
+                                        s.shuffle,
+                                        s.repeat.to_mpris(),
+                                        s.volume,
+                                    ),
+                                    Err(_) => continue,
+                                };
                             srv.properties_changed([
                                 Property::Metadata(metadata),
                                 Property::PlaybackStatus(status),
                                 Property::Shuffle(shuffle),
                                 Property::LoopStatus(repeat),
+                                Property::Volume(volume),
                             ])
                             .await
                             .ok();
