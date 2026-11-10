@@ -267,7 +267,7 @@ fn Field(
                     input {
                         class: "{TEXT_INPUT}",
                         r#type: if secret { "password" } else { "text" },
-                        "inputmode": if url { "url" } else { "text" },
+                        "inputmode": if url { "url" },
                         "autocapitalize": "off",
                         "autocorrect": "off",
                         "spellcheck": "false",

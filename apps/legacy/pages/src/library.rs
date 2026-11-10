@@ -138,6 +138,8 @@ pub fn LibraryPage(
     let sync_job = hooks::jobs::use_job_progress(hooks::JobKind::LibrarySync);
     let is_loading = use_memo(move || sync_job.read().running);
     let sync_server = move || hooks::jobs::start(hooks::JobKind::LibrarySync);
+    let scan_job = hooks::jobs::use_job_progress(hooks::JobKind::Scan);
+    let is_refreshing = use_memo(move || sync_job.read().running || scan_job.read().running);
 
     let mut ctrl = use_context::<PlayerController>();
     let mut active_menu_track = use_signal(|| None::<String>);
@@ -269,6 +271,7 @@ pub fn LibraryPage(
     rsx! {
         if is_selection_mode() {
             components::BackDismiss {
+                background: true,
                 on_back: move |_| {
                     is_selection_mode.set(false);
                     selected_tracks.write().clear();
@@ -280,6 +283,7 @@ pub fn LibraryPage(
 
             if *show_playlist_modal.read() {
                 PlaylistModal {
+                    on_back: move |_| show_playlist_modal.set(false),
                     on_close: move |_| {
                         show_playlist_modal.set(false);
                         is_selection_mode.set(false);
@@ -474,7 +478,7 @@ pub fn LibraryPage(
             components::PullToRefresh {
                 scroller_id: "library-scroll".to_string(),
                 class: "flex-1 min-h-0 flex flex-col".to_string(),
-                refreshing: is_loading(),
+                refreshing: is_refreshing(),
                 on_refresh: move |_| {
                     if caps().scan_folders {
                         on_rescan.call(());

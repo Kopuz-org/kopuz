@@ -109,14 +109,27 @@ class MainActivity : WryActivity() {
     // own threads. Resuming it right back keeps that loop turning in the background.
     override fun onPause() {
         super.onPause()
+        resumed = false
         webView?.onResume()
         webView?.resumeTimers()
         MediaReceiver.nativeOnAction("bg-enter")
     }
 
+    private var resumed = false
+
     override fun onResume() {
         super.onResume()
+        resumed = true
         MediaReceiver.nativeOnAction("bg-exit")
+        askPendingBatteryExemption()
+    }
+
+    /** UI thread only. */
+    private fun askPendingBatteryExemption() {
+        if (!resumed || !batteryExemptionPending || askedBatteryExemption) return
+        batteryExemptionPending = false
+        askedBatteryExemption = true
+        requestBatteryOptimizationExemption()
     }
 
     override fun onDestroy() {
@@ -140,18 +153,24 @@ class MainActivity : WryActivity() {
         @Volatile
         private var askedBatteryExemption = false
 
+        @Volatile
+        private var batteryExemptionPending = false
+
         /**
          * Asked when playback first starts rather than on first launch: a cold
          * start already queues the notification and media prompts, and the
          * battery request only makes sense to someone who has just pressed play
          * and wants it to keep going with the screen off.
+         *
+         * Android blocks activity launches from the background, so playback
+         * started from the notification or a headset only marks the request
+         * pending and onResume makes it once the activity is visible.
          */
         @JvmStatic
         fun requestBatteryExemptionOnce() {
             if (askedBatteryExemption) return
-            val act = instance ?: return
-            askedBatteryExemption = true
-            act.runOnUiThread { act.requestBatteryOptimizationExemption() }
+            batteryExemptionPending = true
+            instance?.let { act -> act.runOnUiThread { act.askPendingBatteryExemption() } }
         }
     }
 

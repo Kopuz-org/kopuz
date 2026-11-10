@@ -1297,6 +1297,8 @@ fn App() -> Element {
                 is_fullscreen.set(false);
             } else if !*is_sidebar_collapsed.peek() {
                 is_sidebar_collapsed.set(true);
+            } else if components::back_stack::dismiss_background() {
+                // Selection mode lives in the page, under everything above.
             } else if *current_route.peek() == Route::Settings && settings_subpage.peek().is_some()
             {
                 settings_subpage.set(None);

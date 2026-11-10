@@ -22,6 +22,9 @@ pub fn PullToRefresh(
     let mut swipe = crate::gestures::use_swipe();
     let mut armed = use_signal(|| false);
     let mut past_threshold = use_signal(|| false);
+    // Bumped on every touch start and end, so a scroll-position answer that
+    // comes back after its gesture is over cannot arm the next one.
+    let mut gesture = use_signal(|| 0u64);
 
     if !cfg!(target_os = "android") {
         return rsx! {
@@ -46,6 +49,8 @@ pub fn PullToRefresh(
             ontouchstart: move |evt| {
                 swipe.start(&evt);
                 armed.set(false);
+                let started = *gesture.peek() + 1;
+                gesture.set(started);
                 let id = id_for_start.replace('\\', "\\\\").replace('\'', "\\'");
                 spawn(async move {
                     let mut at_top = dioxus::document::eval(&format!(
@@ -53,6 +58,7 @@ pub fn PullToRefresh(
                     ));
                     if let Ok(scroll_top) = at_top.recv::<f64>().await
                         && scroll_top <= 1.0
+                        && *gesture.peek() == started
                     {
                         armed.set(true);
                     }
@@ -71,6 +77,7 @@ pub fn PullToRefresh(
             ontouchend: move |evt| {
                 let commit = *armed.peek() && swipe.pull_down() >= REFRESH_AT;
                 swipe.finish(&evt);
+                gesture.with_mut(|current| *current += 1);
                 armed.set(false);
                 past_threshold.set(false);
                 if commit && !refreshing {
@@ -79,6 +86,7 @@ pub fn PullToRefresh(
             },
             ontouchcancel: move |_| {
                 swipe.reset();
+                gesture.with_mut(|current| *current += 1);
                 armed.set(false);
                 past_threshold.set(false);
             },

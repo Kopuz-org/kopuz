@@ -212,6 +212,7 @@ pub fn FavoritesBody(
     rsx! {
         if is_selection_mode() {
             components::BackDismiss {
+                background: true,
                 on_back: move |_| {
                     is_selection_mode.set(false);
                     selected_tracks.write().clear();
@@ -222,6 +223,7 @@ pub fn FavoritesBody(
             class: "flex-1 min-h-0 flex flex-col",
             if *show_playlist_modal.read() {
                 PlaylistModal {
+                    on_back: move |_| show_playlist_modal.set(false),
                     on_close: move |_| {
                         show_playlist_modal.set(false);
                         if is_selection_mode() {

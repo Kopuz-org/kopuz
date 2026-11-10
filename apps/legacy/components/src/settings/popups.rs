@@ -303,7 +303,7 @@ pub fn LoginPopup(
     );
 
     rsx! {
-        crate::BackDismiss { on_back: move |_| on_close.call(()) }
+        crate::BackDismiss { on_back: move |_| if !loading() { on_close.call(()) } }
         div {
             class: "overlay",
             onclick: move |_| on_close.call(()),
