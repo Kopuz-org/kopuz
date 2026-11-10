@@ -955,7 +955,7 @@ impl IntegrationService {
                     .await
                     .map_err(database_error)?;
             }
-            if [PRESENCE, PRESENCE_SOURCE]
+            if [PRESENCE, PRESENCE_SOURCE, UPLOAD_COVER]
                 .iter()
                 .any(|key| value_of(&values, key).is_some())
             {
@@ -1275,6 +1275,40 @@ mod tests {
             config.snapshot().await.integrations.discord_presence,
             Some(true),
             "the presence setting is left alone"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_upload_cover_toggle_saves_on_its_own() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let database = db::init(&dir.path().join("upload.db")).await.expect("db");
+        let config = Arc::new(crate::config_service::ConfigService::new(
+            database.clone(),
+            dir.path().join("settings.toml"),
+            config::Settings::default(),
+        ));
+        let credentials = CredentialStore::load(&database).await.expect("credentials");
+        let pause = PresencePause::load(&database).await.expect("pause");
+        let service = IntegrationService::new(config.clone(), credentials, pause);
+
+        let info = service
+            .set_settings(DISCORD, vec![answer(UPLOAD_COVER, "true")])
+            .await
+            .expect("toggle");
+
+        let field = info
+            .fields
+            .iter()
+            .find(|field| field.key == UPLOAD_COVER)
+            .expect("upload cover field");
+        assert_eq!(field.value.as_deref(), Some("true"));
+        assert_eq!(
+            config
+                .snapshot()
+                .await
+                .integrations
+                .discord_presence_upload_cover,
+            Some(true)
         );
     }
 
