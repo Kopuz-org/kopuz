@@ -195,6 +195,12 @@ impl Registry {
                 .map(|agreed| added_hosts(agreed, plugin))
                 .unwrap_or_default();
             if added_hosts.is_empty() {
+                // A lower root's copy waiting on its hosts is no update to
+                // this one, which outranks it.
+                pending.retain(|waiting| {
+                    waiting.plugin.id() != plugin.id()
+                        || waiting.plugin.origin() != Origin::Extension
+                });
                 serving_extensions.push(Arc::clone(plugin));
                 continue;
             }
@@ -1073,6 +1079,37 @@ mod tests {
         };
         assert_eq!(pending.plugin.manifest().version, "1.2.0");
         assert_eq!(pending.added_hosts, ["c.test"]);
+    }
+
+    #[tokio::test]
+    async fn a_lower_copy_waiting_for_hosts_is_no_update_to_the_one_that_serves() {
+        let dir = scratch("ext-lower-waits");
+        write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
+        Registry::load(&[], Some(&dir), &[])
+            .await
+            .save_approved(&dir)
+            .unwrap();
+        std::fs::remove_dir_all(dir.join("radio")).unwrap();
+        let lower = scratch("ext-lower-waits-lower");
+        write(
+            &lower,
+            &radio("radio", "1.1.0", &["a.test", "b.test"]),
+            EMPTY_COMPONENT,
+        );
+        let upper = scratch("ext-lower-waits-upper");
+        write(
+            &upper,
+            &radio("radio", "1.2.0", &["a.test"]),
+            EMPTY_COMPONENT,
+        );
+
+        let registry = Registry::load(&[], Some(&dir), &[lower.clone(), upper.clone()]).await;
+        for root in [&dir, &lower, &upper] {
+            std::fs::remove_dir_all(root).ok();
+        }
+        assert!(registry.pending().is_empty(), "nothing is offered");
+        let serving = registry.for_service("radio").expect("radio served");
+        assert_eq!(serving.manifest().version, "1.2.0");
     }
 
     #[cfg(unix)]
