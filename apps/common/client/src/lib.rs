@@ -1204,6 +1204,29 @@ impl api::PlaylistApi for GrpcApi {
         Ok(id.into_inner().id)
     }
 
+    async fn import_playlist(
+        &self,
+        name: String,
+        m3u: String,
+        base_dir: Option<String>,
+    ) -> Result<api::PlaylistImport, ApiError> {
+        let import = self
+            .client()
+            .import_playlist(Request::new(proto::ImportPlaylistRequest {
+                name,
+                m3u,
+                base_dir,
+            }))
+            .await
+            .map_err(wire_error)?
+            .into_inner();
+        Ok(api::PlaylistImport {
+            id: import.id,
+            matched: import.matched,
+            missing: import.missing,
+        })
+    }
+
     async fn rename_playlist(&self, id: String, name: String) -> Result<(), ApiError> {
         self.client()
             .rename_playlist(Request::new(proto::RenamePlaylistRequest {

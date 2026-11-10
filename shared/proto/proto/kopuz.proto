@@ -70,6 +70,7 @@ service Kopuz {
 
   rpc GetPlaylists(GetPlaylistsRequest) returns (PlaylistCatalog);
   rpc CreatePlaylist(CreatePlaylistRequest) returns (PlaylistId);
+  rpc ImportPlaylist(ImportPlaylistRequest) returns (PlaylistImport);
   rpc RenamePlaylist(RenamePlaylistRequest) returns (Unit);
   rpc DeletePlaylist(PlaylistId) returns (Unit);
   rpc AddPlaylistTracks(AddPlaylistTracksRequest) returns (Unit);
@@ -1595,6 +1596,20 @@ message PlaylistFolderId {
 message CreatePlaylistRequest {
   string name = 1;
   repeated string keys = 2;
+}
+
+message ImportPlaylistRequest {
+  string name = 1;
+  // The M3U file's text.
+  string m3u = 2;
+  // The file's folder, for entries written relative to it.
+  optional string base_dir = 3;
+}
+
+message PlaylistImport {
+  string id = 1;
+  uint32 matched = 2;
+  repeated string missing = 3;
 }
 
 message RenamePlaylistRequest {
