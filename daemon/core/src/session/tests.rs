@@ -936,9 +936,9 @@ async fn engine_position_ticks_do_not_become_one_hz_api_events() {
         if playing {
             ticks.push(playing);
         } else {
-            assert_eq!(
-                flags.next(),
-                Some(true),
+            // The last pull may stall with nothing after it to resume on.
+            assert!(
+                matches!(flags.next(), Some(true) | None),
                 "a stall anchor is followed by its resume: {anchors:?}"
             );
         }
