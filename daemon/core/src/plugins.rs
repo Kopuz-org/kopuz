@@ -1,8 +1,9 @@
 //! The plugins the daemon runs, and the community marketplace it installs
 //! more from.
 
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Weak};
+use std::time::{Duration, Instant, SystemTime};
 
 use api::{ApiError, PluginCatalog, PluginInfo, PluginOrigin, PluginUpdate};
 use plugin_host::market::{self, Index, Listing, MarketError};
@@ -15,6 +16,9 @@ pub const DEFAULT_INDEX_URL: &str =
 const INDEX_TTL: Duration = Duration::from_secs(10 * 60);
 
 const MAX_INDEX_BYTES: usize = 4 * 1024 * 1024;
+
+/// How often the plugin directory is checked for files dropped in by hand.
+const WATCH_INTERVAL: Duration = Duration::from_secs(2);
 
 const MAX_REDIRECTS: usize = 5;
 
@@ -166,16 +170,70 @@ impl PluginService {
                 Some(error)
             }
         };
+        // Files waiting in the plugin directory win over the marketplace: they
+        // are what an approval would load.
+        // One that waited across a restart has nothing loaded to attach to.
+        for waiting in registry.pending() {
+            let manifest = waiting.plugin.manifest();
+            let update = PluginUpdate {
+                version: manifest.version.clone(),
+                network: manifest.permissions.network.clone(),
+                added_hosts: waiting.added_hosts.clone(),
+            };
+            match plugins.iter_mut().find(|info| info.id == manifest.id) {
+                Some(info) => info.update = Some(update),
+                None => plugins.push(PluginInfo {
+                    id: manifest.id.clone(),
+                    name: manifest.name.clone(),
+                    description: manifest.description.clone(),
+                    author: String::new(),
+                    homepage: None,
+                    origin: PluginOrigin::Community,
+                    sandboxed: true,
+                    installed_version: None,
+                    available_version: Some(manifest.version.clone()),
+                    services: manifest
+                        .services
+                        .iter()
+                        .map(|service| service.id.clone())
+                        .collect(),
+                    network: Vec::new(),
+                    update: Some(update),
+                }),
+            }
+        }
         PluginCatalog {
             plugins,
             marketplace_error,
         }
     }
 
-    /// Fetch, verify, check the manifest and compile it once before anything
-    /// is written. `network` is what the user agreed to; anything else is refused.
+    /// Install or update `id`, swapping it in while sources keep running.
+    /// `network` is what the user agreed to; anything else is refused.
     pub async fn install(&self, id: &str, network: &[String]) -> Result<PluginInfo, ApiError> {
         let _changing = self.changing.lock().await;
+        if server::plugins::registry()
+            .pending()
+            .iter()
+            .any(|waiting| waiting.plugin.id() == id)
+        {
+            return match server::plugins::approve(id, network).await {
+                Some(()) => {
+                    tracing::info!(plugin = %id, "plugin update allowed its new hosts");
+                    installed()
+                        .into_iter()
+                        .find(|info| info.id == id)
+                        .ok_or_else(|| ApiError::internal("the updated plugin did not load"))
+                }
+                None => Err(changed_hosts()),
+            };
+        }
+        self.install_listed(id, network).await
+    }
+
+    /// Fetch, verify, check the manifest and compile it once before anything
+    /// is written.
+    async fn install_listed(&self, id: &str, network: &[String]) -> Result<PluginInfo, ApiError> {
         let dir = server::plugins::dir()
             .ok_or_else(|| ApiError::unsupported("this daemon has no plugin directory"))?
             .to_path_buf();
@@ -192,12 +250,10 @@ impl PluginService {
                 .map(|plugin| plugin.id().to_string())
         })
         .map_err(market_error)?;
-        // The index is fetched again here, so what it lists now may not be what
-        // the user was shown; the manifest is held to the listing below.
+        // The index is fetched again here, so what it lists now may not be
+        // what the user was shown.
         if plugin_host::host_set(&listing.network) != plugin_host::host_set(network) {
-            return Err(ApiError::invalid_input(
-                "the plugin now reaches different hosts than the ones shown; review them and try again",
-            ));
+            return Err(changed_hosts());
         }
 
         // Files are for a local test index; one from the internet names downloads.
@@ -244,20 +300,19 @@ impl PluginService {
             .map_err(|error| ApiError::invalid_input(error.to_string()))?;
 
         let id = listing.id.clone();
-        tokio::task::spawn_blocking(move || {
+        // A hand-installed copy of the id under another directory name would
+        // otherwise stay on disk and win a later rescan.
+        let copies = server::plugins::registry().dirs_of(&id);
+        server::plugins::adopt(Arc::new(candidate), move || {
             let _locked = market::lock(&dir)?;
             let target = market::install(&dir, &id, &manifest_text, &component)?;
-            // A hand-installed copy under another directory name would still
-            // load beside it on the next start.
-            plugin_host::dirs_of(&dir, &id)
-                .iter()
-                .filter(|copy| **copy != target)
-                .try_for_each(|copy| market::uninstall(&dir, copy))
+            for copy in copies.iter().filter(|copy| **copy != target) {
+                market::uninstall(&dir, copy)?;
+            }
+            Ok(target)
         })
         .await
-        .map_err(|error| ApiError::internal(error.to_string()))?
         .map_err(market_error)?;
-        reload().await?;
         tracing::info!(plugin = %listing.id, version = %listing.version, "plugin installed");
 
         let mut info = installed()
@@ -271,31 +326,34 @@ impl PluginService {
     pub async fn uninstall(&self, id: &str) -> Result<(), ApiError> {
         let _changing = self.changing.lock().await;
         let registry = server::plugins::registry();
-        let plugin = registry
+        if registry
             .plugins()
             .iter()
-            .find(|plugin| plugin.id() == id)
-            .ok_or_else(|| ApiError::not_found("no such plugin is installed"))?;
-        if plugin.origin() == plugin_host::Origin::Bundled {
+            .any(|plugin| plugin.id() == id && plugin.origin() == plugin_host::Origin::Bundled)
+        {
             return Err(ApiError::invalid_input(
                 "an official plugin ships with kopuz and cannot be removed",
             ));
         }
+        // An update that waited across a restart has files but nothing loaded.
+        let copies = registry.dirs_of(id);
+        if copies.is_empty() && registry.from_extension(id) {
+            return Err(market_error(MarketError::Extension(id.to_string())));
+        }
+        if copies.is_empty() {
+            return Err(ApiError::not_found("no such plugin is installed"));
+        }
         let dir = server::plugins::dir()
             .ok_or_else(|| ApiError::unsupported("this daemon has no plugin directory"))?
             .to_path_buf();
-        let id = id.to_string();
-        let removed = id.clone();
-        tokio::task::spawn_blocking(move || {
+        server::plugins::remove(move || {
             let _locked = market::lock(&dir)?;
-            plugin_host::dirs_of(&dir, &removed)
+            copies
                 .iter()
                 .try_for_each(|copy| market::uninstall(&dir, copy))
         })
         .await
-        .map_err(|error| ApiError::internal(error.to_string()))?
         .map_err(market_error)?;
-        reload().await?;
         tracing::info!(plugin = %id, "plugin removed");
         Ok(())
     }
@@ -316,7 +374,9 @@ fn installed() -> Vec<PluginInfo> {
                 homepage: None,
                 origin: match plugin.origin() {
                     plugin_host::Origin::Bundled => PluginOrigin::Official,
-                    plugin_host::Origin::Installed => PluginOrigin::Community,
+                    plugin_host::Origin::Installed | plugin_host::Origin::Extension => {
+                        PluginOrigin::Community
+                    }
                 },
                 sandboxed: !plugin.is_native(),
                 installed_version: Some(manifest.version.clone()),
@@ -331,6 +391,100 @@ fn installed() -> Vec<PluginInfo> {
             }
         })
         .collect()
+}
+
+fn added(installed: &[String], update: &[String]) -> Vec<String> {
+    let allowed = plugin_host::host_set(installed);
+    plugin_host::host_set(update)
+        .into_iter()
+        .filter(|host| !allowed.contains(host))
+        .collect()
+}
+
+fn changed_hosts() -> ApiError {
+    ApiError::invalid_input(
+        "the plugin now reaches different hosts than the ones shown; review them and try again",
+    )
+}
+
+/// Size and modification time of each plugin's files, to notice a change
+/// without reading or hashing them.
+/// Where it can, the inode and change time too: a file replaced by one of the
+/// same size whose modification time was kept, as `cp -p` does, still changes
+/// them, and reading them costs no more than the size.
+type Stamps = Vec<(PathBuf, Option<(u64, SystemTime, u64, i128)>)>;
+
+#[cfg(unix)]
+fn identity(meta: &std::fs::Metadata) -> (u64, i128) {
+    use std::os::unix::fs::MetadataExt as _;
+    (
+        meta.ino(),
+        i128::from(meta.ctime()) * 1_000_000_000 + i128::from(meta.ctime_nsec()),
+    )
+}
+
+#[cfg(not(unix))]
+fn identity(_meta: &std::fs::Metadata) -> (u64, i128) {
+    (0, 0)
+}
+
+fn stamps(dir: &Path) -> Stamps {
+    plugin_host::plugin_dirs(dir)
+        .into_iter()
+        .flat_map(|plugin| {
+            [plugin_host::MANIFEST_FILE, plugin_host::COMPONENT_FILE].map(|file| plugin.join(file))
+        })
+        .map(|path| {
+            let stamp = std::fs::metadata(&path).ok().and_then(|meta| {
+                let (inode, changed) = identity(&meta);
+                Some((meta.len(), meta.modified().ok()?, inode, changed))
+            });
+            (path, stamp)
+        })
+        .collect()
+}
+
+/// Watch the plugin directory and swap in plugins whose files changed,
+/// calling `changed` when that loaded or queued anything. Stops once `owner`
+/// is dropped.
+pub fn watch<T, F, Fut>(owner: Weak<T>, changed: F)
+where
+    T: Send + Sync + 'static,
+    F: Fn(Arc<T>) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = ()> + Send,
+{
+    let Some(dir) = server::plugins::dir() else {
+        return;
+    };
+    tokio::spawn(async move {
+        // Nothing yet, so the first quiet poll rescans whatever it finds, even
+        // a directory emptied between boot loading the plugins and now.
+        let mut loaded: Option<Stamps> = None;
+        let mut last = stamps(dir);
+        loop {
+            tokio::time::sleep(WATCH_INTERVAL).await;
+            if owner.strong_count() == 0 {
+                return;
+            }
+            let Ok(now) = tokio::task::spawn_blocking(move || stamps(dir)).await else {
+                continue;
+            };
+            // Wait for one quiet interval, so files still being copied in are
+            // not read half written.
+            let settled = now == last;
+            last.clone_from(&now);
+            if !settled || loaded.as_ref() == Some(&now) {
+                continue;
+            }
+            loaded = Some(now);
+            if server::plugins::rescan().await {
+                let Some(owner) = owner.upgrade() else {
+                    return;
+                };
+                changed(owner).await;
+            }
+        }
+    });
 }
 
 fn listed(listing: &Listing) -> PluginInfo {
@@ -350,13 +504,6 @@ fn listed(listing: &Listing) -> PluginInfo {
     }
 }
 
-/// Off the runtime: reading the directory compiles every installed plugin.
-async fn reload() -> Result<(), ApiError> {
-    tokio::task::spawn_blocking(server::plugins::reload)
-        .await
-        .map_err(|error| ApiError::internal(error.to_string()))
-}
-
 /// Versions are free-form, so any other version or component counts; nothing
 /// says which of two is newer.
 fn differs(plugin: &plugin_host::Plugin, listing: &Listing) -> bool {
@@ -366,10 +513,34 @@ fn differs(plugin: &plugin_host::Plugin, listing: &Listing) -> bool {
             .is_some_and(|digest| !digest.eq_ignore_ascii_case(listing.component.sha256.trim()))
 }
 
-fn added(installed: &[String], update: &[String]) -> Vec<String> {
-    let allowed = plugin_host::host_set(installed);
-    plugin_host::host_set(update)
-        .into_iter()
-        .filter(|host| !allowed.contains(host))
-        .collect()
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_same_sized_replacement_keeping_its_modification_time_is_noticed() {
+        let dir = std::env::temp_dir().join(format!("kopuz-stamps-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let plugin = dir.join("radio");
+        std::fs::create_dir_all(&plugin).unwrap();
+        let component = plugin.join(plugin_host::COMPONENT_FILE);
+        std::fs::write(plugin.join(plugin_host::MANIFEST_FILE), "id = \"radio\"").unwrap();
+        std::fs::write(&component, b"old!").unwrap();
+        let modified = std::fs::metadata(&component).unwrap().modified().unwrap();
+        let before = stamps(&dir);
+
+        let staged = plugin.join("staged");
+        std::fs::write(&staged, b"new!").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&staged)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        std::fs::rename(&staged, &component).unwrap();
+        let after = stamps(&dir);
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_ne!(before, after);
+    }
 }

@@ -12,7 +12,7 @@ mod session;
 
 pub use plugin::{Code, Origin, Plugin};
 pub use registry::{
-    Bundled, COMPONENT_FILE, MANIFEST_FILE, Registry, dirs_of, host_set, plugin_dirs,
+    Bundled, COMPONENT_FILE, MANIFEST_FILE, Pending, Registry, host_set, plugin_dirs,
 };
 pub use session::Session;
 
