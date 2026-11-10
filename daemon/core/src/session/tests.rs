@@ -918,17 +918,36 @@ async fn engine_position_ticks_do_not_become_one_hz_api_events() {
     }
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    let mut anchors = 0;
+    let mut anchors = Vec::new();
     loop {
         match events.try_recv() {
-            Ok(ApiEvent::PlayerPosition { .. }) => anchors += 1,
+            Ok(ApiEvent::PlayerPosition { playing, .. }) => anchors.push(playing),
             Ok(_) | Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
             Err(broadcast::error::TryRecvError::Empty | broadcast::error::TryRecvError::Closed) => {
                 break;
             }
         }
     }
-    assert_eq!(anchors, 1, "only the initial play anchor is emitted");
+    // A slow runner can starve the decoder under these pulls; the stall and
+    // its resume each re-anchor, which is not a position tick.
+    let mut ticks = Vec::new();
+    let mut flags = anchors.iter().copied();
+    while let Some(playing) = flags.next() {
+        if playing {
+            ticks.push(playing);
+        } else {
+            // The last pull may stall with nothing after it to resume on.
+            assert!(
+                matches!(flags.next(), Some(true) | None),
+                "a stall anchor is followed by its resume: {anchors:?}"
+            );
+        }
+    }
+    assert_eq!(
+        ticks,
+        [true],
+        "only the initial play anchor is emitted: {anchors:?}"
+    );
 }
 
 #[tokio::test]

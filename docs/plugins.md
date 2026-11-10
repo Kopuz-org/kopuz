@@ -157,7 +157,14 @@ Inside the Flatpak, a plugin can also ship as an extension of the
 reads these at start, beneath the plugin directory: one replaces an official
 plugin with its id, a plugin installed in the plugin directory replaces it, and
 its hosts wait for the user the same way. Its files are read-only, so the
-Plugins page cannot remove one; `flatpak uninstall` does.
+Plugins page tags it System and cannot remove one; `flatpak uninstall` does.
+
+Outside the Flatpak, a system package or a Nix profile installs a plugin the
+same way under `kopuz/plugins` in a data directory on `XDG_DATA_DIRS`
+(`/usr/local/share` and `/usr/share` when it is unset), such as
+`/usr/share/kopuz/plugins/<name>/`; `KOPUZ_PLUGIN_PATH` lists other
+directories in their place. These load and behave as an extension's do, and
+the package manager removes them.
 
 ## Publishing to the marketplace
 

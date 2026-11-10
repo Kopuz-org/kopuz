@@ -66,18 +66,26 @@ enum Reread {
 }
 
 impl Registry {
-    /// The bundled plugins, then each plugin a Flatpak extension mounts under
-    /// `extensions`, then each plugin installed under `dir`. A later layer's
+    /// The bundled plugins, then each plugin in the read-only `extensions`
+    /// directories (a Flatpak extension's, a system package's), in order,
+    /// then each plugin installed under `dir`. A later layer's
     /// plugin with an earlier one's id replaces it, which is how a fix or a
     /// fork of an official plugin is tried without rebuilding kopuz. A plugin
     /// is compiled first, so one that does not compile never displaces the
     /// plugin it would replace. One that reaches hosts beyond those agreed to
     /// for its id waits in [`Self::pending`], as on a reload; one with no
     /// record is taken as agreed, as before records.
-    pub async fn load(bundled: &[Bundled], dir: Option<&Path>, extensions: Option<&Path>) -> Self {
+    pub async fn load(bundled: &[Bundled], dir: Option<&Path>, extensions: &[PathBuf]) -> Self {
         let approved = dir.map(read_approved).unwrap_or_default();
         let mut provided = Extensions::default();
-        for path in extensions.map(plugin_dirs).unwrap_or_default() {
+        let mut roots = Vec::new();
+        for root in extensions {
+            match read_plugin_dirs(root) {
+                Ok(paths) => roots.extend(paths),
+                Err(_) => provided.unreadable = true,
+            }
+        }
+        for path in roots {
             match compile(&path, Origin::Extension).await {
                 Ok(plugin) => provided.plugins.push((path, Arc::new(plugin))),
                 Err(error) => {
@@ -89,7 +97,14 @@ impl Registry {
         let mut installed = Vec::new();
         let mut pending = Vec::new();
         let mut unreadable = false;
-        for path in dir.map(plugin_dirs).unwrap_or_default() {
+        let paths = match dir.map(read_plugin_dirs).transpose() {
+            Ok(paths) => paths.unwrap_or_default(),
+            Err(_) => {
+                unreadable = true;
+                Vec::new()
+            }
+        };
+        for path in paths {
             match compile(&path, Origin::Installed).await {
                 Ok(plugin) => {
                     let plugin = Arc::new(plugin);
@@ -180,16 +195,27 @@ impl Registry {
                 .map(|agreed| added_hosts(agreed, plugin))
                 .unwrap_or_default();
             if added_hosts.is_empty() {
-                serving_extensions.push(Arc::clone(plugin));
-            } else if !pending
-                .iter()
-                .any(|waiting| waiting.plugin.id() == plugin.id())
-            {
-                pending.push(Pending {
-                    plugin: Arc::clone(plugin),
-                    added_hosts,
-                    dir: dir.clone(),
+                // A lower root's copy waiting on its hosts is no update to
+                // this one, which outranks it.
+                pending.retain(|waiting| {
+                    waiting.plugin.id() != plugin.id()
+                        || waiting.plugin.origin() != Origin::Extension
                 });
+                serving_extensions.push(Arc::clone(plugin));
+                continue;
+            }
+            let waiting = Pending {
+                plugin: Arc::clone(plugin),
+                added_hosts,
+                dir: dir.clone(),
+            };
+            match pending
+                .iter_mut()
+                .find(|other| other.plugin.id() == plugin.id())
+            {
+                None => pending.push(waiting),
+                Some(other) if other.plugin.origin() == Origin::Extension => *other = waiting,
+                Some(_) => {}
             }
         }
         // A record is dropped only once no directory can hold its plugin: a
@@ -264,10 +290,13 @@ impl Registry {
     /// keeps the version it had loaded; one whose new files reach more hosts
     /// waits in [`Self::pending`] for [`Self::approve`].
     pub async fn reload(&self, dir: &Path) -> Self {
+        let Ok(paths) = read_plugin_dirs(dir) else {
+            return self.clone();
+        };
         let mut installed = Vec::new();
         let mut pending = Vec::new();
         let mut unreadable = false;
-        for path in plugin_dirs(dir) {
+        for path in paths {
             let here = self
                 .installed
                 .iter()
@@ -524,13 +553,22 @@ fn added_hosts(agreed: &BTreeSet<String>, candidate: &Plugin) -> Vec<String> {
 
 /// Each `<dir>/<name>/`, sorted, so which of two plugins wins a service does
 /// not depend on directory order. A dot directory is an install in progress.
+/// Nothing where `dir` cannot be read; see [`read_plugin_dirs`] to tell that
+/// apart from an empty directory.
 pub fn plugin_dirs(dir: &Path) -> Vec<PathBuf> {
+    read_plugin_dirs(dir).unwrap_or_default()
+}
+
+/// [`plugin_dirs`], or the error that kept `dir` from being read. A missing
+/// directory holds nothing; any other failure leaves which plugins it holds
+/// unknown.
+pub fn read_plugin_dirs(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => {
             tracing::warn!(dir = %dir.display(), %error, "plugin directory unreadable");
-            return Vec::new();
+            return Err(error);
         }
     };
     let mut paths: Vec<_> = entries
@@ -540,7 +578,7 @@ pub fn plugin_dirs(dir: &Path) -> Vec<PathBuf> {
         .filter(|path| path.is_dir())
         .collect();
     paths.sort();
-    paths
+    Ok(paths)
 }
 
 async fn compile(dir: &Path, origin: Origin) -> Result<Plugin, String> {
@@ -592,7 +630,7 @@ mod tests {
         std::fs::create_dir_all(&broken).unwrap();
         std::fs::write(broken.join(MANIFEST_FILE), "id = ").unwrap();
 
-        let registry = Registry::load(&bundled, Some(&dir), None).await;
+        let registry = Registry::load(&bundled, Some(&dir), &[]).await;
         std::fs::remove_dir_all(&dir).ok();
 
         assert_eq!(registry.plugins().len(), 1);
@@ -642,7 +680,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(port.join(COMPONENT_FILE), EMPTY_COMPONENT).unwrap();
-        let registry = Registry::load(&native, Some(&dir), None).await;
+        let registry = Registry::load(&native, Some(&dir), &[]).await;
         std::fs::remove_dir_all(&dir).ok();
         assert!(!registry.for_service("ytmusic").unwrap().is_native());
     }
@@ -662,7 +700,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(fork.join(COMPONENT_FILE), b"not a component").unwrap();
-        let registry = Registry::load(&bundled, Some(&dir), None).await;
+        let registry = Registry::load(&bundled, Some(&dir), &[]).await;
         std::fs::remove_dir_all(&dir).ok();
         let serving = registry.for_service("subsonic").expect("subsonic served");
         assert_eq!(serving.origin(), Origin::Bundled);
@@ -682,7 +720,7 @@ mod tests {
             .unwrap();
             std::fs::write(path.join(COMPONENT_FILE), EMPTY_COMPONENT).unwrap();
         }
-        let registry = Registry::load(&[], Some(&dir), None).await;
+        let registry = Registry::load(&[], Some(&dir), &[]).await;
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(registry.plugins().len(), 1);
         assert_eq!(registry.dirs_of("radio"), [dir.join("my-radio-fork")]);
@@ -720,7 +758,7 @@ mod tests {
     async fn unchanged_files_keep_the_loaded_plugin() {
         let dir = scratch("unchanged");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let first = Registry::load(&[], Some(&dir), None).await;
+        let first = Registry::load(&[], Some(&dir), &[]).await;
         let again = first.reload(&dir).await;
         std::fs::remove_dir_all(&dir).ok();
         assert!(Arc::ptr_eq(serving(&first), serving(&again)));
@@ -731,7 +769,7 @@ mod tests {
     async fn an_update_that_compiles_replaces_the_loaded_plugin() {
         let dir = scratch("update");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let first = Registry::load(&[], Some(&dir), None).await;
+        let first = Registry::load(&[], Some(&dir), &[]).await;
         write(&dir, &radio("radio", "1.0.1", &["a.test"]), EMPTY_COMPONENT);
         let next = first.reload(&dir).await;
         std::fs::remove_dir_all(&dir).ok();
@@ -743,7 +781,7 @@ mod tests {
     async fn a_failed_load_keeps_the_old_module() {
         let dir = scratch("failed");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let first = Registry::load(&[], Some(&dir), None).await;
+        let first = Registry::load(&[], Some(&dir), &[]).await;
 
         write(
             &dir,
@@ -767,7 +805,7 @@ mod tests {
     async fn new_files_may_not_change_the_plugin_id() {
         let dir = scratch("id");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let first = Registry::load(&[], Some(&dir), None).await;
+        let first = Registry::load(&[], Some(&dir), &[]).await;
         write(&dir, &radio("other", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
         let next = first.reload(&dir).await;
         std::fs::remove_dir_all(&dir).ok();
@@ -779,7 +817,7 @@ mod tests {
     async fn an_update_reaching_new_hosts_waits_until_they_are_allowed() {
         let dir = scratch("hosts");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let first = Registry::load(&[], Some(&dir), None).await;
+        let first = Registry::load(&[], Some(&dir), &[]).await;
         write(
             &dir,
             &radio("radio", "1.1.0", &["a.test", "B.test"]),
@@ -811,7 +849,7 @@ mod tests {
     async fn an_approved_update_in_another_directory_outlives_a_rescan_once_the_old_copy_goes() {
         let dir = scratch("other-dir");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let first = Registry::load(&[], Some(&dir), None).await;
+        let first = Registry::load(&[], Some(&dir), &[]).await;
         let update = dir.join("radio-update");
         std::fs::create_dir_all(&update).unwrap();
         std::fs::write(
@@ -848,7 +886,7 @@ mod tests {
     async fn an_update_reaching_new_hosts_still_waits_after_a_restart() {
         let dir = scratch("restart");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        Registry::load(&[], Some(&dir), None)
+        Registry::load(&[], Some(&dir), &[])
             .await
             .save_approved(&dir)
             .unwrap();
@@ -858,7 +896,7 @@ mod tests {
             EMPTY_COMPONENT,
         );
 
-        let restarted = Registry::load(&[], Some(&dir), None).await;
+        let restarted = Registry::load(&[], Some(&dir), &[]).await;
         assert!(restarted.for_service("radio").is_none());
         let [pending] = restarted.pending() else {
             panic!("the update still waits");
@@ -874,7 +912,7 @@ mod tests {
             .expect("the hosts shown are the hosts asked for")
             .save_approved(&dir)
             .unwrap();
-        let allowed = Registry::load(&[], Some(&dir), None).await;
+        let allowed = Registry::load(&[], Some(&dir), &[]).await;
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(serving(&allowed).manifest().version, "1.1.0");
         assert!(allowed.pending().is_empty());
@@ -888,7 +926,7 @@ mod tests {
         }];
         let dir = scratch("bundled");
         std::fs::remove_dir_all(dir.join("radio")).unwrap();
-        Registry::load(&bundled, Some(&dir), None)
+        Registry::load(&bundled, Some(&dir), &[])
             .await
             .save_approved(&dir)
             .unwrap();
@@ -899,7 +937,7 @@ mod tests {
             EMPTY_COMPONENT,
         );
 
-        let restarted = Registry::load(&bundled, Some(&dir), None).await;
+        let restarted = Registry::load(&bundled, Some(&dir), &[]).await;
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(serving(&restarted).origin(), Origin::Bundled);
         let [pending] = restarted.pending() else {
@@ -912,13 +950,13 @@ mod tests {
     async fn a_waiting_plugin_whose_files_break_for_a_while_still_waits() {
         let dir = scratch("broken-wait");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        Registry::load(&[], Some(&dir), None)
+        Registry::load(&[], Some(&dir), &[])
             .await
             .save_approved(&dir)
             .unwrap();
         let widened = radio("radio", "1.1.0", &["a.test", "b.test"]);
         write(&dir, &widened, EMPTY_COMPONENT);
-        let restarted = Registry::load(&[], Some(&dir), None).await;
+        let restarted = Registry::load(&[], Some(&dir), &[]).await;
         assert_eq!(restarted.pending().len(), 1);
 
         write(&dir, "id = ", EMPTY_COMPONENT);
@@ -949,14 +987,16 @@ mod tests {
         let dir = scratch("ext-layers-installed");
         std::fs::remove_dir_all(dir.join("radio")).unwrap();
 
-        let extended = Registry::load(&bundled, Some(&dir), Some(&extensions)).await;
+        let extended =
+            Registry::load(&bundled, Some(&dir), std::slice::from_ref(&extensions)).await;
         assert_eq!(serving(&extended).origin(), Origin::Extension);
         assert_eq!(serving(&extended).manifest().version, "2.0.0");
         assert!(extended.dirs_of("radio").is_empty());
 
         std::fs::create_dir_all(dir.join("radio")).unwrap();
         write(&dir, &radio("radio", "3.0.0", &["a.test"]), EMPTY_COMPONENT);
-        let installed = Registry::load(&bundled, Some(&dir), Some(&extensions)).await;
+        let installed =
+            Registry::load(&bundled, Some(&dir), std::slice::from_ref(&extensions)).await;
         assert_eq!(serving(&installed).origin(), Origin::Installed);
         assert_eq!(installed.plugins().len(), 1);
         assert_eq!(installed.dirs_of("radio"), [dir.join("radio")]);
@@ -971,11 +1011,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn every_extension_root_is_read() {
+        let first = scratch("ext-root-one");
+        write(
+            &first,
+            &radio("radio", "1.0.0", &["a.test"]),
+            EMPTY_COMPONENT,
+        );
+        let second = scratch("ext-root-two");
+        write(
+            &second,
+            &radio("other", "1.0.0", &["b.test"]),
+            EMPTY_COMPONENT,
+        );
+        let registry = Registry::load(&[], None, &[first.clone(), second.clone()]).await;
+        std::fs::remove_dir_all(&first).ok();
+        std::fs::remove_dir_all(&second).ok();
+        let mut ids: Vec<&str> = registry
+            .plugins()
+            .iter()
+            .map(|plugin| plugin.id())
+            .collect();
+        ids.sort_unstable();
+        assert_eq!(ids, ["other", "radio"]);
+    }
+
+    #[tokio::test]
     async fn a_missing_extension_directory_provides_nothing() {
         let dir = scratch("ext-missing");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
         let missing = dir.join("no-such-extensions");
-        let registry = Registry::load(&[], Some(&dir), Some(&missing)).await;
+        let registry = Registry::load(&[], Some(&dir), std::slice::from_ref(&missing)).await;
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(serving(&registry).origin(), Origin::Installed);
         assert!(!registry.from_extension("radio"));
@@ -983,10 +1049,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn of_two_extension_copies_waiting_for_hosts_the_later_root_waits() {
+        let dir = scratch("ext-two-waiting");
+        write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
+        Registry::load(&[], Some(&dir), &[])
+            .await
+            .save_approved(&dir)
+            .unwrap();
+        std::fs::remove_dir_all(dir.join("radio")).unwrap();
+        let lower = scratch("ext-two-waiting-lower");
+        write(
+            &lower,
+            &radio("radio", "1.1.0", &["a.test", "b.test"]),
+            EMPTY_COMPONENT,
+        );
+        let upper = scratch("ext-two-waiting-upper");
+        write(
+            &upper,
+            &radio("radio", "1.2.0", &["a.test", "c.test"]),
+            EMPTY_COMPONENT,
+        );
+
+        let registry = Registry::load(&[], Some(&dir), &[lower.clone(), upper.clone()]).await;
+        for root in [&dir, &lower, &upper] {
+            std::fs::remove_dir_all(root).ok();
+        }
+        let [pending] = registry.pending() else {
+            panic!("one copy waits");
+        };
+        assert_eq!(pending.plugin.manifest().version, "1.2.0");
+        assert_eq!(pending.added_hosts, ["c.test"]);
+    }
+
+    #[tokio::test]
+    async fn a_lower_copy_waiting_for_hosts_is_no_update_to_the_one_that_serves() {
+        let dir = scratch("ext-lower-waits");
+        write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
+        Registry::load(&[], Some(&dir), &[])
+            .await
+            .save_approved(&dir)
+            .unwrap();
+        std::fs::remove_dir_all(dir.join("radio")).unwrap();
+        let lower = scratch("ext-lower-waits-lower");
+        write(
+            &lower,
+            &radio("radio", "1.1.0", &["a.test", "b.test"]),
+            EMPTY_COMPONENT,
+        );
+        let upper = scratch("ext-lower-waits-upper");
+        write(
+            &upper,
+            &radio("radio", "1.2.0", &["a.test"]),
+            EMPTY_COMPONENT,
+        );
+
+        let registry = Registry::load(&[], Some(&dir), &[lower.clone(), upper.clone()]).await;
+        for root in [&dir, &lower, &upper] {
+            std::fs::remove_dir_all(root).ok();
+        }
+        assert!(registry.pending().is_empty(), "nothing is offered");
+        let serving = registry.for_service("radio").expect("radio served");
+        assert_eq!(serving.manifest().version, "1.2.0");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_extension_root_that_cannot_be_read_keeps_every_approval() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = scratch("ext-unreadable");
+        write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
+        Registry::load(&[], Some(&dir), &[])
+            .await
+            .save_approved(&dir)
+            .unwrap();
+        std::fs::remove_dir_all(dir.join("radio")).unwrap();
+        let locked = scratch("ext-unreadable-root");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let readable = std::fs::read_dir(&locked).is_ok();
+
+        let registry = Registry::load(&[], Some(&dir), std::slice::from_ref(&locked)).await;
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::remove_dir_all(&locked).ok();
+        std::fs::remove_dir_all(&dir).ok();
+        if readable {
+            return;
+        }
+        assert!(
+            registry.approved.contains_key("radio"),
+            "which plugin the root holds is unknown, so its record stays"
+        );
+    }
+
+    #[tokio::test]
     async fn an_extension_reaching_hosts_not_agreed_to_waits_until_they_are_allowed() {
         let dir = scratch("ext-hosts");
         write(&dir, &radio("radio", "1.0.0", &["a.test"]), EMPTY_COMPONENT);
-        Registry::load(&[], Some(&dir), None)
+        Registry::load(&[], Some(&dir), &[])
             .await
             .save_approved(&dir)
             .unwrap();
@@ -998,7 +1156,7 @@ mod tests {
             EMPTY_COMPONENT,
         );
 
-        let restarted = Registry::load(&[], Some(&dir), Some(&extensions)).await;
+        let restarted = Registry::load(&[], Some(&dir), std::slice::from_ref(&extensions)).await;
         assert!(restarted.for_service("radio").is_none());
         let [pending] = restarted.pending() else {
             panic!("the extension waits");
@@ -1016,7 +1174,7 @@ mod tests {
         assert!(allowed.pending().is_empty());
         assert!(allowed.reload(&dir).await.same_as(&allowed));
 
-        let again = Registry::load(&[], Some(&dir), Some(&extensions)).await;
+        let again = Registry::load(&[], Some(&dir), std::slice::from_ref(&extensions)).await;
         std::fs::remove_dir_all(&dir).ok();
         std::fs::remove_dir_all(&extensions).ok();
         assert_eq!(serving(&again).manifest().version, "1.1.0");

@@ -18,6 +18,9 @@ pub struct PluginInfo {
     pub origin: PluginOrigin,
     /// False for an official plugin that runs in-process.
     pub sandboxed: bool,
+    /// From a Flatpak extension or a system package, whose package manager
+    /// updates and removes it; the Plugins page cannot.
+    pub system: bool,
     /// `None` when not installed.
     pub installed_version: Option<String>,
     /// `None` when the marketplace lists none.
