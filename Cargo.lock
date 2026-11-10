@@ -6613,12 +6613,14 @@ name = "kopuz-discord-presence"
 version = "0.68.0"
 dependencies = [
  "discord-rich-presence",
+ "image",
  "kopuz-config",
  "kopuz-db",
  "kopuz-reader",
  "kopuz-utils",
  "reqwest 0.13.4",
  "serde",
+ "tokio",
  "tracing",
 ]
 
