@@ -102,6 +102,7 @@ impl MediaSource for LocalSource {
         _: config::StreamQuality,
     ) -> Result<StreamInfo, SourceError> {
         Ok(StreamInfo {
+            guard: None,
             url: item_id.to_string(),
             format: None,
             user_agent: None,

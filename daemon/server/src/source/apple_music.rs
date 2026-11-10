@@ -181,6 +181,7 @@ impl MediaSource for AppleMusicSource {
             base64::Engine::encode(&base64::engine::general_purpose::STANDARD, token.as_bytes());
 
         Ok(StreamInfo {
+            guard: None,
             url: format!(
                 "__AM_FMP4:{_item_id}:{}:{}:{encoded_token}",
                 self.client.storefront(),

@@ -652,6 +652,7 @@ impl MediaSource for YtSource {
             player::AudioFormat::M4a => crate::stream::AudioFormat::M4a,
         };
         Ok(StreamInfo {
+            guard: None,
             url: info.url,
             format: Some((format, info.range_safe)),
             user_agent: Some(info.user_agent),
@@ -943,6 +944,7 @@ mod tests {
             apple_music_language: String::new(),
             folders: Vec::new(),
             account: None,
+            plugin_service: None,
         };
         let src = YtSource::new(db, Source::Server("test".to_string()), &conn);
         (src, dir)

@@ -1,0 +1,25 @@
+/// The only network a plugin has, checked against its manifest.
+interface http {
+    record request {
+        method: string,
+        url: string,
+        headers: list<tuple<string, string>>,
+        body: option<list<u8>>,
+        timeout-ms: option<u32>,
+    }
+
+    record response {
+        status: u16,
+        headers: list<tuple<string, string>>,
+        body: list<u8>,
+    }
+
+    variant http-error {
+        denied(string),
+        connect(string),
+        timeout,
+        other(string),
+    }
+
+    send: func(request: request) -> result<response, http-error>;
+}

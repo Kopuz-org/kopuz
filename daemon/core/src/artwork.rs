@@ -30,6 +30,7 @@ use utils::artwork_image::{
 };
 const MAX_REMOTE_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
 const REMOTE_ARTWORK_TIMEOUT: Duration = Duration::from_secs(15);
+const MAX_ARTWORK_REDIRECTS: usize = 10;
 /// A cover cached by item id rather than URL never sees its URL change, so it is fetched again after this.
 const REMOTE_ARTWORK_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
@@ -278,7 +279,9 @@ impl ArtworkService {
             Located::File(path) => self.local_payload(&path.to_string_lossy(), hq).await,
             Located::Url(url) => {
                 let cache_name = remote_cache_name(server, &cover, &url);
-                self.proxied_payload(&url, &cache_name, hq).await
+                let reach = server.and_then(server::plugins::Reach::of_installed);
+                self.proxied_payload(&url, &cache_name, hq, reach.as_ref())
+                    .await
             }
         }
     }
@@ -449,6 +452,7 @@ impl ArtworkService {
         url: &str,
         cache_name: &str,
         hq: bool,
+        reach: Option<&server::plugins::Reach>,
     ) -> Result<ArtworkPayload, ApiError> {
         let cache_path = self.cache_dir.join(format!(
             "remote_{}_{cache_name}",
@@ -465,7 +469,7 @@ impl ArtworkService {
             let content_type = sniff_content_type(bytes);
             return Ok(self.payload(bytes.clone(), content_type));
         }
-        match self.download(url, hq).await {
+        match self.download(url, hq, reach).await {
             Ok((bytes, content_type)) => {
                 if let Some(parent) = cache_path.parent() {
                     let _ = tokio::fs::create_dir_all(parent).await;
@@ -484,20 +488,16 @@ impl ArtworkService {
         }
     }
 
-    async fn download(&self, url: &str, hq: bool) -> Result<(Vec<u8>, &'static str), ApiError> {
-        let mut response = self
-            .http
-            .get(url)
-            .timeout(REMOTE_ARTWORK_TIMEOUT)
-            .send()
-            .await
-            .map_err(|error| {
-                ApiError::internal(format!("artwork fetch failed: {}", error.without_url()))
-            })?
+    async fn download(
+        &self,
+        url: &str,
+        hq: bool,
+        reach: Option<&server::plugins::Reach>,
+    ) -> Result<(Vec<u8>, &'static str), ApiError> {
+        let mut response = get(&self.http, url, reach)
+            .await?
             .error_for_status()
-            .map_err(|error| {
-                ApiError::internal(format!("artwork fetch failed: {}", error.without_url()))
-            })?;
+            .map_err(fetch_failed)?;
         if response
             .content_length()
             .is_some_and(|length| length > MAX_REMOTE_ARTWORK_BYTES as u64)
@@ -505,9 +505,7 @@ impl ArtworkService {
             return Err(ApiError::internal("artwork exceeds the maximum size"));
         }
         let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|error| {
-            ApiError::internal(format!("artwork fetch failed: {}", error.without_url()))
-        })? {
+        while let Some(chunk) = response.chunk().await.map_err(fetch_failed)? {
             if bytes.len().saturating_add(chunk.len()) > MAX_REMOTE_ARTWORK_BYTES {
                 return Err(ApiError::internal("artwork exceeds the maximum size"));
             }
@@ -524,9 +522,176 @@ impl ArtworkService {
     }
 }
 
+/// A client that follows no redirect, for a fetch that checks each hop itself.
+fn fetch_failed(error: reqwest::Error) -> ApiError {
+    ApiError::internal(format!("artwork fetch failed: {}", error.without_url()))
+}
+
+/// The response for `url`. Under a community plugin every remote picture came
+/// from it, so the URL and each redirect are held to the hosts it may reach:
+/// one stored before the plugin narrowed them is refused, not fetched. Each
+/// name resolves through the plugin's guard as its streams do, so an allowed
+/// name cannot lead to this machine or its network either.
+pub(crate) async fn get(
+    http: &reqwest::Client,
+    url: &str,
+    reach: Option<&server::plugins::Reach>,
+) -> Result<reqwest::Response, ApiError> {
+    let Some(reach) = reach else {
+        return http
+            .get(url)
+            .timeout(REMOTE_ARTWORK_TIMEOUT)
+            .send()
+            .await
+            .map_err(fetch_failed);
+    };
+    let outside = || ApiError::internal("artwork is outside the hosts its plugin may reach");
+    if !reach.allows(url) {
+        return Err(outside());
+    }
+    let unredirected = utils::http::guarded_builder(reach.stream_guard())
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(fetch_failed)?;
+    let mut url = reqwest::Url::parse(url)
+        .map_err(|error| ApiError::internal(format!("artwork URL is invalid: {error}")))?;
+    for _ in 0..=MAX_ARTWORK_REDIRECTS {
+        let response = unredirected
+            .get(url.clone())
+            .timeout(REMOTE_ARTWORK_TIMEOUT)
+            .send()
+            .await
+            .map_err(fetch_failed)?;
+        if !response.status().is_redirection() {
+            return Ok(response);
+        }
+        let next = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|location| location.to_str().ok())
+            .and_then(|location| url.join(location).ok())
+            .ok_or_else(|| ApiError::internal("artwork redirect names no location"))?;
+        if !reach.allows(next.as_str()) {
+            return Err(outside());
+        }
+        url = next;
+    }
+    Err(ApiError::internal("artwork redirected too many times"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Answers each request from `routes` by path, counting what arrives.
+    async fn serve_on(
+        host: &str,
+        routes: Vec<(&'static str, String)>,
+    ) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind((host, 0))
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("address");
+        let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = Arc::clone(&hits);
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut request = vec![0u8; 4096];
+                let read = stream.read(&mut request).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&request[..read]).into_owned();
+                let path = request.split_whitespace().nth(1).unwrap_or_default();
+                let reply = match routes.iter().find(|(route, _)| *route == path) {
+                    Some((_, location)) if !location.is_empty() => format!(
+                        "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    ),
+                    Some(_) => {
+                        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                            .to_string()
+                    }
+                    None => {
+                        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            .to_string()
+                    }
+                };
+                let _ = stream.write_all(reply.as_bytes()).await;
+            }
+        });
+        (format!("http://{address}"), hits)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_allowed_name_leading_to_this_machine_is_not_fetched_for_a_plugin() {
+        let (local, hits) = serve_on("127.0.0.1", vec![("/x.jpg", String::new())]).await;
+        let port = local.rsplit(':').next().expect("port");
+        let reach = server::plugins::Reach::from_parts(
+            false,
+            plugin_host::manifest::Permissions {
+                network: vec!["localhost".into()],
+            },
+            "https://music.example",
+        );
+        let fetched = get(
+            &utils::http::client(),
+            &format!("http://localhost:{port}/x.jpg"),
+            Some(&reach),
+        )
+        .await;
+        assert!(fetched.is_err());
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    /// Skipped where 127.0.0.2 is not a loopback address, as on macOS by default.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_plugin_cover_never_leaves_the_plugins_hosts() {
+        if std::net::TcpListener::bind(("127.0.0.2", 0)).is_err() {
+            return;
+        }
+        let (elsewhere, elsewhere_hits) =
+            serve_on("127.0.0.2", vec![("/x.jpg", String::new())]).await;
+        let (allowed, _) = serve_on(
+            "127.0.0.1",
+            vec![
+                ("/moved.jpg", "/cover.jpg".to_string()),
+                ("/cover.jpg", String::new()),
+                ("/away.jpg", format!("{elsewhere}/x.jpg")),
+            ],
+        )
+        .await;
+        let reach = server::plugins::Reach::from_parts(
+            false,
+            plugin_host::manifest::Permissions {
+                network: vec!["$server".into()],
+            },
+            // An address on this network is reachable only as the plugin's server.
+            &allowed,
+        );
+        let http = utils::http::client();
+
+        let followed = get(&http, &format!("{allowed}/moved.jpg"), Some(&reach))
+            .await
+            .expect("a redirect on an allowed host is followed");
+        assert_eq!(followed.status(), reqwest::StatusCode::OK);
+
+        let refused = get(&http, &format!("{allowed}/away.jpg"), Some(&reach)).await;
+        assert!(refused.is_err());
+        let denied = get(&http, &format!("{elsewhere}/x.jpg"), Some(&reach)).await;
+        assert!(
+            denied.is_err(),
+            "a stored URL off its hosts is refused outright"
+        );
+        assert_eq!(
+            elsewhere_hits.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "the undeclared host is never asked"
+        );
+
+        let unrestricted = get(&http, &format!("{elsewhere}/x.jpg"), None)
+            .await
+            .expect("without a community plugin the URL is fetched as before");
+        assert_eq!(unrestricted.status(), reqwest::StatusCode::OK);
+    }
 
     fn jpeg_of(edge: u32) -> Vec<u8> {
         let image = image::DynamicImage::new_rgb8(edge, edge);

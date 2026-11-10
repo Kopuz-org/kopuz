@@ -1,0 +1,23 @@
+[package]
+name = "kopuz-plugin-sdk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Build kopuz plugins: the WIT bindings, an HTTP client and the source trait."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "kopuz_plugin_sdk"
+
+[lints]
+workspace = true
+
+[dependencies]
+base64 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+url = { workspace = true }
+wit-bindgen = { workspace = true }

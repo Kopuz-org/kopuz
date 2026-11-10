@@ -1,0 +1,16 @@
+id = "subsonic"
+name = "Subsonic"
+version = "0.1.0"
+api = "0.1"
+description = "Subsonic, OpenSubsonic and Navidrome servers, and any server speaking their API."
+
+[permissions]
+network = ["$server"]
+
+[[service]]
+id = "subsonic"
+capabilities = { sync = true, downloads = true, radio = ["track"], play-queue = true, playlists = "reorder" }
+
+[[service]]
+id = "custom"
+capabilities = { sync = true, downloads = true, radio = ["track"], play-queue = true, playlists = "reorder" }

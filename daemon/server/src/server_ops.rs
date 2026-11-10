@@ -15,16 +15,20 @@ pub struct ServerConn {
     pub account: Option<String>,
     /// Library roots for folder-tree backends (Nextcloud). Empty = auto-detect.
     pub folders: Vec<String>,
+    /// The plugin's own service slug, for a `MusicService::Plugin` server.
+    pub plugin_service: Option<String>,
 }
 
 impl ServerConn {
-    /// The active server's connection params, or `None` without a token (anonymous YouTube Music runs on none and ignores a leftover one), or without a `user_id` for a service that signs requests with one.
+    /// The active server's connection params, or `None` without a token (anonymous YouTube Music runs on none and ignores a leftover one; a plugin's service decides for itself), or without a `user_id` for a service that signs requests with one.
     pub fn resolve(sources: &crate::sources::Sources) -> Option<Self> {
         let server = sources.server.as_ref()?;
         let token = if server.service == MusicService::AudioCd
             || (server.service == MusicService::YtMusic && server.yt_anonymous)
         {
             String::new()
+        } else if server.service == MusicService::Plugin {
+            server.access_token.clone().unwrap_or_default()
         } else {
             server.access_token.clone()?
         };
@@ -33,7 +37,9 @@ impl ServerConn {
             | MusicService::AppleMusic
             | MusicService::Spotify
             | MusicService::AudioCd
-            | MusicService::Clippsly => server.user_id.clone().unwrap_or_default(),
+            | MusicService::Clippsly
+            // A plugin's service may need no account; its plugin says so on use.
+            | MusicService::Plugin => server.user_id.clone().unwrap_or_default(),
             _ => server.user_id.clone()?,
         };
         Some(Self {
@@ -50,6 +56,7 @@ impl ServerConn {
                 .as_deref()
                 .map(|id| sources.folders_for(id))
                 .unwrap_or_default(),
+            plugin_service: server.plugin_service.clone(),
         })
     }
 }
@@ -120,5 +127,12 @@ mod tests {
         let yt = ServerConn::resolve(&cfg("YtMusic", Some("cookie"), None)).unwrap();
         assert_eq!(yt.token, "cookie");
         assert!(yt.user_id.is_empty());
+    }
+
+    #[test]
+    fn a_plugin_service_resolves_without_credentials() {
+        let plugin = ServerConn::resolve(&cfg("Plugin", None, None)).expect("resolves");
+        assert!(plugin.token.is_empty());
+        assert!(plugin.user_id.is_empty());
     }
 }

@@ -227,6 +227,11 @@ the daemon's machine), `BrowseSource`, `ValidateSource`,
 Settings: `GetConfig`, `EditConfig`, `PreviewEqualizer` and `PreviewReplayGain`
 (heard, not kept).
 
+Plugins: `GetPlugins` (the installed ones and what the community marketplace
+offers, with the hosts each may reach), `InstallPlugin {id}` (fetch, verify
+and install the marketplace's version; its services are offered at once) and
+`UninstallPlugin {id}` (community plugins only). See [plugins.md](plugins.md).
+
 Artwork: `GetArtwork {target, hq}` streams `ArtworkChunk`, the first
 carrying `content_type`.
 

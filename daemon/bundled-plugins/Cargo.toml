@@ -1,0 +1,23 @@
+[package]
+name = "kopuz-bundled-plugins"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "bundled_plugins"
+
+[lints]
+workspace = true
+
+[dependencies]
+plugin-host = { workspace = true }
+
+[build-dependencies]
+toml = { workspace = true }
+serde = { workspace = true }

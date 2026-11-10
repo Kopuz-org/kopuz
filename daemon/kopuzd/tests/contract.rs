@@ -1010,6 +1010,30 @@ fn normalized(mut state: PlayerState) -> PlayerState {
 }
 
 #[tokio::test]
+async fn plugins_are_not_installed_or_removed_over_tcp() {
+    let pair = spawn_pair().await;
+    let refused = |error: ApiError| {
+        assert_eq!(error.code, ErrorCode::Unsupported);
+        assert!(
+            error.message.contains("only from this computer"),
+            "{error:?}"
+        );
+    };
+    refused(
+        pair.tcp
+            .install_plugin("internet-archive".into(), vec!["archive.org".into()])
+            .await
+            .expect_err("install over tcp"),
+    );
+    refused(
+        pair.tcp
+            .uninstall_plugin("internet-archive".into())
+            .await
+            .expect_err("uninstall over tcp"),
+    );
+}
+
+#[tokio::test]
 async fn reads_agree_between_local_and_wire() {
     let pair = spawn_pair().await;
     let ack = pair

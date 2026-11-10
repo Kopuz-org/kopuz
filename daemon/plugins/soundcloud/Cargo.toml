@@ -1,0 +1,21 @@
+[package]
+name = "kopuz-plugin-soundcloud"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "The SoundCloud source, as a kopuz plugin."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+kopuz-plugin-sdk = { path = "../sdk" }
+serde = { workspace = true }
+serde_json = { workspace = true }
