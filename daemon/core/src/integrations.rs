@@ -471,12 +471,13 @@ fn present(
     hold_connection(slot, options.enabled)
 }
 
-/// What the presence card shows: the two settings, and the pause toggle the daemon keeps beside them.
+/// What the presence card shows: its settings, and the pause toggle the daemon keeps beside them.
 #[derive(Clone, Copy)]
 struct PresenceOptions {
     enabled: bool,
     paused: bool,
     source: bool,
+    upload_cover: bool,
 }
 
 impl PresenceOptions {
@@ -485,6 +486,10 @@ impl PresenceOptions {
             enabled: config.integrations.discord_presence.unwrap_or(true),
             paused: *paused.borrow(),
             source: config.integrations.discord_presence_source.unwrap_or(true),
+            upload_cover: config
+                .integrations
+                .discord_presence_upload_cover
+                .unwrap_or(false),
         }
     }
 }
@@ -541,8 +546,13 @@ fn project(
             let (artist_c, album_c) = (artist.clone(), album.clone());
             let session = session.clone();
             let key = track.map(|t| t.key.clone()).unwrap_or_default();
+            let upload_cover = options.upload_cover;
             discord.cover_task = Some(tokio::spawn(async move {
                 let track = session.queued_track(&key).await;
+                let local_path = track
+                    .as_ref()
+                    .and_then(|track| track.id.local_path())
+                    .map(std::path::Path::to_path_buf);
                 let resolved = match track
                     .as_ref()
                     .and_then(discord_presence::cover_art::youtube_cover_art_url)
@@ -551,12 +561,19 @@ fn project(
                     None if session.offline().offline_mode() => None,
                     None => {
                         let mbid = track.and_then(|track| track.musicbrainz_release_id);
-                        discord_presence::cover_art::resolve_cover_art_url_cached(
+                        let found = discord_presence::cover_art::resolve_cover_art_url_cached(
                             mbid.as_deref(),
                             &artist_c,
                             &album_c,
                         )
-                        .await
+                        .await;
+                        match (found, local_path) {
+                            (Some(url), _) => Some(url),
+                            (None, Some(path)) if upload_cover => {
+                                discord_presence::cover_upload::uploaded_cover_url(&path).await
+                            }
+                            (None, _) => None,
+                        }
                     }
                 };
                 let _ = tx.send((song_key, resolved));
@@ -629,6 +646,7 @@ const LIBREFM: &str = "librefm";
 const PRESENCE: &str = "presence";
 const PAUSED: &str = "paused";
 const PRESENCE_SOURCE: &str = "source";
+const UPLOAD_COVER: &str = "upload_cover";
 const TOKEN: &str = "token";
 const API_KEY: &str = "api_key";
 const API_SECRET: &str = "api_secret";
@@ -675,6 +693,17 @@ fn discord(config: &config::Settings, paused: bool) -> IntegrationInfo {
                 "discord_presence_source",
                 config.integrations.discord_presence_source.unwrap_or(true),
             ),
+            FieldSpec {
+                help: Some(Text::key("discord_presence_upload_cover_help")),
+                ..toggle_field(
+                    UPLOAD_COVER,
+                    "discord_presence_upload_cover",
+                    config
+                        .integrations
+                        .discord_presence_upload_cover
+                        .unwrap_or(false),
+                )
+            },
         ],
     }
 }
@@ -795,6 +824,11 @@ fn apply_presence(values: &[FieldValue], config: &mut config::Settings) {
         values,
         PRESENCE_SOURCE,
         &mut config.integrations.discord_presence_source,
+    );
+    set_toggle(
+        values,
+        UPLOAD_COVER,
+        &mut config.integrations.discord_presence_upload_cover,
     );
 }
 
@@ -921,7 +955,7 @@ impl IntegrationService {
                     .await
                     .map_err(database_error)?;
             }
-            if [PRESENCE, PRESENCE_SOURCE]
+            if [PRESENCE, PRESENCE_SOURCE, UPLOAD_COVER]
                 .iter()
                 .any(|key| value_of(&values, key).is_some())
             {
@@ -1102,9 +1136,10 @@ async fn listenbrainz_token_from(
 }
 
 /// What a presence write reports as changed, so the session republishes the config.
-const PRESENCE_KEYS: [config::SettingKey; 2] = [
+const PRESENCE_KEYS: [config::SettingKey; 3] = [
     config::SettingKey::Integrations(config::IntegrationsKey::DiscordPresence),
     config::SettingKey::Integrations(config::IntegrationsKey::DiscordPresenceSource),
+    config::SettingKey::Integrations(config::IntegrationsKey::DiscordPresenceUploadCover),
 ];
 
 /// Open the approval page, then poll for the session key. The person has to
@@ -1240,6 +1275,40 @@ mod tests {
             config.snapshot().await.integrations.discord_presence,
             Some(true),
             "the presence setting is left alone"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_upload_cover_toggle_saves_on_its_own() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let database = db::init(&dir.path().join("upload.db")).await.expect("db");
+        let config = Arc::new(crate::config_service::ConfigService::new(
+            database.clone(),
+            dir.path().join("settings.toml"),
+            config::Settings::default(),
+        ));
+        let credentials = CredentialStore::load(&database).await.expect("credentials");
+        let pause = PresencePause::load(&database).await.expect("pause");
+        let service = IntegrationService::new(config.clone(), credentials, pause);
+
+        let info = service
+            .set_settings(DISCORD, vec![answer(UPLOAD_COVER, "true")])
+            .await
+            .expect("toggle");
+
+        let field = info
+            .fields
+            .iter()
+            .find(|field| field.key == UPLOAD_COVER)
+            .expect("upload cover field");
+        assert_eq!(field.value.as_deref(), Some("true"));
+        assert_eq!(
+            config
+                .snapshot()
+                .await
+                .integrations
+                .discord_presence_upload_cover,
+            Some(true)
         );
     }
 

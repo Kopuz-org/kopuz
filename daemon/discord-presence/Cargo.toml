@@ -16,7 +16,9 @@ name = "discord_presence"
 workspace = true
 
 [dependencies]
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["json", "multipart"] }
+image = { workspace = true }
+tokio = { workspace = true }
 utils = { workspace = true, features = ["http"] }
 serde.workspace = true
 tracing.workspace = true

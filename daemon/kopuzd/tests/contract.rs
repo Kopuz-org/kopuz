@@ -2543,6 +2543,35 @@ async fn listing_queries_filter_sort_and_page_the_same_on_both_transports() {
 }
 
 #[tokio::test]
+async fn an_m3u_import_over_the_wire_keeps_the_songs_the_library_has() {
+    let pair = spawn_pair().await;
+    let import = pair
+        .wire
+        .import_playlist(
+            "Imported".into(),
+            "#EXTM3U\nseed-1.flac\n/old/music/seed-0.flac\n/old/gone.flac\n".into(),
+            Some("/lib".into()),
+        )
+        .await
+        .expect("import over the wire");
+    assert_eq!(import.matched, 2);
+    assert_eq!(import.missing, vec!["/old/gone.flac".to_string()]);
+    let catalog = pair.local.playlists().await.expect("catalog");
+    let playlist = catalog
+        .playlists
+        .iter()
+        .find(|playlist| playlist.id == import.id)
+        .expect("the imported playlist is in the catalog");
+    assert_eq!(
+        playlist.track_keys,
+        vec![
+            "/lib/seed-1.flac".to_string(),
+            "/lib/seed-0.flac".to_string()
+        ]
+    );
+}
+
+#[tokio::test]
 async fn playlists_round_trip_across_transports() {
     let pair = spawn_pair().await;
 

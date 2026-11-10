@@ -2,6 +2,7 @@
 //! (track, artist, album art) to the Discord client via RPC.
 
 pub mod cover_art;
+pub mod cover_upload;
 
 #[cfg(not(target_os = "android"))]
 use discord_rich_presence::{

@@ -774,6 +774,24 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::PlaylistId { id }))
     }
 
+    async fn import_playlist(
+        &self,
+        request: Request<proto::ImportPlaylistRequest>,
+    ) -> Result<Response<proto::PlaylistImport>, Status> {
+        let request = request.into_inner();
+        let import = self
+            .0
+            .api
+            .import_playlist(request.name, request.m3u, request.base_dir)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::PlaylistImport {
+            id: import.id,
+            matched: import.matched,
+            missing: import.missing,
+        }))
+    }
+
     async fn rename_playlist(
         &self,
         request: Request<proto::RenamePlaylistRequest>,
