@@ -13,7 +13,7 @@ mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::{
     RepeatMode, SystemEvent, poll_event, set_identity, update_modes, update_now_playing,
-    update_position, wait_event,
+    update_position, update_volume, wait_event,
 };
 
 #[cfg(target_os = "windows")]
