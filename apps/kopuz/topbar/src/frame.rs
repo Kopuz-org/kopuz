@@ -5,7 +5,7 @@ use components::{icons, style};
 use config::TitlebarMode;
 use gpui_kit::component::{ActiveTheme as _, h_flex};
 use gpui_kit::{
-    AnyElement, App, Decorations, Div, ElementId, InteractiveElement as _, IntoElement,
+    AnyElement, App, Decorations, Div, ElementId, Hsla, InteractiveElement as _, IntoElement,
     MouseButton, ParentElement as _, Pixels, Point, ResizeEdge, SharedString, Stateful,
     StatefulInteractiveElement as _, Styled, TitlebarOptions, Window, WindowControlArea,
     WindowDecorations, WindowOptions, div, point, px,
@@ -154,21 +154,33 @@ pub fn titlebar(window: &Window, cx: &App) -> Option<AnyElement> {
                             "titlebar-minimize",
                             icons::WINDOW_MINIMIZE,
                             t("minimize"),
+                            style::white(style::RAISED, cx),
                             cx,
                         )
                         .window_control_area(WindowControlArea::Min)
                         .on_click(|_, window, _| window.minimize_window()),
                     )
                     .child(
-                        window_button("titlebar-zoom", zoom_glyph, t("maximize"), cx)
-                            .window_control_area(WindowControlArea::Max)
-                            .on_click(|_, window, _| window.zoom_window()),
+                        window_button(
+                            "titlebar-zoom",
+                            zoom_glyph,
+                            t("maximize"),
+                            style::white(style::RAISED, cx),
+                            cx,
+                        )
+                        .window_control_area(WindowControlArea::Max)
+                        .on_click(|_, window, _| window.zoom_window()),
                     )
                     .child(
-                        window_button("titlebar-close", icons::CLOSE, t("close"), cx)
-                            .window_control_area(WindowControlArea::Close)
-                            .hover(|button| button.bg(cx.theme().danger.opacity(CLOSE_HOVER)))
-                            .on_click(|_, window, _| window.remove_window()),
+                        window_button(
+                            "titlebar-close",
+                            icons::CLOSE,
+                            t("close"),
+                            cx.theme().danger.opacity(CLOSE_HOVER),
+                            cx,
+                        )
+                        .window_control_area(WindowControlArea::Close)
+                        .on_click(|_, window, _| window.remove_window()),
                     ),
             )
             .into_any_element(),
@@ -179,6 +191,7 @@ fn window_button(
     id: &'static str,
     glyph: &'static str,
     label: SharedString,
+    hover_bg: Hsla,
     cx: &App,
 ) -> Stateful<Div> {
     div()
@@ -192,7 +205,7 @@ fn window_button(
         .hover(|button| {
             button
                 .text_color(style::white(style::TEXT_STRONG, cx))
-                .bg(style::white(style::RAISED, cx))
+                .bg(hover_bg)
         })
         .tooltip(move |window, cx| {
             gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)
