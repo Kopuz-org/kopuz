@@ -128,50 +128,55 @@ impl ThinSlider {
                     .axis(Axis::Horizontal)
                     .disabled(disabled)
                     .w_full()
-                    .h(handle_height)
-                    .flex()
-                    .items_center()
                     .child(
-                        div()
-                            .h(M3_TRACK)
-                            .w(relative(self.filled))
-                            .flex_shrink(1.)
-                            .rounded_l(M3_TRACK / 2.)
-                            .rounded_r(M3_INNER)
-                            .bg(fill),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(notch)
+                        // Only the indicator records the bounds a press maps against.
+                        SliderIndicator::new(&self.state)
+                            .w_full()
                             .h(handle_height)
                             .flex()
-                            .justify_center()
+                            .items_center()
                             .child(
                                 div()
-                                    .w(handle_width)
-                                    .h_full()
-                                    .rounded(handle_width / 2.)
+                                    .h(M3_TRACK)
+                                    .w(relative(self.filled))
+                                    .flex_shrink(1.)
+                                    .rounded_l(M3_TRACK / 2.)
+                                    .rounded_r(M3_INNER)
                                     .bg(fill),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .relative()
-                            .flex_1()
-                            .min_w_0()
-                            .h(M3_TRACK)
-                            .rounded_l(M3_INNER)
-                            .rounded_r(M3_TRACK / 2.)
-                            .bg(rest)
+                            )
                             .child(
                                 div()
-                                    .absolute()
-                                    .top((M3_TRACK - M3_STOP) / 2.)
-                                    .right(M3_GAP)
-                                    .size(M3_STOP)
-                                    .rounded_full()
-                                    .bg(fill),
+                                    .flex_none()
+                                    .w(notch)
+                                    .h(handle_height)
+                                    .flex()
+                                    .justify_center()
+                                    .child(
+                                        div()
+                                            .w(handle_width)
+                                            .h_full()
+                                            .rounded(handle_width / 2.)
+                                            .bg(fill),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .relative()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .h(M3_TRACK)
+                                    .rounded_l(M3_INNER)
+                                    .rounded_r(M3_TRACK / 2.)
+                                    .bg(rest)
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .top((M3_TRACK - M3_STOP) / 2.)
+                                            .right(M3_GAP)
+                                            .size(M3_STOP)
+                                            .rounded_full()
+                                            .bg(fill),
+                                    ),
                             ),
                     ),
             )
@@ -282,4 +287,51 @@ fn scan(color: Hsla) -> impl IntoElement {
                 bar.left(relative(left)).w(relative(right - left))
             },
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui_kit::{AppContext as _, Context, Render, TestAppContext, point};
+
+    struct Fixture {
+        state: Entity<SliderState>,
+    }
+
+    impl Render for Fixture {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(200.))
+                .child(ThinSlider::new("probe", &self.state))
+        }
+    }
+
+    #[gpui_kit::test]
+    fn a_press_on_a_material_slider_lands_where_it_was_pressed(cx: &mut TestAppContext) {
+        skin::register(Box::new(skin::Material3));
+        skin::select("material3");
+        assert!(skin::material());
+        // The link talks to its tokio runtime from another thread, which the test scheduler refuses by default.
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            i18n::init("en");
+            link::init(
+                link::Address::Socket("/nonexistent/kopuz.sock".into()),
+                false,
+                cx,
+            )
+            .expect("a link that has not connected yet");
+            store::init(cx);
+            theme::apply_named("default", None, cx);
+        });
+        let state = cx.new(|_| SliderState::new().min(0.).max(1.).step(0.001));
+        let (_, cx) = cx.add_window_view(|_, _| Fixture {
+            state: state.clone(),
+        });
+        cx.run_until_parked();
+        cx.simulate_click(point(px(150.), px(22.)), Default::default());
+        let value = state.read_with(cx, |state, _| state.value().end());
+        assert!((value - 0.75).abs() < 0.01, "pressed at 3/4, got {value}");
+    }
 }
