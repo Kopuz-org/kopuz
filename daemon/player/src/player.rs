@@ -17,7 +17,8 @@ use crate::engine::{
     target_os = "macos",
     target_os = "linux",
     target_os = "windows",
-    target_os = "android"
+    target_os = "android",
+    target_os = "ios"
 ))]
 use crate::systemint;
 
@@ -83,9 +84,10 @@ impl Player {
     }
 
     pub fn try_new() -> Result<Self, PlayerInitError> {
-        // Android initialises the JNI media session + classloader cache here; the desktop
+        // The phones initialise their media session here (JNI + classloader cache on
+        // Android, the audio session iOS needs before an output can open); the desktop
         // platforms set up their system integration from the app entry point instead.
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         systemint::init();
 
         let engine = EngineHandle::spawn(|tx| {
@@ -222,8 +224,9 @@ impl Player {
         self.metadata_token = None;
         self.incoming = None;
         // Tear down the Android foreground service + media notification so the OS can
-        // reclaim the process; otherwise the dismissed-notification state lingers.
-        #[cfg(target_os = "android")]
+        // reclaim the process; otherwise the dismissed-notification state lingers. iOS
+        // clears its Now Playing card the same way.
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         systemint::stop_session();
     }
 
@@ -352,7 +355,8 @@ impl Player {
             target_os = "macos",
             target_os = "linux",
             target_os = "windows",
-            target_os = "android"
+            target_os = "android",
+            target_os = "ios"
         ))]
         if let Some(meta) = &self.now_playing {
             systemint::update_now_playing(
@@ -369,7 +373,8 @@ impl Player {
             target_os = "macos",
             target_os = "linux",
             target_os = "windows",
-            target_os = "android"
+            target_os = "android",
+            target_os = "ios"
         )))]
         let _ = (position, playing);
     }

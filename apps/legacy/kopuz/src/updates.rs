@@ -183,7 +183,7 @@ fn checksum_matches(digest: &[u8], checksum_file: &str) -> bool {
 
 /// Package managers, debug builds and anything not writable get `None`.
 fn detect_install() -> Option<InstallKind> {
-    if cfg!(debug_assertions) || cfg!(target_os = "android") {
+    if cfg!(debug_assertions) || cfg!(any(target_os = "android", target_os = "ios")) {
         return None;
     }
     if std::env::var_os("FLATPAK_ID").is_some() {

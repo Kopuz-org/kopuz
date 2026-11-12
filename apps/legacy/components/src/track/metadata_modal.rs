@@ -14,6 +14,7 @@ fn fmt_dur(s: u64) -> String {
     format!("{}:{:02}", s / 60, s % 60)
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn data_url(bytes: &[u8], mime: &str) -> String {
     use base64::Engine as _;
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
@@ -139,7 +140,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
     };
 
     let pick_cover = move |_| {
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         spawn(async move {
             let file = rfd::AsyncFileDialog::new()
                 .add_filter("Images", &["jpg", "jpeg", "png", "webp", "gif"])

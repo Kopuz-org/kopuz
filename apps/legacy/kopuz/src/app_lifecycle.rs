@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 /// on Android the only capable runtime is the WebView already drawing the UI,
 /// so the daemon's solve requests are drained through `document::eval`. Which
 /// source needed a script, and why, stays behind the seam.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn use_webview_script_engine() {
     use_hook(|| {
         let (engine, mut rx) = daemon::script_engine::webview_channel();

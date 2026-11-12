@@ -75,7 +75,7 @@ const SECTIONS: &[(&str, &[NavItem])] = &[
     ),
 ];
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const TOOL_ITEMS: &[NavItem] = &[
     NavItem {
         key: "downloader",
@@ -89,7 +89,7 @@ const TOOL_ITEMS: &[NavItem] = &[
     },
 ];
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 const TOOL_ITEMS: &[NavItem] = &[NavItem {
     key: "settings",
     route: Route::Settings,
@@ -103,7 +103,7 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
     let mut is_collapsed = use_signal(|| false);
     let mut is_resizing = use_signal(|| false);
 
-    let is_android = cfg!(target_os = "android");
+    let is_android = cfg!(any(target_os = "android", target_os = "ios"));
     let form_factor = crate::form_factor::use_form_factor();
     let drawer = is_android && !form_factor.is_tablet();
     let fallback_collapse = use_signal(|| true);
@@ -315,7 +315,7 @@ fn VaxryNavItem(
     collapsed: bool,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
-    let phone = cfg!(target_os = "android");
+    let phone = cfg!(any(target_os = "android", target_os = "ios"));
     rsx! {
         a {
             class: if phone && collapsed {

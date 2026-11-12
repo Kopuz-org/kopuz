@@ -1241,7 +1241,7 @@ select:disabled {
     transform: scaleX(-1);
 }
 
-[data-platform="android"] .settings-category-content {
+[data-phone] .settings-category-content {
     contain: none;
     animation: none;
 }

@@ -34,9 +34,9 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod deno_engine;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub use deno_engine::DenoCoreEngine;
 
 const LIB: &str = include_str!("solver/lib.min.js");
@@ -73,11 +73,11 @@ pub fn set_engine(engine: Box<dyn JsEngine>) -> Result<(), Box<dyn JsEngine>> {
 fn engine() -> &'static dyn JsEngine {
     ENGINE
         .get_or_init(|| {
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 Box::new(DenoCoreEngine::new()) as Box<dyn JsEngine>
             }
-            #[cfg(target_os = "android")]
+            #[cfg(any(target_os = "android", target_os = "ios"))]
             {
                 Box::new(SubprocessEngine) as Box<dyn JsEngine>
             }
@@ -675,7 +675,7 @@ mod tests {
 
     /// End-to-end proof through the headless [`DenoCoreEngine`]. Run alone:
     /// `cargo test -p kopuz-server deno_decipher -- --ignored --nocapture`.
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     #[tokio::test]
     #[ignore = "hits live YouTube; run manually and alone (registers the global engine)"]
     async fn live_deno_decipher_streams() {

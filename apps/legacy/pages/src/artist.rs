@@ -216,7 +216,7 @@ pub fn Artist(
             div {
                 class: page_container_class,
                 div { class: "relative flex-1 min-h-0 flex flex-col w-full max-w-[1600px] mx-auto",
-                    if !cfg!(target_os = "android") {
+                    if !cfg!(any(target_os = "android", target_os = "ios")) {
                         components::back_button::BackButton {
                             on_click: move |_| nav_ctrl.go_back(),
                         }
@@ -250,7 +250,7 @@ pub fn Artist(
 
             if !detail_open {
                 div { class: "flex-1 min-h-0 flex flex-col",
-                    if !cfg!(target_os = "android") {
+                    if !cfg!(any(target_os = "android", target_os = "ios")) {
                         h1 { class: "text-3xl font-semibold tracking-tight text-white mb-6 shrink-0", "{i18n::t(\"artists\")}" }
                     }
                     div { class: "flex items-center justify-end gap-2 mb-4 shrink-0",
@@ -311,7 +311,7 @@ pub fn Artist(
                 }
             } else {
                 div { class: "relative flex-1 min-h-0 flex flex-col w-full max-w-[1600px] mx-auto",
-                    if !cfg!(target_os = "android") {
+                    if !cfg!(any(target_os = "android", target_os = "ios")) {
                         components::back_button::BackButton {
                             on_click: move |_| nav_ctrl.go_back(),
                         }
@@ -536,7 +536,7 @@ pub fn Artist(
                                 tracks: artist_tracks(),
 
                                 on_cover_click: move |_| {
-                                    #[cfg(not(target_os = "android"))]
+                                    #[cfg(not(any(target_os = "android", target_os = "ios")))]
                                     {
                                         let Some(artist) = open_artist.peek().clone() else {
                                             return;

@@ -15,7 +15,7 @@ pub fn ReadError(error: api::ApiError) -> Element {
 /// Where page content starts, inline and from the top. Every page sits on this
 /// edge, with its content capped by [`PAGE_CONTENT`] inside it.
 pub fn page_inset_class(ui_style: &UiStyle) -> &'static str {
-    if cfg!(target_os = "android") {
+    if cfg!(any(target_os = "android", target_os = "ios")) {
         return "px-3 pt-3 tablet:px-6 tablet:pt-6";
     }
     match ui_style {
@@ -26,7 +26,7 @@ pub fn page_inset_class(ui_style: &UiStyle) -> &'static str {
 
 /// The inline part of [`page_inset_class`], for a full-bleed banner whose text still lines up with the page edge.
 pub fn page_inline_class(ui_style: &UiStyle) -> &'static str {
-    if cfg!(target_os = "android") {
+    if cfg!(any(target_os = "android", target_os = "ios")) {
         return "px-3 tablet:px-6";
     }
     match ui_style {
@@ -40,7 +40,7 @@ pub const PAGE_CONTENT: &str = "w-full max-w-[1600px] mx-auto";
 
 /// A page that fills the view and scrolls inside its own lists.
 pub fn page_container_class(ui_style: &UiStyle) -> &'static str {
-    if cfg!(target_os = "android") {
+    if cfg!(any(target_os = "android", target_os = "ios")) {
         return "px-3 pt-3 tablet:px-6 tablet:pt-6 absolute inset-0 flex flex-col overflow-x-hidden";
     }
     match ui_style {

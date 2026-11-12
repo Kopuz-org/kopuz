@@ -19,7 +19,12 @@ use super::{
     Phase, Transition,
 };
 use crate::player::PlayerInitError;
-#[cfg(any(target_os = "android", target_os = "linux", target_os = "macos"))]
+#[cfg(any(
+    target_os = "android",
+    target_os = "ios",
+    target_os = "linux",
+    target_os = "macos"
+))]
 use crate::systemint;
 
 const TICK: Duration = Duration::from_millis(100);
@@ -1240,7 +1245,7 @@ impl Actor {
         if delivered && !is_position {
             // Waking tokio isn't enough on platforms where the app main loop
             // itself may be parked (tao/CFRunLoop).
-            #[cfg(any(target_os = "android", target_os = "macos"))]
+            #[cfg(any(target_os = "android", target_os = "ios", target_os = "macos"))]
             systemint::wake_run_loop();
         }
     }

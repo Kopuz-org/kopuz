@@ -4,20 +4,20 @@
 pub mod cover_art;
 pub mod cover_upload;
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use discord_rich_presence::{
     DiscordIpc, DiscordIpcClient,
     activity::{self, Assets, Timestamps},
 };
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::sync::{Mutex, MutexGuard};
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(10);
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[derive(Debug, Clone)]
 struct StoredActivity {
     details: String,
@@ -31,7 +31,7 @@ struct StoredActivity {
     assets: Option<(String, String)>,
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl StoredActivity {
     fn as_activity(&self) -> activity::Activity<'_> {
         let mut act = activity::Activity::new()
@@ -64,7 +64,7 @@ impl StoredActivity {
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[derive(Debug)]
 struct Inner {
     client: Option<DiscordIpcClient>,
@@ -72,14 +72,14 @@ struct Inner {
     next_retry: Option<Instant>,
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[derive(Debug)]
 pub struct Presence {
     client_id: String,
     inner: Mutex<Inner>,
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl Presence {
     pub fn new(client_id: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let presence = Self {
@@ -250,7 +250,7 @@ impl Presence {
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl Drop for Presence {
     fn drop(&mut self) {
         let mut inner = self.lock();
@@ -260,14 +260,14 @@ impl Drop for Presence {
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[derive(Debug)]
 pub struct Presence;
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 impl Presence {
     pub fn new(_client_id: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        Err("Discord presence is not available on Android".into())
+        Err("Discord presence is not available on a phone".into())
     }
 
     pub fn disconnect(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -305,7 +305,11 @@ impl Presence {
     }
 }
 
-#[cfg(all(test, not(target_os = "android"), target_family = "unix"))]
+#[cfg(all(
+    test,
+    not(any(target_os = "android", target_os = "ios")),
+    target_family = "unix"
+))]
 mod reconnect_tests {
     use super::*;
     use std::io::{Read as _, Write as _};

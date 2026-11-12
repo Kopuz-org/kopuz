@@ -498,7 +498,7 @@ pub(super) fn PlayerSection(settings: Signal<Settings>) -> Element {
                     }
                 }
             }
-            if !cfg!(target_os = "android") {
+            if !cfg!(any(target_os = "android", target_os = "ios")) {
                 SettingItem {
                     title: i18n::t("volume_scroll_step").to_string(),
                     config_key: "volume_scroll_step",
@@ -711,7 +711,7 @@ pub(super) fn PlayerSection(settings: Signal<Settings>) -> Element {
                     }
                 }
             }
-            if !cfg!(target_os = "android") {
+            if !cfg!(any(target_os = "android", target_os = "ios")) {
                 EqualizerItem { settings }
             }
         }

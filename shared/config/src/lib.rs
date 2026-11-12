@@ -1322,10 +1322,16 @@ where
 
 /// The folder a fresh install scans. `directories` resolves the XDG layout
 /// against `$HOME`, which on Android is a private app path with no music in it,
-/// so point at the shared media directory the platform actually uses.
+/// so point at the shared media directory the platform actually uses. An iOS app
+/// sees only its own container, whose Documents the Files app can fill.
 fn default_music_directory() -> PathBuf {
     if cfg!(target_os = "android") {
         return PathBuf::from("/storage/emulated/0/Music");
+    }
+    if cfg!(target_os = "ios") {
+        return directories::UserDirs::new()
+            .map(|dirs| dirs.home_dir().join("Documents"))
+            .unwrap_or_else(|| PathBuf::from("Documents"));
     }
     let dirs = directories::UserDirs::new();
     music_directory_of(

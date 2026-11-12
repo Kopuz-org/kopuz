@@ -26,6 +26,6 @@ db = { workspace = true }
 reader.workspace = true
 config.workspace = true
 
-# Discord IPC has no meaning on Android, so the real client is desktop-only.
-[target.'cfg(not(target_os = "android"))'.dependencies]
+# Discord IPC has no meaning on a phone, so the real client is desktop-only.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 discord-rich-presence.workspace = true

@@ -343,7 +343,7 @@ pub fn SeekSlider(
     // A fingertip hides the 12px thumb and gives no sense of where a drag will
     // land, so on touch a time bubble rides above it while held. main.css grows
     // the thumb and the input's hit area from the same `seek-dragging` class.
-    let touch_dragging = cfg!(target_os = "android") && seek.dragging;
+    let touch_dragging = cfg!(any(target_os = "android", target_os = "ios")) && seek.dragging;
 
     match variant {
         ControlsVariant::Fullscreen => rsx! {
@@ -375,7 +375,7 @@ pub fn SeekSlider(
                         }
                         if !is_loading {
                             div {
-                                class: if cfg!(target_os = "android") {
+                                class: if cfg!(any(target_os = "android", target_os = "ios")) {
                                     "playback-seek-handle absolute top-1 w-3 h-3 bg-white rounded-full pointer-events-none"
                                 } else {
                                     "playback-seek-handle absolute top-1 w-3 h-3 bg-white rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
@@ -471,7 +471,7 @@ pub fn VolumeSlider(
                         style: "width: {volume_percent}%;"
                     }
                     div {
-                        class: if cfg!(target_os = "android") {
+                        class: if cfg!(any(target_os = "android", target_os = "ios")) {
                             "playback-seek-handle absolute top-1 w-3 h-3 bg-white rounded-full pointer-events-none"
                         } else {
                             "playback-seek-handle absolute top-1 w-3 h-3 bg-white rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
