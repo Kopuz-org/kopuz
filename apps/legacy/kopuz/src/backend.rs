@@ -105,6 +105,28 @@ pub fn start(args: CoreArgs) -> Result<&'static Core, String> {
 /// this runtime either way.
 #[cfg(not(target_os = "android"))]
 async fn serve_socket(core: &Core) {
+    tokio::join!(serve_unix_socket(core), serve_tcp(core));
+    std::future::pending::<()>().await;
+}
+
+/// Serve the core on the TCP address the settings name, if any, for clients that cannot reach the local socket.
+#[cfg(not(target_os = "android"))]
+async fn serve_tcp(core: &Core) {
+    let Some(address) = kopuzd::configured_listen(core).await else {
+        return;
+    };
+    match kopuzd::listen_tcp(core, address).await {
+        Ok(serving) => {
+            if let Err(error) = serving.await {
+                tracing::warn!(%error, "the daemon TCP listener stopped serving");
+            }
+        }
+        Err(error) => tracing::warn!(%error, %address, "the daemon TCP address is unavailable"),
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+async fn serve_unix_socket(core: &Core) {
     match kopuzd::default_socket_path() {
         Some(socket) => match kopuzd::listen(core, &socket) {
             Ok(serving) => {
@@ -120,7 +142,6 @@ async fn serve_socket(core: &Core) {
         },
         None => tracing::warn!("no address for the daemon socket"),
     }
-    std::future::pending::<()>().await;
 }
 
 /// The socket this process bound, while it still serves it.

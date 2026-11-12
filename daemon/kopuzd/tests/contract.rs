@@ -465,6 +465,8 @@ async fn cli_playback_and_search_work_over_each_transport() {
             api,
             ctl::Command::Play {
                 keys: vec![key.clone()],
+                next: false,
+                append: false,
             },
             None,
         )
@@ -498,6 +500,22 @@ async fn cli_playback_and_search_work_over_each_transport() {
         .await
         .expect("queue");
         assert_eq!(queue[0]["key"], key);
+        ctl::execute(
+            api,
+            ctl::Command::Play {
+                keys: vec![key.clone()],
+                next: true,
+                append: false,
+            },
+            None,
+        )
+        .await
+        .expect("play next");
+        let status = ctl::execute(api, ctl::Command::Status, None)
+            .await
+            .expect("status after play next");
+        assert_eq!(status["queue_length"], 2, "queued behind, not replacing");
+        assert_eq!(status["phase"], "paused", "what plays now is left alone");
         ctl::execute(api, ctl::Command::Stop, None)
             .await
             .expect("stop");

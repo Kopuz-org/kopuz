@@ -1222,3 +1222,5 @@ playlist_imported = Imported { $matched } songs.
 playlist_imported_partly = Imported { $matched } songs. { $missing } are not in your library.
 swiped_play_next = "{ $title }" அடுத்து இயக்கப்படும்
 swiped_add_to_queue = "{ $title }" வரிசையில் சேர்க்கப்பட்டது
+listen_address = Serve the API on a TCP address
+listen_address_description = An <ip>:<port> where kopuzctl and other clients can reach Kopuz without the local socket. Anyone who can reach it can control playback, so keep it on 127.0.0.1 unless you trust your network. Takes effect after a restart.

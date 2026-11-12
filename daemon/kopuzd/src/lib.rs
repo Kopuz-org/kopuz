@@ -87,6 +87,31 @@ pub fn listen(
     ))
 }
 
+/// The TCP address the `listen_address` setting names, for a daemon that `--listen` gave none.
+pub async fn configured_listen(core: &Core) -> Option<std::net::SocketAddr> {
+    let system = core.config_service.snapshot().await.system;
+    let address = system.listen_socket_address();
+    if address.is_none() && !system.listen_address.trim().is_empty() {
+        tracing::warn!(
+            address = %system.listen_address,
+            "listen_address is not an <ip>:<port>; serving the socket alone"
+        );
+    }
+    address
+}
+
+/// Bind `address`, then hand back the future that serves the core over TCP on it until the server stops.
+pub async fn listen_tcp(
+    core: &Core,
+    address: std::net::SocketAddr,
+) -> std::io::Result<impl std::future::Future<Output = std::io::Result<()>> + use<>> {
+    let listener = bind_tcp(address).await?;
+    Ok(serve_tcp(
+        listener,
+        state(core, None, &service::Clients::default()),
+    ))
+}
+
 async fn bind_tcp(address: std::net::SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
     let listener = tokio::net::TcpListener::bind(address).await?;
     tracing::info!(bound = %listener.local_addr()?, "kopuzd listening on tcp");
@@ -176,7 +201,11 @@ pub async fn run(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
     let updater = updates::Updater::new(core.session.clone());
     updater.spawn_checks(core.config_service.clone());
     tracing::info!(path = %socket.display(), "kopuzd listening");
-    let tcp = match args.listen {
+    let listen = match args.listen {
+        Some(address) => Some(address),
+        None => configured_listen(&core).await,
+    };
+    let tcp = match listen {
         Some(address) => Some(bind_tcp(address).await?),
         None => None,
     };

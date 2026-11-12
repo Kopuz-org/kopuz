@@ -901,6 +901,23 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                     }
                                 }
                             }
+                            SettingItem {
+                                title: i18n::t("listen_address").to_string(),
+                                config_key: "listen_address",
+                                control: rsx! {
+                                    input {
+                                        r#type: "text",
+                                        value: "{settings.read().system.listen_address}",
+                                        placeholder: "127.0.0.1:7700",
+                                        title: "{i18n::t(\"listen_address_description\")}",
+                                        spellcheck: false,
+                                        class: "w-48 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white placeholder-slate-500 focus:outline-none focus:border-white/30",
+                                        onchange: move |evt| {
+                                            edits.edit(SettingsEdit::System(SystemEdit::ListenAddress(evt.value().trim().to_string())));
+                                        }
+                                    }
+                                }
+                            }
                         }
                         SettingItem {
                             title: i18n::t("back_behavior").to_string(),

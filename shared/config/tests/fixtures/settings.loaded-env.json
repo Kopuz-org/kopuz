@@ -54,6 +54,7 @@
   },
   "fullscreen_use_player_bar": false,
   "language": "tr",
+  "listen_address": "",
   "live_theme_path": "",
   "local_sources": [
     {

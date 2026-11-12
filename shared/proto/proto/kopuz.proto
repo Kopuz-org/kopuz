@@ -1982,6 +1982,7 @@ message ConfigEdit {
     StringList connectivity_check_urls = 83;
     bool offline_cache_enabled = 84;
     uint64 offline_cache_max_bytes = 85;
+    string listen_address = 86;
   }
 }
 
@@ -2104,6 +2105,7 @@ enum SettingKey {
   SETTING_KEY_CONNECTIVITY_CHECK_URLS = 83;
   SETTING_KEY_OFFLINE_CACHE_ENABLED = 84;
   SETTING_KEY_OFFLINE_CACHE_MAX_BYTES = 85;
+  SETTING_KEY_LISTEN_ADDRESS = 86;
   SETTING_KEY_DISCORD_PRESENCE_UPLOAD_COVER = 87;
 }
 
@@ -2307,6 +2309,7 @@ message Config {
   // Both absent from a peer that predates them, which must read as the defaults: on, and 5 GB.
   optional bool offline_cache_enabled = 84;
   optional uint64 offline_cache_max_bytes = 85;
+  string listen_address = 86;
 }
 
 message DownloaderOptions {

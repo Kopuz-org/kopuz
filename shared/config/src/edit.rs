@@ -143,6 +143,7 @@ pub enum SystemEdit {
     AutoCheckUpdates(bool),
     MinimizeToTray(bool),
     ConnectivityCheckUrls(Vec<String>),
+    ListenAddress(String),
 }
 
 /// One change to one setting.
@@ -480,6 +481,7 @@ impl System {
             SystemEdit::AutoCheckUpdates(value) => self.auto_check_updates = value,
             SystemEdit::MinimizeToTray(value) => self.minimize_to_tray = value,
             SystemEdit::ConnectivityCheckUrls(value) => self.connectivity_check_urls = value,
+            SystemEdit::ListenAddress(value) => self.listen_address = value,
         }
     }
 }
@@ -589,6 +591,7 @@ pub fn edit_samples() -> Vec<SettingsEdit> {
         SettingsEdit::System(SystemEdit::ConnectivityCheckUrls(vec![
             "https://check.example/up".into(),
         ])),
+        SettingsEdit::System(SystemEdit::ListenAddress("127.0.0.1:7700".into())),
     ]
 }
 
@@ -733,6 +736,8 @@ mod tests {
                 "cp.cloudflare.com".into(),
             ])),
             SettingsEdit::System(SystemEdit::ConnectivityCheckUrls(vec!["https://".into()])),
+            SettingsEdit::System(SystemEdit::ListenAddress("localhost".into())),
+            SettingsEdit::System(SystemEdit::ListenAddress("127.0.0.1".into())),
         ] {
             let mut settings = Settings::default();
             assert!(settings.try_apply(edit.clone()).is_err(), "{edit:?}");
