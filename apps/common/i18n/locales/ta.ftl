@@ -1222,3 +1222,4 @@ playlist_imported = Imported { $matched } songs.
 playlist_imported_partly = Imported { $matched } songs. { $missing } are not in your library.
 swiped_play_next = "{ $title }" அடுத்து இயக்கப்படும்
 swiped_add_to_queue = "{ $title }" வரிசையில் சேர்க்கப்பட்டது
+open_software_center = Open in Software

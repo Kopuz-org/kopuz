@@ -1222,3 +1222,4 @@ playlist_imported = Imported { $matched } songs.
 playlist_imported_partly = Imported { $matched } songs. { $missing } are not in your library.
 swiped_play_next = "{ $title }" അടുത്തതായി പ്ലേ ചെയ്യും
 swiped_add_to_queue = "{ $title }" ക്യൂവിലേക്ക് ചേർത്തു
+open_software_center = Open in Software

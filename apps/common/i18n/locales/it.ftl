@@ -1213,3 +1213,4 @@ playlist_imported = Imported { $matched } songs.
 playlist_imported_partly = Imported { $matched } songs. { $missing } are not in your library.
 swiped_play_next = "{ $title }" sarà riprodotto dopo
 swiped_add_to_queue = "{ $title }" aggiunto alla coda
+open_software_center = Open in Software
