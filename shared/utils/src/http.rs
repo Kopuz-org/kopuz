@@ -16,6 +16,12 @@ pub fn offline() -> bool {
     OFFLINE.load(Ordering::SeqCst)
 }
 
+/// How large a response's HTTP/2 header block may be. hyper's 16 KB default is
+/// less than YouTube's HTML pages send to some regions (a 7 KB
+/// `connection-allowlist-report-only` alone), and a larger block resets the
+/// stream, which reqwest reports only as "error sending request".
+const MAX_RESPONSE_HEADER_BYTES: u32 = 256 * 1024;
+
 /// A client builder on rustls, kept off the internet in offline mode.
 pub fn builder() -> reqwest::ClientBuilder {
     internet_builder().dns_resolver(Arc::new(OfflineGate))
@@ -23,7 +29,9 @@ pub fn builder() -> reqwest::ClientBuilder {
 
 /// A client builder on rustls that reaches the internet in offline mode too, for the connectivity checks that tell when it is back.
 pub fn internet_builder() -> reqwest::ClientBuilder {
-    reqwest::Client::builder().tls_backend_rustls()
+    reqwest::Client::builder()
+        .tls_backend_rustls()
+        .http2_max_header_list_size(MAX_RESPONSE_HEADER_BYTES)
 }
 
 /// A rustls client with reqwest's defaults; panics where `reqwest::Client::new` would.
@@ -38,6 +46,7 @@ pub fn client() -> reqwest::Client {
 pub fn blocking_builder() -> reqwest::blocking::ClientBuilder {
     reqwest::blocking::Client::builder()
         .tls_backend_rustls()
+        .http2_max_header_list_size(MAX_RESPONSE_HEADER_BYTES)
         .dns_resolver(Arc::new(OfflineGate))
 }
 
@@ -46,6 +55,7 @@ pub fn blocking_builder() -> reqwest::blocking::ClientBuilder {
 pub fn native_tls_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .tls_backend_native()
+        .http2_max_header_list_size(MAX_RESPONSE_HEADER_BYTES)
         .dns_resolver(Arc::new(OfflineGate))
 }
 
@@ -371,5 +381,42 @@ mod tests {
         set_offline(false);
         assert!(refused.is_err(), "kept off the internet");
         assert!(local.is_ok_and(|mut addrs| addrs.next().is_some()));
+    }
+}
+
+#[cfg(test)]
+mod header_block_tests {
+    use http_body_util::Full;
+    use hyper::body::Bytes;
+
+    /// A header block past hyper's 16 KB default, as YouTube's watch page sends some regions.
+    #[tokio::test]
+    async fn a_response_with_a_large_header_block_still_arrives() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let service = hyper::service::service_fn(|_| async {
+                hyper::Response::builder()
+                    .header("connection-allowlist-report-only", "a".repeat(24 * 1024))
+                    .body(Full::new(Bytes::from_static(b"ok")))
+            });
+            let _ = hyper::server::conn::http2::Builder::new(hyper_util::rt::TokioExecutor::new())
+                .serve_connection(hyper_util::rt::TokioIo::new(stream), service)
+                .await;
+        });
+        let client = super::internet_builder()
+            .http2_prior_knowledge()
+            .build()
+            .unwrap();
+        let body = client
+            .get(format!("http://{addr}/"))
+            .send()
+            .await
+            .expect("the header block is within the limit")
+            .text()
+            .await
+            .unwrap();
+        assert_eq!(body, "ok");
     }
 }

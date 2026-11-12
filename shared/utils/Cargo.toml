@@ -49,3 +49,8 @@ objc2-foundation = { workspace = true, features = ["NSLocale", "NSString"] }
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Globalization"] }
 
+
+[dev-dependencies]
+http-body-util = "0.1"
+hyper = { version = "1", features = ["server", "http2"] }
+hyper-util = { workspace = true }
