@@ -92,6 +92,7 @@ pub enum IntegrationsEdit {
     DiscordPresence(Option<bool>),
     DiscordPresenceSource(Option<bool>),
     DiscordPresenceUploadCover(Option<bool>),
+    DiscordPresenceListenButton(Option<bool>),
     RadioRegistries(RadioRegistryOp),
 }
 
@@ -238,7 +239,8 @@ impl SettingKey {
             Self::Integrations(key) => match key {
                 IntegrationsKey::DiscordPresence
                 | IntegrationsKey::DiscordPresenceSource
-                | IntegrationsKey::DiscordPresenceUploadCover => {
+                | IntegrationsKey::DiscordPresenceUploadCover
+                | IntegrationsKey::DiscordPresenceListenButton => {
                     Some("SourceApi::set_integration_settings")
                 }
                 IntegrationsKey::RadioRegistries => None,
@@ -436,6 +438,9 @@ impl Integrations {
         match edit {
             IntegrationsEdit::DiscordPresence(value) => self.discord_presence = value,
             IntegrationsEdit::DiscordPresenceSource(value) => self.discord_presence_source = value,
+            IntegrationsEdit::DiscordPresenceListenButton(value) => {
+                self.discord_presence_listen_button = value
+            }
             IntegrationsEdit::DiscordPresenceUploadCover(value) => {
                 self.discord_presence_upload_cover = value
             }
@@ -569,6 +574,7 @@ pub fn edit_samples() -> Vec<SettingsEdit> {
         SettingsEdit::Integrations(IntegrationsEdit::DiscordPresence(Some(false))),
         SettingsEdit::Integrations(IntegrationsEdit::DiscordPresenceSource(None)),
         SettingsEdit::Integrations(IntegrationsEdit::DiscordPresenceUploadCover(Some(true))),
+        SettingsEdit::Integrations(IntegrationsEdit::DiscordPresenceListenButton(Some(false))),
         SettingsEdit::Integrations(IntegrationsEdit::RadioRegistries(RadioRegistryOp::Put(
             registry,
         ))),
@@ -809,6 +815,7 @@ mod tests {
                 "discord_presence",
                 "discord_presence_source",
                 "discord_presence_upload_cover",
+                "discord_presence_listen_button",
                 "ytdlp_output_dir",
                 "ytdlp_options",
                 "spotify_browser",

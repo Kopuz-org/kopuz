@@ -70,6 +70,7 @@ pub fn setting_key_to_proto(value: config::SettingKey) -> SettingKey {
             IntegrationsKey::DiscordPresence => SettingKey::DiscordPresence,
             IntegrationsKey::DiscordPresenceSource => SettingKey::DiscordPresenceSource,
             IntegrationsKey::DiscordPresenceUploadCover => SettingKey::DiscordPresenceUploadCover,
+            IntegrationsKey::DiscordPresenceListenButton => SettingKey::DiscordPresenceListenButton,
             IntegrationsKey::RadioRegistries => SettingKey::RadioRegistries,
         },
         K::Downloads(key) => match key {
@@ -140,6 +141,9 @@ pub fn setting_key_from_proto(value: i32) -> Option<config::SettingKey> {
         SettingKey::DiscordPresence => K::Integrations(IntegrationsKey::DiscordPresence),
         SettingKey::DiscordPresenceSource => {
             K::Integrations(IntegrationsKey::DiscordPresenceSource)
+        }
+        SettingKey::DiscordPresenceListenButton => {
+            K::Integrations(IntegrationsKey::DiscordPresenceListenButton)
         }
         SettingKey::DiscordPresenceUploadCover => {
             K::Integrations(IntegrationsKey::DiscordPresenceUploadCover)
@@ -238,6 +242,9 @@ pub fn config_edit_to_proto(value: &config::SettingsEdit) -> ConfigEdit {
         Se::Integrations(edit) => match edit {
             In::DiscordPresence(value) => Edit::DiscordPresence(OptionalBool { value }),
             In::DiscordPresenceSource(value) => Edit::DiscordPresenceSource(OptionalBool { value }),
+            In::DiscordPresenceListenButton(value) => {
+                Edit::DiscordPresenceListenButton(OptionalBool { value })
+            }
             In::DiscordPresenceUploadCover(value) => {
                 Edit::DiscordPresenceUploadCover(OptionalBool { value })
             }
@@ -359,6 +366,9 @@ pub fn config_edit_from_proto(value: &ConfigEdit) -> Option<config::SettingsEdit
         Edit::DiscordPresence(value) => Se::Integrations(In::DiscordPresence(value.value)),
         Edit::DiscordPresenceSource(value) => {
             Se::Integrations(In::DiscordPresenceSource(value.value))
+        }
+        Edit::DiscordPresenceListenButton(value) => {
+            Se::Integrations(In::DiscordPresenceListenButton(value.value))
         }
         Edit::DiscordPresenceUploadCover(value) => {
             Se::Integrations(In::DiscordPresenceUploadCover(value.value))

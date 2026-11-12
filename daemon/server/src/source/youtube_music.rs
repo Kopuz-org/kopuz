@@ -294,6 +294,10 @@ impl MediaSource for YtSource {
         (!id.trim().is_empty()).then(|| format!("https://music.youtube.com/playlist?list={id}"))
     }
 
+    fn listen_links(&self) -> bool {
+        true
+    }
+
     async fn fetch_track(&self, item_id: &str) -> Result<Option<reader::Track>, SourceError> {
         if item_id.trim().is_empty() {
             return Ok(None);

@@ -92,6 +92,7 @@ service Kopuz {
   rpc EditQueue(QueueEditRequest) returns (MutationResult);
   rpc GetExternalDevices(ExternalDevicesRequest) returns (ExternalDeviceList);
   rpc SelectExternalDevice(SelectExternalDeviceRequest) returns (Unit);
+  rpc OpenListenLink(OpenListenLinkRequest) returns (Unit);
   rpc SetFavorite(FavoriteRequest) returns (SetFavoriteResponse);
   rpc DontRecommend(DontRecommendRequest) returns (Unit);
   rpc Rate(RateRequest) returns (Unit);
@@ -473,6 +474,10 @@ message ExternalDeviceList {
 }
 
 // Absent device_id moves playback back to this app's own player.
+message OpenListenLinkRequest {
+  string link = 1;
+}
+
 message SelectExternalDeviceRequest {
   string source_id = 1;
   optional string device_id = 2;
@@ -1971,6 +1976,7 @@ message ConfigEdit {
     OptionalBool discord_presence = 79;
     OptionalBool discord_presence_source = 80;
     OptionalBool discord_presence_upload_cover = 87;
+    OptionalBool discord_presence_listen_button = 88;
     RadioRegistryOp radio_registries = 61;
     string downloader_output_dir = 76;
     DownloaderOptions downloader_options = 77;
@@ -2107,6 +2113,7 @@ enum SettingKey {
   SETTING_KEY_OFFLINE_CACHE_MAX_BYTES = 85;
   SETTING_KEY_LISTEN_ADDRESS = 86;
   SETTING_KEY_DISCORD_PRESENCE_UPLOAD_COVER = 87;
+  SETTING_KEY_DISCORD_PRESENCE_LISTEN_BUTTON = 88;
 }
 
 message GetFrontendPrefsRequest {
@@ -2300,6 +2307,7 @@ message Config {
   optional bool discord_presence = 79;
   optional bool discord_presence_source = 80;
   optional bool discord_presence_upload_cover = 87;
+  optional bool discord_presence_listen_button = 88;
   optional string spotify_browser = 81;
   bool spotify_prefer_active_device = 82;
   string downloader_output_dir = 76;

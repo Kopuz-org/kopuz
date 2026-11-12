@@ -445,6 +445,23 @@ impl api::PlayerApi for LocalApi {
             .chunk(request)
             .await
     }
+
+    async fn open_listen_link(&self, link: String) -> Result<(), ApiError> {
+        self.acted();
+        let played =
+            crate::listen_link::play(&link, self.sources()?, self.catalog()?, &self.session).await;
+        let (level, code) = match &played {
+            Ok(()) => (api::NoticeLevel::Info, "listen_link_playing"),
+            Err(refusal) => (api::NoticeLevel::Error, refusal.notice),
+        };
+        // The window that is open may not be the process that was handed the link.
+        self.session.emit_event(api::ApiEvent::Notice {
+            level,
+            code: code.to_string(),
+            message: None,
+        });
+        played.map_err(|refusal| refusal.error)
+    }
 }
 
 #[async_trait::async_trait]

@@ -32,6 +32,7 @@
   },
   "device_change_behavior": "Pause",
   "discord_presence": false,
+  "discord_presence_listen_button": true,
   "discord_presence_source": true,
   "discord_presence_upload_cover": false,
   "enable_musixmatch_lyrics": false,

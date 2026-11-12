@@ -1,10 +1,11 @@
 [Desktop Entry]
 Name=Kopuz
 Comment=A modern music player
-Exec=kopuz
+Exec=kopuz %u
 Icon=moe.kopuz.kopuz
 Terminal=false
 Type=Application
 Categories=AudioVideo;Audio;Player;Music;
 Keywords=Music;Player;
+MimeType=x-scheme-handler/kopuz;
 StartupWMClass=kopuz

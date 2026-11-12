@@ -1125,6 +1125,10 @@ pub struct Integrations {
     #[serde(default = "default_discord_presence_upload_cover")]
     #[garde(skip)]
     pub discord_presence_upload_cover: Option<bool>,
+    /// Offer a "Listen on Kopuz" button on the Discord card, for songs whose source other people can play too.
+    #[serde(default = "default_discord_presence_listen_button")]
+    #[garde(skip)]
+    pub discord_presence_listen_button: Option<bool>,
     #[serde(default = "default_radio_registries")]
     #[garde(skip)]
     pub radio_registries: Vec<RegistryEntry>,
@@ -1136,6 +1140,7 @@ impl Default for Integrations {
             discord_presence: Some(true),
             discord_presence_source: Some(true),
             discord_presence_upload_cover: Some(false),
+            discord_presence_listen_button: Some(true),
             radio_registries: default_radio_registries(),
         }
     }
@@ -1288,6 +1293,10 @@ fn default_discord_presence() -> Option<bool> {
 }
 
 fn default_discord_presence_source() -> Option<bool> {
+    Some(true)
+}
+
+fn default_discord_presence_listen_button() -> Option<bool> {
     Some(true)
 }
 

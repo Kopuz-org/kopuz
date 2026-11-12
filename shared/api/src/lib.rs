@@ -199,6 +199,9 @@ pub trait PlayerApi: Send + Sync {
     /// A byte range of a queued music video's picture for a muted element, which follows
     /// [`PlayerState::position`] less `output_latency_ms` one to one.
     async fn video(&self, request: VideoRequest) -> Result<VideoChunk, ApiError>;
+
+    /// Play what a "Listen on Kopuz" link carries, on its own source; the outcome is also a notice, for the window that is open.
+    async fn open_listen_link(&self, link: String) -> Result<(), ApiError>;
 }
 
 /// Reading the library, and the per-track state that belongs to it.
