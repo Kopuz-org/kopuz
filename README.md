@@ -372,13 +372,13 @@ paru -S kopuz
 
 Every release updates these on its own:
 
-| Package | What you get |
-| ------- | ------------ |
-| `kopuz` | Kopuz with `kopuzd`, built from the release source |
-| `kopuz-bin` | The same, from the release's prebuilt `.deb` |
-| `kopuz-legacy` | Kopuz Legacy, built from source |
-| `kopuz-nightly` | Kopuz Nightly, built from the latest nightly tag |
-| `kopuz-nightly-bin` | Kopuz Nightly, from the nightly's prebuilt `.deb` |
+| Package             | What you get                                       |
+| ------------------- | -------------------------------------------------- |
+| `kopuz`             | Kopuz with `kopuzd`, built from the release source |
+| `kopuz-bin`         | The same, from the release's prebuilt `.deb`       |
+| `kopuz-legacy`      | Kopuz Legacy, built from source                    |
+| `kopuz-nightly`     | Kopuz Nightly, built from the latest nightly tag   |
+| `kopuz-nightly-bin` | Kopuz Nightly, from the nightly's prebuilt `.deb`  |
 
 ### Flatpak (Recommended)
 
