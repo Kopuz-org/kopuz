@@ -64,6 +64,12 @@ android-patch:
     cd {{android_project}} && ./gradlew assembleDebug
     @echo "APK: {{android_project}}/app/build/outputs/apk/debug/app-debug.apk"
 
+# e.g. `just legacy-release 0.67.2 "Fixes X and Y." abc1234 def5678`; see scripts/legacy-release.sh.
+# Prepare a Kopuz Legacy patch release on release-<major>.<minor> (never pushes)
+[positional-arguments]
+legacy-release version summary *commits:
+    scripts/legacy-release.sh "$@"
+
 # Release APK, signed when the KOPUZ_ANDROID_KEYSTORE env vars are set.
 android-release:
     ./packaging/android/build-apk.sh
