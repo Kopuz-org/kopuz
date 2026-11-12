@@ -226,7 +226,7 @@ fn legacy_artist() {
     assert_eq!(artist.name, "Daft Punk");
     assert_eq!(
         artist.shuffle_ref.as_deref(),
-        Some("mix:RDAOni3jl65KF37F9JYsJM8DGg")
+        Some("mix:RDAOni3jl65KF37F9JYsJM8DGg@UCRr1xG_2WIDs18a6cIiCxeA")
     );
     assert_eq!(
         artist.mix_ref.as_deref(),

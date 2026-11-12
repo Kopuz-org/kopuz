@@ -520,9 +520,16 @@ impl YouTubeMusicClient {
         &self,
         playlist_id: &str,
         token: &str,
+        artist: Option<&str>,
     ) -> Result<mix::MixPage, String> {
         self.account(async {
-            mix::fetch_continuation(playlist_id, token, self.cookies.as_deref().unwrap_or("")).await
+            mix::fetch_continuation(
+                playlist_id,
+                token,
+                artist,
+                self.cookies.as_deref().unwrap_or(""),
+            )
+            .await
         })
         .await
     }

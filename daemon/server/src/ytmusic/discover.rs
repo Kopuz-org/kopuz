@@ -341,10 +341,10 @@ pub(super) fn parse_artist(channel_id: &str, resp: &Value) -> YtArtist {
             .get(button)?
             .pointer("/buttonRenderer/navigationEndpoint/watchEndpoint/playlistId")?
             .as_str()
-            .map(super::mix::issued_mix_ref)
     };
-    let shuffle_ref = mix("playButton");
-    let mix_ref = mix("startRadioButton");
+    let shuffle_ref = mix("playButton")
+        .map(|playlist_id| super::mix::artist_shuffle_ref(playlist_id, channel_id));
+    let mix_ref = mix("startRadioButton").map(super::mix::issued_mix_ref);
 
     let mut sections = Vec::new();
     for section in album_section_contents(resp) {
