@@ -909,62 +909,11 @@ jobs:
     # A bare condition would also wait on publish's own needs, so a nightly's macOS failure would skip this.
     if: ${{ github.ref_type == 'tag' && !cancelled() && needs.publish.result == 'success' }}
     needs: publish
-    runs-on: ubuntu-latest
-    container: archlinux:base-devel
-
-    steps:
-      - name: Install tools
-        run: pacman -Syu --noconfirm --needed git openssh sudo curl
-
-      - uses: actions/checkout@v4
-
-      - name: Download Linux packages
-        uses: actions/download-artifact@v4
-        with:
-          pattern: ${{ contains(github.ref_name, '-nightly.') && 'kopuz-nightly-linux' || 'kopuz-release-linux-*' }}
-          path: dist
-          merge-multiple: true
-
-      - name: Fetch the tag's source tarball
-        if: ${{ !contains(github.ref_name, '-nightly.') }}
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          curl -fsSL -o "dist/kopuz-${TAG#v}.tar.gz" \
-            "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz"
-
-      # makepkg refuses root, so the packages are rendered and pushed by an unprivileged builder.
-      - name: Publish the AUR packages
-        env:
-          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-
-          version="${TAG#v}"
-          useradd -m builder
-          echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
-          install -d -m700 -o builder -g builder /home/builder/.ssh
-          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > /home/builder/.ssh/id_ed25519
-          chmod 600 /home/builder/.ssh/id_ed25519
-          chown -R builder:builder /home/builder/.ssh "$PWD"
-
-          publish() {
-            sudo -u builder env \
-              HOME=/home/builder \
-              PKG="$1" VERSION="$version" SOURCE_FILE="$2" VERIFY="$3" \
-              GIT_SSH_COMMAND="ssh -i /home/builder/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new" \
-              bash scripts/publish-aur.sh
-          }
-
-          if [[ "$TAG" == *-nightly.* ]]; then
-            publish kopuz-nightly-bin "$PWD/dist/kopuz-nightly_${version}_amd64.deb" build
-            exit 0
-          fi
-          publish kopuz-bin "$PWD/dist/kopuz_${version}-1_amd64.deb" build
-          # A full source build of the legacy app takes most of an hour; the checksum is what can drift.
-          publish kopuz-legacy "$PWD/dist/kopuz-${version}.tar.gz" source
+    uses: ./.github/workflows/aur.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
 
   flatpak:
     # Kopuz Nightly's Flatpak wraps the published .deb and is served from R2 at flatpak.kopuz.moe.
