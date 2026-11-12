@@ -7572,6 +7572,7 @@ dependencies = [
  "kopuz-api",
  "kopuz-client",
  "kopuz-config",
+ "kopuz-proto",
  "kopuz-utils",
  "libc",
  "semver 1.0.28",
@@ -12804,11 +12805,13 @@ dependencies = [
  "kopuz-config",
  "kopuz-i18n",
  "link",
+ "percent-encoding",
  "profile",
  "serde",
  "serde_json",
  "toml 0.8.23",
  "tracing",
+ "url",
 ]
 
 [[package]]

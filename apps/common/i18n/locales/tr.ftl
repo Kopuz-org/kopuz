@@ -666,6 +666,7 @@ share = Share
 share_copied = Bağlantı kopyalandı
 share_no_page = Bu şarkı için bir sayfa bulunamadı
 share_no_album_page = Bu albüm için bir sayfa bulunamadı
+link_unknown = Bu bağlantı açılamıyor
 explicit = Müstehcen
 
 first_run_title = Welcome to Kopuz

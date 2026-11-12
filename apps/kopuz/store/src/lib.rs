@@ -10,6 +10,7 @@ mod catalog_marks;
 mod chrome;
 mod config;
 mod debounce;
+pub mod deep_link;
 mod downloads;
 mod favorites;
 mod for_you;
@@ -56,7 +57,8 @@ pub use link::{Link, api};
 pub use nav::{Navigator, Route};
 pub use notices::{DAEMON_GONE, Notice, Notices, Record, Retracted, Undo};
 pub use opener::{
-    BATCH_METADATA, FOLDER_PICKER, Opener, RENAME, Rename, SHORTCUTS, TRACK_METADATA, URL_DOWNLOAD,
+    ADD_SOURCE_OFFER, BATCH_METADATA, FOLDER_PICKER, Opener, RENAME, Rename, SHORTCUTS,
+    TRACK_METADATA, URL_DOWNLOAD,
 };
 pub use paging::Pager;
 pub use palette::Swatches;

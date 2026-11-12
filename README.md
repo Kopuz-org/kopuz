@@ -65,7 +65,8 @@ window is a client of it, and so is anything else you write — the contract is
 one gRPC schema on a local socket, documented in [docs/api.md](docs/api.md).
 `kopuzd` runs the same core with no window. Use [`kopuzctl`](docs/cli.md) to
 control playback, configure sources, and start library jobs from a terminal or
-script.
+script. Other apps and web pages can open a page, a search or a track in Kopuz
+with a [`kopuz://` link](docs/protocol.md).
 
 ## Features
 

@@ -72,5 +72,7 @@ pub const RENAME: Opener<Rename> = Opener::new("rename");
 pub const FOLDER_PICKER: Opener<String> = Opener::new("folder-picker");
 /// The sheet `?` opens.
 pub const SHORTCUTS: Opener<()> = Opener::new("shortcuts");
+/// The add-source form, answered as a `kopuz://add-source` link says.
+pub const ADD_SOURCE_OFFER: Opener<crate::deep_link::SourceOffer> = Opener::new("add-source-offer");
 /// The "fetch this URL" box.
 pub const URL_DOWNLOAD: Opener<()> = Opener::new("url-download");

@@ -4,6 +4,7 @@ pub mod add_source;
 pub mod folders;
 pub mod integrations;
 mod login;
+mod offer;
 pub mod offline_cache;
 mod plugins;
 mod reauth;
@@ -33,6 +34,7 @@ use sources::Sources;
 pub fn register(cx: &mut gpui_kit::App) {
     store::register_password_form(login::open, cx);
     store::register_session_chooser(reauth::open, cx);
+    store::ADD_SOURCE_OFFER.register(offer::open, cx);
 }
 
 pub struct SourceSettings {

@@ -687,6 +687,7 @@ share = Share
 share_copied = Copied link
 share_no_page = Couldn't find a page for this track
 share_no_album_page = Couldn't find a page for this album
+link_unknown = Impossibile aprire questo link
 explicit = Esplicito
 
 first_run_title = Welcome to Kopuz
