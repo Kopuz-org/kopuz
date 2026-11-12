@@ -10,17 +10,51 @@ use gpui_kit::component::input::{Input, InputContentType, InputState};
 use gpui_kit::component::{Disableable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
-    Styled, Window,
+    AppContext as _, Context, Entity, Global, IntoElement, ParentElement as _, Render,
+    SharedString, Styled, Window,
 };
 use link::Link;
 use store::SourcesModel;
 
+/// What a link said to sign in with, for the one source it added.
+struct Expected {
+    server_id: String,
+    username: Option<String>,
+    password: Option<String>,
+}
+
+impl Global for Expected {}
+
+/// Fill the next sign-in form for `server_id` from a link; any other form drops it unused.
+pub(crate) fn expect(
+    server_id: String,
+    username: Option<String>,
+    password: Option<String>,
+    cx: &mut gpui_kit::App,
+) {
+    cx.set_global(Expected {
+        server_id,
+        username,
+        password,
+    });
+}
+
 /// Open the sign-in dialog for `server_id` on a fresh form, so it works without the settings page open.
 pub fn open(server_id: String, service: SharedString, window: &mut Window, cx: &mut gpui_kit::App) {
+    let expected = cx
+        .has_global::<Expected>()
+        .then(|| cx.remove_global::<Expected>())
+        .filter(|expected| expected.server_id == server_id);
+    // Saving the offered source was the go-ahead, so a link that brought both signs in without a second press.
+    let complete = expected
+        .as_ref()
+        .is_some_and(|expected| expected.username.is_some() && expected.password.is_some());
     let form = cx.new(|cx| LoginForm::new(window, cx));
     form.update(cx, |form, cx| {
         form.reset(server_id, service, window, cx);
+        if let Some(expected) = expected {
+            form.fill(expected.username, expected.password, window, cx);
+        }
     });
     let (title, submit, held) = (form.clone(), form.clone(), form.clone());
     FormDialog::new(SharedString::default())
@@ -28,7 +62,12 @@ pub fn open(server_id: String, service: SharedString, window: &mut Window, cx: &
         .size(DialogSize::Wide)
         .on_submit(move |window, cx| submit.update(cx, |form, cx| form.submit(window, cx)))
         .open(form, window, cx);
-    held.update(cx, |form, cx| form.focus(window, cx));
+    held.update(cx, |form, cx| {
+        form.focus(window, cx);
+        if complete {
+            form.submit(window, cx);
+        }
+    });
 }
 
 pub struct LoginForm {
@@ -69,6 +108,23 @@ impl LoginForm {
         self.error = None;
         self.loading = false;
         cx.notify();
+    }
+
+    fn fill(
+        &mut self,
+        username: Option<String>,
+        password: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(username) = username {
+            self.username
+                .update(cx, |state, cx| state.set_value(username, window, cx));
+        }
+        if let Some(password) = password {
+            self.password
+                .update(cx, |state, cx| state.set_value(password, window, cx));
+        }
     }
 
     /// Opening a dialog focuses the dialog itself, so this runs once it is open.

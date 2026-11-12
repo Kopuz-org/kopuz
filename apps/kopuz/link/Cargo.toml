@@ -14,7 +14,7 @@ config = { workspace = true }
 api = { workspace = true }
 client = { workspace = true }
 gpui-kit = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "process"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "process", "net", "io-util"] }
 futures = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
@@ -25,6 +25,7 @@ semver = { workspace = true }
 libc = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
+proto = { workspace = true }
 windows = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_System_Pipes",

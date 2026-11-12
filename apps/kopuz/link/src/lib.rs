@@ -1,6 +1,7 @@
 //! The one seam to a Kopuz daemon: a gRPC client on its own tokio runtime, supervised as a GPUI entity.
 
 mod daemon_process;
+pub mod relay;
 mod replace;
 
 use std::future::Future;

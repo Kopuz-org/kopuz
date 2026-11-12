@@ -674,6 +674,7 @@ share = Share
 share_copied = Link kopiert
 share_no_page = Für diesen Titel wurde keine Seite gefunden
 share_no_album_page = Für dieses Album wurde keine Seite gefunden
+link_unknown = Dieser Link kann nicht geöffnet werden
 explicit = Explizit
 
 first_run_title = Welcome to Kopuz

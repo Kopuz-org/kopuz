@@ -135,6 +135,8 @@ pub struct AddSource {
     warned: Option<SourceDraft>,
     /// Save into this source's settings instead of creating one.
     fill: Option<String>,
+    /// The service and answers a link asked for, until the service list arrives to look them up in.
+    offered: Option<(String, Vec<FieldValue>)>,
     /// The last saved answers, so a form can be put back the way it was.
     last: Option<(ServiceInfo, Vec<FieldValue>, String)>,
     /// The browser profiles signed in to the chosen service, by service id; `None` while the daemon looks.
@@ -186,6 +188,7 @@ impl AddSource {
             probe: None,
             warned: None,
             fill: None,
+            offered: None,
             last: None,
             sessions: None,
             importing: None,
@@ -222,6 +225,7 @@ impl AddSource {
         self.probe = None;
         self.warned = None;
         self.fill = None;
+        self.offered = None;
         self.importing = None;
         self.service = None;
         self.form = None;
@@ -239,8 +243,74 @@ impl AddSource {
         self.services.read(cx).value().cloned().unwrap_or_default()
     }
 
+    /// Answer the form as a link says; secrets and paths on this machine are never taken from one.
+    pub fn offer(
+        &mut self,
+        offer: &store::deep_link::SourceOffer,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.reset(window, cx);
+        if let Some(name) = offer.name.clone() {
+            self.name
+                .update(cx, |state, cx| state.set_value(name, window, cx));
+        }
+        let values = offer
+            .values
+            .iter()
+            .map(|(key, value)| FieldValue {
+                key: key.clone(),
+                value: value.clone(),
+            })
+            .collect();
+        self.offered = Some((offer.service.clone(), values));
+        self.service = None;
+        self.ensure_service(window, cx);
+    }
+
+    fn take_offered(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.services.read(cx).value().is_none() {
+            return false;
+        }
+        let Some((id, values)) = self.offered.take() else {
+            return false;
+        };
+        let Some(service) = self
+            .offered(cx)
+            .into_iter()
+            .find(|service| service.id == id)
+        else {
+            if let Some(first) = self.offered(cx).into_iter().next() {
+                self.select(first, window, cx);
+            }
+            self.error = Some(t("link_unknown"));
+            cx.notify();
+            return true;
+        };
+        let values: Vec<FieldValue> = values
+            .into_iter()
+            .filter(|value| {
+                service.fields.iter().any(|field| {
+                    field.key == value.key
+                        && !matches!(
+                            field.kind,
+                            FieldKind::Secret
+                                | FieldKind::Directory
+                                | FieldKind::Directories
+                                | FieldKind::Note
+                        )
+                })
+            })
+            .collect();
+        self.select_with(service, &values, window, cx);
+        true
+    }
+
     /// Nothing is chosen until the list arrives, and then the first is.
     fn ensure_service(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.take_offered(window, cx) {
+            return;
+        }
         if self.service.is_some() || self.embedded {
             cx.notify();
             return;
