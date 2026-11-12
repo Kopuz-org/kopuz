@@ -1,0 +1,66 @@
+name: Beta
+
+# Tags each new head of the beta branch as v<version>-beta.N; release.yml builds it as a pre-release of Kopuz.
+on:
+  push:
+    branches: [beta]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: beta
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: beta
+          fetch-depth: 0
+
+      - name: Tag the beta branch unless its head already is a beta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          version="$(
+            cargo metadata --no-deps --format-version 1 |
+              jq -r '.packages[] | select(.name == "kopuz") | .version'
+          )"
+          if [[ "$version" == *-* ]]; then
+            echo "The beta branch must carry the release's own version, not ${version}"
+            exit 1
+          fi
+          head="$(git rev-parse HEAD)"
+
+          if [[ "$(git tag --points-at "$head")" == *-beta.* ]]; then
+            echo "${head} is already a beta"
+            exit 0
+          fi
+
+          last=0
+          for existing in $(git tag --list "v${version}-beta.*"); do
+            n="${existing##*-beta.}"
+            if [[ "$n" =~ ^[0-9]+$ ]] && (( n > last )); then
+              last="$n"
+            fi
+          done
+          tag="v${version}-beta.$(( last + 1 ))"
+
+          git tag "$tag" "$head"
+          git push origin "refs/tags/${tag}"
+          # A tag pushed with this workflow's token starts no other workflow, so the build is started by hand.
+          if ! gh workflow run release.yml --ref "$tag"; then
+            # A tag on HEAD reads as built, so one whose build never started must go for the next run to retry.
+            git push origin --delete "refs/tags/${tag}"
+            echo "Could not start the build of ${tag}; removed the tag"
+            exit 1
+          fi
+          echo "Tagged ${head} as ${tag}"

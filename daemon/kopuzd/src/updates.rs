@@ -9,8 +9,8 @@ use config::flavor::Flavor;
 use daemon::SessionHandle;
 
 const RELEASES_URL: &str = "https://api.github.com/repos/Kopuz-org/kopuz/releases";
-/// Nightlies come out daily and only the last ten are kept, so one page always holds the newest.
-const NIGHTLY_PAGE: &str = "?per_page=30";
+/// GitHub lists the newest first and only ten nightlies are kept, so one page always holds a channel's newest.
+const RELEASES_PAGE: &str = "?per_page=30";
 const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 // A daemon that starts before the network would otherwise offer nothing for a whole CHECK_EVERY.
 const RETRY_EVERY: Duration = Duration::from_secs(10 * 60);
@@ -123,7 +123,7 @@ impl Updater {
 
     pub async fn check(&self) -> Result<UpdateStatus, ApiError> {
         let flavor = Flavor::current();
-        let (status, plan) = match fetch_newest(flavor).await? {
+        let (status, plan) = match fetch_newest(Channel::of(flavor, CURRENT_VERSION)).await? {
             Some(release) if is_newer_version(CURRENT_VERSION, &release.tag_name) => {
                 let plan = self.install.clone().and_then(|kind| {
                     select_asset(flavor, kind, std::env::consts::ARCH, &release.assets)
@@ -315,17 +315,48 @@ fn http_client(timeout: Duration) -> Result<reqwest::Client, String> {
         .map_err(|error| format!("could not build the HTTP client: {error}"))
 }
 
-/// The newest release this flavour updates to: GitHub's latest for Kopuz, the newest nightly pre-release for Kopuz Nightly.
-async fn fetch_newest(flavor: Flavor) -> Result<Option<GithubRelease>, ApiError> {
+/// The releases a build updates to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Channel {
+    Release,
+    /// A beta of Kopuz, which takes the betas after it and then the release they lead to.
+    Beta,
+    Nightly,
+}
+
+impl Channel {
+    fn of(flavor: Flavor, version: &str) -> Self {
+        match flavor {
+            Flavor::Nightly => Self::Nightly,
+            Flavor::Stable if is_beta(version) => Self::Beta,
+            Flavor::Stable => Self::Release,
+        }
+    }
+
+    fn takes(self, release: &GithubRelease) -> bool {
+        match self {
+            Self::Release => !release.prerelease,
+            Self::Beta => !release.prerelease || is_beta(&release.tag_name),
+            Self::Nightly => release.prerelease && release.tag_name.contains("-nightly."),
+        }
+    }
+}
+
+fn is_beta(version: &str) -> bool {
+    version_of(version).is_some_and(|version| version.pre.as_str().starts_with("beta."))
+}
+
+/// The newest release of `channel`: GitHub's latest for Kopuz, the newest of the first page otherwise.
+async fn fetch_newest(channel: Channel) -> Result<Option<GithubRelease>, ApiError> {
     let unreachable = |error: reqwest::Error| {
         ApiError::new(
             api::ErrorCode::SourceUnreachable,
             format!("release check: {error}"),
         )
     };
-    let url = match flavor {
-        Flavor::Stable => format!("{RELEASES_URL}/latest"),
-        Flavor::Nightly => format!("{RELEASES_URL}{NIGHTLY_PAGE}"),
+    let url = match channel {
+        Channel::Release => format!("{RELEASES_URL}/latest"),
+        Channel::Beta | Channel::Nightly => format!("{RELEASES_URL}{RELEASES_PAGE}"),
     };
     let response = http_client(Duration::from_secs(8))
         .map_err(ApiError::internal)?
@@ -335,20 +366,20 @@ async fn fetch_newest(flavor: Flavor) -> Result<Option<GithubRelease>, ApiError>
         .await
         .and_then(reqwest::Response::error_for_status)
         .map_err(unreachable)?;
-    match flavor {
-        Flavor::Stable => response.json().await.map(Some).map_err(unreachable),
-        Flavor::Nightly => response
+    match channel {
+        Channel::Release => response.json().await.map(Some).map_err(unreachable),
+        Channel::Beta | Channel::Nightly => response
             .json::<Vec<GithubRelease>>()
             .await
-            .map(newest_nightly)
+            .map(|releases| newest(channel, releases))
             .map_err(unreachable),
     }
 }
 
-fn newest_nightly(releases: Vec<GithubRelease>) -> Option<GithubRelease> {
+fn newest(channel: Channel, releases: Vec<GithubRelease>) -> Option<GithubRelease> {
     releases
         .into_iter()
-        .filter(|release| release.prerelease && release.tag_name.contains("-nightly."))
+        .filter(|release| channel.takes(release))
         .filter_map(|release| Some((version_of(&release.tag_name)?, release)))
         .max_by(|(a, _), (b, _)| a.cmp(b))
         .map(|(_, release)| release)
@@ -793,18 +824,56 @@ mod tests {
 
     #[test]
     fn the_newest_nightly_is_picked_whatever_order_github_lists_them_in() {
-        let newest = newest_nightly(vec![
-            release("v0.68.0-nightly.20261028", true),
-            release("v0.68.0-nightly.20261030", true),
-            release("v0.68.0-nightly.20261029.2", true),
-            release("v0.67.0", false),
-            release("v0.69.0-nightly.20261031", false),
-        ]);
+        let picked = newest(
+            Channel::Nightly,
+            vec![
+                release("v0.68.0-nightly.20261028", true),
+                release("v0.68.0-nightly.20261030", true),
+                release("v0.68.0-nightly.20261029.2", true),
+                release("v0.67.0", false),
+                release("v0.69.0-nightly.20261031", false),
+                release("v1.0.0-beta.1", true),
+            ],
+        );
         assert_eq!(
-            newest.map(|release| release.tag_name).as_deref(),
+            picked.map(|release| release.tag_name).as_deref(),
             Some("v0.68.0-nightly.20261030")
         );
-        assert!(newest_nightly(vec![release("v0.67.0", false)]).is_none());
+        assert!(newest(Channel::Nightly, vec![release("v0.67.0", false)]).is_none());
+    }
+
+    #[test]
+    fn only_a_beta_install_follows_the_betas() {
+        assert_eq!(Channel::of(Flavor::Stable, "1.0.0-beta.2"), Channel::Beta);
+        assert_eq!(Channel::of(Flavor::Stable, "1.0.0"), Channel::Release);
+        assert_eq!(
+            Channel::of(Flavor::Nightly, "1.0.0-nightly.20261112"),
+            Channel::Nightly
+        );
+        let page = || {
+            vec![
+                release("v1.0.0-beta.2", true),
+                release("v1.0.0-beta.10", true),
+                release("v1.0.0-nightly.20261112", true),
+                release("v0.67.0", false),
+            ]
+        };
+        assert_eq!(
+            newest(Channel::Beta, page())
+                .map(|release| release.tag_name)
+                .as_deref(),
+            Some("v1.0.0-beta.10")
+        );
+        let mut released = page();
+        released.push(release("v1.0.0", false));
+        assert_eq!(
+            newest(Channel::Beta, released)
+                .map(|release| release.tag_name)
+                .as_deref(),
+            Some("v1.0.0")
+        );
+        assert!(is_newer_version("1.0.0-beta.2", "v1.0.0-beta.10"));
+        assert!(is_newer_version("1.0.0-beta.10", "v1.0.0"));
     }
 
     #[test]

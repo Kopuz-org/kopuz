@@ -9,12 +9,12 @@ on:
 permissions:
   contents: read
 
-# Kopuz ships as Kopuz_<ver>_*, Kopuz Legacy as Kopuz-Legacy-<ver>-*, a v<ver>-nightly.YYYYMMDD tag as the Kopuz-Nightly_<ver>_* pre-release.
+# Kopuz ships as Kopuz_<ver>_*, Kopuz Legacy as Kopuz-Legacy-<ver>-*, a v<ver>-nightly.YYYYMMDD tag as the Kopuz-Nightly_<ver>_* pre-release, a v<ver>-beta.N tag as the Kopuz_<ver>-beta.N_* pre-release.
 
 jobs:
   linux-legacy:
-    # Kopuz Nightly is the GPUI app alone; Legacy and Android ship only with releases.
-    if: ${{ !(github.ref_type == 'tag' && contains(github.ref_name, '-nightly.')) }}
+    # Nightlies and betas are the GPUI app alone; Legacy and Android ship only with releases.
+    if: ${{ !(github.ref_type == 'tag' && (contains(github.ref_name, '-nightly.') || contains(github.ref_name, '-beta.'))) }}
     runs-on: ubuntu-22.04
 
     steps:
@@ -183,19 +183,24 @@ jobs:
           base="$version"
 
           nightly=false
+          prerelease=false
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             tag="${GITHUB_REF_NAME#v}"
             if [[ "$tag" =~ ^${base//./\\.}-nightly\.[0-9]{8}(\.[0-9]+)?$ ]]; then
               nightly=true
+              prerelease=true
+              version="$tag"
+            elif [[ "$tag" =~ ^${base//./\\.}-beta\.[0-9]+$ ]]; then
+              prerelease=true
               version="$tag"
             elif [[ "$tag" != "$base" ]]; then
-              echo "Tag ${GITHUB_REF_NAME} is neither v${base} nor a v${base}-nightly.YYYYMMDD"
+              echo "Tag ${GITHUB_REF_NAME} is neither v${base}, a v${base}-nightly.YYYYMMDD nor a v${base}-beta.N"
               exit 1
             fi
           fi
 
-          # A nightly carries its tag's version in this build only; nothing is committed.
-          if [[ "$nightly" == true ]]; then
+          # A nightly or beta carries its tag's version in this build only; nothing is committed.
+          if [[ "$prerelease" == true ]]; then
             sed -i "s/\"${base}\"/\"${version}\"/g" Cargo.toml
             cargo update -w
           fi
@@ -203,6 +208,7 @@ jobs:
           {
             echo "version=${version}"
             echo "nightly=${nightly}"
+            echo "prerelease=${prerelease}"
             if [[ "$nightly" == true ]]; then
               echo "flavor=nightly"
               echo "package=kopuz-nightly"
@@ -302,7 +308,7 @@ jobs:
           if-no-files-found: error
 
   macos-legacy:
-    if: ${{ !(github.ref_type == 'tag' && contains(github.ref_name, '-nightly.')) }}
+    if: ${{ !(github.ref_type == 'tag' && (contains(github.ref_name, '-nightly.') || contains(github.ref_name, '-beta.'))) }}
     runs-on: macos-15
 
     steps:
@@ -410,19 +416,24 @@ jobs:
           base="$version"
 
           nightly=false
+          prerelease=false
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             tag="${GITHUB_REF_NAME#v}"
             if [[ "$tag" =~ ^${base//./\\.}-nightly\.[0-9]{8}(\.[0-9]+)?$ ]]; then
               nightly=true
+              prerelease=true
+              version="$tag"
+            elif [[ "$tag" =~ ^${base//./\\.}-beta\.[0-9]+$ ]]; then
+              prerelease=true
               version="$tag"
             elif [[ "$tag" != "$base" ]]; then
-              echo "Tag ${GITHUB_REF_NAME} is neither v${base} nor a v${base}-nightly.YYYYMMDD"
+              echo "Tag ${GITHUB_REF_NAME} is neither v${base}, a v${base}-nightly.YYYYMMDD nor a v${base}-beta.N"
               exit 1
             fi
           fi
 
-          # A nightly carries its tag's version in this build only; nothing is committed.
-          if [[ "$nightly" == true ]]; then
+          # A nightly or beta carries its tag's version in this build only; nothing is committed.
+          if [[ "$prerelease" == true ]]; then
             sed "s/\"${base}\"/\"${version}\"/g" Cargo.toml > Cargo.toml.next
             mv Cargo.toml.next Cargo.toml
             cargo update -w
@@ -516,8 +527,8 @@ jobs:
           if-no-files-found: error
 
   windows-legacy:
-    # Kopuz Nightly is the GPUI app alone; Legacy and Android ship only with releases.
-    if: ${{ !(github.ref_type == 'tag' && contains(github.ref_name, '-nightly.')) }}
+    # Nightlies and betas are the GPUI app alone; Legacy and Android ship only with releases.
+    if: ${{ !(github.ref_type == 'tag' && (contains(github.ref_name, '-nightly.') || contains(github.ref_name, '-beta.'))) }}
     runs-on: windows-latest
 
     steps:
@@ -624,19 +635,24 @@ jobs:
           $base = ($metadata.packages | Where-Object name -eq "kopuz").version
           $version = $base
           $nightly = $false
+          $prerelease = $false
 
           if ($env:GITHUB_REF_TYPE -eq "tag") {
             $tag = $env:GITHUB_REF_NAME -replace '^v', ''
             if ($tag -match ('^' + [regex]::Escape($base) + '-nightly\.[0-9]{8}(\.[0-9]+)?$')) {
               $nightly = $true
+              $prerelease = $true
+              $version = $tag
+            } elseif ($tag -match ('^' + [regex]::Escape($base) + '-beta\.[0-9]+$')) {
+              $prerelease = $true
               $version = $tag
             } elseif ($tag -ne $base) {
-              throw "Tag $env:GITHUB_REF_NAME is neither v$base nor a v$base-nightly.YYYYMMDD"
+              throw "Tag $env:GITHUB_REF_NAME is neither v$base, a v$base-nightly.YYYYMMDD nor a v$base-beta.N"
             }
           }
 
-          # A nightly carries its tag's version in this build only; nothing is committed.
-          if ($nightly) {
+          # A nightly or beta carries its tag's version in this build only; nothing is committed.
+          if ($prerelease) {
             (Get-Content Cargo.toml -Raw).Replace("`"$base`"", "`"$version`"") | Set-Content Cargo.toml -NoNewline
             cargo update -w
             if ($LASTEXITCODE -ne 0) { throw "cargo update failed" }
@@ -644,6 +660,7 @@ jobs:
 
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "nightly=$($nightly.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "prerelease=$($prerelease.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "flavor=$(if ($nightly) { 'nightly' } else { 'stable' })" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "asset=$(if ($nightly) { 'Kopuz-Nightly' } else { 'Kopuz' })" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
@@ -665,15 +682,18 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
           NIGHTLY: ${{ steps.version.outputs.nightly }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
           ASSET: ${{ steps.version.outputs.asset }}
         run: |
           New-Item -ItemType Directory -Path dist -Force | Out-Null
 
-          # WiX takes only numeric versions, so a nightly ships the NSIS installer alone.
+          # WiX takes only numeric versions, so a nightly or beta ships the NSIS installer alone.
           if ($env:NIGHTLY -eq 'true') {
             $config = 'packaging/kopuz-nightly/kopuz-nightly.ci.toml'
             (Get-Content packaging/kopuz-nightly/kopuz-nightly.toml -Raw).Replace('@VERSION@', $env:VERSION) | Set-Content $config -NoNewline
             cargo packager --config $config --release -f nsis --out-dir "$PWD\bundle"
+          } elseif ($env:PRERELEASE -eq 'true') {
+            cargo packager -p kopuz --release -f nsis --out-dir "$PWD\bundle"
           } else {
             cargo packager -p kopuz --release -f nsis,wix --out-dir "$PWD\bundle"
           }
@@ -685,8 +705,8 @@ jobs:
           }
           Move-Item $exe[0].FullName "dist/$($env:ASSET)_$($env:VERSION)_x64-setup.exe"
 
-          if ($env:NIGHTLY -ne 'true') {
-            $msi = @(Get-ChildItem bundle -Filter *.msi)
+          if ($env:PRERELEASE -ne 'true') {
+            $msi =@(Get-ChildItem bundle -Filter *.msi)
             if ($msi.Count -ne 1) {
               throw "Expected one MSI installer, found $($msi.Count)"
             }
@@ -713,8 +733,8 @@ jobs:
           if-no-files-found: error
 
   android:
-    # Kopuz Nightly is the GPUI app alone; Legacy and Android ship only with releases.
-    if: ${{ !(github.ref_type == 'tag' && contains(github.ref_name, '-nightly.')) }}
+    # Nightlies and betas are the GPUI app alone; Legacy and Android ship only with releases.
+    if: ${{ !(github.ref_type == 'tag' && (contains(github.ref_name, '-nightly.') || contains(github.ref_name, '-beta.'))) }}
     # 24.04, not 22.04: the binstall'd dx is built against glibc 2.39, and an
     # APK has no host-glibc compatibility concerns (unlike the Linux job).
     runs-on: ubuntu-24.04
@@ -844,11 +864,12 @@ jobs:
           if-no-files-found: error
 
   publish:
-    # A release needs every job; a nightly only the GPUI Linux, macOS and Windows builds, whatever the others did.
+    # A release needs every job; a nightly or beta only the GPUI Linux, macOS and Windows builds, whatever the others did.
     if: >-
       ${{ github.ref_type == 'tag' && !cancelled()
       && needs.linux.result == 'success' && needs.windows.result == 'success'
       && ((contains(github.ref_name, '-nightly.') && needs.macos.result == 'success')
+        || (contains(github.ref_name, '-beta.') && needs.macos.result == 'success')
         || (needs.linux-legacy.result == 'success' && needs.macos.result == 'success'
           && needs.macos-legacy.result == 'success' && needs.windows-legacy.result == 'success'
           && needs.android.result == 'success')) }}
@@ -865,8 +886,9 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Upload Kopuz Nightly as a pre-release
-        if: contains(github.ref_name, '-nightly.')
+      # Not latest, so Kopuz's updater and the stable package managers never offer it.
+      - name: Upload Kopuz Nightly or a beta as a pre-release
+        if: contains(github.ref_name, '-nightly.') || contains(github.ref_name, '-beta.')
         uses: softprops/action-gh-release@v2
         with:
           prerelease: true
@@ -885,7 +907,7 @@ jobs:
             dist/*.dmg.sha256
 
       - name: Upload packages to GitHub release
-        if: ${{ !contains(github.ref_name, '-nightly.') }}
+        if: ${{ !contains(github.ref_name, '-nightly.') && !contains(github.ref_name, '-beta.') }}
         uses: softprops/action-gh-release@v2
         with:
           fail_on_unmatched_files: true
@@ -906,8 +928,10 @@ jobs:
             dist/*.apk.sha256
 
   aur:
-    # A bare condition would also wait on publish's own needs, so a nightly's macOS failure would skip this.
-    if: ${{ github.ref_type == 'tag' && !cancelled() && needs.publish.result == 'success' }}
+    # A bare condition would also wait on publish's own needs, so a nightly's macOS failure would skip this; kopuz-bin never takes a beta.
+    if: >-
+      ${{ github.ref_type == 'tag' && !cancelled() && needs.publish.result == 'success'
+      && !contains(github.ref_name, '-beta.') }}
     needs: publish
     runs-on: ubuntu-latest
     container: archlinux:base-devel
@@ -1072,8 +1096,8 @@ jobs:
           done
 
   homebrew:
-    # The casks carry the stable app; Kopuz Nightly's DMG goes only to its pre-release.
-    if: github.ref_type == 'tag' && !contains(github.ref_name, '-nightly.')
+    # The casks carry the stable app; a nightly's or beta's DMG goes only to its pre-release.
+    if: github.ref_type == 'tag' && !contains(github.ref_name, '-nightly.') && !contains(github.ref_name, '-beta.')
     needs: publish
     runs-on: ubuntu-latest
 
