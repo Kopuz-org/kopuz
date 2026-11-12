@@ -22,17 +22,35 @@ GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o StrictHostKeyChecking=accept-new}" \
   git clone "${AUR_REMOTE:-ssh://aur@aur.archlinux.org/$PKG.git}" "$PKG"
 cd "$PKG"
 
-# A rebuild of the same version bumps pkgrel; a new version starts over at 1.
 cur_ver="$(grep -m1 -oP '^pkgver=\K.*' PKGBUILD 2>/dev/null || true)"
 cur_rel="$(grep -m1 -oP '^pkgrel=\K[0-9]+' PKGBUILD 2>/dev/null || echo 0)"
-if [[ "$cur_ver" == "$PKGVER" ]]; then rel=$((cur_rel + 1)); else rel=1; fi
-echo "==> AUR has ${cur_ver:-nothing}-${cur_rel}; publishing ${PKGVER}-${rel}"
+# A late tag from an older branch, such as a release-0.67 fix after 0.68.0, never takes the AUR backwards.
+if [[ -n "$cur_ver" ]] && (($(vercmp "$PKGVER" "$cur_ver") < 0)); then
+  echo "==> AUR already has the newer ${cur_ver}; not going back to ${PKGVER}."
+  exit 0
+fi
 
-sed -e "s/^pkgver=.*/pkgver=${PKGVER}/" \
-    -e "s/^_version=.*/_version=${VERSION}/" \
-    -e "s/^pkgrel=.*/pkgrel=${rel}/" \
-    -e "s/^sha256sums=.*/sha256sums=('${sha}')/" \
-    "$template" > PKGBUILD
+render() {
+  sed -e "s/^pkgver=.*/pkgver=${PKGVER}/" \
+      -e "s/^_version=.*/_version=${VERSION}/" \
+      -e "s/^pkgrel=.*/pkgrel=$1/" \
+      -e "s/^sha256sums=.*/sha256sums=('${sha}')/" \
+      "$template" > PKGBUILD
+}
+
+# Rerunning a release the AUR has changes nothing; a changed PKGBUILD for it bumps pkgrel; a new version starts at 1.
+if [[ "$cur_ver" == "$PKGVER" ]]; then
+  render "$cur_rel"
+  if git diff --quiet -- PKGBUILD; then
+    echo "==> AUR already has ${PKGVER}-${cur_rel}; nothing to publish."
+    exit 0
+  fi
+  rel=$((cur_rel + 1))
+else
+  rel=1
+fi
+echo "==> AUR has ${cur_ver:-nothing}-${cur_rel}; publishing ${PKGVER}-${rel}"
+render "$rel"
 makepkg --printsrcinfo > .SRCINFO
 
 case "$VERIFY" in

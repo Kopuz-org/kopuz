@@ -1,0 +1,132 @@
+name: AUR
+
+# Pushes a release to the AUR: kopuz, kopuz-bin and kopuz-legacy for a stable tag, kopuz-nightly and kopuz-nightly-bin for a nightly.
+on:
+  # release.yml calls this once its tag's packages are on the GitHub release.
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+    secrets:
+      AUR_SSH_PRIVATE_KEY:
+        required: true
+  # Older branches such as release-0.67 have no AUR job of their own; this runs from master's copy after their release finishes.
+  workflow_run:
+    workflows: [Release packages]
+    types: [completed]
+  # Republish or backfill a tag by hand.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to publish, e.g. v0.68.0 or v0.68.0-nightly.20261112
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aur-${{ inputs.tag || github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  aur:
+    if: >-
+      ${{ github.event_name != 'workflow_run'
+      || (github.event.workflow_run.conclusion == 'success'
+      && startsWith(github.event.workflow_run.head_branch, 'v')) }}
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    env:
+      TAG: ${{ inputs.tag || github.event.workflow_run.head_branch }}
+
+    steps:
+      - name: Install tools
+        run: pacman -Syu --noconfirm --needed git openssh sudo curl
+
+      # The PKGBUILD templates and the publish script always come from master, so a fix there reaches every branch's releases.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+
+      - name: Pick the packages
+        id: plan
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$PWD"
+          git fetch --quiet --depth=1 origin "refs/tags/${TAG}:refs/tags/${TAG}"
+
+          # A tag whose release.yml calls this workflow already published itself; workflow_run only catches the rest.
+          if [[ "$GITHUB_EVENT_NAME" == workflow_run ]] &&
+            git cat-file -e "${TAG}:.github/workflows/aur.yml" 2>/dev/null; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "${TAG} publishes through its own release.yml"
+            exit 0
+          fi
+
+          version="${TAG#v}"
+          release="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          mkdir -p dist
+          curl -fsSL --retry 3 -o "dist/source.tar.gz" \
+            "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz"
+
+          # Each line: AUR package, file its checksum comes from, and whether makepkg builds it or only checks the source.
+          plan=()
+          if [[ "$TAG" == *-nightly.* ]]; then
+            deb="kopuz-nightly_${version}_amd64.deb"
+            curl -fsSL --retry 3 -o "dist/${deb}" "${release}/${deb}"
+            plan+=("kopuz-nightly-bin dist/${deb} build")
+            plan+=("kopuz-nightly dist/source.tar.gz source")
+          else
+            # Tags from release-0.67 ship Kopuz Legacy alone; the GPUI app's .deb is how a release says it has Kopuz.
+            deb="kopuz_${version}-1_amd64.deb"
+            if curl -fsSL --retry 3 -o "dist/${deb}" "${release}/${deb}"; then
+              plan+=("kopuz-bin dist/${deb} build")
+              plan+=("kopuz dist/source.tar.gz source")
+            else
+              rm -f "dist/${deb}"
+              echo "${TAG} has no ${deb}; publishing Kopuz Legacy only"
+            fi
+            # A full source build of the legacy app takes most of an hour; the checksum is what can drift.
+            plan+=("kopuz-legacy dist/source.tar.gz source")
+          fi
+
+          printf '%s\n' "${plan[@]}" > dist/plan
+          cat dist/plan
+
+      # makepkg refuses root, so the packages are rendered and pushed by an unprivileged builder.
+      - name: Publish
+        if: steps.plan.outputs.skip != 'true'
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$AUR_SSH_PRIVATE_KEY" ]]; then
+            echo "::error::The AUR_SSH_PRIVATE_KEY secret is not set"
+            exit 1
+          fi
+          useradd -m builder
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+          install -d -m700 -o builder -g builder /home/builder/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > /home/builder/.ssh/aur
+          chmod 600 /home/builder/.ssh/aur
+          chown -R builder:builder /home/builder/.ssh "$PWD"
+
+          failed=0
+          while read -r pkg file verify; do
+            echo "::group::${pkg}"
+            # One package failing still lets the others go out.
+            if ! sudo -u builder env \
+              HOME=/home/builder \
+              PKG="$pkg" VERSION="${TAG#v}" SOURCE_FILE="$PWD/$file" VERIFY="$verify" \
+              GIT_SSH_COMMAND="ssh -i /home/builder/.ssh/aur -o StrictHostKeyChecking=accept-new" \
+              bash scripts/publish-aur.sh; then
+              echo "::error::Publishing ${pkg} failed"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done < dist/plan
+          exit "$failed"

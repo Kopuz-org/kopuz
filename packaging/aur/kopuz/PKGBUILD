@@ -1,0 +1,57 @@
+# Maintainer: temidaradev <temidaradev@proton.me>
+pkgname=kopuz
+pkgver=0.68.0
+pkgrel=1
+pkgdesc="A modern music player, with the kopuzd daemon it runs on"
+arch=('x86_64')
+url="https://github.com/Kopuz-org/kopuz"
+license=('EUPL-1.2')
+depends=(
+    'ca-certificates'
+    'alsa-lib'
+    'openssl'
+    'gcc-libs'
+    'libxcb'
+    'libxkbcommon'
+    'libxkbcommon-x11'
+    'wayland'
+    'vulkan-icd-loader'
+    'fontconfig'
+    'freetype2'
+)
+# rustup, not rust: the bundled plugins build for wasm32-wasip2, which rust-toolchain.toml pins.
+makedepends=('rustup' 'pkgconf' 'cmake' 'clang')
+optdepends=(
+    'ffmpeg: converting YouTube downloads to MP3, FLAC or WAV'
+)
+options=('!lto')
+source=("kopuz-$pkgver.tar.gz::https://github.com/Kopuz-org/kopuz/archive/refs/tags/v$pkgver.tar.gz")
+# Filled in at publish time from the tag's source tarball.
+sha256sums=('SKIP')
+
+prepare() {
+    cd "kopuz-$pkgver"
+    rustup toolchain install
+    cargo fetch --locked
+}
+
+build() {
+    cd "kopuz-$pkgver"
+    export SQLX_OFFLINE=true
+    export KOPUZ_FLAVOR=stable
+    cargo build --frozen --release -p kopuz -p kopuz-kopuzd -p kopuz-ctl
+}
+
+package() {
+    cd "kopuz-$pkgver"
+    install -Dm755 -t "$pkgdir/usr/bin" target/release/{kopuz,kopuzd,kopuzctl}
+    install -Dm644 data/moe.kopuz.kopuz.desktop \
+        "$pkgdir/usr/share/applications/moe.kopuz.kopuz.desktop"
+    install -Dm644 data/moe.kopuz.kopuz.metainfo.xml \
+        "$pkgdir/usr/share/metainfo/moe.kopuz.kopuz.metainfo.xml"
+    install -Dm644 apps/legacy/kopuz/assets/logo.png \
+        "$pkgdir/usr/share/icons/hicolor/256x256/apps/moe.kopuz.kopuz.png"
+    install -Dm644 packaging/systemd/kopuzd.service \
+        "$pkgdir/usr/lib/systemd/user/kopuzd.service"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

@@ -365,13 +365,20 @@ brew install --cask --no-quarantine kopuz-org/tap/kopuz
 Install from the AUR using your preferred helper:
 
 ```bash
-yay -S kopuz-bin
+yay -S kopuz
 # or
-paru -S kopuz-bin
+paru -S kopuz
 ```
 
-`kopuz-bin` is Kopuz with `kopuzd`; `kopuz-legacy` builds Kopuz Legacy from
-source.
+Every release updates these on its own:
+
+| Package             | What you get                                       |
+| ------------------- | -------------------------------------------------- |
+| `kopuz`             | Kopuz with `kopuzd`, built from the release source |
+| `kopuz-bin`         | The same, from the release's prebuilt `.deb`       |
+| `kopuz-legacy`      | Kopuz Legacy, built from source                    |
+| `kopuz-nightly`     | Kopuz Nightly, built from the latest nightly tag   |
+| `kopuz-nightly-bin` | Kopuz Nightly, from the nightly's prebuilt `.deb`  |
 
 ### Flatpak (Recommended)
 
