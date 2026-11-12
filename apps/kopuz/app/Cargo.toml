@@ -25,6 +25,8 @@ authors = ["temidaradev"]
 category = "Music"
 license-file = "../../../LICENSE"
 icons = ["../../legacy/kopuz/assets/logo.png", "../../legacy/kopuz/assets/app.ico"]
+# Where "Listen on Kopuz" links land: the website hands the Discord button to kopuz://j/.
+deep-link-protocols = [{ schemes = ["kopuz"] }]
 # The app spawns kopuzd from its own directory, so both land side by side in every format.
 binaries = [
   { path = "kopuz", main = true },

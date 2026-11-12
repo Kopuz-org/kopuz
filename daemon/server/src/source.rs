@@ -297,6 +297,11 @@ pub trait MediaSource: Send + Sync {
         None
     }
 
+    /// Its keys mean the same track on anyone's install and `fetch_track` names them, so a "Listen on Kopuz" link can carry them.
+    fn listen_links(&self) -> bool {
+        false
+    }
+
     /// For a key nothing has listed this session; `None` when the source has no such track.
     async fn fetch_track(&self, _item_id: &str) -> Result<Option<reader::Track>, SourceError> {
         Ok(None)

@@ -7,7 +7,7 @@ pub mod cover_upload;
 #[cfg(not(target_os = "android"))]
 use discord_rich_presence::{
     DiscordIpc, DiscordIpcClient,
-    activity::{self, Assets, Timestamps},
+    activity::{self, Assets, Button, Timestamps},
 };
 #[cfg(not(target_os = "android"))]
 use std::sync::{Mutex, MutexGuard};
@@ -16,6 +16,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(not(target_os = "android"))]
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(10);
+
+#[cfg(not(target_os = "android"))]
+const LISTEN_LABEL: &str = "Listen on Kopuz";
 
 #[cfg(not(target_os = "android"))]
 #[derive(Debug, Clone)]
@@ -29,6 +32,8 @@ struct StoredActivity {
     /// an empty one, so a track with no album (a YouTube video, say) carries
     /// the image alone.
     assets: Option<(String, String)>,
+    /// A "Listen on Kopuz" link for anyone watching the card.
+    listen_url: Option<String>,
 }
 
 #[cfg(not(target_os = "android"))]
@@ -50,6 +55,10 @@ impl StoredActivity {
 
         if let Some(ref name) = self.name {
             act = act.name(name);
+        }
+
+        if let Some(ref url) = self.listen_url {
+            act = act.buttons(vec![Button::new(LISTEN_LABEL, url)]);
         }
 
         if let Some((ref image, ref text)) = self.assets {
@@ -193,6 +202,7 @@ impl Presence {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn set_now_playing(
         &self,
         title: &str,
@@ -201,6 +211,7 @@ impl Presence {
         elapsed_secs: u64,
         duration_secs: u64,
         cover_url: Option<&str>,
+        listen_url: Option<&str>,
         source: Option<&str>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
@@ -220,15 +231,18 @@ impl Presence {
             name: source.map(|s| format!("Kopuz - on {s}")),
             timestamps: Some(timestamps),
             assets: cover_url.map(|url| (url.to_owned(), album.to_owned())),
+            listen_url: listen_url.map(str::to_owned),
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn set_paused(
         &self,
         title: &str,
         artist: &str,
         album: &str,
         cover_url: Option<&str>,
+        listen_url: Option<&str>,
         source: Option<&str>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.set_and_deliver(StoredActivity {
@@ -237,6 +251,7 @@ impl Presence {
             name: source.map(|s| format!("Kopuz - on {s}")),
             timestamps: None,
             assets: cover_url.map(|url| (url.to_owned(), album.to_owned())),
+            listen_url: listen_url.map(str::to_owned),
         })
     }
 
@@ -276,6 +291,7 @@ impl Presence {
 
     pub fn tick(&self) {}
 
+    #[allow(clippy::too_many_arguments)]
     pub fn set_now_playing(
         &self,
         _title: &str,
@@ -284,17 +300,20 @@ impl Presence {
         _elapsed_secs: u64,
         _duration_secs: u64,
         _cover_url: Option<&str>,
+        _listen_url: Option<&str>,
         _source: Option<&str>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn set_paused(
         &self,
         _title: &str,
         _artist: &str,
         _album: &str,
         _cover_url: Option<&str>,
+        _listen_url: Option<&str>,
         _source: Option<&str>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
@@ -354,7 +373,7 @@ mod reconnect_tests {
         assert!(presence.lock().client.is_none());
         assert!(
             presence
-                .set_now_playing("First Song", "Artist", "Album", 30, 180, None, None)
+                .set_now_playing("First Song", "Artist", "Album", 30, 180, None, None, None)
                 .is_err()
         );
         assert!(presence.lock().last_activity.is_some());
@@ -374,12 +393,22 @@ mod reconnect_tests {
 
         let server = serve_one(listener, tx);
         presence
-            .set_now_playing("Second Song", "Artist", "Album", 0, 200, None, None)
+            .set_now_playing(
+                "Second Song",
+                "Artist",
+                "Album",
+                0,
+                200,
+                None,
+                Some("https://kopuz.moe/j#1/ytmusic/p0/abc"),
+                None,
+            )
             .expect("update resent over new connection");
         let payload = rx
             .recv_timeout(Duration::from_secs(5))
             .expect("activity resent after reconnect");
         assert!(payload.contains("Second Song"));
+        assert!(payload.contains("Listen on Kopuz"));
         server.join().expect("server thread");
 
         let _ = std::fs::remove_dir_all(&dir);

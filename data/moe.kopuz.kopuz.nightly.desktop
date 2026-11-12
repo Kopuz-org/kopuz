@@ -1,10 +1,11 @@
 [Desktop Entry]
 Name=Kopuz Nightly
 Comment=A modern music player, built from the latest development code
-Exec=kopuz-nightly
+Exec=kopuz-nightly %u
 Icon=moe.kopuz.kopuz.nightly
 Terminal=false
 Type=Application
 Categories=AudioVideo;Audio;Player;Music;
 Keywords=Music;Player;
+MimeType=x-scheme-handler/kopuz;
 StartupWMClass=kopuz-nightly

@@ -476,6 +476,7 @@ pub fn config_to_proto(value: &config::Settings) -> Config {
         discord_presence: integrations.discord_presence,
         discord_presence_source: integrations.discord_presence_source,
         discord_presence_upload_cover: integrations.discord_presence_upload_cover,
+        discord_presence_listen_button: integrations.discord_presence_listen_button,
         spotify_browser: spotify.spotify_browser.clone(),
         spotify_prefer_active_device: spotify.spotify_prefer_active_device,
         downloader_output_dir: downloads.downloader_output_dir.clone(),
@@ -554,6 +555,7 @@ pub fn config_from_proto(value: &Config) -> config::Settings {
             discord_presence: value.discord_presence,
             discord_presence_source: value.discord_presence_source,
             discord_presence_upload_cover: value.discord_presence_upload_cover,
+            discord_presence_listen_button: value.discord_presence_listen_button,
             radio_registries: value
                 .radio_registries
                 .iter()

@@ -4,6 +4,7 @@
 mod args;
 mod backdrop;
 mod handover;
+mod instance;
 #[cfg(target_os = "macos")]
 mod menus;
 mod router;
@@ -104,8 +105,22 @@ fn main() -> anyhow::Result<()> {
 
     let (address, start_own) = daemon_address()?;
     let args = args::Args::parse(std::env::args_os().skip(1));
+    let _instance = match (instance::claim(&address), &args.link) {
+        (Err(instance::Elsewhere::Running), Some(link)) => {
+            instance::hand_off(&address, link.clone());
+            return Ok(());
+        }
+        (claimed, _) => claimed.ok(),
+    };
 
     let application = gpui_kit::application().with_assets(gpui_kit::assets::AllAssets);
+    // macOS hands a link to the running app here rather than on a command line.
+    let (opened_tx, mut opened) = futures::channel::mpsc::unbounded::<String>();
+    application.on_open_urls(move |urls| {
+        for url in urls.into_iter().filter(|url| args::is_link(url)) {
+            let _ = opened_tx.unbounded_send(url);
+        }
+    });
     // A window closed to the tray, or with the red button, comes back from the Dock icon.
     application.on_reopen(|cx| {
         if main_window(cx).is_none() && cx.has_global::<Booted>() {
@@ -143,6 +158,15 @@ fn main() -> anyhow::Result<()> {
             store::SourcesModel::global(cx)
                 .update(cx, |sources, cx| sources.offline_on_connect(cx));
         }
+        if let Some(link) = args.link {
+            instance::open(link, cx);
+        }
+        cx.spawn(async move |cx| {
+            while let Some(url) = futures::StreamExt::next(&mut opened).await {
+                cx.update(|cx| instance::open(url, cx));
+            }
+        })
+        .detach();
         metadata_dialog::register(cx);
         settings_sources::register(cx);
         settings_interface::init(cx);

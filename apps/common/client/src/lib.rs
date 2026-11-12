@@ -267,6 +267,14 @@ impl api::PlayerApi for GrpcApi {
         Ok(())
     }
 
+    async fn open_listen_link(&self, link: String) -> Result<(), ApiError> {
+        self.client()
+            .open_listen_link(Request::new(proto::OpenListenLinkRequest { link }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
     async fn video(&self, request: api::VideoRequest) -> Result<api::VideoChunk, ApiError> {
         let chunk = self
             .client()

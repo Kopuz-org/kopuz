@@ -225,6 +225,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     );
     crate::integrations::spawn_discord_presence(
         &session,
+        database.clone(),
         session.settings_watch(),
         session.sources_watch(),
         presence_pause.watch(),

@@ -9,6 +9,7 @@ category = "Music"
 description = "A modern, lightweight music player built with Rust and GPUI, from the latest development code."
 license-file = "../../LICENSE"
 icons = ["logo.png", "app.ico"]
+deep-link-protocols = [{ schemes = ["kopuz"] }]
 binaries-dir = "../../target/release"
 binaries = [
   { path = "kopuz-nightly", main = true },

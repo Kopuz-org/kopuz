@@ -1038,6 +1038,18 @@ impl Kopuz for KopuzGrpc {
         }))
     }
 
+    async fn open_listen_link(
+        &self,
+        request: Request<proto::OpenListenLinkRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        self.0
+            .api
+            .open_listen_link(request.into_inner().link)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
     async fn select_external_device(
         &self,
         request: Request<proto::SelectExternalDeviceRequest>,
