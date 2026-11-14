@@ -19,7 +19,8 @@ pub use common::controls::{
 };
 pub use common::pull_refresh::PullToRefresh;
 pub use common::{
-    back_stack, catalog_actions, constants, gestures, haptics, shared, virtual_scroll,
+    back_stack, catalog_actions, constants, folder_dialog, gestures, haptics, shared,
+    virtual_scroll,
 };
 pub use layout::{
     bottombar, download_overlay, form_factor, fullscreen, header, normal, rightbar, showcase,

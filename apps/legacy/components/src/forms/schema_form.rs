@@ -306,9 +306,7 @@ fn Field(
     }
 }
 
-/// Pick a directory with whatever the platform offers. Android has no folder
-/// dialog, so there the path is typed.
-#[cfg(not(target_os = "android"))]
+/// Pick a directory with the platform's own folder picker.
 #[component]
 fn DirectoryButton(on_pick: EventHandler<String>) -> Element {
     rsx! {
@@ -316,19 +314,12 @@ fn DirectoryButton(on_pick: EventHandler<String>) -> Element {
             class: "app-button-tonal bg-white/10 hover:bg-white/20 px-3 py-2 rounded-xl text-sm text-white transition-colors shrink-0",
             onclick: move |_| {
                 spawn(async move {
-                    if let Some(handle) = rfd::AsyncFileDialog::new().pick_folder().await {
-                        on_pick.call(handle.path().display().to_string());
+                    if let Some(path) = crate::folder_dialog::pick_folder().await {
+                        on_pick.call(path.display().to_string());
                     }
                 });
             },
             i { class: "fa-solid fa-folder-open text-sm" }
         }
     }
-}
-
-#[cfg(target_os = "android")]
-#[component]
-fn DirectoryButton(on_pick: EventHandler<String>) -> Element {
-    let _ = on_pick;
-    rsx! {}
 }

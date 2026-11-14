@@ -71,8 +71,11 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
         44.0
     };
 
+    let lead_height = use_signal(|| 0.0_f64);
+    let hero_scrolls = crate::showcase::use_hero_scrolls(!props.tracks.is_empty());
+
     let scroll_info = crate::virtual_scroll::use_virtual_scroll(
-        *scroll_stat.read(),
+        crate::showcase::list_scroll(*scroll_stat.read(), *lead_height.read(), hero_scrolls),
         *container_height.read(),
         sorted_track_pairs.len(),
         ITEM_HEIGHT,
@@ -103,8 +106,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
         ""
     };
 
-    rsx! {
-        div { class: "w-full max-w-[1600px] mx-auto select-none flex-1 min-h-0 flex flex-col",
+    let hero = rsx! {
             div { class: if phone { "flex flex-col items-center text-center gap-3 mb-3 px-4 pt-2 shrink-0 tablet:flex-row tablet:items-end tablet:text-start tablet:gap-6 tablet:mb-6 tablet:px-6 tablet:pt-4" } else { "flex items-end gap-6 mb-8 px-6 pt-6 shrink-0" },
                 div {
                     class: "{cover_size} rounded-xl overflow-hidden shrink-0 shadow-2xl bg-white/5 {cover_cursor}",
@@ -230,6 +232,25 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                     }
                 }
             }
+    };
+    let header = rsx! {
+        div { class: "shrink-0",
+            Header {
+                is_vaxry: true,
+                is_album: props.is_album,
+                is_selection_mode: props.is_selection_mode,
+                on_select_all: props.on_select_all,
+                all_selected: props.all_selected,
+                sort_state,
+            }
+        }
+    };
+    let (hero_top, header_top, lead) =
+        crate::showcase::place_hero(hero, header, lead_height, hero_scrolls);
+
+    rsx! {
+        div { class: "w-full max-w-[1600px] mx-auto select-none flex-1 min-h-0 flex flex-col",
+            {hero_top}
 
             if props.tracks.is_empty() {
                 div { class: "flex flex-col items-center justify-center py-16 gap-3",
@@ -244,16 +265,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                     }
                 }
             } else {
-                div { class: "shrink-0",
-                    Header {
-                        is_vaxry: true,
-                        is_album: props.is_album,
-                        is_selection_mode: props.is_selection_mode,
-                        on_select_all: props.on_select_all,
-                        all_selected: props.all_selected,
-                        sort_state,
-                    }
-                }
+                {header_top}
 
                 div { class: "flex-1 min-h-0 w-full flex flex-col overflow-hidden",
                     crate::virtual_scroll::VirtualScrollView {
@@ -265,6 +277,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                         saved_scroll: 0.0,
                         top_pad: scroll_info.top_pad,
                         bottom_pad: scroll_info.bottom_pad,
+                        lead,
                         for (display_idx, (track, idx)) in sorted_track_pairs
                             .iter()
                             .enumerate()

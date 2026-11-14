@@ -175,6 +175,54 @@ pub struct ShowcaseProps {
     pub on_move_down: EventHandler<usize>,
 }
 
+/// Whether the cover/title/buttons hero scrolls away with the tracks. On a phone
+/// it takes most of the screen, so pinning it above the list leaves room for a
+/// handful of rows; a tablet or desktop window has the height to keep it.
+pub fn use_hero_scrolls(has_tracks: bool) -> bool {
+    let form_factor = crate::form_factor::use_form_factor();
+    cfg!(target_os = "android") && !form_factor.is_tablet() && has_tracks
+}
+
+/// The list's own scroll offset once the hero above it is scrolled past, which
+/// is what the virtual window is laid out against.
+pub fn list_scroll(scroll_top: f64, lead_height: f64, hero_scrolls: bool) -> f64 {
+    if hero_scrolls {
+        (scroll_top - lead_height).max(0.0)
+    } else {
+        scroll_top
+    }
+}
+
+/// Puts the hero and the column header either above the list (`.0`, `.1`) or,
+/// when the hero scrolls, inside it as one measured lead block (`.2`) whose
+/// height lands in `lead_height`.
+pub fn place_hero(
+    hero: Element,
+    header: Element,
+    mut lead_height: Signal<f64>,
+    hero_scrolls: bool,
+) -> (Option<Element>, Option<Element>, Option<Element>) {
+    if !hero_scrolls {
+        return (Some(hero), Some(header), None);
+    }
+    let lead = rsx! {
+        // A flex column so the hero's bottom margin counts toward the measured height.
+        div {
+            class: "flex flex-col",
+            onresize: move |event| {
+                if let Ok(size) = event.get_border_box_size()
+                    && (size.height - *lead_height.peek()).abs() > 0.5
+                {
+                    lead_height.set(size.height);
+                }
+            },
+            {hero}
+            {header}
+        }
+    };
+    (None, None, Some(lead))
+}
+
 #[component]
 pub fn Showcase(props: ShowcaseProps) -> Element {
     let settings = use_context::<Signal<Settings>>();
