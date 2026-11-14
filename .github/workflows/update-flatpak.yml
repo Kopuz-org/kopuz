@@ -11,6 +11,8 @@ permissions:
 
 jobs:
   update:
+    # The Flatpak follows releases; a beta is a pre-release it never takes.
+    if: ${{ !contains(github.ref_name, '-beta.') }}
     runs-on: ubuntu-latest
 
     steps:
