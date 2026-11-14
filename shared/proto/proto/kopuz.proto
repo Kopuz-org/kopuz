@@ -2190,10 +2190,8 @@ message PluginInfo {
   optional PluginUpdate update = 12;
   // From a Flatpak extension or a system package, which removes it.
   bool system = 13;
-  // Reviewed by the kopuz maintainers and marked so in the marketplace.
-  bool verified = 14;
-  // Reads the folders picked for each of its sources.
-  bool reads_folders = 15;
+  // Reads the files in the folders picked for each of its sources.
+  bool reads_folders = 14;
 }
 
 message PluginCatalog {

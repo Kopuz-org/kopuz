@@ -28,8 +28,8 @@ pub struct Permissions {
     /// matches `example.com`.
     #[serde(default)]
     pub network: Vec<String>,
-    /// The folders the person picked for a source, read-only. Only a plugin
-    /// kopuz ships, or one the marketplace lists as verified, is loaded with it.
+    /// The folders the person picked for a source, read-only. The Plugins page
+    /// warns before such a plugin is installed.
     #[serde(default)]
     pub folders: FolderAccess,
 }

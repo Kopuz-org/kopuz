@@ -1,14 +1,12 @@
-//! A plugin that reads folders, installed from a `file://` marketplace: only a
-//! listing marked verified installs, the build is recorded as verified, its
-//! service asks for folders instead of an address, and removing it forgets
-//! the record.
+//! A plugin that reads folders, installed from a `file://` marketplace: its
+//! listing has to say so, the Plugins page is told, and its service asks for
+//! folders instead of an address.
 //!
 //! The component is the official Subsonic one under a manifest asking for
 //! folders; loading is what is tested, not what it reads.
 
 use std::path::{Path, PathBuf};
 
-use api::ErrorCode;
 use api::schema::FieldKind;
 use daemon::PluginService;
 use sha2::{Digest, Sha256};
@@ -37,7 +35,7 @@ name = "Songs"
 capabilities = { sync = true }
 "#;
 
-fn marketplace(dir: &Path, component: &[u8], folders: &str, verified: bool) -> String {
+fn marketplace(dir: &Path, component: &[u8], folders: &str) -> String {
     std::fs::create_dir_all(dir).unwrap();
     let manifest_path = dir.join("songs.toml");
     let component_path = dir.join("songs.wasm");
@@ -54,7 +52,6 @@ fn marketplace(dir: &Path, component: &[u8], folders: &str, verified: bool) -> S
             "services": ["songs-service"],
             "network": [],
             "folders": folders,
-            "verified": verified,
             "manifest": { "url": format!("file://{}", manifest_path.display()), "sha256": sha(MANIFEST.as_bytes()) },
             "component": { "url": format!("file://{}", component_path.display()), "sha256": sha(component) },
         }],
@@ -74,64 +71,34 @@ fn subsonic_component() -> &'static [u8] {
 }
 
 fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("kopuz-verified-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("kopuz-folders-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     dir
 }
 
 /// One test, because the plugin directory is per process.
 #[tokio::test(flavor = "multi_thread")]
-async fn only_a_verified_listing_installs_a_plugin_that_reads_folders() {
+async fn a_plugin_that_reads_folders_says_so_and_its_sources_take_folders() {
     let plugins = temp("installed");
     server::plugins::init(Some(plugins.clone()), Vec::new()).await;
 
-    // Listed without the folders it asks for, it is refused.
-    let quiet = PluginService::new(marketplace(
-        &temp("quiet"),
-        subsonic_component(),
-        "none",
-        true,
-    ));
+    // Listed without the folders it asks for, it is refused, so the warning
+    // shown before install is never missing.
+    let quiet = PluginService::new(marketplace(&temp("quiet"), subsonic_component(), "none"));
     assert!(quiet.install("songs", &[]).await.is_err());
+    assert!(!plugins.join("songs").exists());
 
-    // Listed honestly but not verified, it is refused too.
-    let unverified = PluginService::new(marketplace(
-        &temp("unverified"),
-        subsonic_component(),
-        "read",
-        false,
-    ));
-    let listed = unverified.catalog().await;
+    let market = PluginService::new(marketplace(&temp("market"), subsonic_component(), "read"));
+    let listed = market.catalog().await;
     let shown = listed
         .plugins
         .iter()
         .find(|plugin| plugin.id == "songs")
         .expect("listed");
-    assert!(shown.reads_folders && !shown.verified);
-    let refused = unverified
-        .install("songs", &[])
-        .await
-        .expect_err("not verified");
-    assert_eq!(refused.code, ErrorCode::InvalidInput);
-    assert!(!plugins.join("songs").exists());
+    assert!(shown.reads_folders, "the Plugins page warns before install");
 
-    let verified = PluginService::new(marketplace(
-        &temp("verified"),
-        subsonic_component(),
-        "read",
-        true,
-    ));
-    let installed = verified.install("songs", &[]).await.expect("installed");
-    assert!(installed.verified);
+    let installed = market.install("songs", &[]).await.expect("installed");
     assert!(installed.reads_folders);
-    let record = plugin_host::market::read_verified(&plugins);
-    assert_eq!(
-        record.get("songs"),
-        Some(&plugin_host::market::VerifiedBuild::of(
-            MANIFEST,
-            subsonic_component()
-        ))
-    );
 
     // Its sources are folders, not an address.
     let offered = daemon::services::all();
@@ -142,27 +109,7 @@ async fn only_a_verified_listing_installs_a_plugin_that_reads_folders() {
     assert_eq!(service.fields.len(), 1);
     assert!(matches!(service.fields[0].kind, FieldKind::Directories));
 
-    // Edited in place, the files are no longer the verified build, so a
-    // rescan keeps the build that was loaded.
-    std::fs::write(
-        plugins.join("songs").join(plugin_host::MANIFEST_FILE),
-        MANIFEST.replace("Songs a game", "Anything a game"),
-    )
-    .unwrap();
-    server::plugins::rescan().await;
-    let loaded = server::plugins::registry()
-        .plugins()
-        .iter()
-        .find(|plugin| plugin.id() == "songs")
-        .map(|plugin| plugin.manifest().description.clone());
-    assert_eq!(
-        loaded.as_deref(),
-        Some("Songs a game keeps on this computer.")
-    );
-
-    verified.uninstall("songs").await.expect("removed");
+    market.uninstall("songs").await.expect("removed");
     assert!(!plugins.join("songs").exists());
-    assert!(!plugin_host::market::read_verified(&plugins).contains_key("songs"));
-
     std::fs::remove_dir_all(&plugins).ok();
 }

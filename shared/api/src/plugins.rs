@@ -29,10 +29,7 @@ pub struct PluginInfo {
     /// `$server` is the configured server's host.
     pub network: Vec<String>,
     pub update: Option<PluginUpdate>,
-    /// Reviewed by the kopuz maintainers, who mark it so in the marketplace.
-    pub verified: bool,
-    /// Reads the folders picked for each of its sources, which only a
-    /// verified plugin may.
+    /// Reads the files in the folders picked for each of its sources.
     pub reads_folders: bool,
 }
 

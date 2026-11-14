@@ -17,7 +17,6 @@ pub fn plugin_info_to_proto(value: &api::PluginInfo) -> PluginInfo {
         network: value.network.clone(),
         sandboxed: value.sandboxed,
         system: value.system,
-        verified: value.verified,
         reads_folders: value.reads_folders,
         update: value.update.as_ref().map(|update| PluginUpdate {
             version: update.version.clone(),
@@ -45,7 +44,6 @@ pub fn plugin_info_from_proto(value: &PluginInfo) -> api::PluginInfo {
         network: value.network.clone(),
         sandboxed: value.sandboxed,
         system: value.system,
-        verified: value.verified,
         reads_folders: value.reads_folders,
         update: value.update.as_ref().map(|update| api::PluginUpdate {
             version: update.version.clone(),
@@ -100,7 +98,6 @@ mod tests {
                     network: vec!["*.bandcamp.com".into()],
                     update: None,
                     system: false,
-                    verified: true,
                     reads_folders: true,
                 },
                 api::PluginInfo {

@@ -202,9 +202,6 @@ impl Plugins {
                             .gap_2()
                             .child(ui::label(SharedString::from(plugin.name.clone())))
                             .child(Badge::new(origin).tone(BadgeTone::Neutral))
-                            .when(plugin.verified, |line| {
-                                line.child(Badge::new(t("plugin_verified")).tone(BadgeTone::Accent))
-                            })
                             .when(plugin.system, |line| {
                                 line.child(Badge::new(t("plugin_system")).tone(BadgeTone::Neutral))
                             })
@@ -219,7 +216,14 @@ impl Plugins {
                     })
                     .children(reaches.map(|reaches| ui::hint(reaches, cx)))
                     .when(plugin.reads_folders, |text| {
-                        text.child(ui::hint(t("plugin_reads_folders"), cx))
+                        text.child(
+                            h_flex()
+                                .gap_1()
+                                .text_xs()
+                                .text_color(cx.theme().warning)
+                                .child(icons::icon(icons::WARNING).size_3())
+                                .child(t("plugin_reads_folders")),
+                        )
                     })
                     .children(update_reaches.map(|warning| {
                         h_flex()
