@@ -11,8 +11,12 @@ pub const USER_AGENT: &str = concat!(
     " (https://github.com/temidaradev/kopuz)"
 );
 
-pub fn youtube_cover_art_url(track: &Track) -> Option<String> {
-    if track.id.service() != Some(config::MusicService::YtMusic) {
+pub fn source_cover_art_url(track: &Track) -> Option<String> {
+    let service = track.id.service()?;
+    if !matches!(
+        service,
+        config::MusicService::YtMusic | config::MusicService::SoundCloud
+    ) {
         return None;
     }
 
@@ -20,9 +24,10 @@ pub fn youtube_cover_art_url(track: &Track) -> Option<String> {
         return None;
     };
 
-    if reqwest::Url::parse(&url)
-        .ok()
-        .is_some_and(|parsed| parsed.host_str() == Some("i.ytimg.com"))
+    if service == config::MusicService::YtMusic
+        && reqwest::Url::parse(&url)
+            .ok()
+            .is_some_and(|parsed| parsed.host_str() == Some("i.ytimg.com"))
     {
         let video_id = track.id.key();
         if !video_id.is_empty() {
@@ -319,7 +324,7 @@ mod tests {
     fn youtube_tracks_prefer_their_source_artwork() {
         let url = "https://lh3.googleusercontent.com/youtube-cover=w800-h800";
         assert_eq!(
-            youtube_cover_art_url(&track(MusicService::YtMusic, Some(url))).as_deref(),
+            source_cover_art_url(&track(MusicService::YtMusic, Some(url))).as_deref(),
             Some(url)
         );
     }
@@ -328,16 +333,32 @@ mod tests {
     fn youtube_video_thumbnails_use_the_stable_public_url() {
         let signed = "https://i.ytimg.com/vi/video-id/hqdefault.jpg?sqp=temporary&rs=signature";
         assert_eq!(
-            youtube_cover_art_url(&track(MusicService::YtMusic, Some(signed))).as_deref(),
+            source_cover_art_url(&track(MusicService::YtMusic, Some(signed))).as_deref(),
             Some("https://i.ytimg.com/vi/video-id/hqdefault.jpg")
         );
     }
 
     #[test]
-    fn non_youtube_tracks_keep_the_existing_lookup_path() {
+    fn soundcloud_tracks_prefer_their_source_artwork() {
+        let url = "https://i1.sndcdn.com/artworks-m95GEj534cwraokF-7baVyw-t500x500.jpg";
+        assert_eq!(
+            source_cover_art_url(&track(MusicService::SoundCloud, Some(url))).as_deref(),
+            Some(url)
+        );
+    }
+
+    #[test]
+    fn source_tracks_without_artwork_keep_the_existing_lookup_path() {
+        for service in [MusicService::YtMusic, MusicService::SoundCloud] {
+            assert_eq!(source_cover_art_url(&track(service, None)), None);
+        }
+    }
+
+    #[test]
+    fn other_sources_keep_the_existing_lookup_path() {
         let url = "https://example.com/source-cover.jpg";
         assert_eq!(
-            youtube_cover_art_url(&track(MusicService::SoundCloud, Some(url))),
+            source_cover_art_url(&track(MusicService::Subsonic, Some(url))),
             None
         );
     }
