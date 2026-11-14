@@ -559,9 +559,15 @@ impl SourceService {
                     .as_ref()
                     .ok_or_else(|| ApiError::not_found("no such server"))?;
                 let view = crate::services::ServerView::from(server);
+                let reads_folders = crate::services::server_reads_folders(
+                    server.service,
+                    server.plugin_service.as_deref(),
+                );
                 info.name = server.name.clone();
-                info.needs_network = server.service != config::MusicService::AudioCd;
+                info.needs_network =
+                    server.service != config::MusicService::AudioCd && !reads_folders;
                 info.works_offline = server.service == config::MusicService::AudioCd
+                    || reads_folders
                     || network::is_local(&key, Some(&server.url));
                 info.service =
                     crate::services::server_ref(server.service, server.plugin_service.as_deref());
@@ -591,7 +597,7 @@ impl SourceService {
                         server.user_id.as_deref().unwrap_or_default(),
                     ));
                 }
-                if info.capabilities.browse_folders {
+                if info.capabilities.browse_folders || reads_folders {
                     info.settings.push(crate::services::directories_field(
                         &resolved.folders_for(server_id),
                     ));
@@ -915,6 +921,10 @@ impl SourceService {
         let mut saved = config::SavedServer::new(String::new(), String::new(), service);
         saved.id = id.clone();
         crate::services::apply(service, &draft, &mut saved);
+        // A plugin reading folders keeps them as the source's library roots.
+        let folders = (service == config::MusicService::Plugin
+            && crate::services::plugin_reads_folders(&draft.service))
+        .then(|| crate::services::folder_paths(&draft.values));
         let secret = api::schema::value_of(&draft.secrets, crate::services::TOKEN)
             .map(str::trim)
             .filter(|secret| !secret.is_empty())
@@ -946,6 +956,9 @@ impl SourceService {
                     existing.account = account;
                 }
                 None => sources.servers.push(saved.clone()),
+            }
+            if let Some(folders) = folders {
+                sources.set_folders_for(&saved.id, folders);
             }
             if sources.active.server_id() == Some(saved.id.as_str())
                 && let Some(server) = sources.server.as_mut()
@@ -1699,7 +1712,12 @@ impl SourceService {
             crate::services::sign_in(&crate::services::ServerView::from(&server), false)
                 == api::SignInKind::None;
         let usable = server.access_token.is_some() || needs_none;
-        usable && !network::is_local(&source, Some(&server.url))
+        usable
+            && !crate::services::server_reads_folders(
+                server.service,
+                server.plugin_service.as_deref(),
+            )
+            && !network::is_local(&source, Some(&server.url))
     }
 
     /// One spaced, shared connectivity check and what follows from it; `fresh` skips the spacing, as a scheduled recheck does.

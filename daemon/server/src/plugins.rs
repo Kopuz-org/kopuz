@@ -315,6 +315,8 @@ pub fn official_ids() -> Vec<String> {
 
 #[derive(Debug, Clone)]
 pub struct OwnService {
+    /// Its plugin reads the folders picked for each source.
+    pub reads_folders: bool,
     pub service: plugin_host::manifest::Service,
     pub origin: plugin_host::Origin,
 }
@@ -338,6 +340,7 @@ pub fn own_services() -> Vec<OwnService> {
                         .is_some_and(|serving| Arc::ptr_eq(serving, plugin))
                 })
                 .map(|service| OwnService {
+                    reads_folders: plugin.manifest().permissions.reads_folders(),
                     service: service.clone(),
                     origin: plugin.origin(),
                 })
@@ -361,15 +364,43 @@ pub struct Reach {
     trusted: bool,
     permissions: plugin_host::manifest::Permissions,
     server_host: Option<String>,
+    /// The source's folders as the host names them, for a plugin that may
+    /// read them, and where each really is.
+    folders: Vec<String>,
+    roots: Vec<PathBuf>,
 }
 
 impl Reach {
-    pub(crate) fn new(plugin: &plugin_host::Plugin, server_url: &str) -> Self {
+    pub(crate) fn new(plugin: &plugin_host::Plugin, server_url: &str, folders: &[String]) -> Self {
         Self::from_parts(
             plugin.origin() == plugin_host::Origin::Bundled,
             plugin.manifest().permissions.clone(),
             server_url,
         )
+        .with_folders(folders)
+    }
+
+    /// Lets a plugin whose manifest reads folders name files in `folders`.
+    pub fn with_folders(mut self, folders: &[String]) -> Self {
+        if self.permissions.reads_folders() {
+            self.folders = folders.to_vec();
+            self.roots = folders
+                .iter()
+                .filter_map(|folder| std::fs::canonicalize(folder).ok())
+                .collect();
+        }
+        self
+    }
+
+    /// The file `path` names, as the plugin sees it, if it really is in one
+    /// of the source's folders once links are resolved.
+    pub fn local_file(&self, path: &str) -> Option<PathBuf> {
+        let path = plugin_host::folders::host_path(path, &self.folders)?;
+        let real = std::fs::canonicalize(path).ok()?;
+        self.roots
+            .iter()
+            .any(|root| real.starts_with(root))
+            .then_some(real)
     }
 
     pub fn from_parts(
@@ -384,6 +415,8 @@ impl Reach {
                 url.host_str()
                     .map(|host| host.trim_end_matches('.').to_ascii_lowercase())
             }),
+            folders: Vec::new(),
+            roots: Vec::new(),
         }
     }
 
@@ -393,13 +426,19 @@ impl Reach {
         let plugin = registry
             .for_service(server.service_id())
             .filter(|plugin| !plugin.is_native())?;
-        let reach = Self::new(plugin, &server.url);
+        // Only a picture's URL comes through here; files were checked as the
+        // plugin named them.
+        let reach = Self::new(plugin, &server.url, &[]);
         (!reach.trusted).then_some(reach)
     }
 
-    /// `raw` if the host may follow it for this plugin, else nothing.
+    /// `raw` if the host may follow it for this plugin, else nothing. A file
+    /// in the source's folders comes back as the host's path to it.
     pub(crate) fn cover(&self, raw: Option<String>) -> Option<String> {
         let raw = raw?;
+        if let Some(file) = self.local_file(&raw) {
+            return Some(file.to_string_lossy().into_owned());
+        }
         let keep = match reader::CoverRef::parse(&raw) {
             reader::CoverRef::Local(_) => false,
             reader::CoverRef::EmbeddedUrl(url) => self.allows(&url),
@@ -510,6 +549,7 @@ mod tests {
             false,
             plugin_host::manifest::Permissions {
                 network: vec!["$server".into()],
+                ..Default::default()
             },
             "https://Music.Home.test./navidrome",
         );

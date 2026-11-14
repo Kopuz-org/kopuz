@@ -28,6 +28,18 @@ pub struct Permissions {
     /// matches `example.com`.
     #[serde(default)]
     pub network: Vec<String>,
+    /// The folders the person picked for a source, read-only. Only a plugin
+    /// kopuz ships, or one the marketplace lists as verified, is loaded with it.
+    #[serde(default)]
+    pub folders: FolderAccess,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum FolderAccess {
+    #[default]
+    None,
+    Read,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -197,6 +209,10 @@ fn address_literal(host: &str) -> Option<String> {
 }
 
 impl Permissions {
+    pub fn reads_folders(&self) -> bool {
+        self.folders == FolderAccess::Read
+    }
+
     pub fn allows(&self, host: &str, server_host: Option<&str>) -> bool {
         let host = host.trim_end_matches('.').to_ascii_lowercase();
         self.network.iter().any(|pattern| {
@@ -250,6 +266,22 @@ mod tests {
         assert_eq!(custom.capabilities, Capabilities::default());
         assert_eq!(custom.sign_in, SignIn::Password);
         assert_eq!(subsonic.sign_in, SignIn::None);
+        assert!(!manifest.permissions.reads_folders());
+    }
+
+    #[test]
+    fn folder_access_is_read_or_nothing() {
+        let reading = SUBSONIC.replace(
+            "network = [\"$server\"]",
+            "network = []\nfolders = \"read\"",
+        );
+        let manifest = Manifest::parse(&reading).expect("valid manifest");
+        assert!(manifest.permissions.reads_folders());
+        let writing = SUBSONIC.replace(
+            "network = [\"$server\"]",
+            "network = []\nfolders = \"write\"",
+        );
+        assert!(Manifest::parse(&writing).is_err());
     }
 
     #[test]
@@ -283,6 +315,7 @@ mod tests {
                 "*.sndcdn.com".into(),
                 "api.example.com".into(),
             ],
+            ..Permissions::default()
         };
         assert!(permissions.allows("music.home.test", Some("music.home.test")));
         assert!(!permissions.allows("music.home.test", None));

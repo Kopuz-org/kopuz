@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use wasmtime::component::ResourceTable;
 use wasmtime::{StoreLimits, StoreLimitsBuilder};
-use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
+use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxView, WasiView};
 
 use crate::bindings::kopuz::plugin::{http, log};
 use crate::manifest::Permissions;
@@ -37,11 +37,22 @@ impl State {
         plugin_id: Arc<str>,
         permissions: Arc<Permissions>,
         server_url: &str,
+        folders: &[String],
     ) -> Self {
         let server_host = host_of(server_url);
         let client = client_for(&permissions, server_host.clone());
-        // Linked so `std` runs, with no files, sockets or environment.
-        let wasi = WasiCtx::builder().build();
+        // Linked so `std` runs, with no sockets or environment, and no files
+        // beyond the source's folders for a plugin allowed to read them.
+        let mut wasi = WasiCtx::builder();
+        if permissions.reads_folders() {
+            for folder in folders {
+                let guest = crate::folders::guest_path(folder);
+                if let Err(error) = wasi.preopened_dir(folder, &guest, FsPerms::ReadOnly) {
+                    tracing::warn!(plugin = %plugin_id, %folder, error = %format!("{error:#}"), "a source folder could not be opened for the plugin");
+                }
+            }
+        }
+        let wasi = wasi.build();
         Self {
             wasi,
             table: ResourceTable::new(),

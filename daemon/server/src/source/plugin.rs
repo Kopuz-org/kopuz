@@ -26,6 +26,8 @@ pub(super) struct PluginSource {
     session: Arc<Session>,
     slug: String,
     server_url: String,
+    /// The source's folders, which a plugin allowed to read them names files in.
+    folders: Vec<String>,
 }
 
 impl PluginSource {
@@ -37,6 +39,7 @@ impl PluginSource {
     ) -> Option<Self> {
         let slug = connection.service.clone();
         let server_url = connection.url.clone();
+        let folders = connection.folders.clone();
         let session = crate::plugins::session(connection)?;
         session.plugin().manifest().service(&slug)?;
         Some(Self {
@@ -46,11 +49,12 @@ impl PluginSource {
             session,
             slug,
             server_url,
+            folders,
         })
     }
 
     fn artwork(&self) -> crate::plugins::Reach {
-        crate::plugins::Reach::new(&self.session.plugin(), &self.server_url)
+        crate::plugins::Reach::new(&self.session.plugin(), &self.server_url, &self.folders)
     }
 
     fn track(&self, mut track: wit::Track) -> reader::Track {
@@ -395,6 +399,30 @@ impl MediaSource for PluginSource {
         })
     }
 
+    /// A plugin that reads the source's folders streams a file in them, which
+    /// is opened here rather than fetched.
+    async fn open_stream(
+        &self,
+        item_id: &str,
+        _progress: Option<crate::stream::stream_buffer::BufferProgressCallback>,
+    ) -> Result<Option<Box<dyn symphonia::core::io::MediaSource>>, SourceError> {
+        if !self.session.plugin().manifest().permissions.reads_folders() {
+            return Ok(None);
+        }
+        let stream = answer(
+            self.session
+                .resolve_stream(item_id, wit::StreamQuality::High)
+                .await,
+        )?;
+        let Some(path) = self.artwork().local_file(&stream.url) else {
+            return Ok(None);
+        };
+        let file = std::fs::File::open(&path).map_err(|error| {
+            SourceError::Backend(format!("could not open {}: {error}", path.display()))
+        })?;
+        Ok(Some(Box::new(file)))
+    }
+
     async fn download_track(
         &self,
         item_id: &str,
@@ -705,6 +733,7 @@ mod tests {
             false,
             manifest::Permissions {
                 network: vec!["archive.org".into(), "$server".into()],
+                ..Default::default()
             },
             "https://music.example",
         )
@@ -733,6 +762,51 @@ mod tests {
         ] {
             assert_eq!(kept(refused), None, "{refused}");
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_plugin_reading_folders_names_only_files_in_them() {
+        let base = std::env::temp_dir().join(format!("kopuz-reach-folders-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let library = base.join("osu");
+        std::fs::create_dir_all(library.join("files")).unwrap();
+        std::fs::write(library.join("files").join("bg"), b"picture").unwrap();
+        std::fs::write(base.join("secret"), b"key").unwrap();
+        std::os::unix::fs::symlink(base.join("secret"), library.join("leak")).unwrap();
+        let folders = [library.to_string_lossy().into_owned()];
+        let inside = library.join("files").join("bg");
+        let inside = inside.to_string_lossy();
+
+        let reading = crate::plugins::Reach::from_parts(
+            false,
+            manifest::Permissions {
+                folders: manifest::FolderAccess::Read,
+                ..Default::default()
+            },
+            "",
+        )
+        .with_folders(&folders);
+        let real = std::fs::canonicalize(library.join("files").join("bg")).unwrap();
+        assert_eq!(
+            reading.cover(Some(inside.to_string())),
+            Some(real.to_string_lossy().into_owned())
+        );
+        assert_eq!(reading.local_file(&inside), Some(real));
+        for refused in [
+            base.join("secret").to_string_lossy().into_owned(),
+            library.join("leak").to_string_lossy().into_owned(),
+            format!("{}/../secret", library.display()),
+            library.join("missing").to_string_lossy().into_owned(),
+        ] {
+            assert_eq!(reading.local_file(&refused), None, "{refused}");
+            assert_eq!(reading.cover(Some(refused.clone())), None, "{refused}");
+        }
+
+        let not_allowed = community().with_folders(&folders);
+        assert_eq!(not_allowed.local_file(&inside), None);
+        assert_eq!(not_allowed.cover(Some(inside.to_string())), None);
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]

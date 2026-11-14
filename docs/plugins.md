@@ -3,7 +3,8 @@
 A plugin adds a source to Kopuz. It is a WebAssembly component built against
 the WIT package in [`daemon/plugin-host/wit/`](../daemon/plugin-host/wit), plus a `kopuz-plugin.toml` manifest that
 says what it is, which services it serves, what each of them supports and
-which hosts it may reach. The daemon runs it in a sandbox: no files, no
+which hosts it may reach. The daemon runs it in a sandbox: no files (except
+the read-only folders a [verified plugin](#reading-folders) is given), no
 sockets, no environment. Its only way out is the `http` import, and every
 request and every redirect is checked against the hosts its manifest lists.
 The database stays on the daemon's side; a plugin answers for the remote
@@ -116,6 +117,36 @@ resolves; an address listed there would reach whatever it names without that
 check, so the manifest is refused. `$server` covers the configured server,
 whatever its address.
 
+### Reading folders
+
+A plugin for music that already sits on the computer, such as a game's song
+library, can ask to read the folders the person picks for each of its sources:
+
+```toml
+[permissions]
+folders = "read"
+```
+
+Only a plugin the Kopuz maintainers reviewed may do this. They mark its
+listing `"verified": true` in the marketplace index by hand, and a listing
+asking for folders without that mark cannot be installed. Installing a
+verified listing records the SHA-256 of its manifest and component in
+`.verified.toml` in the plugin directory, and a plugin asking for folders loads
+only while its files still match that record. A copy dropped in by hand, edited
+in place, or shipped by a Flatpak extension or a system package is not loaded.
+A debug build loads the ids listed in `KOPUZ_TRUST_PLUGINS` (comma separated)
+unverified, to try a plugin while writing it; a release build ignores it.
+
+Each of a source's folders is mounted read-only, and nothing else is. On Linux
+and macOS a folder keeps its path; on Windows `C:\Music` is mounted at
+`/C:/Music`. `Connection.folders` names them as the plugin sees them. Such a
+source's add form asks for folders instead of an address, and the source works
+offline.
+
+A stream URL or a cover the plugin returns may then be a path to a file in
+those folders. The daemon opens the file itself after resolving links, and
+refuses a path that leads outside the folders.
+
 ## Installing by hand
 
 Put the manifest and the component in a directory of their own under the
@@ -188,6 +219,8 @@ each:
       "homepage": "https://github.com/someone/kopuz-internet-archive",
       "services": ["internet-archive"],
       "network": ["archive.org"],
+      "folders": "none",
+      "verified": false,
       "manifest": { "url": "https://.../kopuz-plugin.toml", "sha256": "..." },
       "component": { "url": "https://.../plugin.wasm", "sha256": "..." }
     }
@@ -196,8 +229,10 @@ each:
 ```
 
 Installing fetches both files over HTTPS, refuses either if its hash differs,
-and refuses a manifest whose id, version, services or hosts differ from the
-listing. The index is fetched again for the install, so the hosts the Plugins
+and refuses a manifest whose id, version, services, hosts or folder access
+differ from the listing. `folders` and `verified` default to `"none"` and
+`false`; only maintainers set `verified`, after reviewing that exact build, and
+the Plugins page shows it as Verified. The index is fetched again for the install, so the hosts the Plugins
 page showed are sent with the request, and an install whose listing now reaches
 other hosts is refused. The component is compiled once before anything is
 written. The files are staged in a hidden directory, the installed version's

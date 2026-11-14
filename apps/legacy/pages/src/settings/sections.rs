@@ -888,6 +888,12 @@ fn PluginRow(
                 div { class: "flex items-center gap-2 flex-wrap",
                     p { class: "text-sm text-white/90 font-medium", "{plugin.name}" }
                     span { class: "text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/10 text-white/60", "{origin}" }
+                    if plugin.verified {
+                        span { class: "text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/10 text-emerald-400",
+                            i { class: "fa-solid fa-circle-check mr-1" }
+                            "{i18n::t(\"plugin_verified\")}"
+                        }
+                    }
                     if plugin.system {
                         span { class: "text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/10 text-white/60", "{i18n::t(\"plugin_system\")}" }
                     }
@@ -906,6 +912,12 @@ fn PluginRow(
                     p { class: "text-xs text-white/40 break-all",
                         i { class: "fa-solid fa-globe mr-1" }
                         "{reaches}"
+                    }
+                }
+                if plugin.reads_folders {
+                    p { class: "text-xs text-white/40",
+                        i { class: "fa-solid fa-folder-open mr-1" }
+                        "{i18n::t(\"plugin_reads_folders\")}"
                     }
                 }
                 if let Some(update_reaches) = update_reaches {

@@ -2,14 +2,28 @@
 //! component and the SHA-256 of both. Nothing is trusted beyond those hashes,
 //! and the manifest is checked again before anything is written. A listing
 //! may not claim an official plugin's id or a built-in service.
+//!
+//! A listing marked verified was reviewed by the kopuz maintainers, who set
+//! the mark by hand in the index. Only such a build may read the folders a
+//! person picks for its sources: installing it records the hashes of its
+//! files in [`VERIFIED_FILE`], and a plugin asking for folders loads only
+//! while its files still match a record.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::manifest::{Manifest, ManifestError};
+use crate::manifest::{FolderAccess, Manifest, ManifestError};
 use crate::registry::{COMPONENT_FILE, MANIFEST_FILE};
+
+/// The builds installed from a verified listing, kept in the plugin directory.
+pub const VERIFIED_FILE: &str = ".verified.toml";
+
+/// Plugin ids a debug build loads with folder access unverified, comma
+/// separated, for trying a plugin under development. Release builds ignore it.
+pub const TRUST_ENV: &str = "KOPUZ_TRUST_PLUGINS";
 
 pub const INDEX_SCHEMA: u32 = 1;
 
@@ -40,6 +54,12 @@ pub struct Listing {
     /// Shown before install; a manifest asking for anything else is refused.
     #[serde(default)]
     pub network: Vec<String>,
+    /// Shown before install, like `network`.
+    #[serde(default)]
+    pub folders: FolderAccess,
+    /// Reviewed by the kopuz maintainers, the only build that may read folders.
+    #[serde(default)]
+    pub verified: bool,
     pub manifest: Download,
     pub component: Download,
 }
@@ -79,6 +99,8 @@ pub enum MarketError {
     ServiceTaken { service: String, by: String },
     #[error("the plugin's manifest asks for more than the marketplace lists")]
     PermissionsDiffer,
+    #[error("`{0}` asks to read your folders, which only a verified plugin may do")]
+    Unverified(String),
     #[error("could not write the plugin: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -188,10 +210,105 @@ pub fn check_manifest(
         .collect();
     let listed_services: std::collections::BTreeSet<&str> =
         listing.services.iter().map(String::as_str).collect();
-    if declared != asked || services != listed_services {
+    if declared != asked
+        || services != listed_services
+        || manifest.permissions.folders != listing.folders
+    {
         return Err(MarketError::PermissionsDiffer);
     }
+    if manifest.permissions.reads_folders() && !listing.verified {
+        return Err(MarketError::Unverified(listing.id.clone()));
+    }
     Ok(manifest)
+}
+
+/// The hashes of one build installed from a verified listing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerifiedBuild {
+    pub manifest: String,
+    pub component: String,
+}
+
+impl VerifiedBuild {
+    pub fn of(manifest_text: &str, component: &[u8]) -> Self {
+        Self {
+            manifest: sha256_hex(manifest_text.as_bytes()),
+            component: sha256_hex(component),
+        }
+    }
+}
+
+pub type Verified = BTreeMap<String, VerifiedBuild>;
+
+/// What [`VERIFIED_FILE`] in `dir` records; nothing when it is missing or
+/// unreadable, which leaves every plugin unverified.
+pub fn read_verified(dir: &Path) -> Verified {
+    let text = match std::fs::read_to_string(dir.join(VERIFIED_FILE)) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Verified::new(),
+        Err(error) => {
+            tracing::warn!(dir = %dir.display(), %error, "verified plugin record unreadable");
+            return Verified::new();
+        }
+    };
+    toml::from_str(&text).unwrap_or_else(|error| {
+        tracing::warn!(dir = %dir.display(), %error, "verified plugin record unreadable");
+        Verified::new()
+    })
+}
+
+/// Record `build` as the verified one for `id`, or forget `id` with `None`.
+/// Written through a rename so a crash never leaves half a record. Hold
+/// [`lock`] around it.
+pub fn set_verified(dir: &Path, id: &str, build: Option<VerifiedBuild>) -> std::io::Result<()> {
+    let mut verified = read_verified(dir);
+    let changed = match build {
+        Some(build) => verified.insert(id.to_string(), build.clone()) != Some(build),
+        None => verified.remove(id).is_some(),
+    };
+    if !changed {
+        return Ok(());
+    }
+    std::fs::create_dir_all(dir)?;
+    let text = toml::to_string(&verified).map_err(std::io::Error::other)?;
+    let staging = dir.join(format!("{VERIFIED_FILE}.writing"));
+    std::fs::write(&staging, text)?;
+    std::fs::rename(&staging, dir.join(VERIFIED_FILE))
+}
+
+/// Whether a plugin read from files whose contents are `manifest_text` and
+/// `component` may load with what its manifest asks for: one that reads
+/// folders needs a verified record of these very files.
+pub fn may_load(
+    verified: &Verified,
+    manifest: &Manifest,
+    manifest_text: &str,
+    component: &[u8],
+) -> Result<(), String> {
+    if !manifest.permissions.reads_folders() {
+        return Ok(());
+    }
+    if trusted_for_development(&manifest.id) {
+        tracing::warn!(plugin = %manifest.id, "loading a plugin that reads folders unverified, as {TRUST_ENV} asks");
+        return Ok(());
+    }
+    match verified.get(&manifest.id) {
+        Some(build) if *build == VerifiedBuild::of(manifest_text, component) => Ok(()),
+        Some(_) => Err(
+            "it reads folders, and its files differ from the verified build installed from the marketplace"
+                .into(),
+        ),
+        None => Err(
+            "it reads folders, which only a plugin installed from a verified marketplace listing may do"
+                .into(),
+        ),
+    }
+}
+
+fn trusted_for_development(id: &str) -> bool {
+    cfg!(debug_assertions)
+        && std::env::var(TRUST_ENV)
+            .is_ok_and(|ids| ids.split(',').any(|trusted| trusted.trim() == id))
 }
 
 /// An advisory lock on `dir`, released when the file is dropped. Hold it
@@ -317,6 +434,8 @@ mod tests {
             homepage: None,
             services: vec!["bandcamp".into()],
             network: vec!["*.bandcamp.com".into()],
+            folders: FolderAccess::None,
+            verified: false,
             manifest: Download {
                 url: "https://example.test/kopuz-plugin.toml".into(),
                 sha256: sha(MANIFEST.as_bytes()),
@@ -408,6 +527,66 @@ mod tests {
             check_manifest(&listing, &hijack, &["jellyfin"]),
             Err(MarketError::ClaimsBuiltIn(service)) if service == "jellyfin"
         ));
+    }
+
+    fn reading_folders(manifest: &str) -> String {
+        manifest.replace(
+            "network = [\"*.bandcamp.com\"]",
+            "network = [\"*.bandcamp.com\"]\n        folders = \"read\"",
+        )
+    }
+
+    #[test]
+    fn only_a_verified_listing_may_read_folders_and_it_must_say_so() {
+        let reads = reading_folders(MANIFEST);
+        let mut listing = listing();
+        assert!(matches!(
+            check_manifest(&listing, &reads, &[]),
+            Err(MarketError::PermissionsDiffer)
+        ));
+        listing.folders = FolderAccess::Read;
+        assert!(matches!(
+            check_manifest(&listing, &reads, &[]),
+            Err(MarketError::Unverified(id)) if id == "bandcamp"
+        ));
+        listing.verified = true;
+        assert!(check_manifest(&listing, &reads, &[]).is_ok());
+        assert!(matches!(
+            check_manifest(&listing, MANIFEST, &[]),
+            Err(MarketError::PermissionsDiffer)
+        ));
+    }
+
+    #[test]
+    fn a_plugin_reading_folders_loads_only_as_the_verified_build() {
+        let text = reading_folders(MANIFEST);
+        let manifest = Manifest::parse(&text).expect("valid manifest");
+        let mut verified = Verified::new();
+        assert!(may_load(&verified, &manifest, &text, b"wasm").is_err());
+        verified.insert("bandcamp".into(), VerifiedBuild::of(&text, b"wasm"));
+        assert!(may_load(&verified, &manifest, &text, b"wasm").is_ok());
+        assert!(may_load(&verified, &manifest, &text, b"tampered").is_err());
+        let edited = text.replace("Bandcamp", "Bandcamp!");
+        assert!(may_load(&verified, &manifest, &edited, b"wasm").is_err());
+
+        let plain = Manifest::parse(MANIFEST).expect("valid manifest");
+        assert!(may_load(&Verified::new(), &plain, MANIFEST, b"anything").is_ok());
+    }
+
+    #[test]
+    fn the_verified_record_is_written_and_forgotten() {
+        let dir = std::env::temp_dir().join(format!("kopuz-verified-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(read_verified(&dir).is_empty());
+        let build = VerifiedBuild::of("manifest", b"wasm");
+        set_verified(&dir, "bandcamp", Some(build.clone())).unwrap();
+        set_verified(&dir, "other", Some(VerifiedBuild::of("m", b"w"))).unwrap();
+        assert_eq!(read_verified(&dir).get("bandcamp"), Some(&build));
+        set_verified(&dir, "bandcamp", None).unwrap();
+        let left = read_verified(&dir);
+        assert!(!left.contains_key("bandcamp"));
+        assert!(left.contains_key("other"));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -629,6 +629,7 @@ mod tests {
             false,
             plugin_host::manifest::Permissions {
                 network: vec!["localhost".into()],
+                ..Default::default()
             },
             "https://music.example",
         );
@@ -663,6 +664,7 @@ mod tests {
             false,
             plugin_host::manifest::Permissions {
                 network: vec!["$server".into()],
+                ..Default::default()
             },
             // An address on this network is reachable only as the plugin's server.
             &allowed,

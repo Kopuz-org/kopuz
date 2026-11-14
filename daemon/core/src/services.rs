@@ -129,11 +129,27 @@ fn plugin_service_info(own: &server::plugins::OwnService) -> ServiceInfo {
             .clone()
             .unwrap_or_else(|| PLUGIN_ACCENT.to_string()),
         experimental: own.origin != plugin_host::Origin::Bundled,
-        fields: match service.url {
-            Some(_) => Vec::new(),
-            None => vec![url_field("server_url_placeholder")],
+        fields: match (&service.url, own.reads_folders) {
+            (_, true) => vec![directories_field(&[])],
+            (Some(_), false) => Vec::new(),
+            (None, false) => vec![url_field("server_url_placeholder")],
         },
     }
+}
+
+/// Whether the plugin serving `slug` reads the folders picked for its
+/// sources, which then take folders where others take an address.
+pub fn plugin_reads_folders(slug: &str) -> bool {
+    server::plugins::own_service(slug).is_some_and(|own| own.reads_folders)
+}
+
+/// Whether a configured server is a source of a plugin reading folders.
+pub fn server_reads_folders(service: MusicService, plugin_service: Option<&str>) -> bool {
+    service == MusicService::Plugin && plugin_service.is_some_and(plugin_reads_folders)
+}
+
+fn reads_folders(service: MusicService, draft: &SourceDraft) -> bool {
+    service == MusicService::Plugin && plugin_reads_folders(&draft.service)
 }
 
 fn plugin_icon(service: &plugin_host::manifest::Service) -> Icon {
@@ -227,16 +243,23 @@ pub fn check_folders(draft: &SourceDraft) -> Vec<FormProblem> {
     if draft.name.trim().is_empty() {
         problems.push(FormProblem::on("name", ErrorReason::SourceNameRequired));
     }
+    problems.extend(folder_problems(draft));
+    problems
+}
+
+/// What is wrong with the folders a draft names.
+fn folder_problems(draft: &SourceDraft) -> Option<FormProblem> {
     let paths = folder_paths(&draft.values);
     if paths.iter().any(|path| path.trim().is_empty()) {
-        problems.push(FormProblem::on(DIRECTORIES, ErrorReason::EmptySourceFolder));
+        Some(FormProblem::on(DIRECTORIES, ErrorReason::EmptySourceFolder))
     } else if paths.is_empty() {
-        problems.push(FormProblem::on(
+        Some(FormProblem::on(
             DIRECTORIES,
             ErrorReason::SourceFolderRequired,
-        ));
+        ))
+    } else {
+        None
     }
-    problems
 }
 
 /// The folders a draft or a settings answer names, none if it does not.
@@ -698,6 +721,9 @@ pub fn check(service: MusicService, draft: &SourceDraft) -> (SignInKind, Vec<For
         }
         MusicService::YtMusic | MusicService::SoundCloud | MusicService::Clippsly => {}
         MusicService::AudioCd => {}
+        MusicService::Plugin if reads_folders(service, draft) => {
+            problems.extend(folder_problems(draft));
+        }
         MusicService::Plugin if plugin_url(&draft.service).is_some() => {}
         MusicService::Smb => {
             if server::smb::Location::parse(value(URL)).is_err() {
@@ -731,8 +757,13 @@ pub fn apply(service: MusicService, draft: &SourceDraft, saved: &mut SavedServer
     saved.url = match service {
         MusicService::Spotify => value(CLIENT_ID),
         MusicService::Clippsly => CLIPPSLY_URL.to_string(),
-        MusicService::Plugin => plugin_url(&draft.service)
-            .unwrap_or_else(|| value(URL).trim_end_matches('/').to_string()),
+        MusicService::Plugin => plugin_url(&draft.service).unwrap_or_else(|| {
+            if reads_folders(service, draft) {
+                String::new()
+            } else {
+                value(URL).trim_end_matches('/').to_string()
+            }
+        }),
         _ => value(URL).trim_end_matches('/').to_string(),
     };
     saved.yt_anonymous = anonymous_draft(draft);

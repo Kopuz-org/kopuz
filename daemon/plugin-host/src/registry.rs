@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::manifest::Manifest;
+use crate::market::Verified;
 use crate::plugin::{Code, Origin, Plugin};
 
 pub const MANIFEST_FILE: &str = "kopuz-plugin.toml";
@@ -77,6 +78,7 @@ impl Registry {
     /// record is taken as agreed, as before records.
     pub async fn load(bundled: &[Bundled], dir: Option<&Path>, extensions: &[PathBuf]) -> Self {
         let approved = dir.map(read_approved).unwrap_or_default();
+        let verified = dir.map(crate::market::read_verified).unwrap_or_default();
         let mut provided = Extensions::default();
         let mut roots = Vec::new();
         for root in extensions {
@@ -86,7 +88,7 @@ impl Registry {
             }
         }
         for path in roots {
-            match compile(&path, Origin::Extension).await {
+            match compile(&path, Origin::Extension, &Verified::new()).await {
                 Ok(plugin) => provided.plugins.push((path, Arc::new(plugin))),
                 Err(error) => {
                     provided.unreadable = true;
@@ -105,7 +107,7 @@ impl Registry {
             }
         };
         for path in paths {
-            match compile(&path, Origin::Installed).await {
+            match compile(&path, Origin::Installed, &verified).await {
                 Ok(plugin) => {
                     let plugin = Arc::new(plugin);
                     let added_hosts = approved
@@ -290,6 +292,7 @@ impl Registry {
     /// keeps the version it had loaded; one whose new files reach more hosts
     /// waits in [`Self::pending`] for [`Self::approve`].
     pub async fn reload(&self, dir: &Path) -> Self {
+        let verified = crate::market::read_verified(dir);
         let Ok(paths) = read_plugin_dirs(dir) else {
             return self.clone();
         };
@@ -302,7 +305,7 @@ impl Registry {
                 .iter()
                 .find(|(loaded, _)| *loaded == path)
                 .map(|(_, plugin)| Arc::clone(plugin));
-            match self.reread(&path, here.as_ref()).await {
+            match self.reread(&path, here.as_ref(), &verified).await {
                 Reread::Load(plugin) => installed.push((path, plugin)),
                 Reread::Keep(reason) => {
                     tracing::warn!(plugin = %path.display(), %reason, "plugin files not loaded");
@@ -334,8 +337,8 @@ impl Registry {
         )
     }
 
-    async fn reread(&self, path: &Path, here: Option<&Arc<Plugin>>) -> Reread {
-        let (manifest, wasm) = match read_plugin(path) {
+    async fn reread(&self, path: &Path, here: Option<&Arc<Plugin>>, verified: &Verified) -> Reread {
+        let (manifest, text, wasm) = match read_plugin(path) {
             Ok(files) => files,
             Err(reason) => return Reread::Keep(reason),
         };
@@ -358,6 +361,9 @@ impl Registry {
                 here.id(),
                 manifest.id
             ));
+        }
+        if let Err(reason) = crate::market::may_load(verified, &manifest, &text, &wasm) {
+            return Reread::Keep(reason);
         }
         let candidate = Plugin::new(manifest, Code::Wasm(Cow::Owned(wasm)), Origin::Installed);
         if let Err(error) = candidate.prepare().await {
@@ -581,22 +587,23 @@ pub fn read_plugin_dirs(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
-async fn compile(dir: &Path, origin: Origin) -> Result<Plugin, String> {
-    let (manifest, wasm) = read_plugin(dir)?;
+async fn compile(dir: &Path, origin: Origin, verified: &Verified) -> Result<Plugin, String> {
+    let (manifest, text, wasm) = read_plugin(dir)?;
+    crate::market::may_load(verified, &manifest, &text, &wasm)?;
     let plugin = Plugin::new(manifest, Code::Wasm(Cow::Owned(wasm)), origin);
     plugin.prepare().await.map_err(|error| error.to_string())?;
     Ok(plugin)
 }
 
-fn read_plugin(dir: &Path) -> Result<(Manifest, Vec<u8>), String> {
-    let manifest = std::fs::read_to_string(dir.join(MANIFEST_FILE))
+/// The manifest, its text as read, and the component.
+fn read_plugin(dir: &Path) -> Result<(Manifest, String, Vec<u8>), String> {
+    let text = std::fs::read_to_string(dir.join(MANIFEST_FILE))
         .map_err(|error| format!("{MANIFEST_FILE}: {error}"))?;
-    let manifest = Manifest::parse(&manifest).map_err(|error| error.to_string())?;
+    let manifest = Manifest::parse(&text).map_err(|error| error.to_string())?;
     let wasm = std::fs::read(dir.join(COMPONENT_FILE))
         .map_err(|error| format!("{COMPONENT_FILE}: {error}"))?;
-    Ok((manifest, wasm))
+    Ok((manifest, text, wasm))
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -685,6 +692,41 @@ mod tests {
         assert!(!registry.for_service("ytmusic").unwrap().is_native());
     }
 
+    #[tokio::test]
+    async fn a_plugin_reading_folders_loads_only_as_its_verified_build() {
+        let dir =
+            std::env::temp_dir().join(format!("kopuz-plugins-verified-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let osu = dir.join("osu");
+        std::fs::create_dir_all(&osu).unwrap();
+        let text = format!(
+            "{}[permissions]\nfolders = \"read\"\n",
+            manifest("osu", "1.0.0", &[])
+        );
+        std::fs::write(osu.join(MANIFEST_FILE), &text).unwrap();
+        std::fs::write(osu.join(COMPONENT_FILE), EMPTY_COMPONENT).unwrap();
+
+        let unverified = Registry::load(&[], Some(&dir), &[]).await;
+        assert!(unverified.plugins().is_empty());
+
+        crate::market::set_verified(
+            &dir,
+            "osu",
+            Some(crate::market::VerifiedBuild::of(&text, EMPTY_COMPONENT)),
+        )
+        .unwrap();
+        let verified = Registry::load(&[], Some(&dir), &[]).await;
+        assert_eq!(verified.plugins().len(), 1);
+
+        // Edited in place, it is no longer the build that was verified.
+        let edited = text.replace("1.0.0", "1.0.1");
+        std::fs::write(osu.join(MANIFEST_FILE), &edited).unwrap();
+        let reloaded = verified.reload(&dir).await;
+        assert_eq!(reloaded.plugins()[0].manifest().version, "1.0.0");
+        let restarted = Registry::load(&[], Some(&dir), &[]).await;
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(restarted.plugins().is_empty());
+    }
     #[tokio::test]
     async fn a_component_that_does_not_compile_leaves_the_bundled_plugin() {
         let bundled = [Bundled {

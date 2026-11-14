@@ -153,6 +153,12 @@ impl PluginService {
                                     added_hosts: added(&info.network, &listing.network),
                                 });
                             }
+                            // A listing vouches for the build it names, not the one installed.
+                            if listing.verified
+                                && !loaded.is_some_and(|plugin| differs(plugin, listing))
+                            {
+                                info.verified = true;
+                            }
                             if info.homepage.is_none() {
                                 info.homepage = listing.homepage.clone();
                             }
@@ -205,6 +211,8 @@ impl PluginService {
                         .collect(),
                     network: Vec::new(),
                     update: Some(update),
+                    verified: false,
+                    reads_folders: manifest.permissions.reads_folders(),
                 }),
             }
         }
@@ -306,11 +314,16 @@ impl PluginService {
             .map_err(|error| ApiError::invalid_input(error.to_string()))?;
 
         let id = listing.id.clone();
+        let verified = listing
+            .verified
+            .then(|| market::VerifiedBuild::of(&manifest_text, &component));
         // A hand-installed copy of the id under another directory name would
         // otherwise stay on disk and win a later rescan.
         let copies = server::plugins::registry().dirs_of(&id);
         server::plugins::adopt(Arc::new(candidate), move || {
             let _locked = market::lock(&dir)?;
+            // Recorded first, so the rescan the new files set off loads them.
+            market::set_verified(&dir, &id, verified)?;
             let target = market::install(&dir, &id, &manifest_text, &component)?;
             for copy in copies.iter().filter(|copy| **copy != target) {
                 market::uninstall(&dir, copy)?;
@@ -352,11 +365,13 @@ impl PluginService {
         let dir = server::plugins::dir()
             .ok_or_else(|| ApiError::unsupported("this daemon has no plugin directory"))?
             .to_path_buf();
+        let id_owned = id.to_string();
         server::plugins::remove(move || {
             let _locked = market::lock(&dir)?;
             copies
                 .iter()
-                .try_for_each(|copy| market::uninstall(&dir, copy))
+                .try_for_each(|copy| market::uninstall(&dir, copy))?;
+            market::set_verified(&dir, &id_owned, None).map_err(MarketError::from)
         })
         .await
         .map_err(market_error)?;
@@ -367,11 +382,20 @@ impl PluginService {
 
 fn installed() -> Vec<PluginInfo> {
     let registry = server::plugins::registry();
+    let verified = server::plugins::dir()
+        .map(market::read_verified)
+        .unwrap_or_default();
     registry
         .plugins()
         .iter()
         .map(|plugin| {
             let manifest = plugin.manifest();
+            let vouched = plugin.origin() == plugin_host::Origin::Installed
+                && verified.get(plugin.id()).is_some_and(|build| {
+                    plugin
+                        .digest()
+                        .is_some_and(|digest| digest == build.component)
+                });
             PluginInfo {
                 id: manifest.id.clone(),
                 name: manifest.name.clone(),
@@ -395,6 +419,8 @@ fn installed() -> Vec<PluginInfo> {
                     .collect(),
                 network: manifest.permissions.network.clone(),
                 update: None,
+                verified: vouched,
+                reads_folders: manifest.permissions.reads_folders(),
             }
         })
         .collect()
@@ -509,6 +535,8 @@ fn listed(listing: &Listing) -> PluginInfo {
         services: listing.services.clone(),
         network: listing.network.clone(),
         update: None,
+        verified: listing.verified,
+        reads_folders: listing.folders == plugin_host::manifest::FolderAccess::Read,
     }
 }
 
