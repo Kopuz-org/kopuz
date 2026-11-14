@@ -92,7 +92,10 @@ impl Session {
     }
 
     async fn open(&self, plugin: Arc<Plugin>) -> Result<Live, PluginError> {
-        let mut instance = plugin.instantiate(&self.connection.url).await?;
+        let mut instance = plugin
+            .instantiate(&self.connection.url, &self.connection.folders)
+            .await?;
+        let guest = plugin.guest_connection(&self.connection);
         let constructed = plugin
             .starting(
                 "opening a session",
@@ -100,7 +103,7 @@ impl Session {
                     .bindings
                     .kopuz_plugin_source()
                     .session()
-                    .call_constructor(&mut instance.store, &self.connection),
+                    .call_constructor(&mut instance.store, &guest),
             )
             .await?;
         let session = constructed.map_err(|error| plugin.trapped(error))?;

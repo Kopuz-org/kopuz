@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use crate::manifest::{Manifest, ManifestError};
+use crate::manifest::{FolderAccess, Manifest, ManifestError};
 use crate::registry::{COMPONENT_FILE, MANIFEST_FILE};
 
 pub const INDEX_SCHEMA: u32 = 1;
@@ -40,6 +40,10 @@ pub struct Listing {
     /// Shown before install; a manifest asking for anything else is refused.
     #[serde(default)]
     pub network: Vec<String>,
+    /// Shown before install, like `network`: whether it reads the folders
+    /// picked for its sources.
+    #[serde(default)]
+    pub folders: FolderAccess,
     pub manifest: Download,
     pub component: Download,
 }
@@ -188,7 +192,10 @@ pub fn check_manifest(
         .collect();
     let listed_services: std::collections::BTreeSet<&str> =
         listing.services.iter().map(String::as_str).collect();
-    if declared != asked || services != listed_services {
+    if declared != asked
+        || services != listed_services
+        || manifest.permissions.folders != listing.folders
+    {
         return Err(MarketError::PermissionsDiffer);
     }
     Ok(manifest)
@@ -317,6 +324,7 @@ mod tests {
             homepage: None,
             services: vec!["bandcamp".into()],
             network: vec!["*.bandcamp.com".into()],
+            folders: FolderAccess::None,
             manifest: Download {
                 url: "https://example.test/kopuz-plugin.toml".into(),
                 sha256: sha(MANIFEST.as_bytes()),
@@ -407,6 +415,25 @@ mod tests {
         assert!(matches!(
             check_manifest(&listing, &hijack, &["jellyfin"]),
             Err(MarketError::ClaimsBuiltIn(service)) if service == "jellyfin"
+        ));
+    }
+
+    #[test]
+    fn a_listing_must_say_the_plugin_reads_folders() {
+        let reads = MANIFEST.replace(
+            "network = [\"*.bandcamp.com\"]",
+            "network = [\"*.bandcamp.com\"]\n        folders = \"read\"",
+        );
+        let mut listing = listing();
+        assert!(matches!(
+            check_manifest(&listing, &reads, &[]),
+            Err(MarketError::PermissionsDiffer)
+        ));
+        listing.folders = FolderAccess::Read;
+        assert!(check_manifest(&listing, &reads, &[]).is_ok());
+        assert!(matches!(
+            check_manifest(&listing, MANIFEST, &[]),
+            Err(MarketError::PermissionsDiffer)
         ));
     }
 

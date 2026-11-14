@@ -215,6 +215,16 @@ impl Plugins {
                         text.child(ui::hint(plugin.description.clone().into(), cx))
                     })
                     .children(reaches.map(|reaches| ui::hint(reaches, cx)))
+                    .when(plugin.reads_folders, |text| {
+                        text.child(
+                            h_flex()
+                                .gap_1()
+                                .text_xs()
+                                .text_color(cx.theme().warning)
+                                .child(icons::icon(icons::WARNING).size_3())
+                                .child(t("plugin_reads_folders")),
+                        )
+                    })
                     .children(update_reaches.map(|warning| {
                         h_flex()
                             .gap_1()

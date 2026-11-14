@@ -1176,6 +1176,7 @@ plugin_official = Official
 plugin_native = In Kopuz
 plugin_community = Community
 plugin_system = System
+plugin_reads_folders = Reads the files in the folders you pick for its sources. Only install it if you trust it.
 plugin_by = by { $author }
 plugin_reaches = Reaches { $hosts }
 plugin_update_reaches = The update also reaches { $hosts }

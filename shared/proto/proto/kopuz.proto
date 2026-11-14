@@ -2190,6 +2190,8 @@ message PluginInfo {
   optional PluginUpdate update = 12;
   // From a Flatpak extension or a system package, which removes it.
   bool system = 13;
+  // Reads the files in the folders picked for each of its sources.
+  bool reads_folders = 14;
 }
 
 message PluginCatalog {

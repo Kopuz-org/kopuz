@@ -181,14 +181,20 @@ impl Plugin {
         self.component().await.map(|_| ())
     }
 
-    /// A fresh instance whose network is scoped to `server_url`.
-    pub(crate) async fn instantiate(&self, server_url: &str) -> Result<Instance, PluginError> {
+    /// A fresh instance whose network is scoped to `server_url`, with
+    /// `folders` mounted read-only if the plugin may read them.
+    pub(crate) async fn instantiate(
+        &self,
+        server_url: &str,
+        folders: &[String],
+    ) -> Result<Instance, PluginError> {
         let component = self.component().await?;
         let runtime = runtime()?;
         let state = State::new(
             Arc::clone(&self.id),
             Arc::clone(&self.permissions),
             server_url,
+            folders,
         );
         let mut store = Store::new(&runtime.engine, state);
         store.limiter(|state| &mut state.limits);
@@ -204,6 +210,20 @@ impl Plugin {
         Ok(Instance { store, bindings })
     }
 
+    /// `connection` as the plugin sees it: a plugin reading folders gets them
+    /// at the paths they are mounted at.
+    pub(crate) fn guest_connection(&self, connection: &wit::Connection) -> wit::Connection {
+        let mut connection = connection.clone();
+        if self.permissions.reads_folders() {
+            connection.folders = connection
+                .folders
+                .iter()
+                .map(|folder| crate::folders::guest_path(folder))
+                .collect();
+        }
+        connection
+    }
+
     pub async fn login(
         &self,
         connection: wit::Connection,
@@ -211,12 +231,13 @@ impl Plugin {
         password: &str,
     ) -> Result<wit::AuthSession, wit::SourceError> {
         let mut instance = self
-            .instantiate(&connection.url)
+            .instantiate(&connection.url, &connection.folders)
             .await
             .map_err(PluginError::into_source_error)?;
+        let guest = self.guest_connection(&connection);
         let login = instance.bindings.kopuz_plugin_source().call_login(
             &mut instance.store,
-            &connection,
+            &guest,
             username,
             password,
         );

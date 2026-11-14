@@ -908,6 +908,12 @@ fn PluginRow(
                         "{reaches}"
                     }
                 }
+                if plugin.reads_folders {
+                    p { class: "text-xs text-white/60",
+                        i { class: "fa-solid fa-triangle-exclamation mr-1" }
+                        "{i18n::t(\"plugin_reads_folders\")}"
+                    }
+                }
                 if let Some(update_reaches) = update_reaches {
                     p { class: "text-xs text-white/60 break-all",
                         i { class: "fa-solid fa-triangle-exclamation mr-1" }

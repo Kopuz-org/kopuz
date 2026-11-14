@@ -29,6 +29,8 @@ pub struct PluginInfo {
     /// `$server` is the configured server's host.
     pub network: Vec<String>,
     pub update: Option<PluginUpdate>,
+    /// Reads the files in the folders picked for each of its sources.
+    pub reads_folders: bool,
 }
 
 /// A different build of an installed plugin: the marketplace lists another

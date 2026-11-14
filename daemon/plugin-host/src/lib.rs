@@ -3,6 +3,7 @@
 //! component's only way out is the `http` import, checked against its
 //! manifest. This crate knows nothing of kopuz's models.
 
+pub mod folders;
 mod host;
 pub mod manifest;
 pub mod market;
