@@ -2,6 +2,7 @@ pub mod back_stack;
 pub mod catalog_actions;
 pub mod constants;
 pub mod controls;
+pub mod folder_dialog;
 pub mod gestures;
 pub mod haptics;
 pub mod pull_refresh;

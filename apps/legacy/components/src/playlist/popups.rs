@@ -1,8 +1,5 @@
 use dioxus::prelude::*;
 
-#[cfg(not(target_os = "android"))]
-use rfd::AsyncFileDialog;
-
 #[component]
 pub fn AddPlaylistPopup(
     playlist_name: Signal<String>,
@@ -58,7 +55,6 @@ pub fn AddPlaylistPopup(
     }
 }
 
-#[cfg(not(target_os = "android"))]
 #[component]
 fn AddFolderFromFileManagerButton(
     on_add_folder: EventHandler<String>,
@@ -70,8 +66,8 @@ fn AddFolderFromFileManagerButton(
             onclick: move |evt| {
                 evt.stop_propagation();
                 spawn(async move {
-                    if let Some(handle) = AsyncFileDialog::new().pick_folder().await {
-                        on_add_folder.call(handle.path().to_string_lossy().to_string());
+                    if let Some(path) = crate::folder_dialog::pick_folder().await {
+                        on_add_folder.call(path.to_string_lossy().to_string());
                         on_close.call(());
                     }
                 });
@@ -79,15 +75,4 @@ fn AddFolderFromFileManagerButton(
             i { class: "fa-solid fa-folder-open" }
         }
     }
-}
-
-#[cfg(target_os = "android")]
-#[component]
-fn AddFolderFromFileManagerButton(
-    on_add_folder: EventHandler<String>,
-    on_close: EventHandler<()>,
-) -> Element {
-    let _ = on_add_folder;
-    let _ = on_close;
-    rsx! {}
 }

@@ -1,8 +1,6 @@
 //! Source settings controls.
 
 use dioxus::prelude::*;
-#[cfg(not(target_os = "android"))]
-use rfd::AsyncFileDialog;
 
 #[component]
 pub fn MultiDirectoryPicker(
@@ -47,49 +45,14 @@ pub fn MultiDirectoryPicker(
     }
 }
 
-#[cfg(not(target_os = "android"))]
 #[component]
 fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -> Element {
     rsx! {
         button {
             onclick: move |_| {
                 spawn(async move {
-                    if let Some(handle) = AsyncFileDialog::new().pick_folder().await {
-                        on_add.call(handle.path().to_path_buf());
-                    }
-                });
-            },
-            class: "app-button-tonal bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
-            "{add_text}"
-        }
-    }
-}
-
-#[cfg(target_os = "android")]
-#[component]
-fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -> Element {
-    rsx! {
-        button {
-            onclick: move |_| {
-                player::systemint::request_permissions();
-                spawn(async move {
-                    if !player::systemint::await_media_permission().await {
-                        return;
-                    }
-                    let mut paths = Vec::new();
-                    if let Some(android_music) = player::systemint::get_android_music_dir() {
-                        paths.push(std::path::PathBuf::from(android_music));
-                    }
-                    paths.push(std::path::PathBuf::from("/storage/emulated/0/Music"));
-                    paths.push(std::path::PathBuf::from("/sdcard/Music"));
-                    if let Ok(home) = std::env::var("HOME") {
-                        paths.push(std::path::PathBuf::from(home).join("Music"));
-                    }
-                    for path in paths {
-                        if path.exists() {
-                            on_add.call(path);
-                            break;
-                        }
+                    if let Some(path) = crate::folder_dialog::pick_folder().await {
+                        on_add.call(path);
                     }
                 });
             },
