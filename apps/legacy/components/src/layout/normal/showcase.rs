@@ -96,8 +96,11 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let container_height = use_signal(|| 0.0_f64);
     const ITEM_HEIGHT: f64 = 56.0;
 
+    let lead_height = use_signal(|| 0.0_f64);
+    let hero_scrolls = crate::showcase::use_hero_scrolls(!props.tracks.is_empty());
+
     let scroll_info = crate::virtual_scroll::use_virtual_scroll(
-        *scroll_stat.read(),
+        crate::showcase::list_scroll(*scroll_stat.read(), *lead_height.read(), hero_scrolls),
         *container_height.read(),
         sorted_track_pairs.len(),
         ITEM_HEIGHT,
@@ -114,9 +117,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
         }
     }
 
-    rsx! {
-         div {
-             class: "select-none flex-1 min-h-0 flex flex-col w-full",
+    let hero = rsx! {
              div {
                  class: if cfg!(target_os = "android") { "showcase-hero flex flex-col items-center text-center gap-4 mb-6 shrink-0 tablet:flex-row tablet:flex-wrap tablet:items-end tablet:text-start tablet:gap-8 tablet:mb-8" } else { "showcase-hero flex flex-col md:flex-row md:flex-wrap items-end gap-8 mb-12 shrink-0" },
                  div { class: if cfg!(target_os = "android") { "showcase-cover w-44 h-44 tablet:w-56 tablet:h-56 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0" } else { "showcase-cover w-64 h-64 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0" },
@@ -236,6 +237,27 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                      }
                  }
              }
+    };
+    let header = rsx! {
+        div { class: "shrink-0",
+            Header {
+                is_vaxry: false,
+                is_album: props.is_album,
+                is_selection_mode: props.is_selection_mode,
+                on_select_all: props.on_select_all,
+                all_selected: props.all_selected,
+                sort_state: sort_state,
+                is_reorderable: props.is_reorderable
+            }
+        }
+    };
+    let (hero_top, header_top, lead) =
+        crate::showcase::place_hero(hero, header, lead_height, hero_scrolls);
+
+    rsx! {
+         div {
+             class: "select-none flex-1 min-h-0 flex flex-col w-full",
+             {hero_top}
 
              div { class: "flex-1 min-h-0 flex flex-col w-full",
                  if props.tracks.is_empty() {
@@ -244,17 +266,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                          p { class: "text-lg", "{i18n::t(\"no_songs_here\")}" }
                      }
                  } else {
-                     div { class: "shrink-0",
-                         Header {
-                             is_vaxry: false,
-                             is_album: props.is_album,
-                             is_selection_mode: props.is_selection_mode,
-                             on_select_all: props.on_select_all,
-                             all_selected: props.all_selected,
-                             sort_state: sort_state,
-                             is_reorderable: props.is_reorderable
-                         }
-                     }
+                     {header_top}
                      div { class: "flex-1 min-h-0 w-full flex flex-col overflow-hidden",
                      crate::virtual_scroll::VirtualScrollView {
                          id: "normal-showcase-scroll".to_string(),
@@ -265,6 +277,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                          saved_scroll: 0.0,
                          top_pad: scroll_info.top_pad,
                          bottom_pad: scroll_info.bottom_pad,
+                         lead,
                          for (display_idx, (track, idx)) in sorted_track_pairs.iter().enumerate().skip(scroll_info.start_index).take(scroll_info.items_to_render) {
                          {
                              let idx = *idx;

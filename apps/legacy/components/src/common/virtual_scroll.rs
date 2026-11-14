@@ -125,6 +125,10 @@ pub fn VirtualScrollView(
     #[props(default)] on_mouse_leave: Option<EventHandler<MouseEvent>>,
     #[props(default)] on_mouse_move: Option<EventHandler<MouseEvent>>,
     #[props(default)] bottom_content: Option<Element>,
+    /// Rendered above the rows and scrolled with them, outside the virtual window:
+    /// the caller offsets `scroll_stat` by its height before laying the rows out.
+    #[props(default)]
+    lead: Option<Element>,
 ) -> Element {
     let mut mounted = use_signal(|| false);
     let mut restored = use_signal(|| false);
@@ -193,6 +197,7 @@ pub fn VirtualScrollView(
                     handler.call(evt);
                 }
             },
+            {lead}
             if top_pad > 0.0 {
                 div { style: "height: {top_pad}px; flex-shrink: 0;" }
             }
