@@ -2,5 +2,5 @@
 Title=Kopuz
 Url=https://flatpak.kopuz.moe/repo/
 Homepage=https://github.com/Kopuz-org/kopuz
-Comment=Kopuz and Kopuz Nightly
+Comment=Kopuz, Kopuz Legacy and Kopuz Nightly
 GPGKey=@GPGKEY@

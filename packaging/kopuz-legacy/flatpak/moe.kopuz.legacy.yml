@@ -1,0 +1,56 @@
+# Kopuz Legacy's Flatpak, wrapping the binary the release job built. CI unpacks its .deb into payload/ and clones
+# flathub/shared-modules into shared-modules/ first.
+id: moe.kopuz.legacy
+# The GNOME runtime carries webkit2gtk-4.1, which the binary links.
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
+command: kopuz-legacy
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri
+  - --filesystem=xdg-music
+  - --filesystem=xdg-download:ro
+  - --filesystem=xdg-run/discord-ipc-0
+  - --filesystem=xdg-run/tray-icon:create
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.freedesktop.secrets
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --own-name=org.mpris.MediaPlayer2.kopuz
+  - --own-name=org.mpris.MediaPlayer2.kopuz.*
+  # Flatpak delivers the updates, so the app's own check would only point at downloads that do not apply.
+  - --env=KOPUZ_CONFIG_AUTO_CHECK_UPDATES=false
+modules:
+  # The tray loads libayatana-appindicator3 at runtime and panics without it.
+  - shared-modules/libayatana-appindicator/libayatana-appindicator-gtk3.json
+
+  # The release binary is built on Ubuntu 22.04 and links libxdo.so.3; xdotool 4 ships libxdo.so.4.
+  - name: libxdo
+    buildsystem: simple
+    build-commands:
+      - make installlib PREFIX=${FLATPAK_DEST}
+    cleanup:
+      - /lib/libxdo.so
+    sources:
+      - type: archive
+        url: https://github.com/jordansissel/xdotool/releases/download/v3.20211022.1/xdotool-3.20211022.1.tar.gz
+        sha256: 96f0facfde6d78eacad35b91b0f46fecd0b35e474c03e00e30da3fdd345f9ada
+
+  - name: kopuz-legacy
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 -t ${FLATPAK_DEST}/bin usr/bin/kopuz-legacy
+      - install -Dm644 moe.kopuz.legacy.desktop ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop
+      - install -Dm644 logo.png ${FLATPAK_DEST}/share/icons/hicolor/256x256/apps/${FLATPAK_ID}.png
+    sources:
+      - type: dir
+        path: payload
+      # dx names its own desktop file and icon kopuz-legacy; these carry the app ID.
+      - type: file
+        path: ../../../data/moe.kopuz.legacy.desktop
+      - type: file
+        path: ../../../apps/legacy/kopuz/assets/logo.png
