@@ -31,7 +31,7 @@
 }:
 let
   pname = "kopuz-legacy";
-  version = "0.68.0";
+  inherit ((lib.importTOML ../../Cargo.toml).workspace.package) version;
 
   librustyV8 = callPackage ./rusty-v8.nix { };
 
