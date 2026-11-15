@@ -82,9 +82,10 @@ impl LibraryService {
     }
 
     /// A public page for a track: the source's own where it has one, else the
-    /// MusicBrainz page its metadata names. A row the library has never stored
-    /// still answers, because a catalog hit is exactly the row someone wants
-    /// to share.
+    /// MusicBrainz page its metadata names. SoundCloud's is looked up here,
+    /// since its id alone does not spell the address. A row the library has
+    /// never stored still answers, because a catalog hit is exactly the row
+    /// someone wants to share.
     pub async fn track_web_url(&self, key: &str) -> Result<Option<String>, ApiError> {
         let sources = self.current_sources();
         let track = match self
@@ -102,6 +103,11 @@ impl LibraryService {
             },
         };
         if let Some(url) = server::source::active(self.db.clone(), &sources).web_url(&track) {
+            return Ok(Some(url));
+        }
+        if track.id.service() == Some(config::MusicService::SoundCloud)
+            && let Some(url) = server::soundcloud::track_page_url(&track.id.key()).await
+        {
             return Ok(Some(url));
         }
         Ok(server::musicbrainz::track_page_url(
