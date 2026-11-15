@@ -63,6 +63,10 @@ fn export_dir() -> PathBuf {
 }
 
 fn export(cx: &mut App) {
+    // No file dialog on Android: gpui-pre-mobile's picker calls Java this APK does not carry.
+    if cfg!(target_os = "android") {
+        return;
+    }
     let prompt = cx.prompt_for_new_path(&export_dir(), Some(EXPORT_NAME));
     cx.spawn(async move |cx| {
         let Ok(Ok(Some(dest))) = prompt.await else {

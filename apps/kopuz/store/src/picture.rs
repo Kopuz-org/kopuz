@@ -204,6 +204,10 @@ fn save_dir() -> PathBuf {
 
 /// Ask where to keep `target`'s full-size picture, then write its bytes there untouched.
 pub fn save_picture(target: ArtworkTarget, pictured: Pictured, cx: &mut App) {
+    // No file dialog on Android: gpui-pre-mobile's picker calls Java this APK does not carry.
+    if cfg!(target_os = "android") {
+        return;
+    }
     let fetch = full_size(target, cx);
     cx.spawn(async move |cx| {
         let data = match fetch.await {

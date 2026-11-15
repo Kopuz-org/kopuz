@@ -4,6 +4,31 @@ The question this spike answers: can kopuz's GPUI stack render on Android and dr
 If it can, the GPUI app can later replace the legacy Dioxus app (`apps/legacy/*`), which today is the
 only kopuz frontend for Android (it also covers macOS).
 
+## Update: in-process daemon and the real kopuz app
+
+There are now two APKs, and neither needs a host daemon:
+
+- **The real kopuz GPUI app** (`kopuz-android/`, package `moe.kopuz.gpuiapp`, launcher label
+  "Kopuz (GPUI)"). It is `apps/kopuz/app` itself, with its real views, theme, components and
+  navigation, running through gpui-pre-mobile with the kopuz daemon core in-process. The layout is
+  desktop-sized. Build it with `scripts/build-apk.sh --app kopuz`, which writes
+  `build/kopuz-gpui-app.apk`, then install it with `adb install -r build/kopuz-gpui-app.apk`.
+- **The minimal spike** (package `moe.kopuz.gpuispike`), built with `scripts/build-apk.sh`. It now
+  also runs the daemon core in-process: the database and settings live in the app's files directory,
+  and six test tones are seeded on first run. Its header shows Connecting… / Reconnecting in Ns… /
+  Not reachable / N tracks, with automatic backoff.
+
+Both refresh the window after the surface is recreated, so the screen is no longer black after resume.
+
+**Host daemon (optional, spike only):** `scripts/run-dev.sh [--install]` starts an isolated host
+kopuzd on 127.0.0.1:50777, sets up `adb reverse`, and sets the device property
+`debug.kopuz.spike.addr`, which switches the spike to TCP. It then launches the app from the launcher
+and keeps everything up until Ctrl-C. On exit it stops kopuzd, removes the reverse and clears the
+property, so the next launch is in-process again. `scripts/test-emulator.sh` now tests the in-process
+launcher start by default; the old host-daemon flow is behind `--host-daemon`.
+
+What the real app gates out on Android is listed in `docs/REPORT.md` ("Real app on Android").
+
 ## What it is
 
 - **One screen**: a library list (`api.tracks(...)`, loaded once, no live event stream), where tapping a
@@ -119,6 +144,21 @@ matters. On the emulator, `10.0.2.2:50777` also reaches the Mac without `adb rev
   as a mediaPlayback foreground service (process model, lifecycle, Kotlin reuse, effort).
 
 ## Results
+
+**In-process spike, started from the launcher with no host daemon** (2026-11-15, `build/logs/summary.txt`):
+these passed: backend=in-process, 6 tones seeded, 6 tracks loaded, tap to play, toggle,
+home and resume, a **resume screenshot that is not black** (0% black at 2 s and at 6 s), a density
+screenshot that is not black, rotation, a relaunch with no re-seeding, no crash, and Vulkan (llvmpipe).
+These failed: the scroll check (6 rows fit on the screen, so nothing can scroll), the runtime density
+change (gpui-pre-mobile does not update the scale), and the keyboard (no text field, which is
+expected).
+
+**Real kopuz app:** it launched from the launcher into its real first-run screen, and a tap went
+through to the real shell (top bar, Home and the now-playing bar), with no crash and no deadlock.
+See `docs/REPORT.md`.
+
+### First run (host kopuzd over TCP)
+
 
 End-to-end run on 2026-11-15 on the running Pixel 8 Pro emulator (API 35). The results come from
 `build/logs/summary.txt`, corrected where the screenshots show more than the script checks:

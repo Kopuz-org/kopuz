@@ -9,6 +9,11 @@ repository.workspace = true
 homepage.workspace = true
 publish = false
 
+# The app itself; main.rs runs it on the desktop, spikes/gpui-mobile/kopuz-android on Android.
+[lib]
+name = "kopuz_app"
+path = "src/lib.rs"
+
 [[bin]]
 name = "kopuz"
 path = "src/main.rs"
@@ -88,7 +93,8 @@ profile = { path = "../profile" }
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 tray-icon = { version = "0.21", default-features = false }
 
-[target.'cfg(not(target_env = "msvc"))'.dependencies]
+# Only main.rs (the desktop binary) installs it.
+[target.'cfg(not(any(target_env = "msvc", target_os = "android")))'.dependencies]
 tikv-jemallocator = "0.6"
 
 [target.'cfg(target_os = "windows")'.build-dependencies]

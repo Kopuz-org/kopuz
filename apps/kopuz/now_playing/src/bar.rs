@@ -224,7 +224,8 @@ impl NowPlaying {
                         .size(style::chrome().round_button * scale, UTILITY_GLYPH * scale),
                 )
             })
-            .when(room.mini, |row| {
+            // The mini player is a second window, and Android has only the one.
+            .when(room.mini && cfg!(not(target_os = "android")), |row| {
                 row.child(
                     utility("bar-mini", icons::COLLAPSE, scale)
                         .tooltip(t("mini_player"))

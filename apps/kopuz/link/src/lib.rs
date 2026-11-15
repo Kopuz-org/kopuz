@@ -1,7 +1,12 @@
 //! The one seam to a Kopuz daemon: a gRPC client on its own tokio runtime, supervised as a GPUI entity.
 
+// Android hosts the daemon core in-process (`init_in_process`): no kopuzd to spawn, and no relay socket.
+#[cfg(not(target_os = "android"))]
 mod daemon_process;
+#[cfg(not(target_os = "android"))]
 pub mod relay;
+// Only `is_older` is reached on Android, where no daemon of this app's own is ever replaced.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 mod replace;
 
 use std::future::Future;
@@ -11,6 +16,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::task::Poll;
 use std::time::Duration;
+#[cfg(not(target_os = "android"))]
 use std::time::Instant;
 
 use api::{ApiError, ApiEvent, KopuzApi};
@@ -20,13 +26,17 @@ use gpui_kit::{App, AppContext as _, AsyncApp, Context, Entity, EventEmitter, Gl
 pub use api;
 pub use client::Address;
 pub use client::default_socket_path;
+#[cfg(not(target_os = "android"))]
 pub use daemon_process::run_daemon_flag;
 
 const RETRY_INTERVAL: Duration = Duration::from_secs(2);
 /// How many times the app starts its own kopuzd before giving up and crashing.
+#[cfg(not(target_os = "android"))]
 const START_TRIES: u32 = 3;
 /// A kopuzd still alive but silent this long is stuck, not slow.
+#[cfg(not(target_os = "android"))]
 const START_WAIT: Duration = Duration::from_secs(60);
+#[cfg(not(target_os = "android"))]
 const START_POLL: Duration = Duration::from_millis(250);
 /// A daemon this slow to say what state it is in is wedged, however it holds the socket.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -110,6 +120,7 @@ impl Link {
         self.own_socket.is_some()
     }
 
+    #[cfg(not(target_os = "android"))]
     async fn answers(&self) -> bool {
         self.probe(|api| async move { api.player_state().await })
             .await
@@ -208,13 +219,7 @@ where
 
 /// Connect to and supervise the daemon at `address`, before any window opens; `start_own` starts this app's own kopuzd on a free socket.
 pub fn init(address: Address, start_own: bool, cx: &mut App) -> anyhow::Result<()> {
-    let runtime = Arc::new(
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .thread_name("kopuz-link")
-            .enable_all()
-            .build()?,
-    );
+    let runtime = link_runtime()?;
     let api: Arc<dyn KopuzApi> = {
         let _guard = runtime.enter();
         match &address {
@@ -226,6 +231,34 @@ pub fn init(address: Address, start_own: bool, cx: &mut App) -> anyhow::Result<(
         (Address::Socket(path), true) => Some(path.clone()),
         _ => None,
     };
+    install(runtime, api, address, own_socket, cx);
+    Ok(())
+}
+
+/// Supervise a daemon core this process runs itself, reached through its in-process `api` instead of a socket.
+pub fn init_in_process(api: Arc<dyn KopuzApi>, cx: &mut App) -> anyhow::Result<()> {
+    let address = Address::Socket(PathBuf::from("in-process"));
+    install(link_runtime()?, api, address, None, cx);
+    Ok(())
+}
+
+fn link_runtime() -> std::io::Result<Arc<tokio::runtime::Runtime>> {
+    Ok(Arc::new(
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .thread_name("kopuz-link")
+            .enable_all()
+            .build()?,
+    ))
+}
+
+fn install(
+    runtime: Arc<tokio::runtime::Runtime>,
+    api: Arc<dyn KopuzApi>,
+    address: Address,
+    own_socket: Option<PathBuf>,
+    cx: &mut App,
+) {
     let link = Link {
         api,
         runtime: runtime.handle().clone(),
@@ -239,7 +272,6 @@ pub fn init(address: Address, start_own: bool, cx: &mut App) -> anyhow::Result<(
         connection,
         _runtime: runtime,
     });
-    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -299,10 +331,13 @@ impl Connection {
                         {
                             return;
                         }
+                        #[cfg(not(target_os = "android"))]
                         if let Some(socket) = start {
                             start_daemon(&link, &socket, cx).await;
                             continue;
                         }
+                        #[cfg(target_os = "android")]
+                        let _ = start;
                         wait_or_retry(&mut retries, cx).await;
                         continue;
                     }
@@ -329,9 +364,12 @@ impl Connection {
                         if starting.is_err() {
                             return;
                         }
+                        #[cfg(not(target_os = "android"))]
                         if replace::stop_daemon(&socket, cx).await {
                             continue;
                         }
+                        #[cfg(target_os = "android")]
+                        let _ = socket;
                     }
 
                     // A daemon from another checkout reads fields by its own numbers, so a
@@ -435,6 +473,7 @@ impl Connection {
 }
 
 /// Start kopuzd until it answers, up to [`START_TRIES`] times, then panic so the crash report says why.
+#[cfg(not(target_os = "android"))]
 async fn start_daemon(link: &Link, socket: &Path, cx: &mut AsyncApp) {
     let mut reason = String::new();
     for attempt in 1..=START_TRIES {

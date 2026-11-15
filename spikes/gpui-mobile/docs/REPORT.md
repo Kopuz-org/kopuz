@@ -5,6 +5,68 @@ changed, and the legacy app is untouched. The details behind this summary are in
 frontends reach the daemon, and what the GPUI app depends on), `UPSTREAM.md` (gpui-pre-mobile against
 kopuz's versions, plus the build recipe) and `FOREGROUND_SERVICE.md` (the on-device daemon plan).
 
+## Follow-up: in-process daemon and the real kopuz app on Android
+
+**In-process daemon.** The kopuz daemon core runs inside the app, as it does in the legacy Android app
+(`kopuz_core::boot::assemble` on its own thread, used through `LocalApi`). Its database, settings and
+caches live under the app's files directory, and `HOME` and `TMPDIR` point there too. Six test tones
+are seeded on first run (`src/seed.rs`). rusty_v8 and deno_core are not involved, because
+kopuz-server already leaves them out on Android. A host kopuzd over TCP is used only when the device
+property `debug.kopuz.spike.addr` is set, which `scripts/run-dev.sh` does.
+
+**Resume fix.** `src/lifecycle.rs` calls `window.refresh()` when the surface is recreated or the
+platform becomes active, and again on the next three ticks. The screenshot 2 s after resume is now 0%
+black (it was 100% black before). The runtime density change is still not applied (upstream).
+
+**The real app runs.** `apps/kopuz/app` now has a library target, `kopuz_app`. Its old `main` body is
+`run()`, and an Android-only `run_in_process` opens the main window from the `Application::run`
+callback rather than from a task, because of gpui-pre-mobile's lock (see above). `link::init_in_process`
+hands the in-process `Arc<dyn KopuzApi>` to the same supervisor and event relay that desktop uses.
+The host package `spikes/gpui-mobile/kopuz-android` builds `apps/kopuz/app` with gpui-kit 0.6.4
+for aarch64-linux-android. On the emulator it opened its real first-run screen, and a tap went
+through to the real shell, with no crash. **That proves gpui-kit 0.6.4 builds and runs on Android.**
+The root `Cargo.toml` and `Cargo.lock` are unchanged; the Android build lives in the spike's own
+workspace and lock. A desktop `cargo check -p kopuz -p link -p profile --locked` passes.
+
+**Real app on Android: what is gated** (`cfg(not(target_os = "android"))` or `cfg!`; desktop is
+unchanged):
+- `app/src/lib.rs`: the `args`, `instance` and `links` modules (command line, single-instance lock,
+  deep links), `daemon_address`, the desktop `run()` (the `--daemon` flag, profile init, instance
+  claim, open-urls and reopen handlers, the relay listener, the preferences wait, the tray),
+  `register_mini_player` (a second window) and `PREFS_WAIT`. The menu and tray gates already left
+  Android out.
+- `app/src/shell.rs`: the window is not redecorated or reopened when the titlebar setting changes.
+- jemalloc (`app/Cargo.toml`, `profile/Cargo.toml`, `profile/src/heap.rs`): its build needs `-lgcc`,
+  which the NDK no longer ships, so heap figures read zero on Android.
+- `link/src/lib.rs`: spawning kopuzd (`daemon_process`, `start_daemon`, the START constants and
+  `answers`), replacing an older daemon (`replace::stop_daemon`), the deep-link `relay`, and
+  `run_daemon_flag`.
+- File dialogs return early: `components/src/folders.rs`, `library/src/playlists.rs`,
+  `settings_sources/src/source_tools.rs`, `store/src/artwork_edit.rs`, `store/src/picture.rs` and
+  `settings_playback/src/logs.rs`.
+- `now_playing/src/bar.rs`: the mini-player button is hidden. `status/src/update.rs`: the updater
+  banner is hidden.
+- Small compile-only gates: the `run_daemon_flag` re-export and an `Instant` import in `link`, and
+  `allow(dead_code)` on `replace` and on `MainWindow`/`main_window`.
+- Android start-up (`run_in_process`) skips some desktop steps: there is no preferences wait (so the
+  keymap is set up before the preferences load, and saved shortcut overrides are probably ignored),
+  no offline flag, no deep links or relay, and no Booted signal.
+
+**Known gaps of the real app on the emulator:**
+- Home shows its empty state although 6 tracks were seeded. It may need a source switch or a reload;
+  not investigated.
+- The layout is desktop-sized: the top bar is cramped, and the 720 px minimum window size does not
+  apply.
+- The APK has no Java, so there is no media notification (`MediaSessionHelper`), TLS verification
+  fails (the radio registry cannot be fetched), and the clipboard and `open_url` are stubs.
+- Text input and IME are untested.
+- Any code that opens windows, or touches the clipboard or display, from a `cx.spawn` task would hit
+  the gpui-pre-mobile lock deadlock.
+
+This lowers the first row of the effort table below ("prove gpui-kit 0.6.4 on Android"), which is now
+done. The recommendation stands: keep the legacy app on Android for now, because IME, accessibility
+and the media session are still missing.
+
 ## What was built
 
 - A standalone crate, `kopuz-mobile-spike` (about 500 lines of Rust), on gpui-pre 0.3.5 and

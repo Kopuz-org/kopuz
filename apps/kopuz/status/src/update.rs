@@ -127,6 +127,10 @@ impl UpdateBanner {
 
 impl Render for UpdateBanner {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Android apps update through their store, not the desktop updater.
+        if cfg!(target_os = "android") {
+            return div().into_any_element();
+        }
         let version = |version: &str| [("version", version.to_string().into())];
         match self.status(cx) {
             None | Some(UpdateStatus::Current) => div().into_any_element(),

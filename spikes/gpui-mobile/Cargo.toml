@@ -16,7 +16,10 @@ name = "kopuz_mobile_spike"
 crate-type = ["cdylib"]
 path = "src/lib.rs"
 
+# kopuz-android: the real kopuz GPUI app (apps/kopuz/app) on the same platform
+# and in-process core; it shares this lock and this release profile.
 [workspace]
+members = [".", "kopuz-android"]
 
 [dependencies]
 gpui = { package = "gpui-pre", version = "=0.3.5", default-features = false }

@@ -279,6 +279,10 @@ impl Shell {
             != topbar::frame::transparent_titlebar(self.frame_mode);
         tracing::info!(?mode, reopen, "the titlebar setting changed");
         self.frame_mode = mode;
+        // Android has one full-screen window and no titlebar to redecorate or reopen.
+        if cfg!(target_os = "android") {
+            return;
+        }
         if cfg!(target_os = "linux") {
             window.request_decorations(topbar::frame::decorations(mode));
             return;

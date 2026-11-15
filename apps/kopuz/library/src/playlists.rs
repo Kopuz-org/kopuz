@@ -196,6 +196,11 @@ impl AddPlaylist {
     }
 
     fn import_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // No file dialog on Android: gpui-pre-mobile's picker calls Java this APK does not carry.
+        if cfg!(target_os = "android") {
+            window.close_dialog(cx);
+            return;
+        }
         let picked = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
