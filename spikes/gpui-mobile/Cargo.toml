@@ -1,0 +1,35 @@
+# Android spike: one GPUI screen (library list + play) on gpui-pre-mobile,
+# talking to kopuzd over TCP. Standalone: its own workspace, so kopuz's root
+# workspace and its [patch] are not involved. Cargo.lock was seeded from the
+# root lock so shared crates keep kopuz's exact versions.
+[package]
+name = "kopuz-mobile-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "kopuz_mobile_spike"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[workspace]
+
+[dependencies]
+gpui = { package = "gpui-pre", version = "=0.3.5", default-features = false }
+# No default features: drops the 30 optional "package" modules (camera, maps, ...).
+gpui-mobile = { package = "gpui-pre-mobile", version = "=0.1.0", default-features = false }
+api = { package = "kopuz-api", path = "../../shared/api" }
+client = { package = "kopuz-client", path = "../../apps/common/client" }
+tokio = { version = "1.53", features = ["rt-multi-thread", "time"] }
+futures = "0.3.34"
+log = "0.4.33"
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity = { version = "0.6", features = ["native-activity"] }
+android_logger = "0.15"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+debug = "line-tables-only"

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The GPUI mobile spike: one NativeActivity that loads libkopuz_mobile_spike.so.
+  No Java/dex (hasCode="false"); scripts/build-apk.sh links this with aapt2 against
+  platforms/android-34/android.jar, which also sets minSdk 31 / targetSdk 34.
+  extractNativeLibs="false": the .so is stored uncompressed and 16 KB aligned
+  (zip -0, zipalign -P 16) and is mapped straight from the APK.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="moe.kopuz.gpuispike"
+    android:versionCode="1"
+    android:versionName="0.0.1">
+
+    <uses-sdk android:minSdkVersion="31" android:targetSdkVersion="34" />
+
+    <!-- kopuzd on the host, reached as 127.0.0.1:50777 through adb reverse. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- wgpu prefers Vulkan and falls back to GLES, so neither is required. -->
+    <uses-feature android:name="android.hardware.vulkan.version"
+        android:version="0x400003" android:required="false" />
+    <uses-feature android:glEsVersion="0x00030000" android:required="false" />
+
+    <application
+        android:label="Kopuz GPUI spike"
+        android:hasCode="false"
+        android:extractNativeLibs="false"
+        android:allowBackup="false"
+        android:theme="@android:style/Theme.Material.NoActionBar">
+
+        <activity
+            android:name="android.app.NativeActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode|fontScale"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data android:name="android.app.lib_name"
+                android:value="kopuz_mobile_spike" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
