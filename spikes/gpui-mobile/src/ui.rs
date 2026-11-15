@@ -1,5 +1,7 @@
 //! The one screen: a header (status + Play/Pause) over a touch-scrolled
 //! `uniform_list` of tracks. Tapping a row replaces the queue from that row.
+//! The status line shows the connection state ("Connecting…", "Not reachable:
+//! …" over "Reconnecting in Ns…", "N tracks") rather than raw errors.
 
 use std::ops::Range;
 
@@ -9,13 +11,17 @@ use gpui::{
     Context, SharedString, Subscription, Task, Window, div, prelude::*, px, rgb, uniform_list,
 };
 
-use crate::daemon::{Daemon, Msg, Row};
+use crate::daemon::{ConnState, Daemon, Msg, Row};
 
 const ROW_HEIGHT: f32 = 64.;
 
 pub struct Library {
     daemon: Daemon,
-    status: SharedString,
+    conn: ConnState,
+    /// Whether the tracks have been loaded at least once.
+    loaded: bool,
+    /// Shown after the track count: seeding, or a call the daemon refused.
+    note: Option<String>,
     rows: Vec<Row>,
     keys: Vec<String>,
     playing: bool,
@@ -49,12 +55,14 @@ impl Library {
         let subscriptions = vec![
             cx.observe_window_bounds(window, |_, window, _| log_size(window)),
             cx.observe_window_activation(window, |_, window, _| {
-                let event = if window.is_window_active() {
-                    "resume"
+                if window.is_window_active() {
+                    log::info!("SPIKE lifecycle resume");
+                    // Draw again: the surface may have been replaced while paused.
+                    window.refresh();
+                    log::info!("SPIKE refresh reason=resume");
                 } else {
-                    "pause"
-                };
-                log::info!("SPIKE lifecycle {event}");
+                    log::info!("SPIKE lifecycle pause");
+                }
             }),
             cx.observe_window_visibility(window, |_, visibility, _, _| {
                 log::info!("SPIKE lifecycle visibility={visibility:?}");
@@ -81,10 +89,12 @@ impl Library {
             }
         });
 
-        daemon.load();
+        daemon.start();
         Self {
             daemon,
-            status: "connecting…".into(),
+            conn: ConnState::Connecting,
+            loaded: false,
+            note: None,
             rows: Vec::new(),
             keys: Vec::new(),
             playing: false,
@@ -97,16 +107,49 @@ impl Library {
 
     fn apply(&mut self, msg: Msg) {
         match msg {
-            Msg::Connecting(1) => self.status = "connecting…".into(),
-            Msg::Connecting(attempt) => self.status = format!("connecting… (try {attempt})").into(),
-            Msg::Connected => self.status = "connected, loading tracks…".into(),
+            Msg::State(conn) => {
+                // A note belongs to the connection it came from.
+                if conn != ConnState::Connected {
+                    self.note = None;
+                }
+                self.conn = conn;
+            }
             Msg::Tracks(rows) => {
-                self.status = format!("{} tracks", rows.len()).into();
+                self.loaded = true;
                 self.keys = rows.iter().map(|row| row.key.clone()).collect();
                 self.rows = rows;
             }
             Msg::Playing(playing) => self.playing = playing,
-            Msg::Error(text) => self.status = text.into(),
+            Msg::Note(note) => self.note = note,
+        }
+    }
+
+    /// The header's status, from the connection state: a main line and,
+    /// between retries, the countdown under the reason.
+    fn status(&self) -> (SharedString, Option<SharedString>) {
+        match &self.conn {
+            ConnState::Connecting => ("Connecting…".into(), None),
+            ConnState::Reconnecting => ("Reconnecting…".into(), None),
+            ConnState::Waiting {
+                reason: Some(reason),
+                secs,
+            } => (
+                format!("Not reachable: {reason}").into(),
+                Some(format!("Reconnecting in {secs}s…").into()),
+            ),
+            ConnState::Waiting { reason: None, secs } => {
+                (format!("Reconnecting in {secs}s…").into(), None)
+            }
+            ConnState::Connected => {
+                let line = if self.loaded {
+                    format!("{} tracks", self.rows.len()).into()
+                } else if self.note.is_some() {
+                    "Connected".into()
+                } else {
+                    "Loading tracks…".into()
+                };
+                (line, self.note.clone().map(Into::into))
+            }
         }
     }
 
@@ -142,6 +185,7 @@ impl Library {
 
 impl Render for Library {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let (status, detail) = self.status();
         let header = div()
             .w_full()
             .flex()
@@ -155,8 +199,19 @@ impl Render for Library {
                 div()
                     .flex_1()
                     .overflow_hidden()
-                    .truncate()
-                    .child(self.status.clone()),
+                    .flex()
+                    .flex_col()
+                    .child(div().w_full().truncate().child(status))
+                    .when_some(detail, |this, detail| {
+                        this.child(
+                            div()
+                                .w_full()
+                                .truncate()
+                                .text_sm()
+                                .text_color(rgb(0xa0a0a0))
+                                .child(detail),
+                        )
+                    }),
             )
             .child(
                 div()

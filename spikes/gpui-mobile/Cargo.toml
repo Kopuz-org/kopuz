@@ -1,7 +1,10 @@
-# Android spike: one GPUI screen (library list + play) on gpui-pre-mobile,
-# talking to kopuzd over TCP. Standalone: its own workspace, so kopuz's root
-# workspace and its [patch] are not involved. Cargo.lock was seeded from the
-# root lock so shared crates keep kopuz's exact versions.
+# Android spike: one GPUI screen (library list + play) on gpui-pre-mobile.
+# By default the kopuz daemon core runs inside the app (as the legacy Android
+# app hosts it); a host kopuzd over TCP is used instead when the system
+# property debug.kopuz.spike.addr names one. Standalone: its own workspace, so
+# kopuz's root workspace and its [patch] are not involved (that patch is
+# gpui-pre-linux only, which Android never builds). Cargo.lock was seeded from
+# the root lock so shared crates keep kopuz's exact versions.
 [package]
 name = "kopuz-mobile-spike"
 version = "0.0.0"
@@ -21,13 +24,25 @@ gpui = { package = "gpui-pre", version = "=0.3.5", default-features = false }
 gpui-mobile = { package = "gpui-pre-mobile", version = "=0.1.0", default-features = false }
 api = { package = "kopuz-api", path = "../../shared/api" }
 client = { package = "kopuz-client", path = "../../apps/common/client" }
-tokio = { version = "1.53", features = ["rt-multi-thread", "time"] }
+# The daemon core (lib `daemon`, renamed so it does not shadow src/daemon.rs),
+# hosted in-process the way apps/legacy/kopuz/src/backend.rs does.
+kopuz_core = { package = "kopuz-daemon", path = "../../daemon/core" }
+# `db::config_dir()`: the app's filesDir on Android (Context.getFilesDir over JNI).
+db = { package = "kopuz-db", path = "../../daemon/db" }
+tokio = { version = "1.53", features = ["rt-multi-thread", "time", "sync", "macros"] }
 futures = "0.3.34"
 log = "0.4.33"
 
 [target.'cfg(target_os = "android")'.dependencies]
 android-activity = { version = "0.6", features = ["native-activity"] }
 android_logger = "0.15"
+# `__system_property_get` for debug.kopuz.spike.addr.
+libc = "0.2"
+# As apps/legacy/kopuz: reqwest's rustls verifies through the Android trust
+# store and panics on first use unless it is handed a JVM and Context.
+rustls-platform-verifier = "0.7"
+jni = "0.22"
+ndk-context = "0.1"
 
 [profile.release]
 opt-level = 3
