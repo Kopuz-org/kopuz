@@ -249,7 +249,7 @@ Builds:
       - $$rustup$$/rustup target add aarch64-linux-android
       - $$rustup$$/cargo install dioxus-cli@0.7.9 --locked
       - npm ci
-      - npx @tailwindcss/cli -i ./tailwind.css -o ./apps/kopuz/kopuz/assets/tailwind.css
+      - npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css
     output: target/dx/kopuz/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
     build:
       - export SQLX_OFFLINE=true
