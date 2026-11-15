@@ -1,6 +1,7 @@
 name: AUR
 
-# Pushes a release to the AUR: kopuz, kopuz-bin and kopuz-legacy for a stable tag, kopuz-nightly and kopuz-nightly-bin for a nightly.
+# Pushes a release to the AUR: kopuz, kopuz-bin and kopuz-legacy for a stable tag, kopuz-nightly and kopuz-nightly-bin
+# for a nightly, nothing for a beta.
 on:
   # release.yml calls this once its tag's packages are on the GitHub release.
   workflow_call:
@@ -66,6 +67,13 @@ jobs:
             exit 0
           fi
 
+          # A beta is a GitHub pre-release only; the AUR packages move on its release.
+          if [[ "$TAG" =~ -(beta|rc)\.[0-9]+$ ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "${TAG} is a beta; the AUR waits for its release"
+            exit 0
+          fi
+
           version="${TAG#v}"
           release="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
           mkdir -p dist
@@ -89,6 +97,8 @@ jobs:
               rm -f "dist/${deb}"
               echo "${TAG} has no ${deb}; publishing Kopuz Legacy only"
             fi
+            # No kopuz-legacy-bin: the release's legacy binary is built on Ubuntu 22.04 and links libxdo.so.3, which Arch's
+            # xdotool 4 no longer ships.
             # A full source build of the legacy app takes most of an hour; the checksum is what can drift.
             plan+=("kopuz-legacy dist/source.tar.gz source")
           fi

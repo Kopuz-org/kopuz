@@ -48,20 +48,7 @@ jobs:
       - name: Read and verify version
         id: version
         shell: bash
-        run: |
-          set -euo pipefail
-
-          version="$(
-            cargo metadata --no-deps --format-version 1 |
-              jq -r '.packages[] | select(.name == "kopuz-legacy") | .version'
-          )"
-
-          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match Cargo version ${version}"
-            exit 1
-          fi
-
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+        run: bash scripts/release-version.sh
 
       - name: Build Linux application
         run: dx build --release --platform desktop --package kopuz-legacy --locked
@@ -116,17 +103,40 @@ jobs:
           mkdir -p dist
           mv "$appimage" "dist/Kopuz-Legacy-${VERSION}-x86_64.AppImage"
 
+      # Named here rather than by dx, so the .deb keeps one name from release to release.
       - name: Build DEB and RPM packages
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
+          set -euo pipefail
+          shopt -s nullglob
+
           dx bundle --release --platform desktop --package kopuz-legacy --package-types deb --out-dir bundle-deb --locked
-          dx bundle --release --platform desktop --package kopuz-legacy --package-types rpm --out-dir bundle-rpm --locked
-          mv bundle-deb/*.deb dist/
-          mv bundle-rpm/*.rpm dist/
+          debs=(bundle-deb/*.deb)
+          if [[ ${#debs[@]} -ne 1 ]]; then
+            echo "Expected one .deb, found ${#debs[@]}"
+            exit 1
+          fi
+          mv "${debs[0]}" "dist/kopuz-legacy_${VERSION}_amd64.deb"
+
+          # dx hands the crate version to RPM as is, and RPM refuses the "-" in 1.0.0-beta.1, so a beta has no .rpm.
+          if [[ "$PRERELEASE" != true ]]; then
+            dx bundle --release --platform desktop --package kopuz-legacy --package-types rpm --out-dir bundle-rpm --locked
+            rpms=(bundle-rpm/*.rpm)
+            if [[ ${#rpms[@]} -ne 1 ]]; then
+              echo "Expected one .rpm, found ${#rpms[@]}"
+              exit 1
+            fi
+            mv "${rpms[0]}" "dist/kopuz-legacy-${VERSION}-1.x86_64.rpm"
+          fi
 
       - name: Create Linux checksums
         shell: bash
         run: |
           set -euo pipefail
+          shopt -s nullglob
 
           for package in dist/*.AppImage dist/*.deb dist/*.rpm; do
             (cd dist && sha256sum "${package#dist/}" > "${package#dist/}.sha256")
@@ -173,48 +183,7 @@ jobs:
       - name: Read and verify version
         id: version
         shell: bash
-        run: |
-          set -euo pipefail
-
-          version="$(
-            cargo metadata --no-deps --format-version 1 |
-              jq -r '.packages[] | select(.name == "kopuz") | .version'
-          )"
-          base="$version"
-
-          nightly=false
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            tag="${GITHUB_REF_NAME#v}"
-            if [[ "$tag" =~ ^${base//./\\.}-nightly\.[0-9]{8}(\.[0-9]+)?$ ]]; then
-              nightly=true
-              version="$tag"
-            elif [[ "$tag" != "$base" ]]; then
-              echo "Tag ${GITHUB_REF_NAME} is neither v${base} nor a v${base}-nightly.YYYYMMDD"
-              exit 1
-            fi
-          fi
-
-          # A nightly carries its tag's version in this build only; nothing is committed.
-          if [[ "$nightly" == true ]]; then
-            sed -i "s/\"${base}\"/\"${version}\"/g" Cargo.toml
-            cargo update -w
-          fi
-
-          {
-            echo "version=${version}"
-            echo "nightly=${nightly}"
-            if [[ "$nightly" == true ]]; then
-              echo "flavor=nightly"
-              echo "package=kopuz-nightly"
-              echo "suffix=-nightly"
-              echo "asset=Kopuz-Nightly"
-            else
-              echo "flavor=stable"
-              echo "package=kopuz"
-              echo "suffix="
-              echo "asset=Kopuz"
-            fi
-          } >> "$GITHUB_OUTPUT"
+        run: bash scripts/release-version.sh
 
       - name: Build the app, daemon and command-line client
         env:
@@ -233,16 +202,20 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
           PACKAGE: ${{ steps.version.outputs.package }}
+          CHANNEL: ${{ steps.version.outputs.channel }}
         run: |
           set -euo pipefail
 
           mkdir -p dist
           nfpm package -f "packaging/${PACKAGE}/nfpm.yaml" -p deb -t dist/
           nfpm package -f "packaging/${PACKAGE}/nfpm.yaml" -p rpm -t dist/
-          # nfpm spells a pre-release its own way per format; the AUR package and the docs expect these names.
-          if [[ "$PACKAGE" == kopuz-nightly ]]; then
+          # nfpm spells a pre-release its own way per format (1.0.0~beta.1); the AUR packages and the docs expect these names.
+          if [[ "$CHANNEL" == nightly ]]; then
             mv dist/kopuz-nightly*.deb "dist/kopuz-nightly_${VERSION}_amd64.deb"
             mv dist/kopuz-nightly*.rpm "dist/kopuz-nightly-${VERSION}.x86_64.rpm"
+          elif [[ "$CHANNEL" == beta ]]; then
+            mv dist/kopuz_*.deb "dist/kopuz_${VERSION}-1_amd64.deb"
+            mv dist/kopuz-*.rpm "dist/kopuz-${VERSION}-1.x86_64.rpm"
           fi
 
       - name: Build AppImage
@@ -288,6 +261,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          shopt -s nullglob
 
           for package in dist/*.AppImage dist/*.deb dist/*.rpm; do
             (cd dist && sha256sum "${package#dist/}" > "${package#dist/}.sha256")
@@ -329,20 +303,7 @@ jobs:
       - name: Read and verify version
         id: version
         shell: bash
-        run: |
-          set -euo pipefail
-
-          version="$(
-            cargo metadata --no-deps --format-version 1 |
-              jq -r '.packages[] | select(.name == "kopuz-legacy") | .version'
-          )"
-
-          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match Cargo version ${version}"
-            exit 1
-          fi
-
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+        run: bash scripts/release-version.sh
 
       - name: Bundle macOS application
         run: dx bundle --release --platform desktop --package kopuz-legacy --package-types macos --out-dir dist --locked
@@ -400,49 +361,7 @@ jobs:
       - name: Read and verify version
         id: version
         shell: bash
-        run: |
-          set -euo pipefail
-
-          version="$(
-            cargo metadata --no-deps --format-version 1 |
-              jq -r '.packages[] | select(.name == "kopuz") | .version'
-          )"
-          base="$version"
-
-          nightly=false
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            tag="${GITHUB_REF_NAME#v}"
-            if [[ "$tag" =~ ^${base//./\\.}-nightly\.[0-9]{8}(\.[0-9]+)?$ ]]; then
-              nightly=true
-              version="$tag"
-            elif [[ "$tag" != "$base" ]]; then
-              echo "Tag ${GITHUB_REF_NAME} is neither v${base} nor a v${base}-nightly.YYYYMMDD"
-              exit 1
-            fi
-          fi
-
-          # A nightly carries its tag's version in this build only; nothing is committed.
-          if [[ "$nightly" == true ]]; then
-            sed "s/\"${base}\"/\"${version}\"/g" Cargo.toml > Cargo.toml.next
-            mv Cargo.toml.next Cargo.toml
-            cargo update -w
-          fi
-
-          {
-            echo "version=${version}"
-            echo "nightly=${nightly}"
-            if [[ "$nightly" == true ]]; then
-              echo "flavor=nightly"
-              echo "asset=Kopuz-Nightly"
-              echo "product=Kopuz Nightly"
-              echo "suffix=-nightly"
-            else
-              echo "flavor=stable"
-              echo "asset=Kopuz"
-              echo "product=Kopuz"
-              echo "suffix="
-            fi
-          } >> "$GITHUB_OUTPUT"
+        run: bash scripts/release-version.sh
 
       - name: Build the app, daemon and command-line client
         env:
@@ -553,33 +472,35 @@ jobs:
 
       - name: Read and verify version
         id: version
-        shell: pwsh
-        run: |
-          $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
-          $version = ($metadata.packages | Where-Object name -eq "kopuz-legacy").version
-
-          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$version") {
-            throw "Tag $env:GITHUB_REF_NAME does not match Cargo version $version"
-          }
-
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        shell: bash
+        run: bash scripts/release-version.sh
 
       - name: Build EXE and MSI installers
         shell: pwsh
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
           dx bundle --release --platform desktop --package kopuz-legacy --package-types nsis --out-dir bundle-nsis --locked
-          dx bundle --release --platform desktop --package kopuz-legacy --package-types msi --out-dir bundle-msi --locked
+          if ($LASTEXITCODE -ne 0) { throw "dx bundle nsis failed" }
 
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           $exe = @(Get-ChildItem bundle-nsis -Filter *.exe)
-          $msi = @(Get-ChildItem bundle-msi -Filter *.msi)
-          if ($exe.Count -ne 1 -or $msi.Count -ne 1) {
-            throw "Expected one EXE and one MSI installer, found $($exe.Count) and $($msi.Count)"
+          if ($exe.Count -ne 1) {
+            throw "Expected one EXE installer, found $($exe.Count)"
           }
           Move-Item $exe[0].FullName "dist/Kopuz-Legacy-$env:VERSION-x64-setup.exe"
-          Move-Item $msi[0].FullName "dist/Kopuz-Legacy-$env:VERSION-x64.msi"
+
+          # WiX takes only numeric versions, so a beta ships the NSIS installer alone.
+          if ($env:PRERELEASE -ne 'true') {
+            dx bundle --release --platform desktop --package kopuz-legacy --package-types msi --out-dir bundle-msi --locked
+            if ($LASTEXITCODE -ne 0) { throw "dx bundle msi failed" }
+            $msi = @(Get-ChildItem bundle-msi -Filter *.msi)
+            if ($msi.Count -ne 1) {
+              throw "Expected one MSI installer, found $($msi.Count)"
+            }
+            Move-Item $msi[0].FullName "dist/Kopuz-Legacy-$env:VERSION-x64.msi"
+          }
 
       - name: Create Windows checksums
         shell: pwsh
@@ -618,34 +539,8 @@ jobs:
 
       - name: Read and verify version
         id: version
-        shell: pwsh
-        run: |
-          $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
-          $base = ($metadata.packages | Where-Object name -eq "kopuz").version
-          $version = $base
-          $nightly = $false
-
-          if ($env:GITHUB_REF_TYPE -eq "tag") {
-            $tag = $env:GITHUB_REF_NAME -replace '^v', ''
-            if ($tag -match ('^' + [regex]::Escape($base) + '-nightly\.[0-9]{8}(\.[0-9]+)?$')) {
-              $nightly = $true
-              $version = $tag
-            } elseif ($tag -ne $base) {
-              throw "Tag $env:GITHUB_REF_NAME is neither v$base nor a v$base-nightly.YYYYMMDD"
-            }
-          }
-
-          # A nightly carries its tag's version in this build only; nothing is committed.
-          if ($nightly) {
-            (Get-Content Cargo.toml -Raw).Replace("`"$base`"", "`"$version`"") | Set-Content Cargo.toml -NoNewline
-            cargo update -w
-            if ($LASTEXITCODE -ne 0) { throw "cargo update failed" }
-          }
-
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "nightly=$($nightly.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "flavor=$(if ($nightly) { 'nightly' } else { 'stable' })" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "asset=$(if ($nightly) { 'Kopuz-Nightly' } else { 'Kopuz' })" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        shell: bash
+        run: bash scripts/release-version.sh
 
       - name: Build the app, daemon and command-line client
         env:
@@ -665,17 +560,19 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
           NIGHTLY: ${{ steps.version.outputs.nightly }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
           ASSET: ${{ steps.version.outputs.asset }}
         run: |
           New-Item -ItemType Directory -Path dist -Force | Out-Null
 
-          # WiX takes only numeric versions, so a nightly ships the NSIS installer alone.
+          # WiX takes only numeric versions, so a nightly or beta ships the NSIS installer alone.
+          $formats = if ($env:PRERELEASE -eq 'true') { 'nsis' } else { 'nsis,wix' }
           if ($env:NIGHTLY -eq 'true') {
             $config = 'packaging/kopuz-nightly/kopuz-nightly.ci.toml'
             (Get-Content packaging/kopuz-nightly/kopuz-nightly.toml -Raw).Replace('@VERSION@', $env:VERSION) | Set-Content $config -NoNewline
-            cargo packager --config $config --release -f nsis --out-dir "$PWD\bundle"
+            cargo packager --config $config --release -f $formats --out-dir "$PWD\bundle"
           } else {
-            cargo packager -p kopuz --release -f nsis,wix --out-dir "$PWD\bundle"
+            cargo packager -p kopuz --release -f $formats --out-dir "$PWD\bundle"
           }
           if ($LASTEXITCODE -ne 0) { throw "cargo packager failed" }
 
@@ -685,7 +582,7 @@ jobs:
           }
           Move-Item $exe[0].FullName "dist/$($env:ASSET)_$($env:VERSION)_x64-setup.exe"
 
-          if ($env:NIGHTLY -ne 'true') {
+          if ($env:PRERELEASE -ne 'true') {
             $msi = @(Get-ChildItem bundle -Filter *.msi)
             if ($msi.Count -ne 1) {
               throw "Expected one MSI installer, found $($msi.Count)"
@@ -758,20 +655,7 @@ jobs:
       - name: Read and verify version
         id: version
         shell: bash
-        run: |
-          set -euo pipefail
-
-          version="$(
-            cargo metadata --no-deps --format-version 1 |
-              jq -r '.packages[] | select(.name == "kopuz-legacy") | .version'
-          )"
-
-          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match Cargo version ${version}"
-            exit 1
-          fi
-
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+        run: bash scripts/release-version.sh
 
       # A tag is a published release, so it has to carry the project signature —
       # an unsigned APK there would strand everyone who installed a signed one.
@@ -884,10 +768,33 @@ jobs:
             dist/*.dmg
             dist/*.dmg.sha256
 
-      - name: Upload packages to GitHub release
-        if: ${{ !contains(github.ref_name, '-nightly.') }}
+      # A beta carries both apps but no MSI, and is never "latest", so the stable updater and the stores stay on the release.
+      - name: Upload a beta as a pre-release
+        if: contains(github.ref_name, '-beta.') || contains(github.ref_name, '-rc.')
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.AppImage
+            dist/*.AppImage.sha256
+            dist/*.deb
+            dist/*.deb.sha256
+            dist/*.rpm
+            dist/*.rpm.sha256
+            dist/*.dmg
+            dist/*.dmg.sha256
+            dist/*.exe
+            dist/*.exe.sha256
+            dist/*.apk
+            dist/*.apk.sha256
+
+      - name: Upload packages to GitHub release
+        if: ${{ !contains(github.ref_name, '-nightly.') && !contains(github.ref_name, '-beta.') && !contains(github.ref_name, '-rc.') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          make_latest: true
           fail_on_unmatched_files: true
           files: |
             dist/*.AppImage
@@ -907,7 +814,10 @@ jobs:
 
   aur:
     # A bare condition would also wait on publish's own needs, so a nightly's macOS failure would skip this.
-    if: ${{ github.ref_type == 'tag' && !cancelled() && needs.publish.result == 'success' }}
+    # A beta stays a GitHub pre-release; the AUR moves on releases and nightlies.
+    if: >-
+      ${{ github.ref_type == 'tag' && !cancelled() && needs.publish.result == 'success'
+      && !contains(github.ref_name, '-beta.') && !contains(github.ref_name, '-rc.') }}
     needs: publish
     uses: ./.github/workflows/aur.yml
     with:
@@ -1021,8 +931,10 @@ jobs:
           done
 
   homebrew:
-    # The casks carry the stable app; Kopuz Nightly's DMG goes only to its pre-release.
-    if: github.ref_type == 'tag' && !contains(github.ref_name, '-nightly.')
+    # The casks carry the released apps; a nightly's or beta's DMG goes only to its pre-release.
+    if: >-
+      github.ref_type == 'tag' && !contains(github.ref_name, '-nightly.')
+      && !contains(github.ref_name, '-beta.') && !contains(github.ref_name, '-rc.')
     needs: publish
     runs-on: ubuntu-latest
 

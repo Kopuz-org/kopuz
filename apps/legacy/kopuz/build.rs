@@ -482,20 +482,35 @@ fn write_notification_icon(asset_dir: &Path, res: &Path) {
 /// Past 99 the fields would carry into each other and two different releases
 /// could claim the same code (0.14.100 and 0.15.0 both give 1500), so the build
 /// stops instead: a silently duplicated code makes an update uninstallable.
+///
+/// A pre-release (1.0.0-beta.1) takes the code just below its release, 9999,
+/// so the release installs over it. Patch 99 stays unused to keep that slot
+/// free, and only a `.0` release can have one: 1.0.1-beta.1 would take 1.0.0's.
 fn android_version_code() -> u32 {
     let version = env!("CARGO_PKG_VERSION");
-    let mut parts = version
-        .split(['.', '-'])
-        .map(|p| p.parse::<u32>().unwrap_or(0));
+    let (release, pre) = match version.split_once('-') {
+        Some((release, _)) => (release, true),
+        None => (version, false),
+    };
+    let mut parts = release.split('.').map(|p| p.parse::<u32>().unwrap_or(0));
     let major = parts.next().unwrap_or(0);
     let minor = parts.next().unwrap_or(0);
     let patch = parts.next().unwrap_or(0);
     assert!(
-        minor < 100 && patch < 100,
+        minor < 100 && patch < 99,
         "crate version {version} cannot be packed into an android versionCode: \
-         minor and patch have to stay below 100"
+         minor has to stay below 100 and patch below 99"
     );
-    major * 10_000 + minor * 100 + patch
+    let code = major * 10_000 + minor * 100 + patch;
+    if !pre {
+        return code;
+    }
+    assert!(
+        patch == 0 && code > 0,
+        "pre-release {version} has no android versionCode: only a .0 release \
+         can have pre-releases, which take the code below it"
+    );
+    code - 1
 }
 
 fn write_media_icons(res: &Path) {
