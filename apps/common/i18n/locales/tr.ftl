@@ -231,6 +231,8 @@ time = Süre
 genre = Tür
 plays = Çalma
 track_count = { $count } parça
+album_count = { $count } albüm
+artist_count = { $count } sanatçı
 songs = şarkı
 min = dk
 

@@ -231,6 +231,8 @@ time = 시간
 genre = 장르
 plays = 재생 횟수
 track_count = { $count }곡
+album_count = 앨범 { $count }개
+artist_count = 아티스트 { $count }명
 songs = 곡
 min = 분
 

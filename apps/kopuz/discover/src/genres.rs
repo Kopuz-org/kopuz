@@ -206,16 +206,18 @@ impl Render for Genre {
                 .icon(icons::DISC)
                 .into_any_element()
         } else {
+            let compact = ::theme::mobile::is_compact(cx);
             v_flex()
                 .flex_1()
                 .min_h_0()
-                .child(self.column_header(cx))
+                .when(!compact, |body| body.child(self.column_header(cx)))
                 .child(div().flex_1().min_h_0().child(self.list.clone()))
                 .into_any_element()
         };
 
         components::page()
             .pb_8()
+            .when(::theme::mobile::is_compact(cx), |page| page.px_4().pt_4())
             .child(
                 PageHeader::new(self.name.clone())
                     .subtitle(track_count(count))

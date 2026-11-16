@@ -231,6 +231,8 @@ time = Idő
 genre = Műfaj
 plays = Lejátszások
 track_count = { $count } dal
+album_count = { $count } album
+artist_count = { $count } előadó
 songs = dalok
 min = perc
 

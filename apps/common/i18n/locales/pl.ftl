@@ -267,6 +267,20 @@ track_count =
         [many] { $count } utworów
        *[other] { $count } utworu
     }
+album_count =
+    { $count ->
+        [one] { $count } album
+        [few] { $count } albumy
+        [many] { $count } albumów
+       *[other] { $count } albumu
+    }
+artist_count =
+    { $count ->
+        [one] { $count } wykonawca
+        [few] { $count } wykonawców
+        [many] { $count } wykonawców
+       *[other] { $count } wykonawcy
+    }
 songs = piosenki
 min = min
 

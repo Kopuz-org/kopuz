@@ -8,12 +8,13 @@ use components::track_list::{
     NowPlaying, TrackActions, TrackList, TrackListEvent, TrackListOptions,
 };
 use components::{
-    DetailActions, DetailHeader, EmptyState, Picture, TrackHeader, detail_header_skeleton, icons,
-    menus,
+    DetailActions, DetailHeader, EmptyState, HeaderLayout, Picture, TrackHeader,
+    detail_header_skeleton, icons, menus,
 };
 use gpui_kit::component::v_flex;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
+    AnyElement, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Pixels, Render,
     SharedString, Styled as _, Subscription, Window, div, px,
 };
 use link::Link;
@@ -22,6 +23,9 @@ use store::{
     Target, actions,
 };
 
+/// The cover on a phone, where the header stacks into a column above the tracks.
+const PHONE_COVER: Pixels = px(128.);
+
 pub struct PlaylistDetail {
     id: SharedString,
     keys: Rc<[String]>,
@@ -29,6 +33,8 @@ pub struct PlaylistDetail {
     tracks: Entity<Query<Vec<TrackInfo>>>,
     list: Entity<TrackList>,
     refreshed: bool,
+    /// A phone's header folds into a slim bar once the rows scroll, so it stops covering them.
+    collapsed: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -63,6 +69,13 @@ impl PlaylistDetail {
         let subscriptions = vec![
             cx.observe(&tracks, |this, _, cx| this.adopt_rows(cx)),
             cx.subscribe(&list, Self::on_list_event),
+            cx.observe(&list, |this, list, cx| {
+                let collapsed = components::phone::collapsed(list.read(cx).scrolled());
+                if collapsed != this.collapsed {
+                    this.collapsed = collapsed;
+                    cx.notify();
+                }
+            }),
             cx.observe(&playlists, |this, _, cx| {
                 this.sync_keys(cx);
                 cx.notify();
@@ -84,6 +97,7 @@ impl PlaylistDetail {
             tracks,
             list,
             refreshed: false,
+            collapsed: false,
             _subscriptions: subscriptions,
         };
         detail.refresh_offline(cx);
@@ -241,20 +255,23 @@ impl PlaylistDetail {
 
 impl Render for PlaylistDetail {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let compact = ::theme::mobile::is_compact(cx);
         let playlists = PlaylistsModel::global(cx);
         let loaded = playlists.read(cx).is_loaded();
         let playlist = playlists.read(cx).playlist(&self.id).cloned();
         let Some(playlist) = playlist else {
             // The page used to draw nothing at all while the catalog was still being read.
-            return components::page().child(if loaded {
-                EmptyState::new(t("playlist_not_found"))
-                    .icon(icons::LIST)
-                    .flex()
-                    .into_any_element()
-            } else {
-                detail_header_skeleton(components::skin::arrangement().pages.hero, false, cx)
-                    .into_any_element()
-            });
+            return components::page()
+                .when(compact, |page| page.px_4().pt_4())
+                .child(if loaded {
+                    EmptyState::new(t("playlist_not_found"))
+                        .icon(icons::LIST)
+                        .flex()
+                        .into_any_element()
+                } else {
+                    detail_header_skeleton(components::skin::arrangement().pages.hero, false, cx)
+                        .into_any_element()
+                });
         };
 
         let name = SharedString::from(playlist.name.clone());
@@ -265,6 +282,9 @@ impl Render for PlaylistDetail {
             name: name.clone(),
         });
         let header = DetailHeader::new(name.clone())
+            .when(compact, |header| {
+                header.layout(HeaderLayout::Column).size(PHONE_COVER)
+            })
             .artwork(playlist.artwork.as_ref())
             .placeholder(icons::LIST)
             .cover_menu(menu, picture)
@@ -287,7 +307,25 @@ impl Render for PlaylistDetail {
             );
 
         let body = self.body(self.keys.len(), window, cx);
-        components::page().gap_8().child(header).child(body)
+        let header = match compact && self.collapsed {
+            true => {
+                let keys = self.keys.clone();
+                components::phone::slim_header(
+                    "playlist-slim",
+                    SharedString::from(playlist.name.clone()),
+                    playlist.artwork.as_ref(),
+                    false,
+                    move |_, cx| commands::play_all(&keys, cx),
+                    cx,
+                )
+            }
+            false => header.into_any_element(),
+        };
+        components::page()
+            .gap_8()
+            .when(compact, |page| page.px_4().pt_4().gap_4())
+            .child(header)
+            .child(body)
     }
 }
 
@@ -323,14 +361,17 @@ impl PlaylistDetail {
                 .into_any_element();
         }
         let _ = window;
+        let compact = ::theme::mobile::is_compact(cx);
         v_flex()
             .flex_1()
             .min_h_0()
             .gap_2()
-            .child(TrackHeader::new(
-                "playlist-header",
-                self.list.read(cx).layout(),
-            ))
+            .when(!compact, |body| {
+                body.child(TrackHeader::new(
+                    "playlist-header",
+                    self.list.read(cx).layout(),
+                ))
+            })
             .child(div().flex_1().min_h_0().child(self.list.clone()))
             .into_any_element()
     }

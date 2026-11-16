@@ -3,7 +3,7 @@
 use components::format::t;
 use components::{Chip, ChipTone, icons};
 use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
+use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::{AnyElement, App, IntoElement};
 use store::SourcesModel;
 
@@ -36,7 +36,7 @@ pub fn indicator(compact: bool, cx: &App) -> Option<AnyElement> {
 pub fn item(menu: PopupMenu, cx: &App) -> PopupMenu {
     let on = is_on(cx);
     menu.item(
-        PopupMenuItem::new(t("offline_mode"))
+        components::menus::entry(t("offline_mode"), None, false, cx)
             .checked(on)
             .on_click(move |_, _, cx| {
                 SourcesModel::global(cx).update(cx, |sources, cx| sources.set_offline(!on, cx));

@@ -13,7 +13,7 @@ use gpui_kit::{
 };
 
 use crate::marker::{self, Along};
-use crate::{Axis, Roving, Step, focus, icons, motion, style};
+use crate::{Axis, Roving, Step, focus, icons, motion, phone, style};
 
 const HOVER: u64 = 0;
 const WASH: u64 = 1;
@@ -201,6 +201,7 @@ impl TabStrip {
         };
         let thickness = self.bar.thickness(self.along);
         let select = self.select.clone();
+        let compact = phone::is_compact(cx);
         // The tab carries no padding of its own: an absolute probe measures against the content box.
         let frame: Div = div().flex().relative().flex_none().bg(wash).text_color(ink);
         frame
@@ -214,6 +215,12 @@ impl TabStrip {
                 (Bar::Pill, false) => frame.rounded(radius).h_full().py_1(),
                 (Bar::Rule, _) => frame.h_11().items_center(),
                 (Bar::Sidebar, _) => frame.rounded(radius).w_full().py(px(6.)),
+            })
+            .when(compact, |frame| {
+                frame
+                    .items_center()
+                    .min_h(phone::TOUCH_TARGET)
+                    .min_w(phone::TOUCH_TARGET)
             })
             .child(marker::probe(tab.key.clone(), self.along, marks))
             .when_some(tab.tooltip, |frame, tip| {
@@ -240,6 +247,7 @@ impl TabStrip {
                             })
                         }
                     })
+                    .when(compact, |row| row.text_size(phone::BODY))
                     .child(
                         icons::icon(tab.icon)
                             .when(self.bar == Bar::Pill, |glyph| glyph.size(px(16.)))

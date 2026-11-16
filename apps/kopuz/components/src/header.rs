@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::cover::{Cover, EditableCover, Scrim};
 use crate::menus::{self, Menu, Picture, WithContextMenu as _};
-use crate::{icons, skin, style};
+use crate::{icons, phone, skin, style};
 use api::ArtworkRef;
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -98,17 +98,26 @@ impl RenderOnce for PageHeader {
         let quiet =
             |text: SharedString| div().text_sm().text_color(style::slate_400(cx)).child(text);
         let display = self.size == TitleSize::Display;
+        let compact = phone::is_compact(cx);
         // A skin with no greeting leaves the home page's actions on their own.
         let title = (!display || pages.greeting).then(|| {
             div()
                 .text_color(cx.theme().foreground)
-                .map(|title| match self.size {
-                    TitleSize::Page => title
+                .map(|title| match (self.size, compact) {
+                    (TitleSize::Page, false) => title
                         .text_size(pages.title)
                         .font_weight(FontWeight::SEMIBOLD),
-                    TitleSize::Display => {
+                    (TitleSize::Display, false) => {
                         title.text_size(rems(2.25)).font_weight(FontWeight::BLACK)
                     }
+                    (TitleSize::Page, true) => title
+                        .text_size(phone::TITLE)
+                        .line_height(phone::TITLE * 1.25)
+                        .font_weight(FontWeight::SEMIBOLD),
+                    (TitleSize::Display, true) => title
+                        .text_size(phone::DISPLAY)
+                        .line_height(phone::DISPLAY * 1.25)
+                        .font_weight(FontWeight::BLACK),
                 })
                 .child(self.title)
         });
@@ -124,7 +133,10 @@ impl RenderOnce for PageHeader {
             .items_center()
             .flex_wrap()
             .gap_3()
-            .when(!self.flush, |header| header.pb_6())
+            .when(!self.flush, |header| match compact {
+                true => header.pb_4(),
+                false => header.pb_6(),
+            })
             .child(
                 v_flex()
                     .min_w_0()
@@ -487,6 +499,49 @@ impl DetailHeader {
             .into_any_element()
     }
 
+    /// A phone's header for the row and column layouts: the cover centred, then the words and the actions the full width under it.
+    fn phone(mut self, cx: &App) -> AnyElement {
+        if self.size > phone::COVER {
+            self.size = phone::COVER;
+        }
+        let cover = self.cover_element();
+        let facts = self.facts(true, None);
+        v_flex()
+            .w_full()
+            .items_center()
+            .gap_4()
+            .child(div().flex_shrink_0().shadow_2xl().child(cover))
+            .child(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap_2()
+                    .children(self.eyebrow)
+                    .child(
+                        div()
+                            .w_full()
+                            .line_clamp(3)
+                            .text_size(phone::TITLE)
+                            .line_height(phone::TITLE * 1.25)
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(self.title),
+                    )
+                    .children(facts)
+                    .children(self.description.map(|text| description(text, cx))),
+            )
+            .when(!self.actions.is_empty(), |column| {
+                column.child(
+                    h_flex()
+                        .w_full()
+                        .gap_3()
+                        .items_center()
+                        .flex_wrap()
+                        .children(self.actions),
+                )
+            })
+            .into_any_element()
+    }
+
     fn column(mut self, cx: &App) -> AnyElement {
         let cover = self.cover_element();
         let facts = self.facts(true, None);
@@ -525,11 +580,15 @@ impl DetailHeader {
     }
 
     fn banner(mut self, cx: &App) -> AnyElement {
+        let compact = phone::is_compact(cx);
         let facts = self.facts(true, Some(style::white(0.7, cx)));
         div()
             .relative()
             .w_full()
-            .h(rems(22.5))
+            .h(match compact {
+                true => rems(18.),
+                false => rems(22.5),
+            })
             .overflow_hidden()
             .bg(cx.theme().secondary)
             .child(
@@ -548,13 +607,20 @@ impl DetailHeader {
                     .size_full()
                     .justify_end()
                     .gap_4()
-                    .px_10()
-                    .pt_16()
-                    .pb_10()
+                    .map(|words| match compact {
+                        true => words.px(phone::PAGE_PAD).pt_10().pb_6(),
+                        false => words.px_10().pt_16().pb_10(),
+                    })
                     .children(self.eyebrow)
                     .child(
                         div()
-                            .text_size(rems(3.75))
+                            .map(|title| match compact {
+                                true => title
+                                    .line_clamp(2)
+                                    .text_size(phone::DISPLAY)
+                                    .line_height(phone::DISPLAY * 1.25),
+                                false => title.text_size(rems(3.75)),
+                            })
                             .font_weight(FontWeight::BLACK)
                             .child(self.title),
                     )
@@ -566,6 +632,7 @@ impl DetailHeader {
                                 .mt_2()
                                 .gap_3()
                                 .items_center()
+                                .when(compact, |actions| actions.flex_wrap())
                                 .children(self.actions),
                         )
                     }),
@@ -586,6 +653,7 @@ fn description(text: SharedString, cx: &App) -> impl IntoElement {
 impl RenderOnce for DetailHeader {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         match self.layout {
+            HeaderLayout::Row | HeaderLayout::Column if phone::is_compact(cx) => self.phone(cx),
             HeaderLayout::Row => self.row(cx),
             HeaderLayout::Column => self.column(cx),
             HeaderLayout::Banner => self.banner(cx),

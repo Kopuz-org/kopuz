@@ -66,6 +66,10 @@ pub struct Shelves {
     // Search results: a song seeds a radio where the source asks for that, and "Show all" switches the filter.
     searching: bool,
     topping_up: Option<usize>,
+    /// Whether the player was playing at the last notify: its tick only matters to the shelves when that flips.
+    playing: bool,
+    /// Where each section was drawn, so a phone builds only those near the screen.
+    windowed: components::scroll::Windowed,
     _play: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -84,9 +88,17 @@ impl Shelves {
             offer_more: false,
             searching: false,
             topping_up: None,
+            playing: player.read(cx).is_playing(),
+            windowed: Default::default(),
             _play: None,
             _subscriptions: vec![
-                cx.observe(&player, |_, _, cx| cx.notify()),
+                cx.observe(&player, |this, player, cx| {
+                    let playing = player.read(cx).is_playing();
+                    if playing != this.playing {
+                        this.playing = playing;
+                        cx.notify();
+                    }
+                }),
                 cx.observe(&marks, |this, marks, cx| this.drop_removed(marks, cx)),
             ],
         }
@@ -609,10 +621,12 @@ impl Shelves {
             return div().into_any_element();
         };
         let rest = &view.shelf.items[1..];
+        let compact = ::theme::mobile::is_compact(cx);
         h_flex()
             .w_full()
             .items_start()
             .gap_6()
+            .when(compact, |row| row.flex_col().items_stretch().gap_4())
             .child(self.hero_card(&view.key, first, cx))
             .when(!rest.is_empty(), |row| {
                 row.child(
@@ -795,12 +809,22 @@ impl Shelves {
 }
 
 impl Render for Shelves {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let touch = components::phone::is_touch(cx);
+        let windowed = self.windowed.clone();
         let mut sections = Vec::with_capacity(self.views.len());
         for index in 0..self.views.len() {
-            if self.views[index].row.is_none() {
-                sections.push(self.section(index, cx));
+            if self.views[index].row.is_some() {
+                continue;
             }
+            sections.push(match touch {
+                true => {
+                    windowed.section(SharedString::from(format!("shelf-{index}")), window, || {
+                        self.section(index, cx)
+                    })
+                }
+                false => self.section(index, cx),
+            });
         }
         v_flex().w_full().gap_12().children(sections)
     }
@@ -1009,6 +1033,7 @@ impl gpui_kit::RenderOnce for HeroBody {
         v_flex()
             .id(motion::channel(&card.key, 0))
             .w(HERO_CARD)
+            .when(::theme::mobile::is_compact(cx), |body| body.w_full())
             .gap_4()
             .p_5()
             .rounded(style::radius_xl())

@@ -149,9 +149,15 @@ impl<T: Send + 'static> Query<T> {
                         let fresh = this.error.as_ref() != Some(&error);
                         // Without an attached daemon the connection banner is what says so.
                         let attached = Link::connection(cx).read(cx).is_connected();
+                        let quiet = cfg!(target_os = "android")
+                            && error.code == api::ErrorCode::SourceUnreachable;
+                        if quiet && fresh {
+                            tracing::warn!(%error, "query failed; not toasted on a phone");
+                        }
                         this.error = Some(error);
                         if fresh
                             && attached
+                            && !quiet
                             && let Some(error) = this.error.as_ref()
                         {
                             crate::Notices::failed(error, cx);

@@ -297,6 +297,8 @@ time = Thời lượng
 genre = Thể loại
 plays = Lượt phát
 track_count = { $count } bài
+album_count = { $count } album
+artist_count = { $count } nghệ sĩ
 songs = bài hát
 min = phút
 

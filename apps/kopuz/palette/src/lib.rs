@@ -46,6 +46,12 @@ const TOP: f32 = 0.15;
 const FLOOR: f32 = 0.08;
 /// The input row and the hint bar, which the list fits between.
 const FRAME: Pixels = px(88.);
+/// The hint bar's share of [`FRAME`], which a touch screen has no keys to fill.
+const FOOTER: Pixels = px(36.);
+/// What a phone keeps between the panel and the status bar above it, and the tab bar below it.
+const PHONE_GAP: Pixels = px(8.);
+/// What a phone keeps between the panel and each side of the screen.
+const PHONE_SIDE: Pixels = px(16.);
 /// `bg-black/55` behind the panel; GPUI has no backdrop blur, so the scrim carries it alone.
 const SCRIM: f32 = 0.55;
 
@@ -517,7 +523,29 @@ fn ranked(mut scored: Vec<(i32, Item)>, limit: usize) -> Vec<Item> {
 }
 
 fn hint(id: &str, cx: &gpui_kit::App) -> Option<SharedString> {
-    commands::keystroke_for(id, cx).map(SharedString::from)
+    commands::keystroke_for(id, cx)
+        .map(SharedString::from)
+        .filter(|_| !theme::mobile::is_touch(cx))
+}
+
+/// A row's height, the section heads' too: a uniform list has one. A finger needs a full touch target.
+fn row_height(cx: &gpui_kit::App) -> Pixels {
+    match theme::mobile::is_touch(cx) {
+        true => theme::mobile::TOUCH_TARGET,
+        false => ROW,
+    }
+}
+
+/// The panel's top edge, and how much of the window below it the panel may take: shares of the window
+/// on a desktop; on a phone, clear of the status bar above and of the tab bar or the keyboard below.
+fn placement(window: &Window, cx: &gpui_kit::App) -> (Pixels, Pixels) {
+    let height = window.viewport_size().height;
+    if !theme::mobile::is_compact(cx) {
+        return (height * TOP, height * (1. - TOP - FLOOR));
+    }
+    let top = theme::mobile::safe_insets(cx).top + PHONE_GAP;
+    let bottom = theme::mobile::bottom_clearance(cx) + PHONE_GAP;
+    (top, (height - top - bottom).max(px(0.)))
 }
 
 impl Palette {
@@ -949,15 +977,14 @@ fn section(lines: &mut Vec<Line>, items: &mut Vec<Item>, title: SharedString, fo
 }
 
 /// A `uniform_list` needs a definite height: the rows it has, capped by the panel and the window.
-fn list_height(count: usize, window: &Window) -> Pixels {
-    let wanted = ROW * count as f32;
-    let capped = if wanted < ROW * SHOWN as f32 {
+fn list_height(count: usize, row: Pixels, room: Pixels) -> Pixels {
+    let wanted = row * count as f32;
+    let capped = if wanted < row * SHOWN as f32 {
         wanted
     } else {
-        ROW * SHOWN as f32
+        row * SHOWN as f32
     };
-    let room = window.viewport_size().height * (1. - TOP - FLOOR) - FRAME;
-    let floor = ROW * 4.;
+    let floor = row * 4.;
     if room < floor {
         floor
     } else if capped < room {
@@ -969,21 +996,30 @@ fn list_height(count: usize, window: &Window) -> Pixels {
 
 impl Palette {
     fn head(&self, title: SharedString, cx: &gpui_kit::App) -> impl IntoElement {
-        h_flex().h(ROW).w_full().px_5().items_end().pb_1p5().child(
-            div()
-                .text_size(style::text_10())
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(style::white(style::TEXT_MUTED, cx))
-                .child(title),
-        )
+        h_flex()
+            .h(row_height(cx))
+            .w_full()
+            .px_5()
+            .items_end()
+            .pb_1p5()
+            .child(
+                div()
+                    .text_size(style::text_10())
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(style::white(style::TEXT_MUTED, cx))
+                    .child(title),
+            )
     }
 
     fn row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let Some(item) = self.items.get(index) else {
-            return div().id(("palette-row", index)).h(ROW).into_any_element();
+            return div()
+                .id(("palette-row", index))
+                .h(row_height(cx))
+                .into_any_element();
         };
         CommandRow::new(("palette-row", index), item.icon, item.title.clone())
-            .height(ROW)
+            .height(row_height(cx))
             .subtitle(item.subtitle.clone())
             .hint(item.hint.clone())
             .chosen(index == self.selected)
@@ -1041,7 +1077,14 @@ impl Render for Palette {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _span = profile::render("palette");
         let count = self.lines.len();
-        let height = list_height(count, window);
+        let touch = theme::mobile::is_touch(cx);
+        let (top, room) = placement(window, cx);
+        let frame = match touch {
+            true => FRAME - FOOTER,
+            false => FRAME,
+        };
+        let height = list_height(count, row_height(cx), room - frame);
+        let insets = theme::mobile::safe_insets(cx);
         components::scroll::smooth_list("palette-list", &self.scroll, window, cx);
         let revealed = self.fade.sample(self.open, motion::FAST, window, cx);
         if !self.open && revealed <= 0. {
@@ -1066,8 +1109,13 @@ impl Render for Palette {
             .justify_center()
             // A flex child stretches unless told not to, which ran the panel to the window's floor.
             .items_start()
-            .px_4()
-            .pt(window.viewport_size().height * TOP)
+            .map(|scrim| match theme::mobile::is_compact(cx) {
+                true => scrim
+                    .pl(insets.left + PHONE_SIDE)
+                    .pr(insets.right + PHONE_SIDE),
+                false => scrim.px_4(),
+            })
+            .pt(top)
             .opacity(revealed)
             .bg(style::black(SCRIM, cx))
             .capture_action(cx.listener(|this, _: &MoveUp, _, cx| {
@@ -1146,7 +1194,7 @@ impl Render for Palette {
                             ),
                         )
                     })
-                    .child(self.footer(cx)),
+                    .when(!touch, |panel| panel.child(self.footer(cx))),
             )
     }
 }

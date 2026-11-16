@@ -17,7 +17,7 @@ use store::layout::Ordered;
 use store::{Layout, LayoutModel, SettingsFilter};
 
 use crate::format::t;
-use crate::{ThinSlider, icons, motion, skin, style};
+use crate::{ThinSlider, icons, motion, phone, skin, style};
 
 /// Mark one row by its title; the next jump, or typing in the filter, replaces it.
 pub fn set_highlight(title: Option<SharedString>, cx: &mut App) {
@@ -147,20 +147,22 @@ impl<T: Clone + PartialEq + 'static> Lockable for Choice<T> {
 }
 
 impl<T: Clone + PartialEq + 'static> RenderOnce for Choice<T> {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let label = self
             .options
             .iter()
             .find(|(value, _)| *value == self.current)
             .map(|(_, label)| label.clone())
             .unwrap_or_else(|| t("choose"));
+        let compact = phone::is_compact(cx);
         let trigger = Button::new(self.id)
             .outline()
             .justify_between()
             .label(label)
-            .map(|trigger| match self.fill {
-                true => trigger.flex_1(),
-                false => trigger.w(select_width()),
+            .map(|trigger| match (self.fill, compact) {
+                (true, false) => trigger.flex_1(),
+                (false, false) => trigger.w(select_width()),
+                (_, true) => trigger.w_full().min_h(phone::TOUCH_TARGET),
             });
         // A disabled trigger still opens its dropdown, so a locked one gets none.
         if self.locked {
@@ -237,7 +239,7 @@ impl RenderOnce for SliderRow {
             };
             (value, filled)
         };
-        let fill = self.fill;
+        let fill = self.fill || phone::is_compact(cx);
         h_flex()
             .gap_3()
             .items_center()
@@ -649,6 +651,7 @@ impl SettingRow {
 
 impl RenderOnce for SettingRow {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let compact = phone::is_compact(cx);
         let (over, hovered) = motion::hovered(scoped("row-hover", &self.title), window, cx);
         let marked = highlighted(cx).is_some_and(|held| held == self.title);
         let lift = if over { style::RAISED } else { 0. };
@@ -675,7 +678,10 @@ impl RenderOnce for SettingRow {
                     .child(
                         div()
                             .min_w_0()
-                            .text_sm()
+                            .map(|title| match compact {
+                                true => title.text_size(phone::ROW_TITLE),
+                                false => title.text_sm(),
+                            })
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(style::white(style::TEXT_STRONG, cx))
                             .child(self.title.clone()),
@@ -703,7 +709,10 @@ impl RenderOnce for SettingRow {
             .when_some(self.description, |column, description| {
                 column.child(
                     div()
-                        .text_xs()
+                        .map(|line| match compact {
+                            true => line.text_size(phone::BODY),
+                            false => line.text_xs(),
+                        })
                         .text_color(style::slate_400(cx))
                         .child(description),
                 )
@@ -718,7 +727,7 @@ impl RenderOnce for SettingRow {
                 .child(t("setting_saved"))
         });
         let locked = self.locked;
-        if self.stacked {
+        if self.stacked || compact {
             // A stacked control needs the full width, so the saved tick sits on the label's line instead.
             let control = self.control.map(|control| {
                 div()
@@ -730,8 +739,10 @@ impl RenderOnce for SettingRow {
                 .id(scoped("row", &self.title))
                 .w_full()
                 .min_h(row_height())
-                .px_5()
-                .py_4()
+                .map(|row| match compact {
+                    true => row.px(phone::PAGE_PAD).py_3(),
+                    false => row.px_5().py_4(),
+                })
                 .bg(surface)
                 .on_hover(motion::track(hovered))
                 .child(

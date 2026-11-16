@@ -68,7 +68,7 @@ pub(crate) fn playing_from(cx: &App) -> Option<(SharedString, Route)> {
 
 impl NowPlaying {
     /// This frame of the track swap; it advances the fade, so a render asks once.
-    fn swap_frame(
+    pub(crate) fn swap_frame(
         &mut self,
         track: Option<&api::TrackInfo>,
         window: &mut Window,
@@ -80,7 +80,7 @@ impl NowPlaying {
     }
 
     /// The bar's cover, fading across a track change; the sheet's cover flies out of this slot.
-    fn cover_slot(
+    pub(crate) fn cover_slot(
         &self,
         size: Pixels,
         track: Option<&api::TrackInfo>,

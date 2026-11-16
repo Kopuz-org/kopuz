@@ -116,6 +116,7 @@ impl Render for SeekRow {
         let shown_ms = self.shown_ms(position_ms, total_ms);
         let scale = match self.scaled {
             true => store::layout(cx).player.size.scale(),
+            false if theme::mobile::is_compact(cx) => crate::phone::SEEK_SCALE,
             false => 1.,
         };
         let bar = SeekBar::new("seek", &self.state)

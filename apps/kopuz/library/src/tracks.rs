@@ -12,6 +12,7 @@ use components::track_row::RowMenu;
 use components::{TrackHeader, TrackRow, menus, style};
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, ClickEvent, Context, FontWeight, IntoElement, ParentElement as _, Pixels,
     SharedString, Styled as _, WeakEntity, Window, div, uniform_list,
@@ -108,6 +109,10 @@ impl Library {
             false => self.total(),
         };
         let height = style::density_row(self.density);
+        let height = match components::phone::is_compact(cx) && height < components::phone::ROW {
+            true => components::phone::ROW,
+            false => height,
+        };
         let sticky = grouped.then(|| self.sticky_group()).flatten();
         v_flex()
             .size_full()
@@ -140,7 +145,8 @@ impl Library {
                         }),
                     )
                     .track_scroll(&self.scroll)
-                    .size_full(),
+                    .size_full()
+                    .when_some(crate::phone_clearance(cx), |list, inset| list.pb(inset)),
                 ),
             )
             .into_any_element()

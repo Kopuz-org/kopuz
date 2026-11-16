@@ -365,6 +365,9 @@ enum Line {
 
 impl Render for Radio {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if ::theme::mobile::is_compact(cx) {
+            return self.phone(cx).into_any_element();
+        }
         components::page()
             .child(
                 div().w_full().mb_8().child(
@@ -382,6 +385,39 @@ impl Render for Radio {
             )
             .child(
                 // Virtualized: a whole directory rebuilt on every scrolled frame is what made this page lag.
+                list(
+                    self.list.clone(),
+                    cx.processor(|this, index: usize, _, cx| this.line(index, cx)),
+                )
+                .flex_1()
+                .min_h_0()
+                .w_full(),
+            )
+            .into_any_element()
+    }
+}
+
+impl Radio {
+    /// A phone has no room for the search box beside the title, so it gets its own full-width line.
+    fn phone(&mut self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        components::page()
+            .px_4()
+            .pt_4()
+            .child(
+                div().w_full().mb_4().child(
+                    PageHeader::new(t("radio"))
+                        .icon(icons::RADIO)
+                        .subtitle(t("radio_subtitle"))
+                        .flush(),
+                ),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .mb_4()
+                    .child(SearchField::new(&self.filter).cleanable(true)),
+            )
+            .child(
                 list(
                     self.list.clone(),
                     cx.processor(|this, index: usize, _, cx| this.line(index, cx)),

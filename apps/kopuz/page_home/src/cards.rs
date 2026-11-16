@@ -13,6 +13,17 @@ pub(crate) const GAP: f32 = 20.;
 /// `md:w-48`, which every shelf upstream settles on at desktop width.
 pub(crate) const TILE: Pixels = px(192.);
 
+/// A phone's card: two and a half to the screen's width, so a shelf reads as a row that scrolls.
+const PHONE_TILE: Pixels = px(148.);
+
+/// How wide a shelf's cards are drawn here.
+pub(crate) fn tile_size(cx: &App) -> Pixels {
+    match components::phone::is_compact(cx) {
+        true => PHONE_TILE,
+        false => TILE,
+    }
+}
+
 /// The queue's current track, as far as a card's play button cares.
 #[derive(Clone, Default)]
 pub(crate) struct Now {
@@ -44,11 +55,11 @@ impl Now {
     }
 }
 
-pub(crate) fn card(tile: &Tile, now: &Now) -> AnyElement {
+pub(crate) fn card(tile: &Tile, now: &Now, size: Pixels) -> AnyElement {
     let mut card = components::Tile::new(tile.key.clone(), tile.title.clone())
         .subtitle(tile.subtitle.clone())
         .artwork(tile.artwork.as_ref())
-        .size(TILE)
+        .size(size)
         .round(tile.round)
         .placeholder(tile.placeholder)
         // Upstream only artists and playlists take the accent; an album title stays white.

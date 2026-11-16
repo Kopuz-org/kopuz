@@ -40,10 +40,6 @@ pub fn pick_paths(
     cx: &mut App,
     apply: impl FnOnce(Vec<String>, &mut App) + 'static,
 ) {
-    // No file dialog on Android: gpui-pre-mobile's picker calls Java this APK does not carry.
-    if cfg!(target_os = "android") {
-        return;
-    }
     let paths = cx.prompt_for_paths(PathPromptOptions {
         files,
         directories,

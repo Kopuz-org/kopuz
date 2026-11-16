@@ -16,6 +16,7 @@ use crate::columns::{self, Layout, Shown, Spec};
 use crate::format::t;
 use crate::icons;
 use crate::motion;
+use crate::phone;
 use crate::resizer::{Edge, EdgeResizer};
 use crate::skin;
 use crate::style;
@@ -159,6 +160,9 @@ fn key(spec: &Spec, channel: u64) -> ElementId {
 
 impl RenderOnce for TrackHeader {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        if phone::is_compact(cx) {
+            return div().into_any_element();
+        }
         let select_id = motion::channel(&self.id, SELECT_ALL);
         let mut header = columns::frame()
             .id(self.id.clone())

@@ -10,6 +10,7 @@ use gpui_kit::{AnyElement, Context, IntoElement as _, Pixels, SharedString, Wind
 use crate::cards::{Frame, album_row, album_tile};
 use crate::format::t;
 use crate::grid::{GridMode, TileGrid};
+use crate::phone;
 
 // `grid-cols-[repeat(auto-fill,minmax(180px,1fr))]`: GPUI wraps flex children instead, at the column's minimum.
 const TILE: Pixels = px(180.);
@@ -36,12 +37,17 @@ impl AlbumCollection {
         window: &mut Window,
         cx: &mut Context<V>,
     ) -> AnyElement {
+        let compact = phone::is_compact(cx);
+        let tile = self.grid.tile_width(TILE, cx);
         self.grid
             .bands(
                 albums.len(),
-                TILE,
+                tile,
                 mode,
                 move |_: &mut V, index, _, cx| match mode {
+                    GridMode::Tiles if compact => {
+                        album_tile(&albums[index]).size(tile).into_any_element()
+                    }
                     GridMode::Tiles => album_tile(&albums[index])
                         .size(TILE_COVER)
                         .frame(Frame::Card)

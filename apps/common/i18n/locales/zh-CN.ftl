@@ -231,6 +231,8 @@ time = 时间
 genre = 流派
 plays = 播放次数
 track_count = { $count } 首曲目
+album_count = { $count } 张专辑
+artist_count = { $count } 位艺术家
 songs = 首歌曲
 min = 分钟
 

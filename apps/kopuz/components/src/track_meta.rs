@@ -442,7 +442,7 @@ impl RenderOnce for NowPlayingMeta {
                     true => div()
                         .truncate()
                         .text_size(px(13.))
-                        .font_family(SharedString::new_static("monospace"))
+                        .font_family(crate::phone::mono_family(cx))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(style::white(style::TEXT_STRONG, cx))
                         .child(SharedString::from(title.to_uppercase())),

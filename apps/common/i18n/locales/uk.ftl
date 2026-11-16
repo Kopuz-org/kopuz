@@ -267,6 +267,20 @@ track_count =
         [many] { $count } треків
        *[other] { $count } треку
     }
+album_count =
+    { $count ->
+        [one] { $count } альбом
+        [few] { $count } альбоми
+        [many] { $count } альбомів
+       *[other] { $count } альбому
+    }
+artist_count =
+    { $count ->
+        [one] { $count } виконавець
+        [few] { $count } виконавці
+        [many] { $count } виконавців
+       *[other] { $count } виконавця
+    }
 songs = пісні
 min = хв
 

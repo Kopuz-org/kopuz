@@ -261,6 +261,18 @@ track_count =
         [few] { $count } piese
        *[other] { $count } de piese
     }
+album_count =
+    { $count ->
+        [one] { $count } album
+        [few] { $count } albume
+       *[other] { $count } de albume
+    }
+artist_count =
+    { $count ->
+        [one] { $count } artist
+        [few] { $count } artiști
+       *[other] { $count } de artiști
+    }
 songs = piese
 min = min
 

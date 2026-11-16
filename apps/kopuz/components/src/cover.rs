@@ -245,8 +245,21 @@ impl RenderOnce for Cover {
             .map(|frame| match &self.artwork {
                 Some(artwork) => frame.child({
                     let faint = style::white(style::TEXT_FAINT, cx);
-                    let shown = arrived(artwork, self.hq, window, cx);
-                    img(store::artwork_source(artwork, self.hq))
+                    let shown = match crate::phone::is_touch(cx)
+                        && self.size <= crate::phone::TOUCH_TARGET
+                    {
+                        true => 1.,
+                        false => arrived(artwork, self.hq, window, cx),
+                    };
+                    let largest = match self.zoom {
+                        Some(_) => self.size * self.zoom_factor.max(1.),
+                        None => self.size,
+                    };
+                    let edge = match self.hq {
+                        true => None,
+                        false => store::decode_edge(largest, window),
+                    };
+                    img(store::artwork_source_at(artwork, self.hq, edge))
                         .opacity(shown)
                         .size(drawn)
                         .flex_shrink_0()

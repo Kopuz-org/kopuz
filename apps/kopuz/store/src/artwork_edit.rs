@@ -24,10 +24,6 @@ pub fn content_type_for(path: &Path) -> String {
 
 /// Ask for one image file; `then` runs with it, and never runs when the picker is dismissed.
 pub fn pick_image(cx: &mut App, then: impl FnOnce(PathBuf, &mut App) + 'static) {
-    // No file dialog on Android: gpui-pre-mobile's picker calls Java this APK does not carry.
-    if cfg!(target_os = "android") {
-        return;
-    }
     let picked = cx.prompt_for_paths(PathPromptOptions {
         files: true,
         directories: false,

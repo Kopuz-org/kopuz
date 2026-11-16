@@ -2,11 +2,20 @@
 
 /// Reads the allocator's own figures; without jemalloc it reports zeroes rather than lying.
 pub struct Heap {
-    #[cfg(all(feature = "jemalloc", not(any(target_env = "msvc", target_os = "android"))))]
+    #[cfg(all(
+        feature = "jemalloc",
+        not(any(target_env = "msvc", target_os = "android"))
+    ))]
     allocated: tikv_jemalloc_ctl::stats::allocated_mib,
-    #[cfg(all(feature = "jemalloc", not(any(target_env = "msvc", target_os = "android"))))]
+    #[cfg(all(
+        feature = "jemalloc",
+        not(any(target_env = "msvc", target_os = "android"))
+    ))]
     resident: tikv_jemalloc_ctl::stats::resident_mib,
-    #[cfg(all(feature = "jemalloc", not(any(target_env = "msvc", target_os = "android"))))]
+    #[cfg(all(
+        feature = "jemalloc",
+        not(any(target_env = "msvc", target_os = "android"))
+    ))]
     epoch: tikv_jemalloc_ctl::epoch_mib,
 }
 
@@ -17,7 +26,10 @@ impl Default for Heap {
 }
 
 impl Heap {
-    #[cfg(all(feature = "jemalloc", not(any(target_env = "msvc", target_os = "android"))))]
+    #[cfg(all(
+        feature = "jemalloc",
+        not(any(target_env = "msvc", target_os = "android"))
+    ))]
     pub fn new() -> Self {
         Self {
             allocated: tikv_jemalloc_ctl::stats::allocated::mib()
@@ -27,13 +39,19 @@ impl Heap {
         }
     }
 
-    #[cfg(not(all(feature = "jemalloc", not(any(target_env = "msvc", target_os = "android")))))]
+    #[cfg(not(all(
+        feature = "jemalloc",
+        not(any(target_env = "msvc", target_os = "android"))
+    )))]
     pub fn new() -> Self {
         Self {}
     }
 
     /// `(allocated, resident)` in bytes; jemalloc caches its stats until the epoch advances.
-    #[cfg(all(feature = "jemalloc", not(any(target_env = "msvc", target_os = "android"))))]
+    #[cfg(all(
+        feature = "jemalloc",
+        not(any(target_env = "msvc", target_os = "android"))
+    ))]
     pub fn read(&self) -> (u64, u64) {
         let _ = self.epoch.advance();
         (
@@ -42,7 +60,10 @@ impl Heap {
         )
     }
 
-    #[cfg(not(all(feature = "jemalloc", not(any(target_env = "msvc", target_os = "android")))))]
+    #[cfg(not(all(
+        feature = "jemalloc",
+        not(any(target_env = "msvc", target_os = "android"))
+    )))]
     pub fn read(&self) -> (u64, u64) {
         (0, 0)
     }

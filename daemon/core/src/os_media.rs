@@ -10,7 +10,7 @@
 
 #![cfg_attr(target_os = "android", allow(unused))]
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 use api::LoopMode;
 use api::PlayerCommand;
 
@@ -152,5 +152,73 @@ pub fn spawn(session: &SessionHandle) {
     });
 }
 
+/// The notification's and the headset's buttons, from `MediaReceiver` through `systemint`, and the
+/// queue's shuffle and repeat mirrored back so the notification draws the right icons. A frontend
+/// that registers its own handler, as the legacy app's player hook does, replaces this one.
 #[cfg(target_os = "android")]
-pub fn spawn(_session: &SessionHandle) {}
+pub fn spawn(session: &SessionHandle) {
+    use api::ApiEvent;
+    use player::systemint::{RepeatMode, SystemEvent};
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SystemEvent>();
+    player::systemint::set_background_handler(move |event| {
+        let _ = tx.send(event);
+    });
+    let session = session.clone();
+    let mut events = session.subscribe();
+    tokio::spawn(async move {
+        let mut modes: (bool, LoopMode) = (false, LoopMode::None);
+        let mut shown: Option<(bool, LoopMode)> = None;
+        loop {
+            tokio::select! {
+                event = rx.recv() => {
+                    let Some(event) = event else {
+                        return;
+                    };
+                    let mapped = match event {
+                        SystemEvent::Play => PlayerCommand::Play,
+                        SystemEvent::Pause | SystemEvent::Stop => PlayerCommand::Pause,
+                        SystemEvent::Toggle => PlayerCommand::Toggle,
+                        SystemEvent::Next => PlayerCommand::Next,
+                        SystemEvent::Prev => PlayerCommand::Previous,
+                        SystemEvent::Seek(seconds) => seek_command(seconds),
+                        SystemEvent::ToggleShuffle => PlayerCommand::SetMode {
+                            shuffle: Some(!modes.0),
+                            loop_mode: None,
+                        },
+                        SystemEvent::CycleRepeat => PlayerCommand::SetMode {
+                            shuffle: None,
+                            loop_mode: Some(match modes.1 {
+                                LoopMode::None => LoopMode::Queue,
+                                LoopMode::Queue => LoopMode::Track,
+                                LoopMode::Track => LoopMode::None,
+                            }),
+                        },
+                    };
+                    command(&session, mapped).await;
+                }
+                received = events.recv() => {
+                    match received {
+                        Ok(ApiEvent::PlayerState(state)) => {
+                            modes = (state.queue.shuffle, state.queue.loop_mode);
+                            if shown != Some(modes) {
+                                shown = Some(modes);
+                                player::systemint::update_modes(
+                                    modes.0,
+                                    match modes.1 {
+                                        LoopMode::None => RepeatMode::Off,
+                                        LoopMode::Queue => RepeatMode::Playlist,
+                                        LoopMode::Track => RepeatMode::Track,
+                                    },
+                                );
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                    }
+                }
+            }
+        }
+    });
+}

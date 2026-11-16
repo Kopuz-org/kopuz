@@ -12,7 +12,7 @@ use gpui_kit::{
     RenderOnce, SharedString, Styled as _, Window, div, px,
 };
 
-use crate::{focus, icons, skin, style};
+use crate::{focus, icons, phone, skin, style};
 
 /// How large a chip or badge is drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -206,6 +206,7 @@ impl RenderOnce for Chip {
         let outlined = material && !self.selected && !matches!(self.tone, ChipTone::Ink(_));
         let checked = material && self.selected && self.icon.is_none();
         let stop = self.stop;
+        let compact = phone::is_compact(cx);
         let button = Button::new(self.id)
             .custom(style::button(fill, hover, ink, cx))
             .xsmall()
@@ -213,10 +214,11 @@ impl RenderOnce for Chip {
             .tab_stop(self.focusable)
             .rounded(radius)
             .text_xs()
-            .map(|chip| match (self.size, material) {
-                (ChipSize::Small, _) => chip.h_5().px_2(),
-                (ChipSize::Medium, false) => chip.h_7().px_3(),
-                (ChipSize::Medium, true) => chip.h_8().px_4(),
+            .map(|chip| match (self.size, material, compact) {
+                (ChipSize::Small, _, _) => chip.h_5().px_2(),
+                (ChipSize::Medium, false, false) => chip.h_7().px_3(),
+                (ChipSize::Medium, true, false) => chip.h_8().px_4(),
+                (ChipSize::Medium, _, true) => chip.h_10().px_4().text_size(phone::BODY),
             })
             .when(outlined, |chip| {
                 chip.border_1()

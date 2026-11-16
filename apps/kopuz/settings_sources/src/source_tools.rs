@@ -128,12 +128,14 @@ impl Render for AccountPicker {
             .collect();
         let this = cx.entity().downgrade();
         let current = active.clone();
+        let compact = components::phone::is_compact(cx);
         block(cx)
             .child(
                 h_flex()
                     .w_full()
                     .gap_3()
                     .justify_between()
+                    .when(compact, |row| row.flex_col().items_stretch().gap_2())
                     .child(ui::label(t("source_account")))
                     .child(
                         Choice::new(
@@ -337,10 +339,6 @@ impl CloudStorage {
     }
 
     fn pick(&mut self, cx: &mut Context<Self>) {
-        // No file dialog on Android: gpui-pre-mobile's picker calls Java this APK does not carry.
-        if cfg!(target_os = "android") {
-            return;
-        }
         let picked = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,

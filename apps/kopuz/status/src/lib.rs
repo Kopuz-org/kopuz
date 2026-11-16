@@ -16,8 +16,9 @@ mod url_download;
 use components::format::t;
 use components::{Heading, SectionHeading, icons, style};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::popover::Popover;
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex};
+use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex};
 use gpui_kit::{
     Anchor, AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _,
     Pixels, Render, SharedString, Styled, Subscription, Window, div, px,
@@ -46,6 +47,11 @@ const POPOVER_WIDTH: Pixels = px(320.);
 /// A list inside a popover scrolls rather than growing past the window.
 pub(crate) const LIST_HEIGHT: Pixels = px(260.);
 const BADGE: Pixels = px(14.);
+/// A phone keeps a popover this far in from each side of the screen.
+const PHONE_MARGIN: Pixels = px(16.);
+/// Where the phone's badge sits in the overflow button it rides on: over the glyph's top-right corner.
+const PHONE_BADGE_INSET: Pixels = px(6.);
+const MENU_GLYPH: Pixels = px(16.);
 
 /// Which popover of the three is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,6 +72,8 @@ pub struct StatusCluster {
     pending: usize,
     failed: usize,
     unseen: usize,
+    /// How wide a popover may be on a phone, set each frame; `None` off a phone.
+    phone_width: Option<Pixels>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -95,6 +103,7 @@ impl StatusCluster {
             pending: 0,
             failed: 0,
             unseen: 0,
+            phone_width: None,
             _subscriptions: subscriptions,
         };
         this.reread(cx);
@@ -180,6 +189,17 @@ impl StatusCluster {
             .tooltip(tip)
     }
 
+    /// A phone's stand-in for a trigger: nothing to see or tap, only a corner for the popover to hang from.
+    fn hidden_trigger(id: &'static str) -> Button {
+        Button::new(id)
+            .ghost()
+            .with_size(px(0.))
+            .size(px(0.))
+            .p_0()
+            .border_0()
+            .opacity(0.)
+    }
+
     fn popover(
         &self,
         which: Which,
@@ -190,10 +210,14 @@ impl StatusCluster {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let open = self.open == Some(which);
+        let (trigger, width) = match self.phone_width {
+            Some(width) => (Self::hidden_trigger(id), width),
+            None => (self.trigger(id, glyph, tip, cx), POPOVER_WIDTH),
+        };
         Popover::new(id)
             .anchor(Anchor::TopRight)
             .p_0()
-            .w(POPOVER_WIDTH)
+            .w(width)
             .rounded(style::radius_lg())
             .border_1()
             .border_color(style::white(style::BORDER, cx))
@@ -202,7 +226,7 @@ impl StatusCluster {
             .on_open_change(cx.listener(move |this, open: &bool, _, cx| {
                 this.set_open(open.then_some(which), cx);
             }))
-            .trigger(self.trigger(id, glyph, tip, cx))
+            .trigger(trigger)
             .content(move |_, _, _| div().w_full().child(body.clone()))
             .into_any_element()
     }
@@ -237,9 +261,88 @@ impl StatusCluster {
     }
 }
 
+impl StatusCluster {
+    /// The cluster's three lists as entries of a phone header's overflow menu, each with its count,
+    /// opening the same popover the desktop's buttons open.
+    pub fn phone_entries(this: &Entity<Self>, menu: PopupMenu, cx: &App) -> PopupMenu {
+        let cluster = this.read(cx);
+        let counted = |label: SharedString, count: usize| match count {
+            0 => label,
+            count => SharedString::from(format!("{label} ({count})")),
+        };
+        let entries = [
+            (
+                Which::Activity,
+                JOBS,
+                counted(t("activity"), cluster.running),
+            ),
+            (
+                Which::Downloads,
+                icons::DOWNLOAD,
+                counted(t("downloads"), cluster.pending + cluster.failed),
+            ),
+            (
+                Which::Centre,
+                BELL,
+                counted(t("notifications"), cluster.unseen),
+            ),
+        ];
+        entries
+            .into_iter()
+            .fold(menu, |menu, (which, glyph, label)| {
+                let cluster = this.clone();
+                menu.item(
+                    components::menus::entry(
+                        label,
+                        Some(Icon::default().path(glyph).size(MENU_GLYPH)),
+                        false,
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| {
+                        let cluster = cluster.clone();
+                        cx.defer(move |cx| {
+                            cluster.update(cx, |this, cx| this.set_open(Some(which), cx));
+                        });
+                    }),
+                )
+            })
+    }
+
+    /// A phone's cluster, laid over the header's overflow button: no buttons of its own, only the
+    /// badge that says something wants looking at, and the corner its popovers hang from.
+    fn render_phone(&self, popovers: [AnyElement; 3], cx: &App) -> AnyElement {
+        let badge = match (self.unseen, self.failed) {
+            (0, 0) => None,
+            (0, failed) => self.badge(failed, cx.theme().danger, cx),
+            (unseen, _) => self.badge(unseen, cx.theme().primary, cx),
+        };
+        div()
+            .size_full()
+            .relative()
+            .children(badge.map(|badge| {
+                div()
+                    .absolute()
+                    .top(PHONE_BADGE_INSET)
+                    .right(PHONE_BADGE_INSET)
+                    .child(badge)
+            }))
+            .child(
+                div()
+                    .absolute()
+                    .bottom_0()
+                    .right_0()
+                    .size_0()
+                    .children(popovers),
+            )
+            .into_any_element()
+    }
+}
+
 impl Render for StatusCluster {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _timing = profile::render("status-cluster");
+        self.phone_width = theme::mobile::is_compact(cx)
+            .then(|| POPOVER_WIDTH.min(window.viewport_size().width - PHONE_MARGIN * 2.));
         let jobs = self.popover(
             Which::Activity,
             "status-activity",
@@ -264,6 +367,9 @@ impl Render for StatusCluster {
             self.centre.clone().into(),
             cx,
         );
+        if self.phone_width.is_some() {
+            return self.render_phone([jobs, downloads, centre], cx);
+        }
         let queued = self.badge(self.pending, cx.theme().primary, cx);
         let failed = self
             .badge(self.failed, cx.theme().danger, cx)
@@ -289,6 +395,7 @@ impl Render for StatusCluster {
                 cx.theme().primary,
                 cx,
             )))
+            .into_any_element()
     }
 }
 

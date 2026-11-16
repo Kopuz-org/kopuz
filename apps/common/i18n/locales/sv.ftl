@@ -321,6 +321,12 @@ track_count =
         [one] { $count } låt
        *[other] { $count } låtar
     }
+album_count = { $count } album
+artist_count =
+    { $count ->
+        [one] { $count } artist
+       *[other] { $count } artister
+    }
 songs = låtar
 min = min
 

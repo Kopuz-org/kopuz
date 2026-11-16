@@ -268,6 +268,20 @@ track_count =
         [many] { $count } треков
        *[other] { $count } трека
     }
+album_count =
+    { $count ->
+        [one] { $count } альбом
+        [few] { $count } альбома
+        [many] { $count } альбомов
+       *[other] { $count } альбома
+    }
+artist_count =
+    { $count ->
+        [one] { $count } артист
+        [few] { $count } артиста
+        [many] { $count } артистов
+       *[other] { $count } артиста
+    }
 songs = песен
 min = мин
 

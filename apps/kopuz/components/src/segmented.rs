@@ -10,7 +10,7 @@ use gpui_kit::{
     RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
-use crate::{focus, icons, motion, skin, style};
+use crate::{focus, icons, motion, phone, skin, style};
 
 const ROOT: u64 = 0;
 const HOVER: u64 = 1;
@@ -73,6 +73,7 @@ pub struct Segmented {
     selected: Option<usize>,
     segments: Vec<Segment>,
     pill: bool,
+    fill: bool,
     select: Option<OnSelect>,
     surface: Option<theme::Surface>,
 }
@@ -84,6 +85,7 @@ impl Segmented {
             selected: None,
             segments: Vec::new(),
             pill: false,
+            fill: false,
             select: None,
             surface: None,
         }
@@ -108,6 +110,12 @@ impl Segmented {
     /// A fully rounded track, as a header's toggles wear.
     pub fn pill(mut self, pill: bool) -> Self {
         self.pill = pill;
+        self
+    }
+
+    /// Span the whole width, every segment an even share of it with its words centred; off by default.
+    pub fn fill(mut self, fill: bool) -> Self {
+        self.fill = fill;
         self
     }
 
@@ -168,6 +176,11 @@ impl Segmented {
             true => M3_HEIGHT,
             false => style::chrome().tab_height,
         };
+        let compact = phone::is_compact(cx);
+        let height = match compact {
+            true => phone::target(height),
+            false => height,
+        };
         let (first, last) = (index == 0, index + 1 == count);
         let checked = material && active && segment.label.is_some();
         let glyph_only = segment.label.is_none();
@@ -184,7 +197,10 @@ impl Segmented {
         )
         .relative()
         .flex()
-        .flex_none()
+        .map(|frame| match self.fill {
+            true => frame.flex_1().min_w_0(),
+            false => frame.flex_none(),
+        })
         .items_center()
         .justify_center()
         .gap_1p5()
@@ -206,6 +222,7 @@ impl Segmented {
                 .text_sm(),
             false => frame.rounded(style::thumb_radius()).text_xs(),
         })
+        .when(compact, |frame| frame.text_size(phone::BODY))
         .bg(wash)
         .text_color(ink)
         .font_weight(FontWeight::MEDIUM)
@@ -265,12 +282,17 @@ impl RenderOnce for Segmented {
             .map(|(index, segment)| self.segment_element(index, count, segment, window, cx))
             .collect();
         if skin::material() {
+            let height = match phone::is_compact(cx) {
+                true => phone::target(M3_HEIGHT),
+                false => M3_HEIGHT,
+            };
             return div()
                 .flex()
                 .flex_none()
+                .when(self.fill, |track| track.w_full())
                 .items_center()
-                .h(M3_HEIGHT)
-                .rounded(M3_HEIGHT / 2.)
+                .h(height)
+                .rounded(height / 2.)
                 .border_1()
                 .border_color(style::white(M3_OUTLINE, cx))
                 .children(children)
@@ -283,6 +305,7 @@ impl RenderOnce for Segmented {
         div()
             .flex()
             .flex_none()
+            .when(self.fill, |track| track.w_full())
             .items_center()
             .gap_1()
             .p_1()

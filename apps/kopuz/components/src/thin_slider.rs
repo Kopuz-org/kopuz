@@ -1,11 +1,14 @@
 //! A hair-thin slider in a hit area you can actually hit: the paint the seek bar and the level share.
 
-use gpui_kit::base::slider::{Slider as BareSlider, SliderIndicator, SliderState, SliderTrack};
+use gpui_kit::base::slider::{
+    Slider as BareSlider, SliderEvent, SliderIndicator, SliderState, SliderTrack, SliderValue,
+};
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Animation, AnimationExt as _, Axis, Entity, Hsla, IntoElement, ParentElement as _, Pixels,
-    RenderOnce, SharedString, Styled as _, Window, div, px, relative,
+    Animation, AnimationExt as _, AnyElement, App, Axis, Entity, HitboxBehavior, Hsla, IntoElement,
+    ParentElement as _, Pixels, RenderOnce, SharedString, Styled as _, TouchDragEvent, TouchPhase,
+    Window, canvas, div, px, relative,
 };
 
 use crate::{motion, skin, style};
@@ -185,7 +188,25 @@ impl ThinSlider {
 }
 
 impl RenderOnce for ThinSlider {
-    fn render(self, window: &mut Window, cx: &mut gpui_kit::App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        if !crate::phone::is_touch(cx) {
+            return self.render_slider(window, cx);
+        }
+        let touch = touch_input(&self.id, self.state.clone(), self.disabled, window, cx);
+        div()
+            .relative()
+            .w_full()
+            .min_h(crate::phone::TOUCH_TARGET)
+            .flex()
+            .items_center()
+            .child(self.render_slider(window, cx))
+            .child(touch)
+            .into_any_element()
+    }
+}
+
+impl ThinSlider {
+    fn render_slider(self, window: &mut Window, cx: &mut App) -> AnyElement {
         let fill = self.fill.unwrap_or_else(|| {
             motion::accent(theme::Surface::Chrome, cx.theme().foreground, window, cx)
         });
@@ -256,6 +277,62 @@ impl RenderOnce for ThinSlider {
             )
             .into_any_element()
     }
+}
+
+/// Claims the finger before GPUI turns its movement into scrolling; state survives redraws mid-drag.
+fn touch_input(
+    id: &SharedString,
+    state: Entity<SliderState>,
+    disabled: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let held = window.use_keyed_state(motion::channel(id, 91), cx, |_, _| None::<SliderValue>);
+    canvas(
+        |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+        move |_, hitbox, window, _| {
+            window.on_mouse_event(move |event: &TouchDragEvent, phase, window, cx| {
+                if !phase.bubble() || disabled {
+                    return;
+                }
+                if event.phase == TouchPhase::Started {
+                    if window.default_prevented() || !hitbox.is_hovered(window) {
+                        return;
+                    }
+                    let value = state.read(cx).value();
+                    held.update(cx, |held, _| *held = Some(value));
+                    window.prevent_default();
+                }
+                let Some(original) = *held.read(cx) else {
+                    return;
+                };
+                cx.stop_propagation();
+                state.update(cx, |state, cx| {
+                    if event.phase == TouchPhase::Cancelled {
+                        state.set_value(original, window, cx);
+                        cx.emit(SliderEvent::Change(original));
+                    } else if state.bounds().size.width > px(0.) {
+                        state.update_value_by_position(
+                            Axis::Horizontal,
+                            event.position,
+                            false,
+                            window,
+                            cx,
+                        );
+                    }
+                    if matches!(event.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+                        state.handle_release(cx);
+                    }
+                });
+                if matches!(event.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+                    held.update(cx, |held, _| *held = None);
+                }
+            });
+        },
+    )
+    .absolute()
+    .inset_0()
+    .into_any_element()
 }
 
 /// One buffered range, as a fraction of the track it covers.
@@ -333,5 +410,89 @@ mod tests {
         cx.simulate_click(point(px(150.), px(22.)), Default::default());
         let value = state.read_with(cx, |state, _| state.value().end());
         assert!((value - 0.75).abs() < 0.01, "pressed at 3/4, got {value}");
+    }
+
+    struct TouchFixture {
+        state: Entity<SliderState>,
+        disabled: bool,
+        _events: gpui_kit::Subscription,
+    }
+
+    impl Render for TouchFixture {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(200.)).child(
+                ThinSlider::new("touch-probe", &self.state)
+                    .fill(gpui_kit::Hsla::default())
+                    .disabled(self.disabled),
+            )
+        }
+    }
+
+    #[gpui_kit::test]
+    fn touch_slider_drags_release_once_and_cancel_restores_value(cx: &mut TestAppContext) {
+        use gpui_kit::{TouchEvent, TouchId};
+        use std::{cell::RefCell, rc::Rc};
+
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            i18n::init("en");
+            link::init(
+                link::Address::Socket("/nonexistent/kopuz.sock".into()),
+                false,
+                cx,
+            )
+            .expect("an unconnected link");
+            store::init(cx);
+            theme::apply_named("default", None, cx);
+            theme::mobile::set_mobile(Default::default(), cx);
+        });
+        let state = cx.new(|_| SliderState::new().min(0.).max(1.).step(0.001));
+        let releases = Rc::new(RefCell::new(Vec::new()));
+        let (view, cx) = cx.add_window_view(|_, cx| TouchFixture {
+            state: state.clone(),
+            disabled: false,
+            _events: cx.subscribe(&state, {
+                let releases = releases.clone();
+                move |_, _, event, _| {
+                    if let SliderEvent::Release(value) = event {
+                        releases.borrow_mut().push(value.end());
+                    }
+                }
+            }),
+        });
+        cx.run_until_parked();
+        let touch = |id, phase, x| TouchEvent {
+            id: TouchId(id),
+            phase,
+            position: point(px(x), px(24.)),
+            ..Default::default()
+        };
+        cx.simulate_event(touch(1, TouchPhase::Started, 50.));
+        cx.simulate_event(touch(1, TouchPhase::Moved, 150.));
+        cx.run_until_parked();
+        assert!((state.read_with(cx, |state, _| state.value().end()) - 0.75).abs() < 0.01);
+        cx.simulate_event(touch(1, TouchPhase::Ended, 180.));
+        cx.run_until_parked();
+        assert_eq!(releases.borrow().len(), 1);
+        assert!((releases.borrow()[0] - 0.9).abs() < 0.01);
+
+        cx.simulate_event(touch(2, TouchPhase::Started, 20.));
+        cx.simulate_event(touch(2, TouchPhase::Moved, 50.));
+        cx.simulate_event(touch(2, TouchPhase::Cancelled, 50.));
+        cx.run_until_parked();
+        assert!((state.read_with(cx, |state, _| state.value().end()) - 0.9).abs() < 0.01);
+        assert_eq!(releases.borrow().len(), 2);
+
+        view.update(cx, |view, cx| {
+            view.disabled = true;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.simulate_event(touch(3, TouchPhase::Started, 40.));
+        cx.simulate_event(touch(3, TouchPhase::Moved, 100.));
+        cx.simulate_event(touch(3, TouchPhase::Ended, 100.));
+        cx.run_until_parked();
+        assert_eq!(releases.borrow().len(), 2);
     }
 }

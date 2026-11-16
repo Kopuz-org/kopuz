@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from apps/legacy/kopuz/build.rs, so both apps draw the same notification. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <group android:scaleX="0.85" android:scaleY="0.85" android:pivotX="12" android:pivotY="10">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M7,7h10v3l4,-4 -4,-4v3L5,5v6h2L7,7zM17,17L7,17v-3l-4,4 4,4v-3h12v-6h-2v4z" />
+    </group>
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M10.4,21.5a1.6,1.6 0 1,0 3.2,0a1.6,1.6 0 1,0 -3.2,0z" />
+</vector>

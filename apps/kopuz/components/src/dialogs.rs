@@ -4,7 +4,9 @@ use std::rc::Rc;
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
-use gpui_kit::component::dialog::{DialogButtonProps, DialogClose, DialogFooter};
+use gpui_kit::component::dialog::{
+    DialogButtonProps, DialogClose, DialogDescription, DialogFooter,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyView, App, ParentElement as _, Pixels, SharedString, Styled as _, Window, div, px,
@@ -60,6 +62,9 @@ pub fn confirm(
 ) {
     let description = description.into();
     let go = Rc::new(go);
+    if crate::phone::is_compact(cx) {
+        return confirm_on_phone(kind, title, description, go, window, cx);
+    }
     window.open_alert_dialog(cx, move |alert, _, _| {
         let go = go.clone();
         alert
@@ -76,6 +81,46 @@ pub fn confirm(
                 go(window, cx);
                 true
             })
+    });
+}
+
+/// What a confirmation runs once it is confirmed.
+type Confirmed = Rc<dyn Fn(&mut Window, &mut App)>;
+
+/// The same question as a plain dialog, since an alert takes no top margin: on a phone it clears the
+/// status bar and keeps 16px clear at each side, as [`FormDialog`] does.
+fn confirm_on_phone(
+    kind: ConfirmKind,
+    title: SharedString,
+    description: SharedString,
+    go: Confirmed,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    window.open_dialog(cx, move |dialog, window, cx| {
+        let room = (window.viewport_size().width - px(32.)).max(px(0.));
+        let go = go.clone();
+        dialog
+            .title(title.clone())
+            .close_button(false)
+            .overlay_closable(false)
+            .margin_top(theme::mobile::safe_insets(cx).top + px(16.))
+            .w(DialogSize::Form.width().min(room))
+            .child(DialogDescription::new().child(description.clone()))
+            .footer(
+                DialogFooter::new()
+                    .gap_2()
+                    .child(DialogClose::new().child(Button::new("cancel").label(t("cancel"))))
+                    .child(
+                        Button::new("confirm")
+                            .with_variant(ButtonVariant::Danger)
+                            .label(kind.ok_text())
+                            .on_click(move |_, window, cx| {
+                                go(window, cx);
+                                window.close_dialog(cx);
+                            }),
+                    ),
+            )
     });
 }
 
@@ -184,10 +229,16 @@ impl FormDialog {
             footer,
             submit,
         } = self;
-        window.open_dialog(cx, move |dialog, _, cx| {
+        window.open_dialog(cx, move |dialog, window, cx| {
             let dialog = dialog
                 .title(title(cx))
                 .w(size.width())
+                .when(crate::phone::is_compact(cx), |dialog| {
+                    let room = (window.viewport_size().width - px(32.)).max(px(0.));
+                    dialog
+                        .margin_top(theme::mobile::safe_insets(cx).top + px(16.))
+                        .w(size.width().min(room))
+                })
                 .overlay_closable(closable(cx))
                 .child(body.clone())
                 .when_some(submit.clone(), |dialog, submit| {

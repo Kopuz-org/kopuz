@@ -4,6 +4,7 @@ use api::{ArtistInfo, ArtistPage, Table};
 use components::format::t;
 use components::{EmptyState, GridMode, Loading, PageHeader, TileGrid, icons};
 use config::{AlbumViewMode, ArtistSortField, SortCriterion};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
     Subscription, Window, div, px,
@@ -89,6 +90,7 @@ impl Render for Artists {
             AlbumViewMode::List => GridMode::Rows,
         };
         let empty = self.entries.is_empty();
+        let tile = self.grid.tile_width(px(TILE), cx);
 
         let body = match (settled, empty) {
             (false, true) => Loading::new().into_any_element(),
@@ -103,13 +105,13 @@ impl Render for Artists {
                     self.grid
                         .bands(
                             self.entries.len(),
-                            px(TILE),
+                            tile,
                             mode,
                             move |this: &mut Artists, index, _, cx| {
                                 let artist = &this.entries[index];
                                 match mode {
                                     GridMode::Tiles => components::artist_tile(artist)
-                                        .size(px(TILE))
+                                        .size(tile)
                                         .into_any_element(),
                                     GridMode::Rows => components::artist_row(artist)
                                         .thumb(store::ConfigModel::global(cx).read(cx).row_images())
@@ -123,6 +125,7 @@ impl Render for Artists {
         };
 
         components::page()
+            .when(::theme::mobile::is_compact(cx), |page| page.px_4().pt_4())
             .child(
                 PageHeader::new(t("artists"))
                     .action(controls::view_mode_toggle(ViewModeKey::Artists, cx))

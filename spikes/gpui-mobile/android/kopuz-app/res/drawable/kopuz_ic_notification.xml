@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from apps/legacy/kopuz/build.rs, so both apps draw the same notification. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="525"
+    android:viewportHeight="525">
+    <group android:translateX="0" android:translateY="43">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M420.676 26.2555C430.194 21.1278 442.072 24.6787 447.206 34.1866L456.501 51.4022L439.266 60.6866C429.747 65.8143 417.869 62.2634 412.736 52.7555C407.602 43.2476 411.157 31.3831 420.676 26.2555Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M516.063 129.114C507.976 133.269 498.048 130.09 493.888 122.012L486.355 107.386L500.997 99.8621C509.084 95.7066 519.012 98.886 523.172 106.964C527.333 115.041 524.15 124.958 516.063 129.114Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M478.98 137.072C473.483 139.897 466.733 137.735 463.905 132.244C461.076 126.752 463.24 120.009 468.739 117.184L478.693 112.069L483.814 122.012C486.643 127.504 484.478 134.246 478.98 137.072Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M256.399 181.706L462.189 76.0873L501.353 90.5641L334.746 173.316L256.399 181.706Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M500.997 71.5357L501.28 90.6372L346.902 171.239H337.531L364.778 147.96L500.997 71.5357Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M256.43 162.377L462.22 56.7587L501.355 71.5357L364.778 147.96L334.006 171.458L256.43 162.377Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M371.427 151.275C372.439 160.809 364.778 166.511 361.067 173.316C354.364 189.059 352.761 191.475 350.098 209.17C337.531 292.66 308.317 334.591 240.217 349.444C153.289 358.645 38.7736 326.469 47.0212 230.817C54.2225 169.139 109.629 143.951 196.557 134.75C319.14 121.775 367.024 109.766 371.427 151.275Z" />
+    </group>
+</vector>

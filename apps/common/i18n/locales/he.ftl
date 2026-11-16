@@ -255,6 +255,16 @@ track_count =
         [one] שיר אחד
        *[other] { $count } שירים
     }
+album_count =
+    { $count ->
+        [one] אלבום אחד
+       *[other] { $count } אלבומים
+    }
+artist_count =
+    { $count ->
+        [one] אמן אחד
+       *[other] { $count } אמנים
+    }
 songs = שירים
 min = דק׳
 

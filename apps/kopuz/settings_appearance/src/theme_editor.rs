@@ -249,6 +249,7 @@ impl Render for ThemeEditor {
         let selected = self.selected.clone();
         let danger = cx.theme().danger;
         let dirty = self.dirty(cx);
+        let compact = ::theme::mobile::is_compact(cx);
         // The original laid the thirteen colors out in a two-column grid; GPUI has no grid.
         let columns = |parity: usize| {
             self.rows
@@ -261,10 +262,12 @@ impl Render for ThemeEditor {
             .w_full()
             .gap_6()
             .items_start()
+            .when(compact, |editor| editor.flex_col().items_stretch())
             .child(
                 v_flex()
                     .w(rems(13.))
                     .flex_none()
+                    .when(compact, |list| list.w_full())
                     .gap_2()
                     .child(
                         Button::new("new-theme")
@@ -298,21 +301,25 @@ impl Render for ThemeEditor {
                     .flex_1()
                     .min_w_0()
                     .gap_5()
+                    .when(compact, |form| form.flex_none().w_full())
                     .child(
                         Panel::new(t("theme_name"))
                             .dirty(dirty)
                             .child(Input::new(&self.name)),
                     )
-                    .child(
-                        Panel::new(t("colors")).dirty(dirty).child(
-                            h_flex()
-                                .w_full()
-                                .gap_10()
-                                .items_start()
-                                .child(v_flex().flex_1().min_w_0().gap_3().children(columns(0)))
-                                .child(v_flex().flex_1().min_w_0().gap_3().children(columns(1))),
-                        ),
-                    )
+                    .child(Panel::new(t("colors")).dirty(dirty).child(if compact {
+                        v_flex()
+                            .w_full()
+                            .gap_3()
+                            .children(self.rows.iter().map(|(_, field)| field.clone()))
+                    } else {
+                        h_flex()
+                            .w_full()
+                            .gap_10()
+                            .items_start()
+                            .child(v_flex().flex_1().min_w_0().gap_3().children(columns(0)))
+                            .child(v_flex().flex_1().min_w_0().gap_3().children(columns(1)))
+                    }))
                     .child(
                         Panel::new(t("preview"))
                             .dirty(dirty)

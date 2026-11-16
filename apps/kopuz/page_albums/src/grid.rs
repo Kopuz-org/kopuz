@@ -121,6 +121,7 @@ impl Render for Albums {
         });
 
         components::page()
+            .when(::theme::mobile::is_compact(cx), |page| page.px_4().pt_4())
             .child(PageHeader::new(t("all_albums")))
             .child(
                 h_flex()

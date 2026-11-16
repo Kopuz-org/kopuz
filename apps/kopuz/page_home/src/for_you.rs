@@ -15,7 +15,7 @@ use store::{ForYouModel, ForYouState};
 
 use api::ApiError;
 
-use crate::cards::{GAP, TILE};
+use crate::cards::{GAP, tile_size};
 use crate::data::{Shelf, Tile};
 
 /// Enough placeholders to fill a wide window; the daemon's mix is about this long anyway.
@@ -60,7 +60,7 @@ pub(crate) fn row(
     let filled = status.filled;
     let shown = fade.sample(filled, motion::MEDIUM, window, cx);
     if filled {
-        let content = crate::shelf::carousel(shelf, handle, now)
+        let content = crate::shelf::carousel(shelf, handle, now, tile_size(cx))
             .strapline(strapline.clone())
             .action(refresh(cx));
         // The pulsing row stays under the mix while it fades in, so the row never empties.
@@ -74,7 +74,8 @@ pub(crate) fn row(
             tiles: last.clone(),
             form: shelf.form,
         };
-        let content = crate::shelf::carousel(&leaving, handle, now).strapline(strapline.clone());
+        let content = crate::shelf::carousel(&leaving, handle, now, tile_size(cx))
+            .strapline(strapline.clone());
         let placeholder = placeholder(title, strapline, true, cx);
         return skeleton::reveal(content, Some(placeholder), shown);
     }
@@ -109,7 +110,7 @@ fn placeholder(
         "for_you_loading",
         title,
         PLACEHOLDERS,
-        TILE,
+        tile_size(cx),
         |slot, _, cx| pulsing(slot, cx),
     )
     .gap(px(GAP))
@@ -122,7 +123,7 @@ fn placeholder(
 
 fn pulsing(slot: usize, cx: &App) -> AnyElement {
     div()
-        .child(skeleton::shelf_tile(TILE, cx))
+        .child(skeleton::shelf_tile(tile_size(cx), cx))
         .with_animation(
             SharedString::from(format!("for-you-pulse-{slot}")),
             Animation::new(Duration::from_millis(1100))

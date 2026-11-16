@@ -14,6 +14,7 @@ use components::{
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Sizable as _, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, App, AppContext as _, Context, Entity,
     InteractiveElement as _, IntoElement, Keystroke, ParentElement as _, Render, ScrollHandle,
@@ -337,7 +338,7 @@ impl Landing {
         skeleton::reveal(div().w_full().children(content), placeholder, shown)
     }
 
-    fn header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn header(&self, cx: &mut Context<Self>) -> AnyElement {
         let shortcut = commands::keystroke_for("app.palette", cx)
             .and_then(|held| Keystroke::parse(&held).ok());
         let search = SearchTrigger::new("discover-search-hint", t("discover_search_hint"))
@@ -356,10 +357,19 @@ impl Landing {
             .icon(icons::icon(icons::REFRESH))
             .label(t("refresh"))
             .on_click(cx.listener(|this, _, _, cx| this.ask(true, cx)));
+        if ::theme::mobile::is_compact(cx) {
+            return v_flex()
+                .w_full()
+                .gap_3()
+                .child(PageHeader::new(t("discover")).flush().action(refresh))
+                .child(div().w_full().child(search))
+                .into_any_element();
+        }
         PageHeader::new(t("discover"))
             .flush()
             .action(refresh)
             .action(search)
+            .into_any_element()
     }
 }
 
@@ -416,6 +426,9 @@ impl Render for Landing {
                     .pt_8()
                     .pb_10()
                     .gap_8()
+                    .when(::theme::mobile::is_compact(cx), |column| {
+                        column.px_4().pt_4().gap_6()
+                    })
                     .child(self.header(cx))
                     .child(body)
                     .children(self.genre_grid(cx)),

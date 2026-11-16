@@ -1,7 +1,7 @@
 # The real kopuz GPUI app (apps/kopuz/app: its views, theme, components and
 # navigation) on gpui-pre-mobile's Android platform, with the kopuz daemon core
-# running in this process. It reuses the spike's in-process core, first-run
-# test tones and surface watcher (../src/{inproc,seed,lifecycle}.rs, included
+# running in this process. It reuses the spike's in-process core and
+# surface watcher (../src/{inproc,lifecycle}.rs, included
 # by path) and shares the spike workspace's Cargo.lock, which was seeded from
 # the root lock so the app's crates keep kopuz's versions.
 [package]
@@ -17,6 +17,8 @@ path = "src/lib.rs"
 
 [dependencies]
 kopuz_app = { package = "kopuz", path = "../../../apps/kopuz/app" }
+# `theme::mobile`: the phone layout switch and the safe-area insets this host keeps current.
+theme = { path = "../../../apps/kopuz/theme" }
 gpui = { package = "gpui-pre", version = "=0.3.5", default-features = false }
 gpui-mobile = { package = "gpui-pre-mobile", version = "=0.1.0", default-features = false }
 api = { package = "kopuz-api", path = "../../../shared/api" }

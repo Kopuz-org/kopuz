@@ -231,6 +231,8 @@ time = tenpo
 genre = kule
 plays = mute kute
 track_count = kalama musi { $count }
+album_count = kulupu pi kalama sama { $count }
+artist_count = jan pali { $count }
 songs = kalama musi
 min = min
 

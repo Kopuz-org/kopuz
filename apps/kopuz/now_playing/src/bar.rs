@@ -75,6 +75,9 @@ impl NowPlaying {
             (false, true) => SCRIM_INLINE,
             (false, false) => SCRIM_PLAIN,
         };
+        if theme::mobile::is_compact(cx) && self.presentation == crate::Presentation::Bar {
+            return self.render_compact_bar(scrim, window, cx);
+        }
 
         let skin = style::chrome();
         let floating = skin.pane_radius > px(0.);
@@ -262,6 +265,9 @@ pub fn utility_metrics(cx: &App) -> (Pixels, Pixels) {
 
 /// The bar owns its height; the shell does not have to guess it.
 pub fn bar_height(cx: &App) -> Pixels {
+    if theme::mobile::is_compact(cx) {
+        return crate::phone::BAR_HEIGHT;
+    }
     style::chrome().player_height * store::layout(cx).player.size.scale()
 }
 

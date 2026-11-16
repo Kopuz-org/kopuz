@@ -167,32 +167,37 @@ impl AppearanceSettings {
             .into_any_element()
     }
 
+    /// Android has no updater and no tray, so it lists neither.
     fn general(&self, cfg: &Settings, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let mut rows = Vec::new();
-        push(
-            &mut rows,
-            toggle_row(
-                "auto_check_updates",
-                t("auto_check_updates"),
-                cfg.system.auto_check_updates,
-                ConfigModel::writer(|on| SettingsEdit::System(SystemEdit::AutoCheckUpdates(on))),
-            )
-            .bind("auto_check_updates", cx)
-            .description(t("auto_check_updates_description")),
-            cx,
-        );
-        push(
-            &mut rows,
-            toggle_row(
-                "minimize_to_tray",
-                t("minimize_to_tray"),
-                cfg.system.minimize_to_tray,
-                ConfigModel::writer(|on| SettingsEdit::System(SystemEdit::MinimizeToTray(on))),
-            )
-            .bind("minimize_to_tray", cx)
-            .description(t("minimize_to_tray_description")),
-            cx,
-        );
+        if !cfg!(target_os = "android") {
+            push(
+                &mut rows,
+                toggle_row(
+                    "auto_check_updates",
+                    t("auto_check_updates"),
+                    cfg.system.auto_check_updates,
+                    ConfigModel::writer(|on| {
+                        SettingsEdit::System(SystemEdit::AutoCheckUpdates(on))
+                    }),
+                )
+                .bind("auto_check_updates", cx)
+                .description(t("auto_check_updates_description")),
+                cx,
+            );
+            push(
+                &mut rows,
+                toggle_row(
+                    "minimize_to_tray",
+                    t("minimize_to_tray"),
+                    cfg.system.minimize_to_tray,
+                    ConfigModel::writer(|on| SettingsEdit::System(SystemEdit::MinimizeToTray(on))),
+                )
+                .bind("minimize_to_tray", cx)
+                .description(t("minimize_to_tray_description")),
+                cx,
+            );
+        }
         push(
             &mut rows,
             SettingRow::new(t("back_behavior"))
@@ -231,7 +236,7 @@ impl AppearanceSettings {
                 .bind("theme", cx)
                 .description(t("theme_description"))
                 .stacked()
-                .setting(self.theme(cfg)),
+                .setting(self.theme(cfg, cx)),
             cx,
         );
         if cfg!(not(target_os = "android")) && cfg.ui.theme == utils::live_theme::THEME_ID {
@@ -338,17 +343,20 @@ impl AppearanceSettings {
             .description(t("reduce_animations_description")),
             cx,
         );
-        push(
-            &mut rows,
-            toggle_row(
-                "fullscreen_use_player_bar",
-                t("fullscreen_use_player_bar"),
-                cfg.ui.fullscreen_use_player_bar,
-                ConfigModel::writer(|on| SettingsEdit::Ui(UiEdit::FullscreenUsePlayerBar(on))),
-            )
-            .bind("fullscreen_use_player_bar", cx),
-            cx,
-        );
+        let phone = components::phone::is_compact(cx);
+        if !phone {
+            push(
+                &mut rows,
+                toggle_row(
+                    "fullscreen_use_player_bar",
+                    t("fullscreen_use_player_bar"),
+                    cfg.ui.fullscreen_use_player_bar,
+                    ConfigModel::writer(|on| SettingsEdit::Ui(UiEdit::FullscreenUsePlayerBar(on))),
+                )
+                .bind("fullscreen_use_player_bar", cx),
+                cx,
+            );
+        }
         push(
             &mut rows,
             toggle_row(
@@ -395,27 +403,29 @@ impl AppearanceSettings {
                 cx,
             );
         }
-        push(
-            &mut rows,
-            SettingRow::new(t("player_bar_position"))
-                .bind("player_bar_position", cx)
-                .setting(
-                    Choice::new(
-                        "player_bar_position",
-                        cfg.ui.player_bar_position,
-                        vec![
-                            (PlayerBarPosition::Bottom, t("position_bottom")),
-                            (PlayerBarPosition::Top, t("position_top")),
-                        ],
-                    )
-                    .on_change(ConfigModel::writer(|value| {
-                        SettingsEdit::Ui(UiEdit::PlayerBarPosition(value))
-                    })),
-                ),
-            cx,
-        );
+        if !phone {
+            push(
+                &mut rows,
+                SettingRow::new(t("player_bar_position"))
+                    .bind("player_bar_position", cx)
+                    .setting(
+                        Choice::new(
+                            "player_bar_position",
+                            cfg.ui.player_bar_position,
+                            vec![
+                                (PlayerBarPosition::Bottom, t("position_bottom")),
+                                (PlayerBarPosition::Top, t("position_top")),
+                            ],
+                        )
+                        .on_change(ConfigModel::writer(|value| {
+                            SettingsEdit::Ui(UiEdit::PlayerBarPosition(value))
+                        })),
+                    ),
+                cx,
+            );
+        }
         // Material 3 always draws the top bar, so the choice would do nothing there.
-        if cfg.ui.ui_style != UiStyle::Material3 {
+        if cfg.ui.ui_style != UiStyle::Material3 && !phone {
             push(
                 &mut rows,
                 SettingRow::new(t("settings_layout"))
@@ -490,8 +500,13 @@ impl AppearanceSettings {
         ))
     }
 
-    fn theme(&self, cfg: &Settings) -> ThemeGallery {
-        theme_gallery("theme", cfg).columns(6)
+    /// Six to a row on desktop; two on a phone, so even "Gruvbox Light Soft" fits its card unclipped.
+    fn theme(&self, cfg: &Settings, cx: &App) -> ThemeGallery {
+        let columns = match theme::mobile::is_compact(cx) {
+            true => 2,
+            false => 6,
+        };
+        theme_gallery("theme", cfg).columns(columns)
     }
 }
 

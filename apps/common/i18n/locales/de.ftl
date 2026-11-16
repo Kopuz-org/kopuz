@@ -239,6 +239,12 @@ time = Zeit
 genre = Genre
 plays = Wiedergaben
 track_count = { $count } Titel
+album_count =
+    { $count ->
+        [one] { $count } Album
+       *[other] { $count } Alben
+    }
+artist_count = { $count } Künstler
 songs = Songs
 min = Min.
 

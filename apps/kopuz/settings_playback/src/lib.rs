@@ -316,6 +316,7 @@ impl PlaybackSettings {
             )
     }
 
+    /// A touch screen has no scroll wheel, so it lists no wheel step for the volume.
     fn player(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let model = ConfigModel::global(cx);
         let config = model.read(cx).config();
@@ -342,16 +343,19 @@ impl PlaybackSettings {
                     }))
                     .shown(cx),
             )
-            .children(
-                SettingRow::new(t("volume_scroll_step"))
-                    .bind("volume_scroll_step", cx)
-                    .description(t("volume_scroll_step_description"))
-                    .setting(
-                        SliderRow::new(&self.volume_scroll)
-                            .readout(|percent| SharedString::from(format!("{}%", percent as i32))),
-                    )
-                    .shown(cx),
-            )
+            .when(!components::phone::is_touch(cx), |section| {
+                section.children(
+                    SettingRow::new(t("volume_scroll_step"))
+                        .bind("volume_scroll_step", cx)
+                        .description(t("volume_scroll_step_description"))
+                        .setting(
+                            SliderRow::new(&self.volume_scroll).readout(|percent| {
+                                SharedString::from(format!("{}%", percent as i32))
+                            }),
+                        )
+                        .shown(cx),
+                )
+            })
             .when(caps.track_radio, |section| {
                 section.children(
                     toggle_row(
@@ -536,6 +540,7 @@ impl PlaybackSettings {
         rows
     }
 
+    /// Android has no file browser to open the logs folder in and no save dialog to export to.
     fn tools(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let tracing_enabled = ConfigModel::global(cx)
             .read(cx)
@@ -562,7 +567,9 @@ impl PlaybackSettings {
                 ),
                 cx,
             ))
-            .children(components::settings::when_unfiltered(logs::actions(cx), cx))
+            .when(!cfg!(target_os = "android"), |section| {
+                section.children(components::settings::when_unfiltered(logs::actions(cx), cx))
+            })
     }
 }
 

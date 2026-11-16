@@ -133,6 +133,11 @@ pub fn has_menu(target: &Target, cx: &App) -> bool {
 }
 
 fn build_menu(target: Target, mut menu: PopupMenu, cx: &mut Context<PopupMenu>) -> PopupMenu {
+    if components::phone::is_touch(cx) {
+        menu = menu
+            .min_w(components::menus::TOUCH_MENU_WIDTH)
+            .scrollable(true);
+    }
     let mut previous: Option<Section> = None;
     for command in all() {
         if command.section == Section::Hidden || !command.is_available(&target, cx) {
@@ -153,7 +158,7 @@ fn item(command: &'static Command, target: &Target, cx: &App) -> PopupMenuItem {
         // Taking something off disk should not look like the item above it.
         .danger(command.danger)
         .on_click(move |_, window, cx| command.perform(target.clone(), window, cx))
-        .into()
+        .into_entry(cx)
 }
 
 /// An icon-only button's tooltip: what it does, and the key that does it without the pointer.

@@ -10,7 +10,7 @@ use store::{Navigator, Offline, PlayerModel, Route, SourcesModel};
 
 use crate::download_toggle::{DownloadToggle, ToggleAct};
 use crate::icon_button::{IconButton, IconTone};
-use crate::{format::t, icons};
+use crate::{format::t, icons, phone};
 
 /// `border-white/15 hover:border-white/30`: the catalog-styled page's quieter ring.
 const CATALOG_RING: (f32, f32) = (0.15, 0.30);
@@ -214,7 +214,12 @@ impl DetailActions {
 
 impl RenderOnce for DetailActions {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let metrics = self.look.metrics();
+        let mut metrics = self.look.metrics();
+        if phone::is_compact(cx) {
+            metrics.play = phone::target(metrics.play);
+            metrics.round = phone::target(metrics.round);
+            metrics.small = phone::target(metrics.small);
+        }
         let capabilities = SourcesModel::global(cx).read(cx).capabilities();
         let shuffled = PlayerModel::global(cx).read(cx).shuffle();
         let id = self.id;
@@ -327,11 +332,12 @@ impl RenderOnce for DetailActions {
             Look::Hero => px(16.),
             _ => px(12.),
         };
-        h_flex()
-            .flex_shrink_0()
-            .items_center()
-            .flex_wrap()
-            .gap(gap)
-            .children(elements)
+        let row = h_flex();
+        let row = if phone::is_compact(cx) {
+            row.min_w_0().w_full()
+        } else {
+            row.flex_shrink_0()
+        };
+        row.items_center().flex_wrap().gap(gap).children(elements)
     }
 }

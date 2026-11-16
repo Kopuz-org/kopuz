@@ -229,9 +229,13 @@ impl Integrations {
                 })
                 .collect();
             let this = cx.entity().downgrade();
+            let compact = components::phone::is_compact(cx);
             h_flex()
                 .gap_2()
                 .items_center()
+                .when(compact, |controls| {
+                    controls.w_full().flex_col().items_stretch()
+                })
                 .child(
                     Choice::new(
                         SharedString::from(format!("browser-profile-{id}")),

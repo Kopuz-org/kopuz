@@ -224,7 +224,10 @@ impl Shared {
 
     fn set_state(&self, state: ConnState) {
         let kind = state.kind();
-        let mut logged = self.logged.lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut logged = self
+            .logged
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         if *logged != kind {
             *logged = kind;
             match &state {
@@ -421,7 +424,7 @@ async fn supervise(shared: Arc<Shared>, backend: Backend) {
                 shared.set_api(Some(Arc::clone(&api)));
                 shared.set_state(ConnState::Connected);
                 shared.send(Msg::Playing(is_playing(player.phase)));
-                match load_tracks(&shared, &backend, api.as_ref()).await {
+                match load_tracks(&shared, api.as_ref()).await {
                     Ok(()) => lost.await,
                     Err(reason) => shared.connection_lost("tracks", &reason),
                 }
@@ -438,14 +441,13 @@ async fn supervise(shared: Arc<Shared>, backend: Backend) {
     }
 }
 
-/// Load the first page of tracks; an empty in-process library is seeded
-/// with test tones first. `Err` only when the connection was lost.
-async fn load_tracks(shared: &Shared, backend: &Backend, api: &dyn KopuzApi) -> Result<(), String> {
+/// Load the first page of tracks; `Err` only when the connection was lost.
+async fn load_tracks(shared: &Shared, api: &dyn KopuzApi) -> Result<(), String> {
     let page = Page {
         offset: 0,
         limit: PAGE_LIMIT,
     };
-    let mut tracks = match call(api.tracks(TrackFilter::default(), page)).await {
+    let tracks = match call(api.tracks(TrackFilter::default(), page)).await {
         Ok(tracks) => tracks,
         Err(CallError::Lost(reason)) => return Err(reason),
         Err(CallError::Failed(reason)) => {
@@ -453,24 +455,6 @@ async fn load_tracks(shared: &Shared, backend: &Backend, api: &dyn KopuzApi) -> 
             return Ok(());
         }
     };
-    if tracks.total == 0 && *backend == Backend::InProcess {
-        shared.send(Msg::Note(Some("Adding test tones…".into())));
-        match crate::seed::seed(api).await {
-            Ok(n) => {
-                log::info!("SPIKE seeded n={n}");
-                shared.send(Msg::Note(None));
-            }
-            Err(error) => shared.call_failed("Seeding", short_reason(&error)),
-        }
-        tracks = match call(api.tracks(TrackFilter::default(), page)).await {
-            Ok(tracks) => tracks,
-            Err(CallError::Lost(reason)) => return Err(reason),
-            Err(CallError::Failed(reason)) => {
-                shared.call_failed("Tracks", reason);
-                return Ok(());
-            }
-        };
-    }
     let rows: Vec<Row> = tracks
         .items
         .into_iter()

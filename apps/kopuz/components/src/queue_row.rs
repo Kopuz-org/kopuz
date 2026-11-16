@@ -16,7 +16,7 @@ use store::{Pictured, Target};
 use crate::format::t;
 use crate::menus::{Picture, WithContextMenu as _};
 use crate::reorder::ReorderDropZones;
-use crate::{icons, lead, menus, motion, style, track_row};
+use crate::{icons, lead, menus, motion, phone, style, track_row};
 
 const WASH: u64 = 1;
 const TITLE: u64 = 2;
@@ -195,12 +195,14 @@ impl RenderOnce for QueueRow {
         let lit = motion::color(motion::channel(&self.uid, TITLE), lit_target, window, cx);
         let lead = motion::color(motion::channel(&self.uid, LEAD), lead_target, window, cx);
         let jump = self.jump;
+        let compact = phone::is_compact(cx);
 
         let row = div()
             .id(("queue-row", index))
             .group(ROW_GROUP)
             .relative()
             .h(style::media_row())
+            .when(compact, |row| row.min_h(phone::TOUCH_TARGET))
             .w_full()
             .flex()
             .items_center()
@@ -264,35 +266,50 @@ impl RenderOnce for QueueRow {
                     .child(
                         div()
                             .truncate()
-                            .text_xs()
+                            .map(|line| match compact {
+                                true => line.text_size(phone::BODY),
+                                false => line.text_xs(),
+                            })
                             .text_color(style::white(ROW_SUBTITLE, cx))
                             .child(self.artist),
                     ),
             )
-            .child(
-                v_flex()
-                    .flex_shrink_0()
-                    .pr_1()
-                    .invisible()
-                    .group_hover(ROW_GROUP, |buttons| buttons.visible())
-                    .child(
-                        reorder_button(("queue-up", index), icons::CHEVRON_UP, cx)
-                            .tooltip(t("move_up"))
-                            .disabled(index == 0)
-                            .on_click(stopped(self.up)),
-                    )
-                    .child(
-                        reorder_button(("queue-down", index), icons::CHEVRON_DOWN, cx)
-                            .tooltip(t("move_down"))
-                            .disabled(self.last)
-                            .on_click(stopped(self.down)),
-                    )
-                    .child(
-                        reorder_button(("queue-remove", index), icons::CLOSE, cx)
-                            .tooltip(t("remove"))
-                            .on_click(stopped(self.remove)),
-                    ),
-            )
+            .when(compact, |row| {
+                row.child(
+                    Button::new(("queue-remove", index))
+                        .custom(style::quiet_button(style::slate_500(cx), cx))
+                        .size(phone::TOUCH_TARGET)
+                        .flex_shrink_0()
+                        .icon(icons::icon(icons::CLOSE))
+                        .on_click(stopped(self.remove.clone())),
+                )
+            })
+            .when(!compact, |row| {
+                row.child(
+                    v_flex()
+                        .flex_shrink_0()
+                        .pr_1()
+                        .invisible()
+                        .group_hover(ROW_GROUP, |buttons| buttons.visible())
+                        .child(
+                            reorder_button(("queue-up", index), icons::CHEVRON_UP, cx)
+                                .tooltip(t("move_up"))
+                                .disabled(index == 0)
+                                .on_click(stopped(self.up)),
+                        )
+                        .child(
+                            reorder_button(("queue-down", index), icons::CHEVRON_DOWN, cx)
+                                .tooltip(t("move_down"))
+                                .disabled(self.last)
+                                .on_click(stopped(self.down)),
+                        )
+                        .child(
+                            reorder_button(("queue-remove", index), icons::CLOSE, cx)
+                                .tooltip(t("remove"))
+                                .on_click(stopped(self.remove)),
+                        ),
+                )
+            })
             .children(self.zones);
 
         body.with_context_menu(menus::pictured(self.target.map(menus::menu_for), picture))

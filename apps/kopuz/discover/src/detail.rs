@@ -61,7 +61,7 @@ impl CatalogPlaylist {
                 }
             }),
             // The shuffle button reads the player at render.
-            cx.observe(&PlayerModel::global(cx), |_, _, cx| cx.notify()),
+            PlayerModel::observe_now_playing(cx),
         ];
         let mut page = Self {
             id,
@@ -131,6 +131,7 @@ impl Render for CatalogPlaylist {
             .filter(|target| commands::has_menu(target, cx));
         components::page()
             .pb_8()
+            .when(::theme::mobile::is_compact(cx), |page| page.px_4().pt_4())
             .child(
                 PageHeader::new(self.title.clone())
                     .when(!self.keys.is_empty(), |header| {
@@ -293,6 +294,9 @@ impl Render for CatalogArtist {
                     .pt_6()
                     .pb_10()
                     .gap_8()
+                    .when(::theme::mobile::is_compact(cx), |column| {
+                        column.px_4().pt_4().gap_6()
+                    })
                     .child(PageHeader::new(self.name()))
                     .when(self.loading, |page| page.child(Loading::new()))
                     .when_some(self.error.clone(), |page, message| {

@@ -38,6 +38,7 @@ pub mod menus;
 pub mod nav_row;
 pub mod page;
 pub mod panel;
+pub mod phone;
 pub mod pick_list;
 pub mod playlist_details;
 pub mod queue_row;

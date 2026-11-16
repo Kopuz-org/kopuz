@@ -7,15 +7,15 @@ use components::album_collection::available_fields;
 use components::format::{t, t_with, total_duration};
 use components::track_sort::{Column, next_sort, sort_tracks};
 use components::{
-    AlbumCollection, DetailActions, DetailHeader, EmptyState, GridMode, Loading, Picture,
-    TrackActions, TrackHeader, TrackList, TrackListEvent, TrackListOptions, icons, menus,
+    AlbumCollection, DetailActions, DetailHeader, EmptyState, GridMode, HeaderLayout, Loading,
+    Picture, TrackActions, TrackHeader, TrackList, TrackListEvent, TrackListOptions, icons, menus,
 };
 use config::{AlbumSortField, AlbumViewMode, SortCriterion, SortDirection};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
-    SharedString, Styled as _, Subscription, Window, div, rems,
+    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Pixels,
+    Render, SharedString, Styled as _, Subscription, Window, div, px, rems,
 };
 use store::{
     ConfigModel, DownloadsModel, LayoutModel, Offline, Pictured, PlayerModel, Query, SourcesModel,
@@ -23,6 +23,9 @@ use store::{
 };
 
 use crate::controls::{self, ViewModeKey};
+
+/// The photo on a phone, where the header stacks into a column above the listing.
+const PHONE_COVER: Pixels = px(128.);
 
 /// One artist from the library: tracks and albums.
 pub struct ArtistDetail {
@@ -41,6 +44,8 @@ pub struct ArtistDetail {
     albums: Rc<[AlbumInfo]>,
     album_fields: Vec<AlbumSortField>,
     collection: AlbumCollection,
+    /// A phone's header folds into a slim bar once the rows scroll, so it stops covering them.
+    collapsed: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -91,8 +96,15 @@ impl ArtistDetail {
                 this.refresh_offline(cx);
                 cx.notify();
             }),
-            cx.observe(&PlayerModel::global(cx), |_, _, cx| cx.notify()),
+            PlayerModel::observe_now_playing(cx),
             cx.subscribe(&list, Self::on_list_event),
+            cx.observe(&list, |this, list, cx| {
+                let collapsed = components::phone::collapsed(list.read(cx).scrolled());
+                if collapsed != this.collapsed {
+                    this.collapsed = collapsed;
+                    cx.notify();
+                }
+            }),
         ];
         Self {
             key,
@@ -108,6 +120,7 @@ impl ArtistDetail {
             albums: Rc::from([]),
             album_fields: Vec::new(),
             collection: AlbumCollection::new("artist-albums-scroll"),
+            collapsed: false,
             _subscriptions: subscriptions,
         }
     }
@@ -246,6 +259,9 @@ impl Render for ArtistDetail {
         };
         components::page()
             .gap_6()
+            .when(::theme::mobile::is_compact(cx), |page| {
+                page.px_4().pt_4().gap_3()
+            })
             .child(
                 h_flex()
                     .w_full()
@@ -262,6 +278,7 @@ impl ArtistDetail {
         let count = self.keys.len();
         let selecting = self.list.read(cx).is_selecting();
         let settled = self.tracks.read(cx).is_settled();
+        let compact = ::theme::mobile::is_compact(cx);
         let body = if !settled && count == 0 {
             Loading::new().into_any_element()
         } else if count == 0 {
@@ -272,7 +289,7 @@ impl ArtistDetail {
             v_flex()
                 .flex_1()
                 .min_h_0()
-                .child(self.column_header(count, cx))
+                .when(!compact, |body| body.child(self.column_header(count, cx)))
                 .child(div().flex_1().min_h_0().child(self.list.clone()))
                 .into_any_element()
         };
@@ -281,7 +298,22 @@ impl ArtistDetail {
             .flex_1()
             .min_h_0()
             .gap_12()
-            .child(self.hero(cx))
+            .when(compact, |view| view.gap_4())
+            .child(match compact && self.collapsed {
+                true => {
+                    let keys = self.keys.clone();
+                    let artwork = self.artwork(cx);
+                    components::phone::slim_header(
+                        "artist-slim",
+                        self.name(cx),
+                        artwork.as_ref(),
+                        true,
+                        move |_, cx| commands::play_all(&keys, cx),
+                        cx,
+                    )
+                }
+                false => self.hero(cx),
+            })
             .child(body)
             .when(selecting, |view| view.child(self.selection_bar(cx)))
             .into_any_element()
@@ -298,6 +330,9 @@ impl ArtistDetail {
             name: name.clone(),
         });
         DetailHeader::new(name)
+            .when(::theme::mobile::is_compact(cx), |header| {
+                header.layout(HeaderLayout::Column).size(PHONE_COVER)
+            })
             .artwork(artwork.as_ref())
             .placeholder(icons::MIC)
             .cover_menu(menu, picture)
@@ -420,6 +455,7 @@ impl ArtistDetail {
             .flex_1()
             .min_h_0()
             .gap_12()
+            .when(::theme::mobile::is_compact(cx), |view| view.gap_4())
             .child(self.hero(cx))
             .child(
                 v_flex()

@@ -56,9 +56,14 @@ pub(crate) fn title() -> SharedString {
     t("keyboard_shortcuts")
 }
 
+/// Wire the sheet `?` opens, without the editor in Settings: what a touch screen gets.
+pub fn init_sheet(cx: &mut App) {
+    store::SHORTCUTS.register(|(), window, cx| sheet::open(window, cx), cx);
+}
+
 /// Wire the sheet `?` opens and contribute the editor to Settings → Interface.
 pub fn init(cx: &mut App) {
-    store::SHORTCUTS.register(|(), window, cx| sheet::open(window, cx), cx);
+    init_sheet(cx);
     settings_interface::register(
         "shortcuts",
         "keyboard_shortcuts",

@@ -4,6 +4,7 @@ use components::format::t;
 use components::{Keycap, icons, motion, style};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Pixels,
     Styled, Window, div, px,
@@ -52,12 +53,17 @@ pub(crate) fn card(window: &mut Window, cx: &mut App) -> Option<AnyElement> {
         return None;
     }
     let fade = motion::enter("first-use-hint", motion::MEDIUM, window, cx);
+    let phone = theme::mobile::is_compact(cx);
+    let shortcut = (!theme::mobile::is_touch(cx)).then(|| Keycap::new("ctrl-k").into_any_element());
     Some(
         v_flex()
             .absolute()
             .bottom_4()
             .right_4()
-            .w(WIDTH)
+            .map(|card| match phone {
+                true => card.left_4(),
+                false => card.w(WIDTH),
+            })
             .child(
                 v_flex()
                     .relative()
@@ -96,12 +102,7 @@ pub(crate) fn card(window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                                     }),
                             ),
                     )
-                    .child(tip(
-                        icons::SEARCH,
-                        Some(Keycap::new("ctrl-k").into_any_element()),
-                        "tips_search",
-                        cx,
-                    ))
+                    .child(tip(icons::SEARCH, shortcut, "tips_search", cx))
                     .child(tip(icons::MUSIC, None, "tips_now_playing", cx))
                     .child(tip(icons::LIBRARY, None, "tips_source_switcher", cx)),
             )

@@ -107,6 +107,24 @@ impl Library {
     }
 }
 
+/// The same two as a phone's more-menu items, in the same order and doing the same.
+pub(crate) fn playlist_actions(cx: &App) -> Vec<crate::bar::MenuAction> {
+    let mut actions = Vec::new();
+    if SourcesModel::global(cx).read(cx).capabilities().folders {
+        actions.push(crate::bar::MenuAction::new(
+            icons::FOLDER,
+            t("new_folder"),
+            |_, cx| new_folder(cx),
+        ));
+    }
+    actions.push(crate::bar::MenuAction::new(
+        icons::PLUS,
+        t("add_playlist"),
+        open_add_playlist,
+    ));
+    actions
+}
+
 /// A folder named the way the Dioxus page named one, renamed from its card's menu.
 pub(crate) fn new_folder(cx: &mut App) {
     let name = t("new_folder").to_string();
@@ -196,11 +214,6 @@ impl AddPlaylist {
     }
 
     fn import_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // No file dialog on Android: gpui-pre-mobile's picker calls Java this APK does not carry.
-        if cfg!(target_os = "android") {
-            window.close_dialog(cx);
-            return;
-        }
         let picked = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,

@@ -24,6 +24,10 @@ use crate::data::{Play, Tile};
 
 /// How tall the hero may be dragged, as the Dioxus edit mode clamps it.
 const HEIGHT: RangeInclusive<u32> = 140..=800;
+/// The tallest a phone draws the hero.
+const PHONE_HEIGHT: u32 = 280;
+/// The hero's album title on a phone, where `text-5xl` would fit one word.
+const PHONE_TITLE: Pixels = px(28.);
 
 /// `w-11 h-11`: the heart and the dots beside Start listening.
 const SIDE_BUTTON: Pixels = px(44.);
@@ -42,6 +46,10 @@ pub(crate) struct Hero<'a> {
 
 pub(crate) fn hero(hero: Hero<'_>, window: &mut Window, cx: &mut App) -> AnyElement {
     let height = hero.height.clamp(*HEIGHT.start(), *HEIGHT.end());
+    let height = match components::phone::is_compact(cx) {
+        true => height.min(PHONE_HEIGHT),
+        false => height,
+    };
     let radius = style::to_px(style::radius_xl(), window);
     let frame = div()
         .id("home-hero")
@@ -90,6 +98,7 @@ pub(crate) fn hero(hero: Hero<'_>, window: &mut Window, cx: &mut App) -> AnyElem
 }
 
 fn body(tile: &Tile, keys: &[String], menu: components::Menu, cx: &mut App) -> AnyElement {
+    let compact = components::phone::is_compact(cx);
     let favorites = FavoritesModel::global(cx).read(cx);
     let favorite = !keys.is_empty() && keys.iter().all(|key| favorites.is_favorite(key));
     let heart: Vec<String> = keys
@@ -106,7 +115,10 @@ fn body(tile: &Tile, keys: &[String], menu: components::Menu, cx: &mut App) -> A
         .absolute()
         .inset_0()
         .justify_center()
-        .p_12()
+        .map(|body| match compact {
+            true => body.p(components::phone::PAGE_PAD + px(4.)),
+            false => body.p_12(),
+        })
         .child(
             div()
                 .mb_3()
@@ -121,7 +133,10 @@ fn body(tile: &Tile, keys: &[String], menu: components::Menu, cx: &mut App) -> A
                 .mb_4()
                 .max_w_full()
                 .truncate()
-                .text_size(style::text_5xl())
+                .map(|title| match compact {
+                    true => title.text_size(PHONE_TITLE),
+                    false => title.text_size(style::text_5xl()),
+                })
                 .line_height(relative(1.25))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(cx.theme().foreground)

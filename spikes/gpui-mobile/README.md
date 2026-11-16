@@ -11,14 +11,17 @@ There are now two APKs, and neither needs a host daemon:
 - **The real kopuz GPUI app** (`kopuz-android/`, package `moe.kopuz.gpuiapp`, launcher label
   "Kopuz (GPUI)"). It is `apps/kopuz/app` itself, with its real views, theme, components and
   navigation, running through gpui-pre-mobile with the kopuz daemon core in-process. The layout is
-  desktop-sized. Build it with `scripts/build-apk.sh --app kopuz`, which writes
+  adapted for touch screens. Build it with `scripts/build-apk.sh --app kopuz`, which writes
   `build/kopuz-gpui-app.apk`, then install it with `adb install -r build/kopuz-gpui-app.apk`.
 - **The minimal spike** (package `moe.kopuz.gpuispike`), built with `scripts/build-apk.sh`. It now
   also runs the daemon core in-process: the database and settings live in the app's files directory,
-  and six test tones are seeded on first run. Its header shows Connecting… / Reconnecting in Ns… /
+  and an empty library stays empty until a source is configured. Its header shows Connecting… / Reconnecting in Ns… /
   Not reachable / N tracks, with automatic backoff.
 
 Both refresh the window after the surface is recreated, so the screen is no longer black after resume.
+
+The real app's APK now carries Java (`android/kopuz-app/java/`), for the soft keyboard, clipboard and
+links, and builds against a patched gpui-pre-mobile in `vendor/`. See `vendor/gpui-pre-mobile/PATCHES.md`. The minimal spike below is still Java-free.
 
 **Host daemon (optional, spike only):** `scripts/run-dev.sh [--install]` starts an isolated host
 kopuzd on 127.0.0.1:50777, sets up `adb reverse`, and sets the device property
@@ -178,3 +181,5 @@ End-to-end run on 2026-11-15 on the running Pixel 8 Pro emulator (API 35). The r
 
 The first run froze after loading the tracks, because the spike called a gpui-pre-mobile method that takes
 the platform lock from inside a GPUI task. That is fixed in `src/lifecycle.rs`. See `docs/REPORT.md`.
+
+First-run demo seeding has been removed from both APKs. The historical emulator report below describes the earlier seeded prototype; the old in-process playback harness requires updating for an empty library.

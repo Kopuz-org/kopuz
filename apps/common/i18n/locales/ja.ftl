@@ -231,6 +231,8 @@ time = 時間
 genre = ジャンル
 plays = 再生回数
 track_count = { $count } トラック
+album_count = { $count } アルバム
+artist_count = { $count } アーティスト
 songs = 曲
 min = 分
 

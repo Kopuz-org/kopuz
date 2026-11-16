@@ -4,24 +4,28 @@ use components::format::t;
 use components::{Carousel, Heading, SectionHeading};
 use gpui_kit::component::v_flex;
 use gpui_kit::{
-    AnyElement, App, IntoElement, ParentElement as _, ScrollHandle, Styled as _, div, px,
+    AnyElement, App, IntoElement, ParentElement as _, Pixels, ScrollHandle, Styled as _, div, px,
 };
 
-use crate::cards::{GAP, Now, TILE, card, row};
+use crate::cards::{GAP, Now, card, row};
 use crate::data::{Form, LISTEN_NOW_ROWS, Shelf};
 
-pub(crate) fn shelf(shelf: &Shelf, handle: &ScrollHandle, now: &Now) -> AnyElement {
-    carousel(shelf, handle, now).into_any_element()
+pub(crate) fn shelf(shelf: &Shelf, handle: &ScrollHandle, now: &Now, size: Pixels) -> AnyElement {
+    carousel(shelf, handle, now, size).into_any_element()
 }
 
-/// Listen Now as `ListenNowStyle::List` draws it: a two-column grid of album rows.
+/// Listen Now as `ListenNowStyle::List` draws it: a two-column grid of album rows, one column on a phone.
 pub(crate) fn rows(shelf: &Shelf, now: &Now, cx: &App) -> AnyElement {
+    let columns = match components::phone::is_compact(cx) {
+        true => 1,
+        false => 2,
+    };
     v_flex()
         .w_full()
         .gap_6()
         .child(SectionHeading::new(t(title(shelf.name))).heading(Heading::Shelf))
         .child(
-            div().grid().grid_cols(2).gap_4().children(
+            div().grid().grid_cols(columns).gap_4().children(
                 shelf
                     .tiles
                     .iter()
@@ -32,15 +36,15 @@ pub(crate) fn rows(shelf: &Shelf, now: &Now, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-pub(crate) fn carousel(shelf: &Shelf, handle: &ScrollHandle, now: &Now) -> Carousel {
+pub(crate) fn carousel(shelf: &Shelf, handle: &ScrollHandle, now: &Now, size: Pixels) -> Carousel {
     let tiles = shelf.tiles.clone();
     let now = now.clone();
     Carousel::new(
         shelf.name,
         t(title(shelf.name)),
         tiles.len(),
-        TILE,
-        move |index, _, _| card(&tiles[index], &now),
+        size,
+        move |index, _, _| card(&tiles[index], &now, size),
     )
     .gap(px(GAP))
     .heading(match shelf.form {

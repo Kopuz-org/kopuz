@@ -397,6 +397,29 @@ fn send(command: PlayerCommand, cx: &App) {
     });
 }
 
+impl PlayerModel {
+    /// Redraws `cx`'s view when the loaded track or play-pause changes, and not on the position and
+    /// buffering events between, which a page that only marks the playing row has no use for.
+    pub fn observe_now_playing<T: 'static>(cx: &mut Context<T>) -> Subscription {
+        let player = Self::global(cx);
+        let mut shown = player.read(cx).now_playing();
+        cx.observe(&player, move |_, player, cx| {
+            let now = player.read(cx).now_playing();
+            if now != shown {
+                shown = now;
+                cx.notify();
+            }
+        })
+    }
+
+    fn now_playing(&self) -> (Option<String>, bool) {
+        (
+            self.track().map(|track| track.key.clone()),
+            self.is_playing(),
+        )
+    }
+}
+
 /// Notifies a few times a second while playback runs; observe it (not [`PlayerModel`]) for anything that tracks the position.
 pub struct Playhead {
     playing: bool,

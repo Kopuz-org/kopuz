@@ -13,10 +13,16 @@ use gpui_kit::{
     UniformListScrollHandle, Window, div, px, uniform_list,
 };
 
-use crate::{motion, scroll, style};
+use crate::{motion, phone, scroll, style};
 
 /// Until the list has been laid out once there is no measured width to divide.
 const COLUMNS_FALLBACK: usize = 4;
+/// A phone's tile before the grid has been measured once: about half a phone's width.
+const PHONE_TILE_FALLBACK: Pixels = px(160.);
+/// How many tiles a phone's band holds unless the page asks for another count.
+const PHONE_COLUMNS: usize = 2;
+/// The space between a phone's columns, and under each band: a desktop gap would take a tenth of the width.
+const PHONE_GAP: Pixels = px(16.);
 /// The jump rail's width, which the bands do not get to use.
 const RAIL: Pixels = px(20.);
 /// The letters the rail offers, with everything else gathered under the first.
@@ -41,6 +47,7 @@ pub struct TileGrid {
     gap: Pixels,
     fallback: usize,
     columns: Cell<usize>,
+    phone_columns: Cell<usize>,
 }
 
 impl TileGrid {
@@ -51,7 +58,13 @@ impl TileGrid {
             gap: px(24.),
             fallback: COLUMNS_FALLBACK,
             columns: Cell::new(COLUMNS_FALLBACK),
+            phone_columns: Cell::new(PHONE_COLUMNS),
         }
+    }
+
+    /// How many tiles across a phone's bands hold: two unless a page offers a choice, such as three.
+    pub fn set_phone_columns(&self, columns: usize) {
+        self.phone_columns.set(columns.max(1));
     }
 
     /// Scroll with a handle another list on the page drives too, so both keep one position.
@@ -94,6 +107,36 @@ impl TileGrid {
         (((width + self.gap) / (tile + self.gap)) as usize).max(1)
     }
 
+    /// The width to draw a tile at: `tile` as given, or on a phone the measured width shared by its columns.
+    pub fn tile_width(&self, tile: Pixels, cx: &App) -> Pixels {
+        self.tile_width_across(tile, self.phone_columns.get(), cx)
+    }
+
+    /// The same for `columns` across on a phone: the measured width less the gaps between them, shared out.
+    pub fn tile_width_across(&self, tile: Pixels, columns: usize, cx: &App) -> Pixels {
+        if !phone::is_compact(cx) {
+            return tile;
+        }
+        let columns = columns.max(1);
+        let width: Pixels = self.scroll.0.borrow().base_handle.bounds().size.width;
+        if width <= px(0.) {
+            let fallback = PHONE_TILE_FALLBACK * (PHONE_COLUMNS as f32 / columns as f32);
+            return match tile < fallback {
+                true => tile,
+                false => fallback,
+            };
+        }
+        ((width - self.spacing(cx) * (columns - 1) as f32) / columns as f32).floor()
+    }
+
+    /// The gap between tiles and under each band: the page's own, or a phone's narrower one.
+    fn spacing(&self, cx: &App) -> Pixels {
+        match phone::is_compact(cx) {
+            true => PHONE_GAP,
+            false => self.gap,
+        }
+    }
+
     /// `count` entries, each `tile` wide in tile mode, built by `cell` only once its band is on screen.
     pub fn bands<V: 'static>(
         &self,
@@ -110,6 +153,7 @@ impl TileGrid {
             cell: Rc::new(cell),
             visit: None,
             rail: None,
+            bottom: None,
         }
     }
 }
@@ -123,6 +167,7 @@ pub struct Bands<'a, V> {
     cell: Build<V>,
     visit: Option<Visit<V>>,
     rail: Option<AnyElement>,
+    bottom: Option<Pixels>,
 }
 
 impl<V: 'static> Bands<'_, V> {
@@ -141,17 +186,24 @@ impl<V: 'static> Bands<'_, V> {
         self
     }
 
+    /// Room after the last band, inside the scroller, so it can scroll clear of bars drawn over the page's foot.
+    pub fn bottom_inset(mut self, inset: Option<Pixels>) -> Self {
+        self.bottom = inset;
+        self
+    }
+
     pub fn build(self, window: &mut Window, cx: &mut Context<V>) -> AnyElement {
         let grid = self.grid;
         scroll::smooth_list(grid.id.clone(), &grid.scroll, window, cx);
         let tiles = self.mode == GridMode::Tiles;
-        let columns = match tiles {
-            true => grid.fit(self.tile),
-            false => 1,
+        let columns = match (tiles, phone::is_compact(cx)) {
+            (true, true) => grid.phone_columns.get(),
+            (true, false) => grid.fit(self.tile),
+            (false, _) => 1,
         };
         grid.columns.set(columns);
         let count = self.count;
-        let gap = grid.gap;
+        let gap = grid.spacing(cx);
         let cell = self.cell;
         let visit = self.visit;
         let list = uniform_list(
@@ -183,7 +235,8 @@ impl<V: 'static> Bands<'_, V> {
             }),
         )
         .track_scroll(&grid.scroll)
-        .size_full();
+        .size_full()
+        .when_some(self.bottom, |list, inset| list.pb(inset));
         match self.rail {
             Some(rail) => h_flex()
                 .size_full()

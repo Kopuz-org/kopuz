@@ -6,11 +6,12 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Hsla, IntoElement, ParentElement as _, Pixels, RenderOnce,
-    SharedString, Styled as _, Window, div, px,
+    AnyElement, App, ClickEvent, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
+    Pixels, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
+    px,
 };
 
-use crate::{focus, hover, icons, motion, skin, style};
+use crate::{focus, hover, icons, motion, phone, skin, style};
 
 const HOVER: u64 = 1;
 const WASH: u64 = 2;
@@ -293,6 +294,13 @@ impl RenderOnce for IconButton {
             None => (self.size, self.size / 2.),
         };
         let inner_width = inner + (width - self.size);
+        let widened =
+            (phone::is_compact(cx) && self.host.is_none() && self.size < phone::TOUCH_TARGET)
+                .then(|| (self.click.clone(), !self.disabled));
+        let click = match widened {
+            Some(_) => None,
+            None => self.click,
+        };
         let button = Button::new(SharedString::from(format!("{id}-button")))
             .custom(style::bare_button(arriving, cx))
             .icon(icons::icon(self.icon))
@@ -303,7 +311,7 @@ impl RenderOnce for IconButton {
             .disabled(self.disabled)
             .loading(self.loading)
             .when_some(self.tooltip, |button, tip| button.tooltip(tip))
-            .when_some(self.click, |button, click| {
+            .when_some(click, |button, click| {
                 button.on_click(move |event, window, cx| {
                     if stop {
                         cx.stop_propagation();
@@ -316,7 +324,7 @@ impl RenderOnce for IconButton {
             Some(host) => host(button),
             None => button.into_any_element(),
         };
-        hover::framed(&id, pointer, control)
+        let frame = hover::framed(&id, pointer, control)
             .flex_shrink_0()
             .h(self.size)
             .w(width)
@@ -339,7 +347,34 @@ impl RenderOnce for IconButton {
                                 .text_color(ink.opacity(ink.a * (1. - shown))),
                         ),
                 )
+            });
+        let Some((tap, live)) = widened else {
+            return frame.into_any_element();
+        };
+        div()
+            .relative()
+            .flex()
+            .flex_shrink_0()
+            .items_center()
+            .justify_center()
+            .h(phone::TOUCH_TARGET)
+            .w(phone::target(width))
+            .child(frame)
+            .when_some(tap.filter(|_| live), |hit, tap| {
+                hit.child(
+                    div()
+                        .id(SharedString::from(format!("{id}-hit")))
+                        .absolute()
+                        .inset_0()
+                        .on_click(move |event, window, cx| {
+                            if stop {
+                                cx.stop_propagation();
+                            }
+                            tap(event, window, cx);
+                        }),
+                )
             })
+            .into_any_element()
     }
 }
 

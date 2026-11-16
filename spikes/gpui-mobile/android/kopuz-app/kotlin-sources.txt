@@ -1,0 +1,7 @@
+spikes/gpui-mobile/android/kopuz-app/kotlin/org/rustls/platformverifier/CertificateVerifier.kt
+spikes/gpui-mobile/android/kopuz-app/kotlin/org/rustls/platformverifier/BuildConfig.kt
+spikes/gpui-mobile/android/kopuz-app/kotlin/dev/dioxus/main/MainActivity.kt
+apps/legacy/kopuz/android-src/java/moe/kopuz/kopuz/LoginActivity.kt
+apps/legacy/kopuz/android-src/java/moe/kopuz/kopuz/MediaSessionHelper.kt
+apps/legacy/kopuz/android-src/java/moe/kopuz/kopuz/MusicService.kt
+apps/legacy/kopuz/android-src/java/moe/kopuz/kopuz/MediaReceiver.kt

@@ -412,6 +412,10 @@ impl CatalogPage {
             CatalogHeader::Detail => HeaderLayout::Row,
             CatalogHeader::Artist => HeaderLayout::Banner,
         };
+        let layout = match (layout, ::theme::mobile::is_compact(cx)) {
+            (HeaderLayout::Row, true) => HeaderLayout::Column,
+            (layout, _) => layout,
+        };
         let play = detail.playback_id.clone().map(|id| {
             DetailActions::new("catalog-page", Rc::<[String]>::from([]))
                 .look(Look::Compact)
@@ -527,6 +531,9 @@ impl Render for CatalogPage {
                     .pt_8()
                     .pb_10()
                     .gap_8()
+                    .when(::theme::mobile::is_compact(cx), |column| {
+                        column.px_4().pt_4().gap_6()
+                    })
                     .child(header)
                     .child(content),
             )

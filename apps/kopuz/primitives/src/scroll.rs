@@ -1,11 +1,16 @@
 //! Smooth scrolling. GPUI turns a wheel notch into `line_height * delta` and applies it at once,
 //! so the view teleports; here the drawn offset glides toward where the wheel has put it.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui_kit::{App, ElementId, Pixels, ScrollHandle, UniformListScrollHandle, Window, point, px};
+use gpui_kit::base::ElementExt as _;
+use gpui_kit::{
+    AnyElement, App, Bounds, ElementId, IntoElement as _, ParentElement as _, Pixels, ScrollHandle,
+    SharedString, Styled as _, UniformListScrollHandle, Window, div, point, px,
+};
 
 use crate::motion;
 
@@ -24,6 +29,12 @@ struct Glide {
     started: bool,
 }
 
+/// Whether scrollers glide: not with motion off, and not on a touch screen, where the finger is the
+/// motion and a glide would leave the page trailing behind it.
+fn glides(cx: &App) -> bool {
+    motion::span(GLIDE, cx).is_some() && !theme::mobile::is_touch(cx)
+}
+
 /// Glides `handle` toward wherever the wheel left it. Call it from the render that draws the
 /// scroller, before the element is built.
 ///
@@ -34,7 +45,7 @@ struct Glide {
 pub fn smooth(id: impl Into<ElementId>, handle: &ScrollHandle, window: &mut Window, cx: &mut App) {
     let id: ElementId = id.into();
     // With motion off, leaving the offset alone is exactly GPUI's own scrolling.
-    if motion::span(GLIDE, cx).is_none() {
+    if !glides(cx) {
         return;
     }
     let state = held(&id, "glide", window, cx);
@@ -63,7 +74,7 @@ pub fn smooth_x(
     cx: &mut App,
 ) {
     let id: ElementId = id.into();
-    if motion::span(GLIDE, cx).is_none() {
+    if !glides(cx) {
         return;
     }
     let state = held(&id, "glide-x", window, cx);
@@ -220,6 +231,44 @@ pub fn smooth_list(
 ) {
     let base = handle.0.borrow().base_handle.clone();
     smooth(id, &base, window, cx);
+}
+
+/// How far past the screen's edges, in screens, a section is still built: enough lead for a fling's
+/// next frames, little enough that a frame lays out about the screen it shows.
+const REACH: f32 = 0.25;
+
+/// A long page's sections, each built only near the viewport: one farther than [`REACH`] away
+/// stands in as an empty box of the size it last had, so a scroll lays out what can be seen
+/// rather than everything the page has loaded.
+#[derive(Clone, Default)]
+pub struct Windowed(Rc<RefCell<HashMap<SharedString, Bounds<Pixels>>>>);
+
+impl Windowed {
+    /// `build`'s section under `key`, or its stand-in while it is out of reach.
+    pub fn section(
+        &self,
+        key: impl Into<SharedString>,
+        window: &Window,
+        build: impl FnOnce() -> AnyElement,
+    ) -> AnyElement {
+        let key = key.into();
+        let height = window.viewport_size().height;
+        let last = self.0.borrow().get(&key).copied();
+        let section = match last {
+            Some(bounds)
+                if bounds.bottom() < -height * REACH || bounds.top() > height * (1. + REACH) =>
+            {
+                div().w_full().flex_shrink_0().h(bounds.size.height)
+            }
+            _ => div().w_full().flex_shrink_0().child(build()),
+        };
+        let drawn = self.0.clone();
+        section
+            .on_prepaint(move |bounds, _, _| {
+                drawn.borrow_mut().insert(key, bounds);
+            })
+            .into_any_element()
+    }
 }
 
 #[cfg(test)]

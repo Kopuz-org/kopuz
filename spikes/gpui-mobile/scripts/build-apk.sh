@@ -10,6 +10,13 @@
 #   --app kopuz     the real kopuz GPUI app (package kopuz-android, libkopuz_android.so,
 #                   android/kopuz-app/AndroidManifest.xml) as build/kopuz-gpui-app.apk;
 #                   default: the spike (kopuz-mobile-spike) as build/kopuz-gpui-spike.apk
+#
+# An app with a java/ directory gets classes.dex: its Java, the Kotlin its kotlin-sources.txt lists
+# (repo-relative: the legacy app's media session, playback service and sign-in WebView, a stand-in
+# for its activity, and a test copy of its rustls-platform-verifier classes that accepts an
+# undetermined revocation status), its res/ as moe.kopuz.kopuz.R, and the kotlin-stdlib they need (KOTLIN_STDLIB, else
+# 2.0.21 from Maven Central kept in build/, else the Gradle cache's oldest). kotlinc comes from PATH,
+# else from `nix shell nixpkgs#kotlin`.
 set -eu
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -26,7 +33,7 @@ while [ $# -gt 0 ]; do
         --package-only) package_only=1 ;;
         --app) shift; app=${1:-} ;;
         --app=*) app=${1#--app=} ;;
-        -h | --help) sed -n '2,12p' "$0"; exit 0 ;;
+        -h | --help) sed -n '2,19p' "$0"; exit 0 ;;
         *) echo "build-apk.sh: unknown argument $1" >&2; exit 2 ;;
     esac
     shift
@@ -81,11 +88,8 @@ fi
 echo "== package"
 rm -rf "$STAGE" "$UNSIGNED" "$ALIGNED" "$APK" "$APK.idsig"
 mkdir -p "$STAGE/lib/arm64-v8a"
-cp "$SO" "$STAGE/lib/arm64-v8a/$LIB"
-# The whole app's line tables make a ~700 MB library; the symbol table stays for backtraces.
-if [ "$app" = kopuz ]; then
-    "$NDK_BIN/llvm-strip" --strip-debug "$STAGE/lib/arm64-v8a/$LIB"
-fi
+JAVA_OUT="$BUILD/$NAME-java"
+rm -rf "$JAVA_OUT"
 
 set -- link -o "$UNSIGNED" -I "$PLATFORM_JAR" \
     --manifest "$ANDROID_DIR/AndroidManifest.xml" \
@@ -95,10 +99,48 @@ if [ -d "$ANDROID_DIR/res" ]; then
     "$AAPT2" compile --dir "$ANDROID_DIR/res" -o "$BUILD/$NAME-res.zip"
     set -- "$@" "$BUILD/$NAME-res.zip"
 fi
+# The shared Kotlin from apps/legacy reads its resources as moe.kopuz.kopuz.R.
+[ -d "$ANDROID_DIR/java" ] && set -- "$@" --java "$JAVA_OUT/gen" --custom-package moe.kopuz.kopuz
 "$AAPT2" "$@"
 
+if [ -d "$ANDROID_DIR/java" ]; then
+    echo "== classes.dex"
+    mkdir -p "$JAVA_OUT/classes"
+    stdlib=${KOTLIN_STDLIB:-$BUILD/kotlin-stdlib-2.0.21.jar}
+    if [ ! -f "$stdlib" ] && ! curl -fsSL -o "$stdlib" \
+        https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.0.21/kotlin-stdlib-2.0.21.jar; then
+        rm -f "$stdlib"
+        stdlib=$(ls "$HOME"/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/*/*/kotlin-stdlib-[0-9]*.jar 2>/dev/null \
+            | grep -v -e sources -e javadoc | sort -V | head -n 1)
+        [ -n "$stdlib" ] || { echo "build-apk.sh: no kotlin-stdlib (set KOTLIN_STDLIB)" >&2; exit 1; }
+    fi
+    find "$ANDROID_DIR/java" "$JAVA_OUT/gen" -name '*.java' >"$JAVA_OUT/sources.txt"
+    # Kotlin first, reading the Java sources: each side calls into the other.
+    if [ -f "$ANDROID_DIR/kotlin-sources.txt" ]; then
+        REPO=$(dirname -- "$(dirname -- "$SPIKE_DIR")")
+        sed "s|^|$REPO/|" "$ANDROID_DIR/kotlin-sources.txt" >"$JAVA_OUT/kotlin-sources.txt"
+        cat "$JAVA_OUT/sources.txt" >>"$JAVA_OUT/kotlin-sources.txt"
+        if command -v kotlinc >/dev/null 2>&1; then
+            set -- kotlinc
+        else
+            set -- nix shell nixpkgs#kotlin --command kotlinc
+        fi
+        "$@" -nowarn -no-stdlib -no-reflect -jvm-target 11 -language-version 2.0 -api-version 2.0 -cp "$PLATFORM_JAR:$stdlib" \
+            -d "$JAVA_OUT/classes" @"$JAVA_OUT/kotlin-sources.txt"
+    fi
+    javac --release 11 -nowarn -cp "$PLATFORM_JAR:$JAVA_OUT/classes:$stdlib" -d "$JAVA_OUT/classes" @"$JAVA_OUT/sources.txt"
+    find "$JAVA_OUT/classes" -name '*.class' >"$JAVA_OUT/classes.txt"
+    "$BUILD_TOOLS/d8" --release --min-api "$ANDROID_API" --lib "$PLATFORM_JAR" --output "$STAGE" \
+        @"$JAVA_OUT/classes.txt" "$stdlib"
+fi
+cp "$SO" "$STAGE/lib/arm64-v8a/$LIB"
+# The whole app's line tables make a ~700 MB library; the symbol table stays for backtraces.
+if [ "$app" = kopuz ]; then
+    "$NDK_BIN/llvm-strip" --strip-debug "$STAGE/lib/arm64-v8a/$LIB"
+fi
+
 # Stored (-0), so zipalign can page-align the .so and the loader can map it from the APK.
-(cd "$STAGE" && zip -q -0 -X -r "$UNSIGNED" lib)
+(cd "$STAGE" && zip -q -0 -X -r "$UNSIGNED" lib $(ls classes*.dex 2>/dev/null))
 "$ZIPALIGN" -f -P 16 4 "$UNSIGNED" "$ALIGNED"
 "$ZIPALIGN" -c -P 16 4 "$ALIGNED"
 

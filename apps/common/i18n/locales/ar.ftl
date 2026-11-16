@@ -255,6 +255,16 @@ track_count =
         [few] { $count } مقاطع
        *[other] { $count } مقطع
     }
+album_count =
+    { $count ->
+        [few] { $count } ألبومات
+       *[other] { $count } ألبوم
+    }
+artist_count =
+    { $count ->
+        [few] { $count } فنانين
+       *[other] { $count } فنان
+    }
 songs = أغانٍ
 min = دقيقة
 

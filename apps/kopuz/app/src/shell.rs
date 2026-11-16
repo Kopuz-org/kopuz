@@ -23,6 +23,19 @@ const MODAL_SCRIM: f32 = 0.8;
 
 /// Toasts rise from the bottom edge, so they clear the player bar only while it sits there.
 fn place_toasts(cx: &mut gpui_kit::App) {
+    if theme::mobile::is_compact(cx) {
+        let player = match now_playing::has_content(cx) {
+            true => now_playing::bar_height(cx),
+            false => px(0.),
+        };
+        let keyboard = theme::mobile::keyboard(cx);
+        let clearance = match keyboard > px(0.) {
+            true => keyboard + TOAST_GAP,
+            false => player + theme::mobile::bottom_chrome(cx) + TOAST_GAP,
+        };
+        theme::place_toasts(clearance, cx);
+        return;
+    }
     let at_top = ConfigModel::global(cx)
         .read(cx)
         .config()
@@ -124,6 +137,7 @@ pub struct Shell {
     // The page drawn last, and the one a source switch is handing over from.
     shown: Option<gpui_kit::AnyView>,
     handover: Option<crate::handover::Handover>,
+    phone_bar: bool,
     // On its own timer: GPUI only renders on a change, and an idle app is when covers want releasing.
     _heartbeat: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -167,10 +181,16 @@ impl Shell {
             cx.observe(&first_run, |_, _, cx| cx.notify()),
             cx.observe(&store::SetupModel::global(cx), |this, _, cx| this.boot(cx)),
             cx.observe(&connection, |this, _, cx| this.boot(cx)),
-            cx.observe(&navigator, |_, _, cx| cx.notify()),
+            cx.observe_in(&navigator, window, |this, _, window, cx| {
+                if theme::mobile::is_touch(cx) {
+                    window.focus(&this.focus, cx);
+                }
+                cx.notify();
+            }),
             cx.observe(&chrome, |_, _, cx| cx.notify()),
             // System colors and the backdrop follow the cover; the player ticks constantly, so only a new cover redraws.
             cx.observe(&PlayerModel::global(cx), |this, player, cx| {
+                this.follow_phone_bar(cx);
                 let artwork = player
                     .read(cx)
                     .track()
@@ -181,7 +201,8 @@ impl Shell {
                 }
             }),
             // Pulled before the skip, so the cover's colours are in hand on the frame its track starts.
-            cx.observe(&store::QueueModel::global(cx), |_, queue, cx| {
+            cx.observe(&store::QueueModel::global(cx), |this, queue, cx| {
+                this.follow_phone_bar(cx);
                 let neighbours: Vec<api::ArtworkRef> = {
                     let queue = queue.read(cx);
                     let Some(at) = queue.position().map(|at| at as usize) else {
@@ -204,6 +225,10 @@ impl Shell {
             }),
             // The skin sizes the player bar, which the toasts have to clear.
             cx.observe(&store::LayoutModel::global(cx), |_, _, cx| place_toasts(cx)),
+            cx.observe_global::<theme::mobile::Mobile>(|_, cx| {
+                place_toasts(cx);
+                cx.notify();
+            }),
             // Held from the ask, not the answer: the queue and the mix change before the source list does.
             cx.subscribe(&sources, |this, _, _: &store::SwitchStarted, cx| {
                 this.hand_over(true, cx);
@@ -235,7 +260,17 @@ impl Shell {
         // Overlays owns the notices channel now, so the bar only has to hold the cluster.
         let topbar = cx.new(|cx| topbar::TopBar::new(window, cx));
         let cluster = cx.new(|cx| status::StatusCluster::new(window, cx));
-        topbar.update(cx, |bar, cx| bar.set_activity(Some(cluster.into()), cx));
+        topbar.update(cx, |bar, cx| {
+            bar.set_activity(Some(cluster.clone().into()), cx)
+        });
+        if theme::mobile::is_compact(cx) {
+            let entries: topbar::phone::MenuEntries = std::rc::Rc::new(
+                move |menu: gpui_kit::component::menu::PopupMenu, cx: &gpui_kit::App| {
+                    status::StatusCluster::phone_entries(&cluster, menu, cx)
+                },
+            );
+            topbar.update(cx, |bar, cx| bar.set_phone_entries(Some(entries), cx));
+        }
         Self {
             router: Router::default(),
             focus,
@@ -264,8 +299,23 @@ impl Shell {
             source: SourceIdentity::of(sources.read(cx)),
             shown: None,
             handover: None,
+            phone_bar: now_playing::has_content(cx),
             _heartbeat: Self::heartbeat(window, cx),
             _subscriptions: subscriptions,
+        }
+    }
+
+    /// A phone draws the player bar only with a track loaded or queued: when that flips, the body
+    /// gains or loses the bar's row and the toasts move with it. Desktop always has the bar.
+    fn follow_phone_bar(&mut self, cx: &mut Context<Self>) {
+        if !theme::mobile::is_compact(cx) {
+            return;
+        }
+        let shown = now_playing::has_content(cx);
+        if shown != self.phone_bar {
+            self.phone_bar = shown;
+            place_toasts(cx);
+            cx.notify();
         }
     }
 
@@ -324,13 +374,14 @@ impl Shell {
     }
 
     /// The tail of one chain: the palette, a menu, a dialog and a selection all stop Escape first.
+    /// A phone's back arrives as Escape: with nothing left to close it walks back, then leaves the app.
     pub fn escape(&mut self, cx: &mut Context<Self>) {
         // The mini window is the innermost thing the Shell can see, and it is a window, not a flag.
         if now_playing::mini_is_open(cx) {
             now_playing::close_mini(cx);
             return;
         }
-        Chrome::global(cx).update(cx, |chrome, cx| {
+        let closed = Chrome::global(cx).update(cx, |chrome, cx| {
             if chrome.is_quick_search_open() {
                 chrome.set_quick_search(false, cx);
             } else if chrome.is_mini() {
@@ -339,8 +390,19 @@ impl Shell {
                 chrome.set_sheet(false, cx);
             } else if chrome.panel().is_some() {
                 chrome.set_panel(None, cx);
+            } else {
+                return false;
             }
+            true
         });
+        if closed || !theme::mobile::is_touch(cx) {
+            return;
+        }
+        if Navigator::global(cx).read(cx).can_go_back() {
+            self.go_back(cx);
+        } else {
+            theme::mobile::minimize(cx);
+        }
     }
 
     pub fn go_back(&mut self, cx: &mut Context<Self>) {
@@ -453,6 +515,64 @@ impl Shell {
         })
     }
 
+    /// A phone's body, top to bottom: the slim header, the page, the player bar and the tab bar.
+    /// The header and the tab bar reach into the safe areas above and below; the rest keeps clear of the sides.
+    /// While the soft keyboard is up the two bars give way to it, so what is typed into stays in view.
+    fn phone_body(
+        &mut self,
+        page: gpui_kit::AnyElement,
+        show_player_bar: bool,
+        panel_open: bool,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let insets = theme::mobile::safe_insets(cx);
+        let player_height = now_playing::bar_height(cx);
+        let keyboard = theme::mobile::keyboard(cx);
+        let typing = keyboard > px(0.);
+        let show_player_bar = show_player_bar && now_playing::has_content(cx) && !typing;
+        v_flex()
+            .size_full()
+            .child(self.topbar.clone())
+            .child(
+                div()
+                    .w_full()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .overflow_hidden()
+                    .pl(insets.left)
+                    .pr(insets.right)
+                    .child(topbar::content_frame().h_full().child(page))
+                    .when(panel_open, |area| {
+                        area.child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .bg(cx.theme().background)
+                                .child(self.side_panel.clone()),
+                        )
+                    })
+                    .child(self.overlays.clone())
+                    .child(self.debug_overlay.clone()),
+            )
+            .when(show_player_bar, |body| {
+                body.child(
+                    div()
+                        .w_full()
+                        .h(player_height)
+                        .flex_shrink_0()
+                        .pl(insets.left)
+                        .pr(insets.right)
+                        .child(self.player_bar.clone()),
+                )
+            })
+            .map(|body| match typing {
+                true => body.child(div().w_full().h(keyboard).flex_shrink_0()),
+                false => body.child(topbar::phone::tab_bar(cx)),
+            })
+            .into_any_element()
+    }
+
     /// The guide alone: no bars, panels or player, and no "Shell" context, so no shortcut navigates away.
     fn render_first_run(
         &mut self,
@@ -466,7 +586,7 @@ impl Shell {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(
-                div()
+                safe_area(div(), cx)
                     .size_full()
                     .relative()
                     .child(self.first_run.clone())
@@ -491,7 +611,7 @@ impl Render for Shell {
             self.system_ease = Default::default();
         }
         if let Some(loader) = self.loader.clone() {
-            let loader = div()
+            let loader = safe_area(div(), cx)
                 .size_full()
                 .child(loader)
                 .children(Root::render_notification_layer(window, cx))
@@ -558,6 +678,8 @@ impl Render for Shell {
         // track forever when the daemon went away.
         let body = if compact {
             self.mini_player.clone().into_any_element()
+        } else if theme::mobile::is_compact(cx) {
+            self.phone_body(page, show_player_bar, panel_open && connected, cx)
         } else {
             v_flex()
                 .size_full()
@@ -659,6 +781,9 @@ impl Render for Shell {
             )
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
+            .when(theme::mobile::is_touch(cx), |shell| {
+                shell.child(components::phone::touch_gestures())
+            })
             .children(match compact {
                 true => None,
                 false => crate::backdrop::layer(window, cx),
@@ -678,6 +803,19 @@ impl Render for Shell {
         // Compact has no top bar to drag the window by.
         framed(shell, compact, window, cx)
     }
+}
+
+/// `content` kept out of the status bar, the cutout and the gesture bar on a phone; unchanged on desktop.
+fn safe_area(content: gpui_kit::Div, cx: &gpui_kit::App) -> gpui_kit::Div {
+    if !theme::mobile::is_compact(cx) {
+        return content;
+    }
+    let insets = theme::mobile::safe_insets(cx);
+    content
+        .pt(insets.top)
+        .pb(insets.bottom)
+        .pl(insets.left)
+        .pr(insets.right)
 }
 
 /// `content` inside the window's frame: the app-drawn titlebar above it and the resize edges around it; `bare` is a screen without the top bar to move the window by.

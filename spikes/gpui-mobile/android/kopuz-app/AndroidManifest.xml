@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   The real kopuz GPUI app (apps/kopuz/app, hosted by spikes/gpui-mobile/kopuz-android):
-  one NativeActivity that loads libkopuz_android.so, with the daemon core in-process.
-  Same setup as the spike's manifest (../AndroidManifest.xml): no Java/dex, the .so
-  stored uncompressed and 16 KB aligned. scripts/build-apk.sh links it (app "kopuz").
+  one GpuiInputActivity (a NativeActivity with the soft keyboard, clipboard, links, pickers and
+  permission prompts; java/) that loads libkopuz_android.so, with the daemon core in-process, and
+  the legacy app's media session, playback service and sign-in browser (kotlin-sources.txt). The
+  .so is stored uncompressed and 16 KB aligned. scripts/build-apk.sh compiles all of it into
+  classes.dex and links it (app "kopuz").
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="moe.kopuz.gpuiapp"
@@ -14,6 +16,17 @@
 
     <!-- Streaming sources, artwork and metadata lookups. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The now-playing notification, and the service that keeps playback going in the background. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Music folders in shared storage. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
 
     <!-- wgpu prefers Vulkan and falls back to GLES, so neither is required. -->
     <uses-feature android:name="android.hardware.vulkan.version"
@@ -22,17 +35,18 @@
 
     <application
         android:label="Kopuz (GPUI)"
-        android:hasCode="false"
+        android:hasCode="true"
         android:extractNativeLibs="false"
         android:allowBackup="false"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
         <activity
-            android:name="android.app.NativeActivity"
+            android:name="dev.gpui.mobile.GpuiInputActivity"
             android:exported="true"
             android:launchMode="singleTask"
+            android:enableOnBackInvokedCallback="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode|fontScale"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustNothing|stateAlwaysHidden">
             <meta-data android:name="android.app.lib_name"
                 android:value="kopuz_android" />
             <intent-filter>
@@ -40,5 +54,23 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- The in-app sign-in browser the daemon opens for YouTube Music, SoundCloud and Apple Music. -->
+        <activity
+            android:name="moe.kopuz.kopuz.LoginActivity"
+            android:exported="false" />
+        <!-- Keeps the process, and so playback, alive while the app is in the background. -->
+        <service
+            android:name="moe.kopuz.kopuz.MusicService"
+            android:foregroundServiceType="mediaPlayback"
+            android:stopWithTask="false"
+            android:exported="false" />
+        <!-- The notification's buttons. -->
+        <receiver
+            android:name="moe.kopuz.kopuz.MediaReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="moe.kopuz.kopuz.ACTION_MEDIA" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

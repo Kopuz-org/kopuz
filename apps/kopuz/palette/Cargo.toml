@@ -18,7 +18,7 @@ components = { path = "../components" }
 gpui-kit = { workspace = true }
 profile = { path = "../profile" }
 settings_interface = { path = "../settings_interface" }
+theme = { workspace = true }
 
 [dev-dependencies]
 link = { workspace = true }
-theme = { workspace = true }

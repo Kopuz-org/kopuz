@@ -297,6 +297,8 @@ time = Oras
 genre = Genre
 plays = Bilang ng Pagpatugtog
 track_count = { $count } na track
+album_count = { $count } album
+artist_count = { $count } artista
 songs = mga kanta
 min = min
 

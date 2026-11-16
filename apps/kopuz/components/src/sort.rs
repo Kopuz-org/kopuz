@@ -5,14 +5,15 @@ use std::rc::Rc;
 use config::{SortCriterion, SortDirection};
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::menu::DropdownMenu as _;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce, SharedString,
     StatefulInteractiveElement as _, Styled as _, Window, div,
 };
 
 use crate::format::t;
-use crate::{focus, icons, motion, style};
+use crate::{focus, icons, motion, phone, style};
 
 const FRAME: u64 = 0;
 const HOVER: u64 = 1;
@@ -48,6 +49,7 @@ pub struct SortControl<F: Copy + PartialEq + 'static> {
     fields: Vec<(F, SharedString)>,
     criteria: Vec<SortCriterion<F>>,
     clearable: bool,
+    glyph: bool,
     write: Option<Write<F>>,
 }
 
@@ -58,6 +60,7 @@ impl<F: Copy + PartialEq + 'static> SortControl<F> {
             fields: Vec::new(),
             criteria,
             clearable: true,
+            glyph: false,
             write: None,
         }
     }
@@ -71,6 +74,12 @@ impl<F: Copy + PartialEq + 'static> SortControl<F> {
     /// Offer "no sorting", for an order that can fall back to the one it came in; on by default.
     pub fn clearable(mut self, clearable: bool) -> Self {
         self.clearable = clearable;
+        self
+    }
+
+    /// On a phone, a toolbar glyph alone in a touch target's box, its words left to the menu it opens; off by default.
+    pub fn glyph_on_phone(mut self, glyph: bool) -> Self {
+        self.glyph = glyph;
         self
     }
 
@@ -112,47 +121,61 @@ impl<F: Copy + PartialEq + 'static> RenderOnce for SortControl<F> {
                 .find(|(field, _)| *field == criterion.field)
                 .map(|(_, label)| label.clone())
         });
-        let label = match deciding {
-            Some(field) => SharedString::from(format!("{}: {field}", t("sort_by"))),
-            None => t("sort_by"),
+        let compact = phone::is_compact(cx);
+        let glyph = compact && self.glyph;
+        let tip = match (&deciding, glyph) {
+            (Some(field), true) => SharedString::from(format!("{}: {field}", t("sort_by"))),
+            _ => t("sort_by"),
+        };
+        let label = match (deciding, compact) {
+            (Some(field), true) => field,
+            (Some(field), false) => SharedString::from(format!("{}: {field}", t("sort_by"))),
+            (None, _) => t("sort_by"),
         };
         let (fields, criteria, clearable, write) =
             (self.fields, self.criteria, self.clearable, self.write);
         // A Button paints its own hover, so the frame carries the wash and the variant the ink.
-        let button = Button::new(id.clone())
-            .custom(style::bare_button(ink, cx))
-            .icon(icons::icon(icons::SORT))
-            .label(label)
-            .h_7()
-            .px_3()
-            .text_xs();
-        let button = focus::quiet(button, cx).dropdown_menu(move |mut menu, _, _| {
+        let button = match glyph {
+            true => phone::tool_button(id.clone(), icons::SORT, tip, cx),
+            false => Button::new(id.clone())
+                .custom(style::bare_button(ink, cx))
+                .icon(icons::icon(icons::SORT))
+                .label(label)
+                .map(|button| match compact {
+                    true => button.h(phone::TOUCH_TARGET).px_3().text_size(phone::BODY),
+                    false => button.h_7().px_3().text_xs(),
+                }),
+        };
+        let button = focus::quiet(button, cx).dropdown_menu(move |mut menu, _, cx| {
+            if phone::is_touch(cx) {
+                menu = menu.min_w(crate::menus::TOUCH_MENU_WIDTH);
+            }
             for (field, label) in fields.iter().cloned() {
                 let position = criteria
                     .iter()
                     .position(|criterion| criterion.field == field);
                 let next = promote(criteria.clone(), field);
                 let write = write.clone();
-                let item = PopupMenuItem::new(label)
+                let glyph = match position.map(|index| criteria[index].direction) {
+                    Some(SortDirection::Asc) => Some(icons::icon(icons::CHEVRON_UP)),
+                    Some(SortDirection::Desc) => Some(icons::icon(icons::CHEVRON_DOWN)),
+                    None => None,
+                };
+                let item = crate::menus::entry(label, glyph, false, cx)
                     .checked(position.is_some())
                     .on_click(move |_, _, cx| {
                         if let Some(write) = write.as_ref() {
                             write(next.clone(), cx);
                         }
                     });
-                menu = menu.item(match position.map(|index| criteria[index].direction) {
-                    Some(SortDirection::Asc) => item.icon(icons::icon(icons::CHEVRON_UP)),
-                    Some(SortDirection::Desc) => item.icon(icons::icon(icons::CHEVRON_DOWN)),
-                    None => item,
-                });
+                menu = menu.item(item);
             }
             if !clearable {
                 return menu;
             }
             let write = write.clone();
             menu.separator().item(
-                PopupMenuItem::new(t("sort_none"))
-                    .icon(icons::icon(icons::CLOSE))
+                crate::menus::entry(t("sort_none"), Some(icons::icon(icons::CLOSE)), false, cx)
                     .on_click(move |_, _, cx| {
                         if let Some(write) = write.as_ref() {
                             write(Vec::new(), cx);
@@ -160,6 +183,9 @@ impl<F: Copy + PartialEq + 'static> RenderOnce for SortControl<F> {
                     }),
             )
         });
+        if glyph {
+            return button.into_any_element();
+        }
         div()
             .id(motion::channel(&id, FRAME))
             .flex()
@@ -170,6 +196,7 @@ impl<F: Copy + PartialEq + 'static> RenderOnce for SortControl<F> {
             .border_color(style::white(style::BORDER_SOFT, cx))
             .on_hover(motion::track(pointer))
             .child(button)
+            .into_any_element()
     }
 }
 

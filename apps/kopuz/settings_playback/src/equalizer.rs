@@ -6,6 +6,7 @@ use components::{Lockable as _, motion, style};
 use config::{EqPreset, EqualizerSettings, PlaybackEdit, SettingsEdit};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, Context, Div, ElementId, Entity, IntoElement, ParentElement as _, Render,
     SharedString, Styled, Subscription, Window, div,
@@ -135,6 +136,7 @@ impl Render for Equalizer {
         );
         let muted = cx.theme().muted_foreground;
         let readout = style::white(READOUT, cx);
+        let compact = ::theme::mobile::is_compact(cx);
 
         v_flex()
             .w_full()
@@ -144,6 +146,7 @@ impl Render for Equalizer {
                     .w_full()
                     .gap_3()
                     .items_stretch()
+                    .when(compact, |row| row.flex_col().items_start())
                     .child(
                         Toggle::new(CONFIG_KEY)
                             .enabled(enabled)
@@ -157,6 +160,7 @@ impl Render for Equalizer {
                     .child(
                         panel(cx)
                             .w_64()
+                            .when(compact, |preset| preset.w_full())
                             .child(div().text_xs().text_color(muted).child(t("eq_preset")))
                             .child(
                                 Choice::listed("eq-preset", preset, EqPreset::all(), preset_label)
@@ -168,6 +172,7 @@ impl Render for Equalizer {
                     .child(
                         panel(cx)
                             .flex_1()
+                            .when(compact, |preamp| preamp.flex_none().w_full())
                             .gap_3()
                             .child(
                                 v_flex()
@@ -199,6 +204,7 @@ impl Render for Equalizer {
                 div()
                     .w_full()
                     .p_4()
+                    .when(compact, |graph| graph.px_2())
                     .rounded(style::radius_lg())
                     .border_1()
                     .border_color(style::white(GRAPH_BORDER, cx))
@@ -207,6 +213,7 @@ impl Render for Equalizer {
                         h_flex()
                             .w_full()
                             .gap_2()
+                            .when(compact, |bands| bands.gap_0p5())
                             .justify_between()
                             .items_end()
                             .children(self.bands.iter().enumerate().map(|(index, band)| {

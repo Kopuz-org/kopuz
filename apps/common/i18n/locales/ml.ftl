@@ -325,6 +325,16 @@ track_count =
         [one] { $count } ട്രാക്ക്
        *[other] { $count } ട്രാക്കുകൾ
     }
+album_count =
+    { $count ->
+        [one] { $count } ആൽബം
+       *[other] { $count } ആൽബങ്ങൾ
+    }
+artist_count =
+    { $count ->
+        [one] { $count } കലാകാരൻ
+       *[other] { $count } കലാകാരന്മാർ
+    }
 songs = പാട്ടുകൾ
 min = മിനിറ്റ്
 

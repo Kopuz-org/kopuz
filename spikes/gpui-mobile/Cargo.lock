@@ -4558,8 +4558,6 @@ dependencies = [
 [[package]]
 name = "gpui-pre-mobile"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edbbaa43d24f63e75b1134a2ddcf3d7b47d9d8f132f1a4fa269153dd48a88789"
 dependencies = [
  "android-activity",
  "android_logger",
@@ -4768,8 +4766,6 @@ dependencies = [
 [[package]]
 name = "gpui-pre-wgpu"
 version = "0.3.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "640b666a16ddf9504e2eb3e7a997acb2b2adfaa7859925bdd36fc3acfd8f30a7"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -5990,6 +5986,7 @@ dependencies = [
  "log",
  "ndk-context",
  "rustls-platform-verifier",
+ "theme",
  "tokio",
  "tracing",
 ]
@@ -8404,6 +8401,7 @@ dependencies = [
  "profile",
  "settings_interface",
  "store",
+ "theme",
 ]
 
 [[package]]

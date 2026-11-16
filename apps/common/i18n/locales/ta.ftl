@@ -325,6 +325,16 @@ track_count =
         [one] { $count } தடம்
        *[other] { $count } தடங்கள்
     }
+album_count =
+    { $count ->
+        [one] { $count } ஆல்பம்
+       *[other] { $count } ஆல்பங்கள்
+    }
+artist_count =
+    { $count ->
+        [one] { $count } கலைஞர்
+       *[other] { $count } கலைஞர்கள்
+    }
 songs = பாடல்கள்
 min = நிமி
 

@@ -32,6 +32,8 @@ const REMOTE_COVER: Pixels = px(300.);
 // `w-12 h-12`, the outlined select-all beside the hero's play.
 const HERO_SECONDARY: Pixels = px(48.);
 const COVER: &str = "album-cover";
+/// The cover on a phone, where the header stacks above the tracks and scrolls with them.
+const PHONE_COVER: Pixels = px(160.);
 
 /// One disc's rows; its list reports a play by the album-wide index its subscription carries.
 struct DiscGroup {
@@ -107,7 +109,7 @@ impl AlbumDetail {
                 cx.notify();
             }),
             // The shuffle button in the actions bar reads the player at render.
-            cx.observe(&PlayerModel::global(cx), |_, _, cx| cx.notify()),
+            PlayerModel::observe_now_playing(cx),
         ];
 
         let scroll = ScrollHandle::new();
@@ -311,9 +313,22 @@ impl AlbumDetail {
             .font_weight(gpui_kit::FontWeight::BOLD)
     }
 
-    fn tracks_body(&self) -> AnyElement {
+    /// The tracks' scroller; `lead` is drawn at its top, so a phone's header scrolls away with the rows.
+    fn tracks_body(&self, lead: Option<AnyElement>) -> AnyElement {
         if self.rows.is_empty() {
-            return EmptyState::new(t("no_tracks_found")).into_any_element();
+            let empty = EmptyState::new(t("no_tracks_found")).into_any_element();
+            return match lead {
+                Some(lead) => v_flex()
+                    .id("album-tracks")
+                    .flex_1()
+                    .min_h_0()
+                    .gap_4()
+                    .overflow_y_scroll()
+                    .child(lead)
+                    .child(empty)
+                    .into_any_element(),
+                None => empty,
+            };
         }
         div()
             .id("album-tracks")
@@ -321,6 +336,7 @@ impl AlbumDetail {
             .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
+            .children(lead.map(|lead| div().w_full().pb_6().child(lead)))
             .children(self.groups.iter().map(|group| {
                 let section = TrackSection::new(
                     format!("album-disc-{}", group.disc.unwrap_or(0)),
@@ -393,7 +409,12 @@ impl AlbumDetail {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let compact = ::theme::mobile::is_compact(cx);
         let radius = style::thumb_radius() * 3.;
+        let hero = match compact {
+            true => PHONE_COVER,
+            false => components::skin::arrangement().pages.hero,
+        };
         let select_all = IconButton::new("album-select-all", icons::CHECK)
             .size(HERO_SECONDARY)
             .tone(IconTone::Outline)
@@ -403,18 +424,25 @@ impl AlbumDetail {
         let spot = picture.as_ref().map(Picture::spot);
         let rip = self.capabilities.rip_audio.then(|| {
             let keys = self.keys.to_vec();
+            if compact {
+                return IconButton::new("album-rip", icons::DISC)
+                    .size(HERO_SECONDARY)
+                    .tone(IconTone::Outline)
+                    .tooltip(t("cd_rip_flac"))
+                    .on_click(move |_, window, cx| rip::open(keys.clone(), window, cx))
+                    .into_any_element();
+            }
             Button::new("album-rip")
                 .rounded_full()
                 .custom(style::raised_button(cx.theme().foreground, cx))
                 .icon(icons::icon(icons::DISC))
                 .label(t("cd_rip_flac"))
                 .on_click(move |_, window, cx| rip::open(keys.clone(), window, cx))
+                .into_any_element()
         });
         let mut header = DetailHeader::new(SharedString::from(album.title.clone()))
-            .cover(
-                self.cover(&album, components::skin::arrangement().pages.hero, radius)
-                    .spot(spot),
-            )
+            .when(compact, |header| header.layout(HeaderLayout::Column))
+            .cover(self.cover(&album, hero, radius).spot(spot))
             .cover_menu(cover_menu(&album), picture)
             .eyebrow(Self::artist_link(
                 &album.artist,
@@ -435,17 +463,34 @@ impl AlbumDetail {
         if album.year > 0 {
             header = header.meta(album.year.to_string());
         }
+        if compact {
+            return components::page()
+                .px_4()
+                .pt_4()
+                .relative()
+                .pb_8()
+                .overflow_hidden()
+                .child(self.tracks_body(Some(header.into_any_element())))
+                .children(self.selection_bar(cx))
+                .into_any_element();
+        }
         components::page()
             .relative()
             .pb_8()
             .overflow_hidden()
             .child(div().flex_shrink_0().mb_12().child(header))
-            .child(self.tracks_body())
+            .child(self.tracks_body(None))
             .children(self.selection_bar(cx))
             .into_any_element()
     }
 
-    fn remote_detail(&self, view: RemoteView, _: &mut Window, _: &mut Context<Self>) -> AnyElement {
+    fn remote_detail(
+        &self,
+        view: RemoteView,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let compact = ::theme::mobile::is_compact(cx);
         let cover = AlbumInfo {
             id: view.id.clone(),
             title: view.title.to_string(),
@@ -460,7 +505,14 @@ impl AlbumDetail {
         let spot = picture.as_ref().map(Picture::spot);
         let mut header = DetailHeader::new(view.title.clone())
             .layout(HeaderLayout::Column)
-            .cover(self.cover(&cover, REMOTE_COVER, radius).spot(spot))
+            .cover(
+                self.cover(
+                    &cover,
+                    if compact { PHONE_COVER } else { REMOTE_COVER },
+                    radius,
+                )
+                .spot(spot),
+            )
             .cover_menu(cover_menu(&cover), picture)
             .eyebrow(Self::artist_link(
                 &view.artist,
@@ -485,6 +537,16 @@ impl AlbumDetail {
         if let Some(year) = view.year.clone() {
             header = header.meta(year);
         }
+        if compact {
+            return components::page()
+                .px_4()
+                .pt_4()
+                .relative()
+                .pb_8()
+                .overflow_hidden()
+                .child(self.tracks_body(Some(header.into_any_element())))
+                .into_any_element();
+        }
 
         components::page()
             .relative()
@@ -503,7 +565,7 @@ impl AlbumDetail {
                             .min_w_0()
                             .h_full()
                             .min_h_0()
-                            .child(self.tracks_body()),
+                            .child(self.tracks_body(None)),
                     ),
             )
             .into_any_element()

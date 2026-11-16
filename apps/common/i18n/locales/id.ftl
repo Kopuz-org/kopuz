@@ -297,6 +297,8 @@ time = Waktu
 genre = Genre
 plays = Pemutaran
 track_count = { $count } trek
+album_count = { $count } album
+artist_count = { $count } artis
 songs = lagu
 min = min
 

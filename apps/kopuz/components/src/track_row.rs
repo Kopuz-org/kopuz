@@ -25,6 +25,7 @@ use crate::link::{Link, Tone};
 use crate::menu_button::MenuButton;
 use crate::menus::{self, Picture, Spot, WithContextMenu as _};
 use crate::motion;
+use crate::phone;
 use crate::style;
 use crate::track_list::TrackDrag;
 
@@ -231,38 +232,45 @@ impl RenderOnce for TrackRow {
         profile::elements::built();
         let slot = self.slot;
         let accent = cx.theme().primary;
-        // `transition-colors` on the row: the playing tint and the selection wash tween, hover does not.
-        let wash = motion::color(
-            motion::row_id("track-row-wash", slot),
-            match (self.playing, self.selected) {
-                (true, _) => style::accent(style::PLAYING, cx),
-                (false, true) => style::white(style::SELECTED, cx),
-                (false, false) => style::white(0., cx),
-            },
-            window,
-            cx,
-        );
-        let title_ink = motion::color(
-            motion::row_id("track-row-title", slot),
-            match self.playing {
-                true => accent,
-                false => style::white(style::TEXT_STRONG, cx),
-            },
-            window,
-            cx,
-        );
+        let touch = phone::is_touch(cx);
+        let wash = match (self.playing, self.selected) {
+            (true, _) => style::accent(style::PLAYING, cx),
+            (false, true) => style::white(style::SELECTED, cx),
+            (false, false) => style::white(0., cx),
+        };
+        let wash = match touch {
+            true => wash,
+            false => motion::color(motion::row_id("track-row-wash", slot), wash, window, cx),
+        };
+        let title_ink = match self.playing {
+            true => accent,
+            false => style::white(style::TEXT_STRONG, cx),
+        };
+        let title_ink = match touch {
+            true => title_ink,
+            false => motion::color(
+                motion::row_id("track-row-title", slot),
+                title_ink,
+                window,
+                cx,
+            ),
+        };
         let mark = CopyMark::of(self.stored, self.cached);
-        let opacity = motion::amount(
-            motion::row_id("track-row-badge", slot),
-            if mark.is_some() && !self.playing {
-                1.
-            } else {
-                0.
-            },
-            motion::FAST,
-            window,
-            cx,
-        );
+        let opacity = if mark.is_some() && !self.playing {
+            1.
+        } else {
+            0.
+        };
+        let opacity = match touch {
+            true => opacity,
+            false => motion::amount(
+                motion::row_id("track-row-badge", slot),
+                opacity,
+                motion::FAST,
+                window,
+                cx,
+            ),
+        };
         let badge = mark.map(|mark| Badge {
             id: motion::row_id("track-row-mark", slot),
             mark,
@@ -293,7 +301,7 @@ impl RenderOnce for TrackRow {
             .map(|ring| style::white(ring, cx));
         let press = window.use_keyed_state(("track-row-press", slot), cx, |_, _| Press::default());
         let long_press = self.long_press.filter(|_| !self.picking);
-        let mut row = columns::frame()
+        let row = columns::frame()
             .id(("track-row", slot))
             .group(ROW_GROUP)
             .h(self.height)
@@ -359,22 +367,86 @@ impl RenderOnce for TrackRow {
                     }
                     click(event, window, cx)
                 })
-            })
-            .child(
-                columns::fixed(columns::index())
-                    .relative()
-                    .justify_center()
-                    .map(|cell| match (self.picking, self.pick) {
-                        (true, Some(pick)) => cell.child(
+            });
+
+        if phone::is_compact(cx) {
+            let subtitle: SharedString = match self.album.is_empty() {
+                true => self.artist.clone(),
+                false => format!("{} · {}", self.artist, self.album).into(),
+            };
+            let row = row
+                .min_h(phone::ROW)
+                .when(self.picking, |row| match self.pick {
+                    Some(pick) => row.child(
+                        columns::fixed(phone::TOUCH_TARGET).justify_center().child(
                             Checkbox::new(("track-pick", slot))
                                 .checked(self.selected)
                                 .on_click(move |checked, window, cx| pick(checked, window, cx)),
                         ),
-                        _ => {
-                            cell.children(lead::lead(ROW_GROUP, self.playing, self.lead, lead_ink))
-                        }
-                    }),
-            );
+                    ),
+                    None => row,
+                })
+                .children(cover.take())
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_0p5()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1p5()
+                                .min_w_0()
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_size(phone::ROW_TITLE)
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(title_ink)
+                                        .child(self.title.clone()),
+                                )
+                                .when(self.explicit, |line| {
+                                    line.child(ExplicitBadge::new(("track-explicit", slot)))
+                                }),
+                        )
+                        .child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(phone::BODY)
+                                .text_color(style::white(style::TEXT_DIM, cx))
+                                .child(subtitle),
+                        ),
+                )
+                .child(
+                    columns::fixed(phone::TOUCH_TARGET)
+                        .id(("track-row-menu", slot))
+                        .justify_center()
+                        .on_click(|_, _, cx| cx.stop_propagation())
+                        .when_some(self.menu.clone(), |cell, menu| {
+                            cell.child(MenuButton::new(format!("track-row-dots-{slot}"), menu))
+                        }),
+                );
+            return row.with_context_menu(menus::pictured(self.menu, picture));
+        }
+
+        let mut row = row.child(
+            columns::fixed(columns::index())
+                .relative()
+                .justify_center()
+                .map(|cell| match (self.picking, self.pick) {
+                    (true, Some(pick)) => cell.child(
+                        Checkbox::new(("track-pick", slot))
+                            .checked(self.selected)
+                            .on_click(move |checked, window, cx| pick(checked, window, cx)),
+                    ),
+                    _ => cell.children(lead::lead(ROW_GROUP, self.playing, self.lead, lead_ink)),
+                }),
+        );
 
         for shown in self.columns.iter() {
             let cell = columns::sized(shown).when(shown.spec.align_end, |cell| cell.justify_end());
@@ -432,7 +504,7 @@ impl RenderOnce for TrackRow {
                 "format" => dim(cell, cx).child(self.format.clone()).into_any_element(),
                 // Tabular digits, so the lengths line up rather than wander by glyph width.
                 _ => dim(cell, cx)
-                    .font_family(SharedString::new_static("monospace"))
+                    .font_family(crate::phone::mono_family(cx))
                     .child(self.length.clone())
                     .into_any_element(),
             });

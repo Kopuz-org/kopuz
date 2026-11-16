@@ -248,6 +248,11 @@ impl TrackList {
         }
     }
 
+    /// How far the rows are scrolled from the top.
+    pub fn scrolled(&self) -> Pixels {
+        -self.scroll.0.borrow().base_handle.offset().y
+    }
+
     pub fn rows(&self) -> &[TrackInfo] {
         &self.rows
     }
@@ -567,7 +572,21 @@ impl Render for TrackList {
                 uniform_list(
                     "track-list",
                     count,
-                    cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
+                    cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
+                        if crate::phone::is_touch(cx) && this.options.show_cover && this.row_images
+                        {
+                            let ahead = range.start.saturating_sub(8)
+                                ..range.end.saturating_add(8).min(this.rows.len());
+                            let edge = store::decode_edge(
+                                style::to_px(style::row_cover(), window),
+                                window,
+                            );
+                            for track in &this.rows[ahead] {
+                                if let Some(artwork) = &track.artwork {
+                                    store::prefetch_artwork(artwork, edge, window, cx);
+                                }
+                            }
+                        }
                         let columns = this.layout();
                         range.map(|index| this.row(index, &columns, cx)).collect()
                     }),

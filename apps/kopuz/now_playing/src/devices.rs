@@ -38,10 +38,14 @@ impl NowPlaying {
         let owner = cx.entity().downgrade();
         let open = self.devices_open;
         let changed = cx.listener(|this, open: &bool, _, cx| this.set_devices_open(*open, cx));
+        let mut button = utility("devices", icons::SPEAKER, self.scale(cx));
+        if theme::mobile::is_compact(cx) {
+            button = button.size(theme::mobile::TOUCH_TARGET).glyph(px(20.));
+        }
 
         // The popover wants a `Selectable` trigger, so the button is handed to it inside its frame.
         Some(
-            utility("devices", icons::SPEAKER, self.scale(cx))
+            button
                 .lit(elsewhere)
                 .accent(accent)
                 .tooltip(t("external_play_on"))

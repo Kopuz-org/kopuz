@@ -514,7 +514,7 @@ impl Render for Home {
                         _ if shelf.name == "listen_now" && listed => {
                             shelf::rows(shelf, &shared.now, cx)
                         }
-                        _ => shelf::shelf(shelf, &handle, &shared.now),
+                        _ => shelf::shelf(shelf, &handle, &shared.now, cards::tile_size(cx)),
                     })
                 }
             };
@@ -546,27 +546,38 @@ impl Render for Home {
         // The queue to resume is not a library, so offline it does not hide that nothing else plays.
         let bare = settled && (offline || banner.is_none());
         let heading = self.heading(cx);
+        let compact = components::phone::is_compact(cx);
+        let fit = move |state: EmptyState| match compact {
+            true => state.flex(),
+            false => state,
+        };
         v_flex()
             .id("home")
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.page)
-            .p_8()
-            .pb_32()
-            .gap_12()
+            .map(|page| match compact {
+                true => page
+                    .px(components::phone::PAGE_PAD)
+                    .pt(components::phone::PAGE_PAD)
+                    .pb_16()
+                    .gap_6(),
+                false => page.p_8().pb_32().gap_12(),
+            })
             .child(heading)
             .children(banner)
             .children(rows)
-            .when(bare && offline, |page| page.child(EmptyState::offline()))
+            .when(bare && offline, |page| {
+                page.child(fit(EmptyState::offline()))
+            })
             .when(bare && !offline, |page| {
-                page.child(
-                    EmptyState::new(t("no_albums_found"))
-                        .icon(icons::DISC)
-                        .detail(t("add_music_to_get_started"))
-                        .action(t("add_source"), |_, _, cx| {
-                            store::SetupModel::start_over(cx)
-                        }),
-                )
+                let state = EmptyState::new(t("no_albums_found"))
+                    .icon(icons::DISC)
+                    .detail(t("add_music_to_get_started"))
+                    .action(t("add_source"), |_, _, cx| {
+                        store::SetupModel::start_over(cx)
+                    });
+                page.child(fit(state))
             })
     }
 }
@@ -678,6 +689,9 @@ impl Home {
             .bg(style::white(style::RAISED, cx))
             .child(
                 div()
+                    .when(components::phone::is_compact(cx), |title| {
+                        title.flex_1().min_w_0().truncate()
+                    })
                     .text_xs()
                     .font_weight(FontWeight::BOLD)
                     .text_color(style::white(style::TEXT_STRONG, cx))

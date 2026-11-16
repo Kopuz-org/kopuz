@@ -109,6 +109,40 @@ impl NowPlaying {
             window,
             cx,
         );
+        if theme::mobile::is_compact(cx) {
+            let drag = self.sheet_drag(open);
+            let body = self.render_phone_sheet(&swap, window, cx);
+            let sheet = surface()
+                .top(drag)
+                .key_context("NowPlaying")
+                .on_key_down(
+                    cx.listener(|this, event: &gpui_kit::KeyDownEvent, window, cx| {
+                        if event.keystroke.key == "space"
+                            && this.sheet_focus.handle.is_focused(window)
+                        {
+                            store::PlayerModel::global(cx)
+                                .update(cx, |player, cx| player.toggle(cx));
+                            cx.stop_propagation();
+                        }
+                    }),
+                )
+                .overflow_hidden()
+                .opacity(shown)
+                .bg(cx.theme().background)
+                .text_color(cx.theme().foreground)
+                .children(self.backdrop(layout.backdrop, artwork.as_ref(), window, cx))
+                .child(body);
+            return div()
+                .size_full()
+                .relative()
+                .map(|layer| match open {
+                    true => {
+                        layer.child(sheet.focus_trap("now-playing-focus", &self.sheet_focus.handle))
+                    }
+                    false => layer.child(sheet),
+                })
+                .into_any_element();
+        }
         let owner = cx.entity().downgrade();
         let showing = self.tab;
         let config = ConfigModel::global(cx).read(cx).config();
@@ -534,6 +568,6 @@ fn set_collapsed(collapsed: bool, cx: &mut App) {
 }
 
 /// A link out of the sheet folds it away first, so the page it opens is not hidden behind it.
-fn close_sheet(_: &mut Window, cx: &mut App) {
+pub(crate) fn close_sheet(_: &mut Window, cx: &mut App) {
     Chrome::global(cx).update(cx, |chrome, cx| chrome.set_sheet(false, cx));
 }

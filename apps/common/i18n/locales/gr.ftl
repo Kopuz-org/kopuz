@@ -255,6 +255,12 @@ track_count =
         [one] { $count } κομμάτι
        *[other] { $count } κομμάτια
     }
+album_count = { $count } άλμπουμ
+artist_count =
+    { $count ->
+        [one] { $count } καλλιτέχνης
+       *[other] { $count } καλλιτέχνες
+    }
 songs = τραγούδια
 min = λεπτ
 

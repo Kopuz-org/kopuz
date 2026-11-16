@@ -38,7 +38,10 @@ mod updates;
 
 use gpui_kit::{App, AppContext as _, Entity, Global};
 
-pub use artwork::{Arrival, ArtworkBytes, ArtworkKey, Residents, artwork_source};
+pub use artwork::{
+    Arrival, ArtworkBytes, ArtworkKey, Residents, artwork_source, artwork_source_at, decode_edge,
+    prefetch_artwork,
+};
 pub use artwork_edit::{content_type_for, pick_and_upload, pick_image, remove_artwork};
 pub use backdrop::{blurred_backdrop, resolve_backdrop};
 pub use catalog_cache::{Cached, CatalogCache, Ticket};

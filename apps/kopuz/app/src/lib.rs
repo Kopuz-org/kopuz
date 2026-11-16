@@ -166,17 +166,20 @@ pub fn run() -> anyhow::Result<()> {
 }
 
 /// The app on a platform the host made (gpui-pre-mobile's on Android), talking to the daemon core this process
-/// runs. `opened` gets the main window once it is open, from the `run` callback rather than from a task.
+/// runs. `prepare` runs first in the `run` callback, before anything is registered or drawn (the host installs
+/// `theme::mobile` there); `opened` gets the main window once it is open, from that callback rather than from a task.
 #[cfg(target_os = "android")]
 pub fn run_in_process(
     application: gpui_kit::Application,
     api: std::sync::Arc<dyn api::KopuzApi>,
+    prepare: impl FnOnce(&mut App) + 'static,
     opened: impl FnOnce(gpui_kit::AnyWindowHandle, &mut App) + 'static,
 ) {
     let started = Instant::now();
     application
         .with_assets(gpui_kit::assets::AllAssets)
         .run(move |cx| {
+            prepare(cx);
             if !connect(|cx| link::init_in_process(api, cx), cx) {
                 return;
             }
@@ -226,7 +229,10 @@ fn register(cx: &mut App) {
     metadata_dialog::register(cx);
     settings_sources::register(cx);
     settings_interface::init(cx);
-    shortcuts::init(cx);
+    match theme::mobile::is_touch(cx) {
+        true => shortcuts::init_sheet(cx),
+        false => shortcuts::init(cx),
+    }
     library::register(cx);
     page_home::register(cx);
     page_home::register_catalog(

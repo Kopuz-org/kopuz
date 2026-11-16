@@ -1,5 +1,7 @@
 //! The chrome over the listing: the facet switch, the filter bar and the selection pill.
 
+use std::rc::Rc;
+
 use api::{AlbumPresentation, FavoritesSyncMode, JobKind, SourceCapabilities, TrackFilter};
 use commands::Command;
 use components::format::{t, t_with};
@@ -13,7 +15,7 @@ use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, Context, FontWeight, IntoElement, ParentElement as _, SharedString,
+    Anchor, AnyElement, App, Context, FontWeight, IntoElement, ParentElement as _, SharedString,
     Styled as _, Window, div,
 };
 use store::layout::{Density, TileSize, ViewMode};
@@ -29,7 +31,6 @@ impl Library {
         let count = self.total();
         // Favorites is one facet, so there is nothing to switch between.
         let switch = (!self.standalone()).then(|| self.facet_switch(cx));
-        let controls = self.controls(cx);
         let filter_bar = self.filter_bar(cx);
         let capabilities = SourcesModel::global(cx).read(cx).capabilities();
         let syncing = JobsModel::global(cx)
@@ -53,7 +54,6 @@ impl Library {
                     .total(total)
                     .on_refresh(|_, _, cx| start(JobKind::PlaylistSync, cx))
             });
-        let stats = self.stat_cards(cx);
         let refreshing = (!self.standalone())
             .then(|| {
                 let jobs = JobsModel::global(cx).read(cx);
@@ -62,6 +62,22 @@ impl Library {
                     .map(ProgressBar::job)
             })
             .flatten();
+        if components::phone::is_compact(cx) {
+            let playlist_syncing = JobsModel::global(cx)
+                .read(cx)
+                .progress(JobKind::PlaylistSync)
+                .is_some();
+            let status = [
+                sync.filter(|_| syncing).map(IntoElement::into_any_element),
+                playlist_sync
+                    .filter(|_| playlist_syncing)
+                    .map(IntoElement::into_any_element),
+                refreshing.map(IntoElement::into_any_element),
+            ];
+            return self.phone_chrome(count, &capabilities, status, switch, filter_bar, cx);
+        }
+        let controls = self.controls(cx);
+        let stats = self.stat_cards(cx);
         let mut header = PageHeader::new(self.title())
             .count(self.count_label(count, cx))
             .flush()
@@ -92,6 +108,12 @@ impl Library {
     fn count_label(&self, count: usize, cx: &App) -> SharedString {
         match self.filters().facet {
             Facet::Tracks => t_with("track_count", &[("count", count.into())]),
+            Facet::Albums if components::phone::is_compact(cx) => {
+                t_with("album_count", &[("count", count.into())])
+            }
+            Facet::Artists if components::phone::is_compact(cx) => {
+                t_with("artist_count", &[("count", count.into())])
+            }
             Facet::Playlists => {
                 let query = self.filters().search.trim().to_lowercase();
                 let playlists = store::PlaylistsModel::global(cx)
@@ -112,15 +134,24 @@ impl Library {
     fn facet_switch(&self, cx: &mut Context<Self>) -> AnyElement {
         let active = self.filters().facet;
         let page = cx.entity().downgrade();
+        let compact = components::phone::is_compact(cx);
+        let glyphs = !compact;
         div()
             .flex()
-            .self_start()
+            .map(|row| match compact {
+                true => row.w_full(),
+                false => row.self_start(),
+            })
             .child(
                 Segmented::new("library-facet")
-                    .segments(Facet::ALL.iter().map(|facet| {
-                        Segment::new(facet.name())
-                            .icon(facet.icon())
-                            .label(t(facet.label_key()))
+                    .fill(compact)
+                    .segments(Facet::ALL.iter().map(move |facet| {
+                        let segment = Segment::new(facet.name());
+                        let segment = match glyphs {
+                            true => segment.icon(facet.icon()),
+                            false => segment,
+                        };
+                        segment.label(t(facet.label_key()))
                     }))
                     .selected(Facet::ALL.iter().position(|facet| *facet == active))
                     .on_select(move |index, _, cx| {
@@ -341,18 +372,237 @@ impl Library {
             ("artists", icons::MIC, counts.artists),
             ("playlists", icons::LIST, playlists),
         ];
-        Some(
-            h_flex()
-                .w_full()
-                .gap_3()
-                .children(cards.into_iter().filter_map(|(key, icon, value)| {
-                    value.map(|value| stat_card(key, icon, value, cx))
-                }))
-                .into_any_element(),
+        let cards = cards
+            .into_iter()
+            .filter_map(|(key, icon, value)| value.map(|value| stat_card(key, icon, value, cx)));
+        Some(h_flex().w_full().gap_3().children(cards).into_any_element())
+    }
+
+    /// A phone's chrome, all of it outside the scroller so the tabs and the filter stay put: the title over
+    /// one summary line that carries the counts, the tabs, one row of controls, and the filter. A sync shows
+    /// its row only while it runs; its refresh waits in the more-menu.
+    fn phone_chrome(
+        &mut self,
+        count: usize,
+        capabilities: &SourceCapabilities,
+        status: [Option<AnyElement>; 3],
+        switch: Option<AnyElement>,
+        filter_bar: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let summary = self.summary_line(cx);
+        let header = PageHeader::new(self.title())
+            .when(summary.is_none(), |header| {
+                header.count(self.count_label(count, cx))
+            })
+            .flush()
+            .when(self.is_activity(), |header| {
+                header.subtitle(t("most_played_tracks"))
+            })
+            .when_some(summary, |header, summary| header.subtitle(summary));
+        let controls = self.phone_controls(capabilities, cx);
+        v_flex()
+            .w_full()
+            .flex_shrink_0()
+            .gap_3()
+            .pb_3()
+            .child(header)
+            .children(status.into_iter().flatten())
+            .children(switch)
+            .child(controls)
+            .child(filter_bar)
+            .into_any_element()
+    }
+
+    /// What the library holds, on one muted line in place of the desktop's four cards.
+    fn summary_line(&self, cx: &App) -> Option<SharedString> {
+        if self.standalone() {
+            return None;
+        }
+        let counts = self.counts.read(cx).value().copied()?;
+        let playlists = store::PlaylistsModel::global(cx).read(cx);
+        let playlists = playlists
+            .is_loaded()
+            .then(|| playlists.playlists().len() as u32);
+        let parts: Vec<String> = [
+            counts
+                .tracks
+                .map(|count| t_with("track_count", &[("count", count.into())])),
+            counts
+                .albums
+                .map(|count| t_with("album_count", &[("count", count.into())])),
+            counts
+                .artists
+                .map(|count| t_with("artist_count", &[("count", count.into())])),
+            playlists.map(|count| t_with("playlist_folder_count", &[("count", count.into())])),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|part| part.to_string())
+        .collect();
+        (!parts.is_empty()).then(|| SharedString::from(parts.join(" · ")))
+    }
+
+    /// One row that fits the width: how the tab is drawn, sized and ordered on the left, and one menu on the right
+    /// holding refresh, making and whatever else is pressed less often. Every control is a touch target's box
+    /// set edge to edge, so no two presses overlap and the row is never wider than six of them.
+    fn phone_controls(
+        &self,
+        capabilities: &SourceCapabilities,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let facet = self.filters().facet;
+        let actions = self.phone_actions(capabilities, cx);
+        let more = phone_more(&self.title(), actions, cx);
+        h_flex()
+            .w_full()
+            .flex_shrink_0()
+            .items_center()
+            .when(facet == Facet::Tracks, |row| {
+                row.child(self.track_sort_control(cx))
+                    .child(self.group_control(cx))
+                    .child(self.density_control(cx))
+            })
+            .when(facet != Facet::Tracks, |row| {
+                row.child(self.phone_view_control(cx))
+                    .child(self.phone_tile_control(cx))
+                    .child(self.grid_sort_control(cx))
+            })
+            .child(div().flex_1())
+            .children(more)
+            .into_any_element()
+    }
+
+    /// What a phone's more-menu offers: the header's buttons on desktop, each as an item that does the same.
+    fn phone_actions(&self, capabilities: &SourceCapabilities, cx: &App) -> Vec<MenuAction> {
+        if self.is_activity() {
+            return Vec::new();
+        }
+        let jobs = JobsModel::global(cx).read(cx);
+        let refresh = |kind: JobKind| {
+            MenuAction::new(icons::REFRESH, t("refresh"), move |_, cx| start(kind, cx))
+                .disabled(jobs.progress(kind).is_some())
+        };
+        if self.is_liked() {
+            let mut actions = Vec::new();
+            if let Some(id) = capabilities.favorites_playlist.clone() {
+                actions.push(MenuAction::new(
+                    icons::RADIO,
+                    t("start_radio"),
+                    move |_, cx| store::actions::start_playlist_radio(id.clone(), cx),
+                ));
+            }
+            if capabilities.favorites_sync == FavoritesSyncMode::Paginated {
+                actions.push(refresh(JobKind::FavoritesSync));
+            }
+            return actions;
+        }
+        let mut actions = match self.filters().facet {
+            Facet::Playlists => crate::playlists::playlist_actions(cx),
+            _ => Vec::new(),
+        };
+        if self.filters().facet == Facet::Playlists
+            && !capabilities.folders
+            && capabilities.albums == AlbumPresentation::Remote
+        {
+            actions.push(refresh(JobKind::PlaylistSync));
+        }
+        let (kind, label) = match (capabilities.scan_folders, capabilities.sync) {
+            (true, _) => (JobKind::Scan, "rescan_library"),
+            (false, true) => (JobKind::LibrarySync, "refresh_music_library"),
+            (false, false) => return actions,
+        };
+        let running = JobsModel::global(cx).read(cx).progress(kind).is_some();
+        actions.push(
+            MenuAction::new(icons::REFRESH, t(label), move |_, cx| start(kind, cx))
+                .disabled(running),
+        );
+        actions
+    }
+
+    /// A phone's grid and list: two touch targets side by side.
+    fn phone_view_control(&self, cx: &mut Context<Self>) -> AnyElement {
+        let page = cx.entity().downgrade();
+        components::phone::view_switch(
+            "library-view",
+            self.mode == ViewMode::Grid,
+            move |grid, cx| {
+                let next = match grid {
+                    true => ViewMode::Grid,
+                    false => ViewMode::Table,
+                };
+                page.update(cx, |this, cx| {
+                    this.write_facet(cx, move |facet| facet.mode = next)
+                })
+                .ok();
+            },
+            cx,
         )
     }
 
+    /// A phone's tile size: one 48px toggle between two columns across and three.
+    fn phone_tile_control(&self, cx: &mut Context<Self>) -> AnyElement {
+        let (next, label) = match self.phone_columns() {
+            3 => (TileSize::Medium, t(tile_label_key(TileSize::Small))),
+            _ => (TileSize::Small, t(tile_label_key(TileSize::Medium))),
+        };
+        let page = cx.entity().downgrade();
+        self.quiet("library-tile", icons::EXPAND, label, cx)
+            .on_click(move |_, _, cx| {
+                page.update(cx, |this, cx| {
+                    this.write_facet(cx, move |facet| facet.tile = next)
+                })
+                .ok();
+            })
+            .into_any_element()
+    }
+
+    /// A phone's rows have no column headers to click, so the tracks' order lives in a menu as a grid's does.
+    fn track_sort_control(&self, cx: &mut Context<Self>) -> AnyElement {
+        let held = self.sort().clone();
+        let fields: [(&'static str, &'static str); 5] = [
+            ("title", "sort_field_title"),
+            ("artist", "sort_field_artist"),
+            ("album", "sort_field_album"),
+            ("duration", "sort_field_duration"),
+            ("added", "sort_field_date_added"),
+        ];
+        let criteria: Vec<SortCriterion<&'static str>> = fields
+            .iter()
+            .find(|(id, _)| *id == held.field)
+            .map(|(id, _)| {
+                let direction = match held.descending {
+                    true => SortDirection::Desc,
+                    false => SortDirection::Asc,
+                };
+                vec![SortCriterion::new(*id, direction)]
+            })
+            .unwrap_or_default();
+        let page = cx.entity().downgrade();
+        SortControl::new("library-track-sort", criteria)
+            .fields(fields.into_iter().map(|(id, key)| (id, t(key))))
+            .clearable(false)
+            .glyph_on_phone(true)
+            .on_change(move |criteria, cx| {
+                let Some(first) = criteria.first() else {
+                    return;
+                };
+                let next = store::layout::Sort {
+                    field: first.field.to_string(),
+                    descending: first.direction == SortDirection::Desc,
+                };
+                page.update(cx, |this, cx| {
+                    this.write_facet(cx, move |facet| facet.sort = next)
+                })
+                .ok();
+            })
+            .into_any_element()
+    }
+
     fn quiet(&self, id: &'static str, icon: &'static str, label: SharedString, cx: &App) -> Button {
+        if components::phone::is_compact(cx) {
+            return components::phone::tool_button(id, icon, label, cx);
+        }
         Button::new(id)
             .custom(style::raised_button(style::white(0.7, cx), cx))
             .icon(icons::icon(icon))
@@ -524,6 +774,7 @@ impl Library {
         SortControl::new("library-grid-sort", criteria)
             .fields(fields.into_iter().map(|(id, key)| (id, t(key))))
             .clearable(false)
+            .glyph_on_phone(true)
             .on_change(move |criteria, cx| {
                 let Some(first) = criteria.first() else {
                     return;
@@ -854,6 +1105,65 @@ fn tile_label_key(size: TileSize) -> &'static str {
 
 fn start(kind: JobKind, cx: &mut App) {
     JobsModel::global(cx).update(cx, |jobs, cx| jobs.start(kind, cx));
+}
+
+/// What a more-menu item does when picked.
+type MenuRun = Rc<dyn Fn(&mut Window, &mut App)>;
+
+/// One item of a phone's more-menu, doing what the desktop header's button does.
+pub(crate) struct MenuAction {
+    icon: &'static str,
+    label: SharedString,
+    disabled: bool,
+    run: MenuRun,
+}
+
+impl MenuAction {
+    pub(crate) fn new(
+        icon: &'static str,
+        label: SharedString,
+        run: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        Self {
+            icon,
+            label,
+            disabled: false,
+            run: Rc::new(run),
+        }
+    }
+
+    pub(crate) fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+}
+
+/// The last control of a phone's row: one touch target opening every action too rare to stand in the row.
+fn phone_more(title: &str, actions: Vec<MenuAction>, cx: &App) -> Option<AnyElement> {
+    if actions.is_empty() {
+        return None;
+    }
+    let tip = t_with("more_actions_for", &[("name", title.to_string().into())]);
+    let actions = Rc::new(actions);
+    let button = components::phone::tool_button("library-more", icons::MORE, tip, cx)
+        .dropdown_menu_with_anchor(Anchor::TopRight, move |mut menu, _, cx| {
+            menu = menu.min_w(components::menus::TOUCH_MENU_WIDTH);
+            for action in actions.iter() {
+                let run = action.run.clone();
+                menu = menu.item(
+                    components::menus::entry(
+                        action.label.clone(),
+                        Some(icons::icon(action.icon)),
+                        false,
+                        cx,
+                    )
+                    .disabled(action.disabled)
+                    .on_click(move |_, window, cx| run(window, cx)),
+                );
+            }
+            menu
+        });
+    Some(button.into_any_element())
 }
 
 /// `AnyElement` has no builder tail; this keeps `chrome` reading as one expression.

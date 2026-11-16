@@ -6,6 +6,7 @@ mod lyrics_view;
 mod meta;
 mod mini;
 mod panel;
+mod phone;
 mod queue_view;
 mod seek;
 mod settings;
@@ -76,6 +77,13 @@ pub struct NowPlaying {
     /// Whether the pointer is holding the level, which the daemon's own echo must not undo.
     volume_held: bool,
     tab: SheetTab,
+    /// The phone player's queue or lyrics, shown in place of the artwork; `None` is the artwork.
+    phone_tab: Option<SheetTab>,
+    /// How far a finger has dragged the phone's bar sideways, toward the next or previous track.
+    bar_drag: Pixels,
+    /// How far a finger has pulled the phone's player down, toward closing it, and whether one still is.
+    sheet_drag: Pixels,
+    sheet_pulling: bool,
     /// What the docked column has been dragged to, once it has been.
     panel_width: Option<Pixels>,
     /// Where the sheet and its hero cover landed last frame, so the cover can travel into it.
@@ -193,6 +201,10 @@ impl NowPlaying {
             volume,
             volume_held: false,
             tab: store::layout(cx).sheet.tab,
+            phone_tab: None,
+            bar_drag: Pixels::ZERO,
+            sheet_drag: Pixels::ZERO,
+            sheet_pulling: false,
             panel_width: None,
             root: None,
             hero: None,
@@ -250,6 +262,13 @@ impl NowPlaying {
     fn track(&self, cx: &App) -> Option<api::TrackInfo> {
         PlayerModel::global(cx).read(cx).track().cloned()
     }
+}
+
+/// Whether the bar has anything to show: a track loaded, or a queue waiting to play. The phone drops the
+/// bar, and the room it takes, without either; the desktop bar is always there.
+pub fn has_content(cx: &App) -> bool {
+    PlayerModel::global(cx).read(cx).track().is_some()
+        || !QueueModel::global(cx).read(cx).is_empty()
 }
 
 /// A slider over the 0..1 fraction of something, since a `SliderState`'s range is fixed at build time.

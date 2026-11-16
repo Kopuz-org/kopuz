@@ -558,7 +558,7 @@ impl RenderOnce for TileRow {
                     .flex_none()
                     .text_right()
                     // Tabular digits, so the numbers line up rather than wander by glyph width.
-                    .font_family(SharedString::new_static("monospace"))
+                    .font_family(crate::phone::mono_family(cx))
                     .text_xs()
                     .text_color(style::white(style::TEXT_DIM, cx))
                     .child(lead),

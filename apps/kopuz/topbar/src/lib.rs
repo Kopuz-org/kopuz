@@ -3,6 +3,7 @@
 mod bounds;
 pub mod frame;
 mod offline;
+pub mod phone;
 mod settings;
 mod switcher;
 mod tabs;
@@ -69,6 +70,8 @@ pub struct TopBar {
     destinations: Vec<&'static str>,
     position: NavPosition,
     activity: Option<AnyView>,
+    /// What the activity slot adds to a phone header's overflow menu, where its buttons have no room.
+    phone_entries: Option<phone::MenuEntries>,
     compact: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -98,6 +101,7 @@ impl TopBar {
             destinations: Vec::new(),
             position: NavPosition::Top,
             activity: None,
+            phone_entries: None,
             compact: window.viewport_size().width < COMPACT_BELOW,
             _subscriptions: subscriptions,
         };
@@ -108,6 +112,16 @@ impl TopBar {
     /// Put a view in the slot left of the source switcher; `None` empties it again.
     pub fn set_activity(&mut self, view: Option<AnyView>, cx: &mut Context<Self>) {
         self.activity = view;
+        cx.notify();
+    }
+
+    /// The entries the activity slot puts in a phone header's overflow menu; unused off a phone.
+    pub fn set_phone_entries(
+        &mut self,
+        entries: Option<phone::MenuEntries>,
+        cx: &mut Context<Self>,
+    ) {
+        self.phone_entries = entries;
         cx.notify();
     }
 
@@ -170,7 +184,8 @@ impl TopBar {
     /// The palette's doorway: it looks like a field, and clicking it opens the palette.
     fn search(&self, cx: &App) -> AnyElement {
         let shortcut = commands::keystroke_for("app.palette", cx)
-            .and_then(|held| gpui_kit::Keystroke::parse(&held).ok());
+            .and_then(|held| gpui_kit::Keystroke::parse(&held).ok())
+            .filter(|_| !theme::mobile::is_touch(cx));
         SearchTrigger::new("nav-search", t("search_placeholder"))
             .on_open(|_, cx| store::Chrome::open_quick_search(cx))
             .shortcut(shortcut)
@@ -259,6 +274,9 @@ impl TopBar {
 impl Render for TopBar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _timing = profile::render("topbar");
+        if theme::mobile::is_compact(cx) {
+            return phone::header(self.activity.clone(), self.phone_entries.clone(), cx);
+        }
         let artists_remote = store::SourcesModel::global(cx)
             .read(cx)
             .capabilities()

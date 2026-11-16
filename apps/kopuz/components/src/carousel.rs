@@ -191,12 +191,13 @@ impl RenderOnce for Carousel {
                 cx,
             ));
         let compact = self.heading.is_compact();
+        let touch = crate::phone::is_touch(cx);
         let heading = self.heading.trailing(
             h_flex()
                 .items_center()
                 .gap_4()
                 .children(self.action)
-                .child(arrows),
+                .when(!touch, |trailing| trailing.child(arrows)),
         );
 
         // The whole shelf is the hover, so reaching up for an arrow does not fade it away.
@@ -204,9 +205,10 @@ impl RenderOnce for Carousel {
             .id(motion::channel(&id, ROOT))
             .w_full()
             .flex_shrink_0()
-            .map(|shelf| match compact {
-                true => shelf.gap_4(),
-                false => shelf.gap_6(),
+            .map(|shelf| match (touch, compact) {
+                (true, _) => shelf.gap_3(),
+                (false, true) => shelf.gap_4(),
+                (false, false) => shelf.gap_6(),
             })
             .on_hover(motion::track(pointer))
             .child(heading)
@@ -219,8 +221,10 @@ impl RenderOnce for Carousel {
                         h_flex()
                             .id(motion::channel(&id, ROW))
                             .w_full()
-                            .pt_2()
-                            .pb_6()
+                            .map(|row| match touch {
+                                true => row.pt_1().pb_2(),
+                                false => row.pt_2().pb_6(),
+                            })
                             .items_start()
                             .overflow_x_scroll()
                             // Without this a bare wheel notch would scroll the page and slide the row at once.
@@ -244,14 +248,20 @@ fn window_of(handle: &ScrollHandle, stride: Pixels, count: usize) -> (usize, usi
     }
     let stride = stride.as_f32();
     let first = ((-handle.offset().x.as_f32() / stride).floor().max(0.) as usize).min(count);
-    let reach = (width.as_f32() / stride).ceil() as usize + 2;
+    let reach = (width.as_f32() / stride).ceil() as usize + 1;
     (first, (first + reach).min(count))
 }
 
-/// Shift and the wheel drives the row sideways, since a bare notch belongs to the page.
+/// Shift and the wheel drives the row sideways, since a bare notch belongs to the page. A mostly
+/// sideways scroll (a trackpad swipe, a touch pan) stops at the row, which has already scrolled: the
+/// page would otherwise read the same movement as a vertical scroll.
 fn wheel(handle: ScrollHandle) -> impl Fn(&ScrollWheelEvent, &mut Window, &mut App) + 'static {
     move |event, window, cx| {
         let delta = event.delta.pixel_delta(window.line_height());
+        if delta.x.abs() > delta.y.abs() {
+            cx.stop_propagation();
+            return;
+        }
         if !event.modifiers.shift || delta.y == px(0.) {
             return;
         }

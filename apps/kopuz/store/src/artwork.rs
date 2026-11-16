@@ -1,9 +1,14 @@
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
+use std::io::Cursor;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use api::{ArtworkRef, ArtworkRequest, ArtworkTarget};
-use gpui_kit::{App, Asset, Image, ImageCacheError, ImageFormat, ImageSource, Window};
+use gpui_kit::{
+    App, Asset, Image, ImageCacheError, ImageFormat, ImageSource, Pixels, RenderImage, Window,
+};
+use image::{DynamicImage, ImageDecoder as _, imageops::FilterType};
 use link::Link;
 
 /// One cover at one size; `version` changes exactly when the picture would, so a hit caches forever.
@@ -93,15 +98,116 @@ fn probe_size(bytes: &[u8]) -> Option<(u32, u32)> {
         .ok()
 }
 
+/// Device-pixel edges a small cover is decoded at, so it uploads a fraction of the thumbnail.
+const EDGES: [u32; 4] = [64, 128, 192, 256];
+
+/// The edge to decode a cover drawn `size` wide at, or `None` past [`EDGES`] to keep it whole.
+pub fn decode_edge(size: Pixels, window: &Window) -> Option<u32> {
+    let device = size.as_f32() * window.scale_factor();
+    EDGES.into_iter().find(|edge| *edge as f32 >= device)
+}
+
+/// A fetched cover at one decode edge; keyed by the image's id, never by its bytes.
+#[derive(Clone)]
+pub struct Shrink {
+    image: Arc<Image>,
+    edge: u32,
+}
+
+impl Hash for Shrink {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.image.id.hash(state);
+        self.edge.hash(state);
+    }
+}
+
+impl PartialEq for Shrink {
+    fn eq(&self, other: &Self) -> bool {
+        self.image.id == other.image.id && self.edge == other.edge
+    }
+}
+
+impl Eq for Shrink {}
+
+/// Decodes a cover off the UI thread with its short side cut to the edge.
+pub enum ShrunkCover {}
+
+impl Asset for ShrunkCover {
+    type Source = Shrink;
+    type Output = Result<Arc<RenderImage>, ImageCacheError>;
+
+    fn load(
+        source: Self::Source,
+        cx: &mut App,
+    ) -> impl Future<Output = Self::Output> + Send + 'static {
+        let renderer = cx.svg_renderer();
+        async move {
+            match shrink(&source.image, source.edge) {
+                Some(rendered) => Ok(Arc::new(rendered)),
+                None => source.image.to_image_data(renderer).map_err(Into::into),
+            }
+        }
+    }
+}
+
+/// `None` for a format only GPUI's own decoder reads, such as an animated GIF or an SVG.
+fn shrink(image: &Image, edge: u32) -> Option<RenderImage> {
+    let format = match image.format {
+        ImageFormat::Jpeg => image::ImageFormat::Jpeg,
+        ImageFormat::Png => image::ImageFormat::Png,
+        ImageFormat::Webp => image::ImageFormat::WebP,
+        _ => return None,
+    };
+    let mut decoder = image::ImageReader::with_format(Cursor::new(&image.bytes), format)
+        .into_decoder()
+        .ok()?;
+    let orientation = decoder.orientation().ok()?;
+    let mut picture = DynamicImage::from_decoder(decoder).ok()?;
+    picture.apply_orientation(orientation);
+    let (width, height) = (picture.width(), picture.height());
+    let short = width.min(height);
+    if short > edge {
+        let scale = edge as f32 / short as f32;
+        let fit = |side: u32| ((side as f32 * scale).round() as u32).max(1);
+        picture = picture.resize_exact(fit(width), fit(height), FilterType::Triangle);
+    }
+    Some(crate::ambient::frame(picture.into_rgba8()))
+}
+
+/// The cover's drawable texture at `edge`, falling back to a whole decode if the shrink failed.
+fn rendered(
+    image: &Arc<Image>,
+    edge: Option<u32>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<Arc<RenderImage>> {
+    let Some(edge) = edge else {
+        return image.clone().use_render_image(window, cx);
+    };
+    let source = Shrink {
+        image: image.clone(),
+        edge,
+    };
+    match window.use_asset::<ShrunkCover>(&source, cx)? {
+        Ok(rendered) => Some(rendered),
+        Err(_) => image.clone().use_render_image(window, cx),
+    }
+}
+
 /// An `img()` source for a row's artwork; `hq` asks for the full-size picture rather than a thumbnail.
 pub fn artwork_source(artwork: &ArtworkRef, hq: bool) -> ImageSource {
+    artwork_source_at(artwork, hq, None)
+}
+
+/// [`artwork_source`] decoded at `edge` (see [`decode_edge`]) for a cover drawn small.
+pub fn artwork_source_at(artwork: &ArtworkRef, hq: bool, edge: Option<u32>) -> ImageSource {
     let key = ArtworkKey::new(artwork, hq);
     ImageSource::Custom(Arc::new(move |window: &mut Window, cx: &mut App| {
         let result = match window.use_asset::<ArtworkBytes>(&key, cx) {
             Some(Ok(image)) => {
                 cx.default_global::<Residents>().failed.remove(&key);
-                if let Some(rendered) = image.clone().use_render_image(window, cx) {
-                    if Residents::touch(&key, &image, cx) {
+                if let Some(rendered) = rendered(&image, edge, window, cx) {
+                    if Residents::touch(&key, &image, edge, cx) {
                         // The cover fading this in learns it was drawn on the next frame, so ask for one.
                         window.request_animation_frame();
                     }
@@ -120,13 +226,28 @@ pub fn artwork_source(artwork: &ArtworkRef, hq: bool) -> ImageSource {
         };
         // Keep the last decoded cover until its replacement has both fetched and decoded.
         if let Some((previous, image)) = cx.default_global::<Residents>().previous(&key) {
-            Residents::touch(&previous, &image, cx);
-            if let Some(rendered) = image.use_render_image(window, cx) {
+            Residents::touch(&previous, &image, edge, cx);
+            if let Some(rendered) = rendered(&image, edge, window, cx) {
                 return Some(Ok(rendered));
             }
         }
         result
     }))
+}
+
+/// Warms the existing byte and decoded-image caches before a row enters the viewport.
+pub fn prefetch_artwork(
+    artwork: &ArtworkRef,
+    edge: Option<u32>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let key = ArtworkKey::new(artwork, false);
+    if let Some(Ok(image)) = window.use_asset::<ArtworkBytes>(&key, cx)
+        && rendered(&image, edge, window, cx).is_some()
+    {
+        Residents::touch(&key, &image, edge, cx);
+    }
 }
 
 /// Long past any cover's fade-in, after which its arrival is forgotten and it counts as settled.
@@ -173,6 +294,8 @@ pub struct Residents {
 struct Resident {
     image: Arc<Image>,
     used: u64,
+    /// Each decode edge it was drawn at, whose textures go with it.
+    edges: Vec<u32>,
 }
 
 impl gpui_kit::Global for Residents {}
@@ -188,7 +311,13 @@ impl Residents {
     }
 
     /// Whether `key` is drawn for the first time, which is when it starts fading in.
-    fn record(&mut self, key: &ArtworkKey, image: &Arc<Image>, now: Instant) -> bool {
+    fn record(
+        &mut self,
+        key: &ArtworkKey,
+        image: &Arc<Image>,
+        edge: Option<u32>,
+        now: Instant,
+    ) -> bool {
         self.clock += 1;
         let clock = self.clock;
         let first = !self.live.contains_key(key);
@@ -199,13 +328,17 @@ impl Residents {
                 .retain(|_, at| now.saturating_duration_since(*at) < ARRIVAL_KEPT);
             self.arrived.insert(key.clone(), now);
         }
-        self.live
-            .entry(key.clone())
-            .and_modify(|resident| resident.used = clock)
-            .or_insert_with(|| Resident {
-                image: image.clone(),
-                used: clock,
-            });
+        let resident = self.live.entry(key.clone()).or_insert_with(|| Resident {
+            image: image.clone(),
+            used: clock,
+            edges: Vec::new(),
+        });
+        resident.used = clock;
+        if let Some(edge) = edge
+            && !resident.edges.contains(&edge)
+        {
+            resident.edges.push(edge);
+        }
         self.latest
             .insert((key.target.clone(), key.hq), key.clone());
         first
@@ -250,9 +383,9 @@ impl Residents {
     }
 
     /// Records that `key` was drawn this frame, and says whether it was the first.
-    fn touch(key: &ArtworkKey, image: &Arc<Image>, cx: &mut App) -> bool {
+    fn touch(key: &ArtworkKey, image: &Arc<Image>, edge: Option<u32>, cx: &mut App) -> bool {
         cx.default_global::<Self>()
-            .record(key, image, Instant::now())
+            .record(key, image, edge, Instant::now())
     }
 
     /// Releases the least recently drawn covers until the budget is met.
@@ -281,6 +414,16 @@ impl Residents {
             // The atlas texture goes first; it is the only one that needs the window.
             if let Some(rendered) = resident.image.clone().get_render_image(window, cx) {
                 cx.drop_image(rendered, Some(window));
+            }
+            for edge in resident.edges {
+                let shrunk = Shrink {
+                    image: resident.image.clone(),
+                    edge,
+                };
+                if let Some(Ok(rendered)) = window.get_asset::<ShrunkCover>(&shrunk, cx) {
+                    cx.drop_image(rendered, Some(window));
+                }
+                cx.remove_asset::<ShrunkCover>(&shrunk);
             }
             resident.image.remove_asset(cx);
             cx.remove_asset::<ArtworkBytes>(&key);
@@ -320,7 +463,7 @@ mod tests {
         let old = key("album", 1, false);
         let image = image(1);
         let mut residents = Residents::default();
-        residents.record(&old, &image, Instant::now());
+        residents.record(&old, &image, None, Instant::now());
         let (previous, fallback) = residents.previous(&key("album", 2, false)).unwrap();
         assert_eq!(previous, old);
         assert!(Arc::ptr_eq(&fallback, &image));
@@ -340,6 +483,7 @@ mod tests {
             residents.record(
                 &key("album", version, false),
                 &image(version as u8),
+                None,
                 Instant::now(),
             );
         }
@@ -354,7 +498,7 @@ mod tests {
     fn a_released_cover_is_no_stand_in() {
         let mut residents = Residents::default();
         let old = key("album", 1, false);
-        residents.record(&old, &image(1), Instant::now());
+        residents.record(&old, &image(1), None, Instant::now());
         assert!(residents.forget(&old).is_some());
         assert!(residents.previous(&key("album", 2, false)).is_none());
     }
@@ -365,10 +509,10 @@ mod tests {
         let cover = key("album", 1, false);
         assert_eq!(residents.arrival_of(&cover), Arrival::Waiting);
         let now = Instant::now();
-        assert!(residents.record(&cover, &image(1), now));
+        assert!(residents.record(&cover, &image(1), None, now));
         assert_eq!(residents.arrival_of(&cover), Arrival::Since(now));
         assert!(
-            !residents.record(&cover, &image(1), now),
+            !residents.record(&cover, &image(1), None, now),
             "drawn again is no arrival"
         );
         assert_eq!(residents.arrival_of(&cover), Arrival::Since(now));
@@ -377,14 +521,14 @@ mod tests {
     #[test]
     fn a_new_version_takes_over_without_fading() {
         let mut residents = Residents::default();
-        residents.record(&key("album", 1, false), &image(1), Instant::now());
+        residents.record(&key("album", 1, false), &image(1), None, Instant::now());
         let newer = key("album", 2, false);
         assert_eq!(
             residents.arrival_of(&newer),
             Arrival::Settled,
             "the old one stands in"
         );
-        residents.record(&newer, &image(2), Instant::now());
+        residents.record(&newer, &image(2), None, Instant::now());
         assert_eq!(residents.arrival_of(&newer), Arrival::Settled);
     }
 
@@ -393,9 +537,54 @@ mod tests {
         let mut residents = Residents::default();
         let start = Instant::now();
         let first = key("first", 1, false);
-        residents.record(&first, &image(1), start);
-        residents.record(&key("second", 1, false), &image(2), start + ARRIVAL_KEPT);
+        residents.record(&first, &image(1), None, start);
+        residents.record(
+            &key("second", 1, false),
+            &image(2),
+            None,
+            start + ARRIVAL_KEPT,
+        );
         assert_eq!(residents.arrival_of(&first), Arrival::Settled);
+    }
+
+    fn png(width: u32, height: u32) -> Image {
+        let mut bytes = Vec::new();
+        image::RgbaImage::new(width, height)
+            .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .unwrap();
+        Image::from_bytes(ImageFormat::Png, bytes)
+    }
+
+    #[test]
+    fn a_cover_is_cut_to_its_edge_on_the_short_side() {
+        let shrunk = shrink(&png(400, 300), 128).unwrap();
+        assert_eq!(shrunk.size(0).width.0, 171);
+        assert_eq!(shrunk.size(0).height.0, 128);
+    }
+
+    #[test]
+    fn a_cover_smaller_than_its_edge_keeps_its_size() {
+        let kept = shrink(&png(60, 60), 128).unwrap();
+        assert_eq!(kept.size(0).width.0, 60);
+    }
+
+    #[test]
+    fn each_edge_a_cover_is_drawn_at_is_remembered_once() {
+        let mut residents = Residents::default();
+        let cover = key("album", 1, false);
+        let picture = image(1);
+        for edge in [Some(128), None, Some(128), Some(64)] {
+            residents.record(&cover, &picture, edge, Instant::now());
+        }
+        assert_eq!(residents.live[&cover].edges, vec![128, 64]);
+    }
+
+    #[test]
+    fn a_frame_rounds_up_to_the_next_edge() {
+        let pick = |device: f32| EDGES.into_iter().find(|edge| *edge as f32 >= device);
+        assert_eq!(pick(126.), Some(128));
+        assert_eq!(pick(129.), Some(192));
+        assert_eq!(pick(300.), None);
     }
 
     #[test]
@@ -405,7 +594,7 @@ mod tests {
         residents.failed.insert(broken.clone());
         assert_eq!(residents.arrival_of(&broken), Arrival::Settled);
         let gone = key("gone", 1, false);
-        residents.record(&gone, &image(1), Instant::now());
+        residents.record(&gone, &image(1), None, Instant::now());
         residents.forget(&gone);
         assert_eq!(residents.arrival_of(&gone), Arrival::Waiting);
     }

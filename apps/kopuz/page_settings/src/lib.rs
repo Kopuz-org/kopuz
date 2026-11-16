@@ -5,12 +5,12 @@ use components::marker::Along;
 use components::{Bar, Callout, EmptyState, PageHeader, SearchField, Tab, TabStrip, icons, style};
 use config::{SettingsLayout, UiStyle};
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled,
-    Subscription, Window, div, rems,
+    AnyElement, App, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled,
+    Subscription, Window, div, px, rems,
 };
 use settings_appearance::AppearanceSettings;
 use settings_interface::InterfaceSettings;
@@ -23,6 +23,12 @@ const FAN_BORDER: f32 = 0.09;
 const FAN_BG: f32 = 0.92;
 /// `text-white/70` on the line under an empty panel.
 const NOTICE: f32 = 0.70;
+/// A phone's categories, three to a line: all nine show at once without a strip to scroll sideways.
+const PHONE_COLUMNS: u16 = 3;
+/// A phone category's height: its glyph over its label, more than a touch target.
+const PHONE_CATEGORY: f32 = 56.;
+/// `text-white/70`, a category not chosen.
+const PHONE_IDLE: f32 = 0.70;
 
 /// Which panel the rail is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,7 +240,8 @@ impl Settings {
             }))
     }
 
-    /// The category fan, as its top-bar branch.
+    /// The category fan, as its top-bar branch. A mostly sideways scroll stops at the strip, or the page
+    /// would read it as a vertical one.
     fn rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let strip = self.fan(Along::Row, Bar::Rule, cx);
         h_flex()
@@ -244,10 +251,69 @@ impl Settings {
             .mb_4()
             .overflow_x_scroll()
             .restrict_scroll_to_axis()
+            .on_scroll_wheel(|event, window, cx| {
+                let delta = event.delta.pixel_delta(window.line_height());
+                if delta.x.abs() > delta.y.abs() {
+                    cx.stop_propagation();
+                }
+            })
             .border_b_1()
             .border_color(style::white(FAN_BORDER, cx))
             .bg(components::settings::panel_background(FAN_BG, cx))
             .child(strip)
+    }
+
+    /// A phone's fan: the categories in even rows of three, each its glyph over its label.
+    fn phone_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let current = self.category;
+        div()
+            .w_full()
+            .flex_none()
+            .mb_4()
+            .grid()
+            .grid_cols(PHONE_COLUMNS)
+            .gap_1()
+            .children(Category::ALL.iter().copied().map(|category| {
+                let active = category == current;
+                v_flex()
+                    .id(SharedString::from(format!(
+                        "settings-fan-{}",
+                        category.slug()
+                    )))
+                    .min_w_0()
+                    .min_h(px(PHONE_CATEGORY))
+                    .px_1()
+                    .py_1()
+                    .gap_1()
+                    .items_center()
+                    .justify_center()
+                    .rounded(style::radius_lg())
+                    .bg(match active {
+                        true => style::accent(style::PICKED, cx),
+                        false => style::white(style::RAISED, cx),
+                    })
+                    .text_color(match active {
+                        true => cx.theme().primary,
+                        false => style::white(PHONE_IDLE, cx),
+                    })
+                    .text_size(components::phone::BODY)
+                    .font_weight(match active {
+                        true => FontWeight::SEMIBOLD,
+                        false => FontWeight::MEDIUM,
+                    })
+                    .cursor_pointer()
+                    .child(icons::icon(category.icon()).size(px(18.)).flex_shrink_0())
+                    .child(
+                        div()
+                            .max_w_full()
+                            .min_w_0()
+                            .truncate()
+                            .child(category.label()),
+                    )
+                    .on_click(
+                        cx.listener(move |this, _, window, cx| this.choose(category, window, cx)),
+                    )
+            }))
     }
 
     /// The CD branch: the fan held beside the panel, centred on the window; the disc is rotated clip-paths GPUI cannot draw.
@@ -306,7 +372,8 @@ impl Render for Settings {
         let config = ConfigModel::global(cx);
         let loaded = config.read(cx).is_loaded();
         let locks = config.read(cx).locks().to_vec();
-        let disc = loaded && {
+        let compact = ::theme::mobile::is_compact(cx);
+        let disc = loaded && !compact && {
             let ui = &config.read(cx).config().ui;
             ui.settings_layout == SettingsLayout::Cd && ui.ui_style != UiStyle::Material3
         };
@@ -324,6 +391,7 @@ impl Render for Settings {
                     .mx_auto()
                     .px_6()
                     .py_7()
+                    .when(compact, |column| column.px_4().py_4())
                     .child(PageHeader::new(t("settings")))
                     .map(|page| {
                         if !loaded {
@@ -333,7 +401,8 @@ impl Render for Settings {
                             .when(!locks.is_empty(), |page| {
                                 page.child(self.managed_notice(&locks))
                             })
-                            .when(!disc, |page| page.child(self.rail(cx)))
+                            .when(!disc && !compact, |page| page.child(self.rail(cx)))
+                            .when(compact, |page| page.child(self.phone_rail(cx)))
                             .when(empty, |page| {
                                 page.child(EmptyState::new(t_with(
                                     "no_results_found",

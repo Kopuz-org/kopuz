@@ -347,6 +347,16 @@ track_count =
         [one] { $count } track
        *[other] { $count } tracks
     }
+album_count =
+    { $count ->
+        [one] { $count } album
+       *[other] { $count } albums
+    }
+artist_count =
+    { $count ->
+        [one] { $count } artist
+       *[other] { $count } artists
+    }
 songs = songs
 min = min
 

@@ -4,6 +4,7 @@ use components::format::t;
 use components::{EmptyState, Loading, icons, style};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Render,
     SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
@@ -39,15 +40,18 @@ impl Render for PlaylistFolder {
             .find(|folder| folder.id == self.id.as_ref())
             .cloned();
         let playlists = model.read(cx).playlists().to_vec();
+        let compact = ::theme::mobile::is_compact(cx);
         let Some(folder) = folder else {
-            return components::page().child(if loaded {
-                EmptyState::new(t("no_playlists_yet"))
-                    .icon(icons::FOLDER)
-                    .flex()
-                    .into_any_element()
-            } else {
-                Loading::new().flex().into_any_element()
-            });
+            return components::page()
+                .when(compact, |page| page.px_4().pt_4())
+                .child(if loaded {
+                    EmptyState::new(t("no_playlists_yet"))
+                        .icon(icons::FOLDER)
+                        .flex()
+                        .into_any_element()
+                } else {
+                    Loading::new().flex().into_any_element()
+                });
         };
         let inside: Vec<_> = folder
             .playlist_ids
@@ -57,6 +61,7 @@ impl Render for PlaylistFolder {
             .collect();
 
         components::page()
+            .when(compact, |page| page.px_4().pt_4())
             .child(breadcrumb(folder.name.clone(), cx))
             .child(
                 v_flex()
@@ -80,14 +85,20 @@ impl Render for PlaylistFolder {
 
 /// Back, a dim slash, and the folder's name: the trail the Dioxus page draws above the grid.
 fn breadcrumb(name: String, cx: &App) -> impl IntoElement {
+    let compact = ::theme::mobile::is_compact(cx);
     h_flex()
         .gap_3()
         .items_center()
         .pb_8()
+        .when(compact, |trail| trail.pb_4())
         .child(
             Button::new("folder-back")
                 .custom(style::quiet_button(style::slate_400(cx), cx))
                 .icon(icons::icon(icons::CHEVRON_LEFT))
+                .when(compact, |back| {
+                    back.min_w(::theme::mobile::TOUCH_TARGET)
+                        .min_h(::theme::mobile::TOUCH_TARGET)
+                })
                 .on_click(|_, _, cx| Navigator::navigate(Route::Playlists, cx)),
         )
         .child(
@@ -95,5 +106,10 @@ fn breadcrumb(name: String, cx: &App) -> impl IntoElement {
                 .text_color(style::white(style::TEXT_DIM, cx))
                 .child("/"),
         )
-        .child(div().font_weight(FontWeight::SEMIBOLD).child(name))
+        .child(
+            div()
+                .font_weight(FontWeight::SEMIBOLD)
+                .when(compact, |title| title.text_xl())
+                .child(name),
+        )
 }

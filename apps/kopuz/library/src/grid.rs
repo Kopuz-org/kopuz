@@ -129,16 +129,27 @@ impl Library {
             ViewMode::Table => GridMode::Rows,
         };
         let rail = self.jump_rail(cx);
+        self.grid.set_phone_columns(self.phone_columns());
+        let tile = self.grid.tile_width(px(self.tile.width()), cx);
         self.grid
             .bands(
                 self.total(),
-                px(self.tile.width()),
+                tile,
                 mode,
                 move |this: &mut Library, index, _, cx| this.cell(index, mode, facet, cx),
             )
             .visit(|this: &mut Library, shown, window, cx| this.ensure_window(&shown, window, cx))
             .rail(rail)
+            .bottom_inset(crate::phone_clearance(cx))
             .build(window, cx)
+    }
+
+    /// How many tiles a phone's band holds: three at the small size, two otherwise.
+    pub(crate) fn phone_columns(&self) -> usize {
+        match self.tile {
+            store::layout::TileSize::Small => 3,
+            _ => 2,
+        }
     }
 
     /// One entry of the grid, or the shape that stands in for it until its page arrives.
@@ -150,7 +161,7 @@ impl Library {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         profile::elements::built();
-        let width = px(self.tile.width());
+        let width = self.grid.tile_width(px(self.tile.width()), cx);
         let Some(tile) = self.tile_at(index).cloned() else {
             return match mode {
                 GridMode::Tiles => {
@@ -183,13 +194,17 @@ impl Library {
                 .offline(offline)
                 .on_toggle(commands::set_offline)
         });
+        let (cover, frame) = match components::phone::is_compact(cx) {
+            true => (width, Frame::Bare),
+            false => (width - px(32.), Frame::Card),
+        };
         let card = components::Tile::new(tile.id.clone(), tile.title.clone())
             .subtitle(tile.subtitle.clone())
             .artwork(tile.artwork.as_ref())
-            .size(width - px(32.))
+            .size(cover)
             .round(facet.round_tiles())
             .placeholder(tile.placeholder)
-            .frame(Frame::Card)
+            .frame(frame)
             .playing(tile.playing)
             .selected(self.selection.contains(&tile.id))
             .cursor(self.selection.cursor() == Some(index))
@@ -259,6 +274,9 @@ impl Library {
 
     /// The letters down the right edge, while every tile is held and they are in title order.
     fn jump_rail(&self, cx: &mut Context<Self>) -> Option<JumpRail> {
+        if components::phone::is_compact(cx) {
+            return None;
+        }
         if self.total() < RAIL_FROM || self.sort().field != "title" {
             return None;
         }

@@ -47,6 +47,12 @@ const FILTER_DELAY: Duration = Duration::from_millis(180);
 /// How long a type-ahead run stays open before the next letter starts a new one.
 const TYPE_AHEAD_GAP: Duration = Duration::from_millis(900);
 
+/// On a phone, the room the listing's scroller keeps after its last line; the shell already sets the page
+/// above the now-playing bar and the tab bar, so this is only breathing room. Nothing on desktop.
+pub(crate) fn phone_clearance(cx: &App) -> Option<gpui_kit::Pixels> {
+    components::phone::is_compact(cx).then(|| px(16.))
+}
+
 actions!(
     library,
     [
@@ -800,13 +806,18 @@ impl Library {
         });
     }
 
+    /// A tracks reply only sets the pager while the Tracks tab shows, or it overwrites the other
+    /// tab's total. Desktop has the same bug; the guard stays phone-only so desktop is unchanged.
     fn adopt_tracks(&mut self, cx: &mut Context<Self>) {
         let Some(page) = self.tracks.read(cx).value().cloned() else {
             cx.notify();
             return;
         };
-        self.pager
-            .adopt(page.offset as usize, page.items.len(), page.total as usize);
+        let foreign = components::phone::is_compact(cx) && self.filters.facet != Facet::Tracks;
+        if !foreign {
+            self.pager
+                .adopt(page.offset as usize, page.items.len(), page.total as usize);
+        }
         self.rows = page.items;
         if self.whole {
             self.narrow_rows();
@@ -1159,7 +1170,12 @@ impl Render for Library {
         let chrome = self.chrome(window, cx);
         let body = self.body(window, cx);
         let bar = self.selection_bar(cx);
+        let compact = components::phone::is_compact(cx);
         components::page()
+            .when(compact, |page| {
+                page.px(components::phone::PAGE_PAD)
+                    .pt(components::phone::PAGE_PAD)
+            })
             .relative()
             .track_focus(&self.focus)
             .key_context("Library")
@@ -1182,7 +1198,7 @@ impl Render for Library {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .pb_8()
+                    .when(!compact, |body| body.pb_8())
                     // A held value that answers the previous filters is dimmed, never blanked.
                     .when(dimmed, |body| body.opacity(0.55))
                     .child(body),
@@ -1254,18 +1270,21 @@ impl Library {
                 let covers = self.density == Density::Comfortable;
                 skeleton::rows(14, height, covers, shown, cx).into_any_element()
             }
-            facet => v_flex()
-                .w_full()
-                .gap_6()
-                .children((0..3).map(|_| {
-                    skeleton::band(
-                        self.grid.columns(),
-                        px(self.tile.width()),
-                        facet.round_tiles(),
-                        cx,
-                    )
-                }))
-                .into_any_element(),
+            facet => {
+                self.grid.set_phone_columns(self.phone_columns());
+                v_flex()
+                    .w_full()
+                    .gap_6()
+                    .children((0..3).map(|_| {
+                        skeleton::band(
+                            self.grid.columns(),
+                            self.grid.tile_width(px(self.tile.width()), cx),
+                            facet.round_tiles(),
+                            cx,
+                        )
+                    }))
+                    .into_any_element()
+            }
         }
     }
 }

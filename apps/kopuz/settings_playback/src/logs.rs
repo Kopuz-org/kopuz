@@ -62,8 +62,8 @@ fn export_dir() -> PathBuf {
         .unwrap_or_default()
 }
 
+/// Android has no save dialog, so the export does nothing there.
 fn export(cx: &mut App) {
-    // No file dialog on Android: gpui-pre-mobile's picker calls Java this APK does not carry.
     if cfg!(target_os = "android") {
         return;
     }

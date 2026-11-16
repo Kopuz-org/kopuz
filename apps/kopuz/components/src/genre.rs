@@ -8,7 +8,7 @@ use gpui_kit::{
 };
 use store::{Navigator, Route};
 
-use crate::{Cover, Scrim, motion, style};
+use crate::{Cover, Scrim, motion, phone, style};
 
 /// One genre tile, wide enough for a name and a cover behind it.
 pub const GENRE_TILE: Pixels = px(240.);
@@ -56,7 +56,10 @@ impl RenderOnce for GenreCard {
             .overflow_hidden()
             .flex()
             .items_end()
-            .w(GENRE_TILE)
+            .map(|tile| match phone::is_compact(cx) {
+                true => tile.w_full().min_w_0(),
+                false => tile.w(GENRE_TILE),
+            })
             .h(TILE_HEIGHT)
             .flex_shrink_0()
             .p_4()

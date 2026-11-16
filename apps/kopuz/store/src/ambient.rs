@@ -288,7 +288,7 @@ fn render(bytes: &[u8], ground: Ground, spread: Spread) -> Option<RgbaImage> {
 }
 
 /// GPUI keeps its images BGRA, which is the one thing about the field it has to be told.
-fn frame(mut field: RgbaImage) -> RenderImage {
+pub(crate) fn frame(mut field: RgbaImage) -> RenderImage {
     for pixel in field.pixels_mut() {
         pixel.0.swap(0, 2);
     }

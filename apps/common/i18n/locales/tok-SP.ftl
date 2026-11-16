@@ -239,6 +239,8 @@ time = 󱥫
 genre = 󱤞
 plays = 󱤼󱤠
 track_count = 󱤕󱤻 { $count }
+album_count = 󱤟󱥍󱦗󱤕󱥖󱦘 { $count }
+artist_count = 󱤑󱥉 { $count }
 songs = 󱤕󱤻
 min = 󱥫
 

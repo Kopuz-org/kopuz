@@ -302,6 +302,7 @@ impl Discover {
 
     fn page(&self, body: AnyElement, cx: &mut Context<Self>) -> AnyElement {
         components::page()
+            .when(::theme::mobile::is_compact(cx), |page| page.px_4().pt_4())
             .child(
                 PageHeader::new(t_with(
                     "discover_results_for",

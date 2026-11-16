@@ -6,7 +6,6 @@
 
 mod daemon;
 mod inproc;
-mod seed;
 mod ui;
 
 #[cfg(target_os = "android")]
