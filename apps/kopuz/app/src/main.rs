@@ -11,7 +11,7 @@ mod menus;
 mod router;
 mod shell;
 mod system_ease;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 mod tray;
 
 use std::time::{Duration, Instant};
@@ -162,6 +162,7 @@ fn main() -> anyhow::Result<()> {
             return;
         }
         store::init(cx);
+        pause_on_quit(cx);
         if args.offline {
             store::SourcesModel::global(cx)
                 .update(cx, |sources, cx| sources.offline_on_connect(cx));
@@ -216,13 +217,30 @@ fn main() -> anyhow::Result<()> {
                 cx.set_global(Booted);
                 let _ = booted.send(());
                 open_main_window(started, None, cx);
-                #[cfg(any(target_os = "macos", target_os = "windows"))]
+                #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
                 tray::init(cx);
             });
         })
         .detach();
     });
     Ok(())
+}
+
+/// The kopuzd this app starts lives on while music plays, so quitting the app pauses it; a daemon reached through `KOPUZ_SOCKET` or `KOPUZ_DAEMON_ADDR` is left alone.
+fn pause_on_quit(cx: &mut App) {
+    if !link::Link::global(cx).starts_own() {
+        return;
+    }
+    cx.on_app_quit(|cx| {
+        let pause = link::Link::global(cx)
+            .call(|api| async move { api.player_command(api::PlayerCommand::Pause).await });
+        async move {
+            if let Err(error) = pause.await {
+                tracing::warn!(%error, "could not pause playback on quit");
+            }
+        }
+    })
+    .detach();
 }
 
 /// The app is set up and the main window may be opened again after it was closed.

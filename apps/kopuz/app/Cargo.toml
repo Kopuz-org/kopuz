@@ -84,9 +84,12 @@ metadata_dialog = { path = "../metadata_dialog" }
 shortcuts = { path = "../shortcuts" }
 profile = { path = "../profile" }
 
-# Linux is left out: appindicator needs a GTK main loop, and GPUI runs none.
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 tray-icon = { version = "0.21", default-features = false }
+
+# appindicator needs a GTK main loop, and GPUI runs none. async-io: zbus/tokio would also flip the zbus GPUI's portals use.
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "0.3.7", default-features = false, features = ["async-io", "blocking"] }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"
