@@ -356,7 +356,7 @@ pub struct Panel {
 impl Default for Panel {
     fn default() -> Self {
         Self {
-            shown: false,
+            shown: true,
             width: 260.,
             pinned: Vec::new(),
         }
@@ -1283,15 +1283,15 @@ mod tests {
     #[test]
     fn a_key_from_a_later_version_is_ignored() {
         let layout: Layout =
-            toml::from_str("what_is_this = 3\n[panel]\nshown = true\n").expect("deserialise");
-        assert!(layout.panel.shown);
+            toml::from_str("what_is_this = 3\n[panel]\nshown = false\n").expect("deserialise");
+        assert!(!layout.panel.shown);
         assert_eq!(layout.nav, Nav::default());
     }
 
     #[test]
     fn a_partial_section_keeps_its_other_defaults() {
-        let layout: Layout = toml::from_str("[panel]\nshown = true\n").expect("deserialise");
-        assert!(layout.panel.shown);
+        let layout: Layout = toml::from_str("[panel]\nshown = false\n").expect("deserialise");
+        assert!(!layout.panel.shown);
         assert_eq!(layout.panel.width, Panel::default().width);
     }
 
@@ -1507,10 +1507,10 @@ mod tests {
     #[test]
     fn resetting_a_section_leaves_the_others_alone() {
         let mut layout = Layout::default();
-        layout.panel.shown = true;
+        layout.panel.shown = false;
         layout.first_use_hint_dismissed = true;
         Section::Panel.reset(&mut layout);
-        assert!(!layout.panel.shown);
+        assert!(layout.panel.shown);
         assert!(layout.first_use_hint_dismissed);
     }
 
@@ -1679,10 +1679,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("kopuz-layout-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         let path = dir.join("layout.toml");
-        std::fs::write(&path, "library_view = \"albums\"\n[panel]\nshown = true\n").expect("write");
+        std::fs::write(&path, "library_view = \"albums\"\n[panel]\nshown = false\n")
+            .expect("write");
         let layout = read(&path);
         assert_eq!(layout.library_view.as_deref(), Some("albums"));
-        assert!(layout.panel.shown);
+        assert!(!layout.panel.shown);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

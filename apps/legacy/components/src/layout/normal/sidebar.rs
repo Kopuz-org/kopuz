@@ -349,6 +349,13 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                             on_move_down: move |_| {},
                         }
                     }
+                    if !*is_collapsed.read() {
+                        SidebarPlaylists {
+                            on_open: move |_| {
+                                if drawer { mobile_collapsed.set(true); }
+                            },
+                        }
+                    }
                 }
             }
 
@@ -363,6 +370,76 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                     class: "absolute top-0 left-0 w-2 h-full cursor-col-resize group/handle z-50",
                     onmousedown: move |_| is_resizing.set(true),
                     div { class: "absolute inset-y-0 left-0 w-px bg-white/0 group-hover/handle:bg-white/10 transition-colors" }
+                }
+            }
+        }
+    }
+}
+
+/// The active source's playlists, so one opens in a click instead of going through the Playlists page.
+#[component]
+fn SidebarPlaylists(on_open: EventHandler<()>) -> Element {
+    let nav = use_context::<crate::NavigationController>();
+    let mut prefs = hooks::ui_prefs::use_ui_prefs();
+    let catalog = hooks::use_db_queries::use_playlists();
+
+    let folded = prefs.read().sidebar_playlists_collapsed;
+    let playlists = catalog.read().clone().unwrap_or_default().playlists;
+    if playlists.is_empty() {
+        return rsx! {};
+    }
+
+    let open_id = (*nav.current_route.read() == Route::Playlists)
+        .then(|| nav.selected_playlist_id.read().clone())
+        .flatten();
+    let heading = i18n::t("playlists");
+    let chevron = if folded {
+        "fa-chevron-right"
+    } else {
+        "fa-chevron-down"
+    };
+
+    rsx! {
+        div { class: "h-px bg-white/5 my-4 mx-3" }
+        button {
+            r#type: "button",
+            class: "w-full flex items-center justify-between px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-slate-500 hover:text-white/80 transition-colors cursor-pointer",
+            aria_expanded: if folded { "false" } else { "true" },
+            onclick: move |_| {
+                let mut prefs = prefs.write();
+                prefs.sidebar_playlists_collapsed = !prefs.sidebar_playlists_collapsed;
+            },
+            span { "{heading}" }
+            i { class: "fa-solid {chevron} text-[10px]" }
+        }
+        if !folded {
+            for playlist in playlists {
+                {
+                    let active = open_id.as_deref() == Some(playlist.id.as_str());
+                    let class = if active {
+                        "bg-white/10 text-white"
+                    } else {
+                        "text-slate-400 hover:text-white/90 hover:bg-white/5"
+                    };
+                    let id = playlist.id.clone();
+                    rsx! {
+                        button {
+                            key: "{playlist.id}",
+                            r#type: "button",
+                            class: "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-start transition-colors cursor-pointer {class}",
+                            title: "{playlist.name}",
+                            aria_current: if active { "page" } else { "false" },
+                            onclick: move |_| {
+                                let mut selected = nav.selected_playlist_id;
+                                let mut route = nav.current_route;
+                                selected.set(Some(id.clone()));
+                                route.set(Route::Playlists);
+                                on_open.call(());
+                            },
+                            i { class: "fa-solid fa-list text-xs opacity-60 shrink-0" }
+                            span { class: "truncate", "{playlist.name}" }
+                        }
+                    }
                 }
             }
         }

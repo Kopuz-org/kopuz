@@ -27,6 +27,8 @@ pub struct UiPrefs {
     pub artists_view_mode: AlbumViewMode,
     pub artist_view_order: ArtistViewOrder,
     pub sidebar_order: Vec<String>,
+    /// The sidebar's list of playlists is folded under its heading.
+    pub sidebar_playlists_collapsed: bool,
     pub home_sections: Vec<HomeSection>,
     /// Home while the active source has a catalog of its own.
     pub catalog_home_sections: Vec<HomeSection>,
@@ -59,6 +61,7 @@ impl Default for UiPrefs {
             artists_view_mode: AlbumViewMode::Grid,
             artist_view_order: ArtistViewOrder::Tracks,
             sidebar_order: default_sidebar_order(),
+            sidebar_playlists_collapsed: false,
             home_sections: default_home_sections(),
             catalog_home_sections: default_catalog_home_sections(),
             listen_now_style: ListenNowStyle::List,
