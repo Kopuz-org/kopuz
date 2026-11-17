@@ -48,6 +48,22 @@ pub fn external_device_from_proto(value: &ExternalDevice) -> api::ExternalDevice
     }
 }
 
+pub fn output_device_to_proto(value: &api::OutputDevice) -> OutputDevice {
+    OutputDevice {
+        id: value.id.clone(),
+        name: value.name.clone(),
+        is_default: value.is_default,
+    }
+}
+
+pub fn output_device_from_proto(value: &OutputDevice) -> api::OutputDevice {
+    api::OutputDevice {
+        id: value.id.clone(),
+        name: value.name.clone(),
+        is_default: value.is_default,
+    }
+}
+
 pub fn anchor_to_proto(value: &api::PositionAnchor) -> PositionAnchor {
     PositionAnchor {
         ms: value.ms,
@@ -169,6 +185,19 @@ mod tests {
         let state = sample_state();
         let back = player_state_from_proto(&player_state_to_proto(&state));
         assert_eq!(state, back);
+    }
+
+    #[test]
+    fn an_output_device_round_trips() {
+        let device = api::OutputDevice {
+            id: "alsa:hw:CARD=0,DEV=0".into(),
+            name: "HDA Intel PCH, ALC892 Analog".into(),
+            is_default: true,
+        };
+        assert_eq!(
+            device,
+            output_device_from_proto(&output_device_to_proto(&device))
+        );
     }
 
     #[test]

@@ -162,6 +162,8 @@ pub enum Command {
     },
     SetDeviceChangeBehavior(config::DeviceChangeBehavior),
     SetSampleRateMode(config::SampleRateMode),
+    /// Move output to this cpal device id (`None`: the system default), rebuilding a live stream there.
+    SetOutputDevice(Option<String>),
     SetDuration(Duration),
     Subscribe(tokio::sync::mpsc::UnboundedSender<Event>),
     Shutdown,

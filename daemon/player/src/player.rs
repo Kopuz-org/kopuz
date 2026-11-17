@@ -83,6 +83,11 @@ impl Player {
     }
 
     pub fn try_new() -> Result<Self, PlayerInitError> {
+        Self::try_new_on(None)
+    }
+
+    /// Open on the cpal device `output_device` names, or the system default when it is `None` or gone.
+    pub fn try_new_on(output_device: Option<String>) -> Result<Self, PlayerInitError> {
         // Android initialises the JNI media session + classloader cache here; the desktop
         // platforms set up their system integration from the app entry point instead.
         #[cfg(target_os = "android")]
@@ -90,7 +95,7 @@ impl Player {
 
         let engine = EngineHandle::spawn(|tx| {
             let tx = tx.clone();
-            CpalSink::try_new(move |event| {
+            CpalSink::try_new(output_device, move |event| {
                 let msg = match event {
                     SinkEvent::DeviceLost => ActorMsg::DeviceError { device_lost: true },
                     SinkEvent::StreamStalled => ActorMsg::DeviceError { device_lost: false },
@@ -268,6 +273,11 @@ impl Player {
     /// (resampling every source) or reopens at each track's native rate.
     pub fn set_sample_rate_mode(&self, mode: config::SampleRateMode) {
         self.engine.send(Command::SetSampleRateMode(mode));
+    }
+
+    /// Move output to another device now, or back to the system default with `None`.
+    pub fn set_output_device(&self, device: Option<String>) {
+        self.engine.send(Command::SetOutputDevice(device));
     }
 
     pub fn update_metadata(&mut self, token: u64, meta: NowPlayingMeta) {

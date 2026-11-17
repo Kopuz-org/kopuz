@@ -1038,6 +1038,19 @@ impl Kopuz for KopuzGrpc {
         }))
     }
 
+    async fn get_output_devices(
+        &self,
+        _request: Request<proto::GetOutputDevicesRequest>,
+    ) -> Result<Response<proto::OutputDeviceList>, Status> {
+        let devices = self.0.api.output_devices().await.map_err(failed)?;
+        Ok(Response::new(proto::OutputDeviceList {
+            devices: devices
+                .iter()
+                .map(convert::output_device_to_proto)
+                .collect(),
+        }))
+    }
+
     async fn open_listen_link(
         &self,
         request: Request<proto::OpenListenLinkRequest>,

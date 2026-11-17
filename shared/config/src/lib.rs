@@ -877,6 +877,10 @@ pub struct Playback {
     #[serde(default)]
     #[garde(skip)]
     pub sample_rate_mode: SampleRateMode,
+    /// A cpal device id (`host:device`, e.g. `alsa:hw:CARD=0,DEV=0`); `None` follows the system default.
+    #[serde(default)]
+    #[garde(skip)]
+    pub output_device: Option<String>,
     #[serde(default)]
     #[garde(skip)]
     pub stream_quality: StreamQuality,
@@ -903,6 +907,7 @@ impl Default for Playback {
             replay_gain: ReplayGainSettings::default(),
             device_change_behavior: DeviceChangeBehavior::Pause,
             sample_rate_mode: SampleRateMode::System,
+            output_device: None,
             stream_quality: StreamQuality::High,
             autoplay_radio: false,
             skip_explicit: false,

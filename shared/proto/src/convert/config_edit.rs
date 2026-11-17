@@ -23,6 +23,7 @@ pub fn setting_key_to_proto(value: config::SettingKey) -> SettingKey {
             PlaybackKey::ReplayGain => SettingKey::ReplayGain,
             PlaybackKey::DeviceChangeBehavior => SettingKey::DeviceChangeBehavior,
             PlaybackKey::SampleRateMode => SettingKey::SampleRateMode,
+            PlaybackKey::OutputDevice => SettingKey::OutputDevice,
             PlaybackKey::StreamQuality => SettingKey::StreamQuality,
             PlaybackKey::AutoplayRadio => SettingKey::AutoplayRadio,
             PlaybackKey::SkipExplicit => SettingKey::SkipExplicit,
@@ -104,6 +105,7 @@ pub fn setting_key_from_proto(value: i32) -> Option<config::SettingKey> {
         SettingKey::ReplayGain => K::Playback(PlaybackKey::ReplayGain),
         SettingKey::DeviceChangeBehavior => K::Playback(PlaybackKey::DeviceChangeBehavior),
         SettingKey::SampleRateMode => K::Playback(PlaybackKey::SampleRateMode),
+        SettingKey::OutputDevice => K::Playback(PlaybackKey::OutputDevice),
         SettingKey::StreamQuality => K::Playback(PlaybackKey::StreamQuality),
         SettingKey::AutoplayRadio => K::Playback(PlaybackKey::AutoplayRadio),
         SettingKey::SkipExplicit => K::Playback(PlaybackKey::SkipExplicit),
@@ -176,6 +178,7 @@ pub fn config_edit_to_proto(value: &config::SettingsEdit) -> ConfigEdit {
             Pb::SampleRateMode(value) => {
                 Edit::SampleRateMode(sample_rate_mode_to_proto(value) as i32)
             }
+            Pb::OutputDevice(value) => Edit::OutputDevice(OptionalString { value }),
             Pb::StreamQuality(value) => Edit::StreamQuality(stream_quality_to_proto(value) as i32),
             Pb::AutoplayRadio(value) => Edit::AutoplayRadio(value),
             Pb::SkipExplicit(value) => Edit::SkipExplicit(value),
@@ -305,6 +308,7 @@ pub fn config_edit_from_proto(value: &ConfigEdit) -> Option<config::SettingsEdit
         Edit::SampleRateMode(value) => {
             Se::Playback(Pb::SampleRateMode(sample_rate_mode_from_proto(value)))
         }
+        Edit::OutputDevice(value) => Se::Playback(Pb::OutputDevice(value.value)),
         Edit::StreamQuality(value) => {
             Se::Playback(Pb::StreamQuality(stream_quality_from_proto(value)))
         }

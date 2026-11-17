@@ -94,6 +94,16 @@ pub struct ExternalDevice {
     pub active: bool,
 }
 
+/// An audio output the daemon's own player can open.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OutputDevice {
+    /// What `Playback::output_device` stores to pick it.
+    pub id: String,
+    pub name: String,
+    /// The one the system default currently resolves to.
+    pub is_default: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct QueueSummary {
     pub rev: u64,

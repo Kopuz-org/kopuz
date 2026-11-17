@@ -49,8 +49,9 @@ pub use library::{
 };
 pub use mutations::{ArtworkChange, ArtworkUpload, TrackMetadataPatch};
 pub use player::{
-    BufferedRange, ExternalDevice, ExternalPlayback, FadingState, Intent, LoopMode, Phase,
-    PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind, VideoChunk, VideoRequest,
+    BufferedRange, ExternalDevice, ExternalPlayback, FadingState, Intent, LoopMode, OutputDevice,
+    Phase, PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind, VideoChunk,
+    VideoRequest,
 };
 pub use playlists::{
     PlaylistCatalog, PlaylistEdit, PlaylistFolderInfo, PlaylistImport, PlaylistInfo,
@@ -195,6 +196,9 @@ pub trait PlayerApi: Send + Sync {
         source_id: String,
         device_id: Option<String>,
     ) -> Result<(), ApiError>;
+
+    /// The audio outputs the daemon's player can be pointed at with `Playback::output_device`.
+    async fn output_devices(&self) -> Result<Vec<OutputDevice>, ApiError>;
 
     /// A byte range of a queued music video's picture for a muted element, which follows
     /// [`PlayerState::position`] less `output_latency_ms` one to one.

@@ -449,6 +449,7 @@ pub fn config_to_proto(value: &config::Settings) -> Config {
         device_change_behavior: device_change_behavior_to_proto(playback.device_change_behavior)
             as i32,
         sample_rate_mode: sample_rate_mode_to_proto(playback.sample_rate_mode) as i32,
+        output_device: playback.output_device.clone(),
         titlebar_mode: titlebar_mode_to_proto(ui.titlebar_mode) as i32,
         offline_quality: offline_quality_to_proto(library.offline_quality) as i32,
         stream_quality: stream_quality_to_proto(playback.stream_quality) as i32,
@@ -496,6 +497,7 @@ pub fn config_from_proto(value: &Config) -> config::Settings {
             replay_gain: replay_gain_from_proto(value.replay_gain.as_ref()),
             device_change_behavior: device_change_behavior_from_proto(value.device_change_behavior),
             sample_rate_mode: sample_rate_mode_from_proto(value.sample_rate_mode),
+            output_device: value.output_device.clone(),
             stream_quality: stream_quality_from_proto(value.stream_quality),
             autoplay_radio: value.autoplay_radio,
             skip_explicit: value.skip_explicit,

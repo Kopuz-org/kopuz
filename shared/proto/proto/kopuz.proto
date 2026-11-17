@@ -91,6 +91,7 @@ service Kopuz {
   rpc SetQueue(SetQueueRequest) returns (MutationResult);
   rpc EditQueue(QueueEditRequest) returns (MutationResult);
   rpc GetExternalDevices(ExternalDevicesRequest) returns (ExternalDeviceList);
+  rpc GetOutputDevices(GetOutputDevicesRequest) returns (OutputDeviceList);
   rpc SelectExternalDevice(SelectExternalDeviceRequest) returns (Unit);
   rpc OpenListenLink(OpenListenLinkRequest) returns (Unit);
   rpc SetFavorite(FavoriteRequest) returns (SetFavoriteResponse);
@@ -471,6 +472,19 @@ message ExternalDevice {
 
 message ExternalDeviceList {
   repeated ExternalDevice devices = 1;
+}
+
+message GetOutputDevicesRequest {}
+
+// An audio output the daemon's own player can open; id is what the output_device setting stores.
+message OutputDevice {
+  string id = 1;
+  string name = 2;
+  bool is_default = 3;
+}
+
+message OutputDeviceList {
+  repeated OutputDevice devices = 1;
 }
 
 // Absent device_id moves playback back to this app's own player.
@@ -1941,6 +1955,7 @@ message ConfigEdit {
     ReplayGainSettings replay_gain = 70;
     DeviceChangeBehavior device_change_behavior = 46;
     SampleRateMode sample_rate_mode = 47;
+    OptionalString output_device = 90;
     StreamQuality stream_quality = 72;
     bool autoplay_radio = 73;
     bool skip_explicit = 74;
@@ -2114,6 +2129,7 @@ enum SettingKey {
   SETTING_KEY_LISTEN_ADDRESS = 86;
   SETTING_KEY_DISCORD_PRESENCE_UPLOAD_COVER = 87;
   SETTING_KEY_DISCORD_PRESENCE_LISTEN_BUTTON = 88;
+  SETTING_KEY_OUTPUT_DEVICE = 90;
 }
 
 message GetFrontendPrefsRequest {
@@ -2320,6 +2336,8 @@ message Config {
   optional bool offline_cache_enabled = 84;
   optional uint64 offline_cache_max_bytes = 85;
   string listen_address = 86;
+  // Absent means the system default output.
+  optional string output_device = 90;
 }
 
 message DownloaderOptions {
