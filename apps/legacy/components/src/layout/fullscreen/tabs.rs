@@ -8,7 +8,7 @@ pub(crate) fn Tabs(
     settings: Signal<Settings>,
     items: Vec<api::TrackInfo>,
     current_queue_index: Signal<usize>,
-    lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
+    lyrics: Signal<hooks::lyrics::LyricsState>,
     current_song_progress: Signal<u64>,
     active_tab: Signal<usize>,
 ) -> Element {

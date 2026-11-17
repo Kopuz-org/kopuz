@@ -27,6 +27,8 @@ const LINE_WIDTH: f32 = 20.;
 const TURN_WIDTH: f32 = 18.;
 // `leading-snug` on the small print of a background line.
 const SNUG: f32 = 1.375;
+// A romanized reading sits under its line, quieter than the words it reads.
+const READING_ALPHA: f32 = 0.7;
 // GPUI filters no text, so a blur is sampled: the words again around one ring, each copy faint.
 const BLUR_TAPS: usize = 6;
 // Weights of the ink kept at the centre and given to each tap; together under one, so a blurred line reads lighter.
@@ -54,6 +56,7 @@ pub struct LyricLine {
     index: usize,
     start_ms: u64,
     text: SharedString,
+    reading: Option<SharedString>,
     body: Body,
     lit: bool,
     background: bool,
@@ -72,6 +75,7 @@ impl LyricLine {
             index,
             start_ms,
             text: text.into(),
+            reading: None,
             body: Body::Words,
             lit: false,
             background: false,
@@ -87,6 +91,12 @@ impl LyricLine {
     /// The colour the voice leaves behind; the dim and the lit states are derived from it.
     pub fn ink(mut self, ink: Hsla) -> Self {
         self.ink = ink;
+        self
+    }
+
+    /// A Latin reading of the words, drawn smaller and dimmer under them.
+    pub fn reading(mut self, reading: Option<SharedString>) -> Self {
+        self.reading = reading;
         self
     }
 
@@ -191,6 +201,21 @@ impl RenderOnce for LyricLine {
                 }
             });
 
+        let reading = self.reading.map(|reading| {
+            let ink = base.alpha(base.a * READING_ALPHA);
+            let line = div()
+                .text_sm()
+                .font_medium()
+                .line_height(relative(SNUG))
+                .text_color(ink);
+            match blur {
+                Some(radius) => line
+                    .child(blurred(reading, ink, hover, radius, group.clone()))
+                    .into_any_element(),
+                None => line.child(reading).into_any_element(),
+            }
+        });
+
         match self.body {
             Body::Interlude(progress) => body
                 .flex()
@@ -221,12 +246,14 @@ impl RenderOnce for LyricLine {
                     sung.alpha(UNSUNG * tint),
                     fills,
                 ))
+                .children(reading)
                 .into_any_element(),
             Body::Karaoke(_) | Body::Words => match blur {
                 Some(radius) => body
                     .child(blurred(self.text, base, hover, radius, group))
+                    .children(reading)
                     .into_any_element(),
-                None => body.child(self.text).into_any_element(),
+                None => body.child(self.text).children(reading).into_any_element(),
             },
         }
     }

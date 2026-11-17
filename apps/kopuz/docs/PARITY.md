@@ -407,7 +407,7 @@ Category → rows. **[H]** = hardcoded `Settings` field (applied to the local co
 
 ### 4.6 Metadata
 - [x] [S] Artwork provider settings: `api.artwork_settings()` → `api.set_artwork_settings([value])`
-- [x] [H] `prefer_local_lyrics`, `enable_musixmatch_lyrics` toggles
+- [x] [H] `prefer_local_lyrics`, `enable_musixmatch_lyrics`, `romanize_lyrics` toggles
 - [x] [H] `lyrics_offset_auto` toggle (label shows measured output latency); `lyrics_offset_ms` slider ±`LYRICS_OFFSET_LIMIT_MS` step 50 (disabled when auto)
 
 ### 4.7 Player

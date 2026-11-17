@@ -399,11 +399,34 @@ fn build_display_lines(
     (display, interludes)
 }
 
+/// The daemon's readings, one per provider line, laid against the display lines the interludes were slotted into.
+fn display_readings(readings: &[Option<String>], interludes: &[bool]) -> Vec<Option<String>> {
+    let mut readings = readings.iter();
+    interludes
+        .iter()
+        .map(|&interlude| {
+            if interlude {
+                None
+            } else {
+                readings.next().cloned().flatten()
+            }
+        })
+        .collect()
+}
+
+/// A romanized reading under its line: smaller, and quieter than the colour the line wears.
+fn lyric_reading_class(layout: LayoutMode) -> &'static str {
+    match layout {
+        LayoutMode::Fullscreen => "block text-base font-medium opacity-70 leading-snug mt-1",
+        LayoutMode::Rightbar => "block text-sm font-medium opacity-70 leading-snug mt-0.5",
+    }
+}
+
 /// Render synchronized lyrics. Blur transitions use explicit pixel lengths;
 /// WebKit does not reliably interpolate between `none` and a blur filter.
 #[component]
 pub fn LyricsView(
-    lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
+    lyrics: Signal<hooks::lyrics::LyricsState>,
     current_song_progress: Signal<u64>,
     settings: Signal<Settings>,
     layout: LayoutMode,
@@ -890,7 +913,11 @@ pub fn LyricsView(
         ));
 
         async move {
-            if let Some(Some(utils::lyrics::Lyrics::Synced(lines))) = lyrics {
+            if let Some(Some(hooks::lyrics::ShownLyrics {
+                lyrics: utils::lyrics::Lyrics::Synced(lines),
+                ..
+            })) = lyrics
+            {
                 let mut sleep_duration_ms: u64;
 
                 let (lines, _) = build_display_lines(&lines);
@@ -959,7 +986,10 @@ pub fn LyricsView(
 
     let has_synced_lyrics = matches!(
         &*lyrics.read(),
-        Some(Some(utils::lyrics::Lyrics::Synced(_)))
+        Some(Some(hooks::lyrics::ShownLyrics {
+            lyrics: utils::lyrics::Lyrics::Synced(_),
+            ..
+        }))
     );
     let show_sync_button = !auto_sync() && has_synced_lyrics;
 
@@ -984,8 +1014,10 @@ pub fn LyricsView(
                     "text-white/70 text-center py-4 px-4 leading-relaxed font-medium text-sm flex flex-col gap-4 overflow-x-hidden"
                 },
                 match &*lyrics.read() {
-                    Some(Some(utils::lyrics::Lyrics::Synced(lines))) => {
+                    Some(Some(hooks::lyrics::ShownLyrics { lyrics: utils::lyrics::Lyrics::Synced(lines), readings })) => {
                         let (lines, interludes) = build_display_lines(lines);
+                        let readings = display_readings(readings, &interludes);
+                        let reading_class = lyric_reading_class(layout);
                         let has_opposite_turn = lines.iter().any(|line| line.opposite_turn);
                         let note_class = match layout {
                             LayoutMode::Fullscreen => "w-7 h-7",
@@ -1083,14 +1115,40 @@ pub fn LyricsView(
                                                 }
                                             }
                                         }
+                                        if let Some(reading) = &readings[i] {
+                                            span { class: "{reading_class}", "{reading}" }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                    Some(Some(utils::lyrics::Lyrics::Plain(text))) => rsx! {
-                        div { class: "whitespace-pre-wrap", "{text}" }
-                    },
+                    Some(Some(hooks::lyrics::ShownLyrics { lyrics: utils::lyrics::Lyrics::Plain(text), readings })) => {
+                        if readings.is_empty() {
+                            rsx! {
+                                div { class: "whitespace-pre-wrap", "{text}" }
+                            }
+                        } else {
+                            let mut readings = readings.iter();
+                            let rows: Vec<(String, Option<String>)> = text
+                                .lines()
+                                .map(|line| (line.to_string(), readings.next().cloned().flatten()))
+                                .collect();
+                            rsx! {
+                                div { class: "whitespace-pre-wrap",
+                                    for (i, (line, reading)) in rows.into_iter().enumerate() {
+                                        div { key: "{i}",
+                                            // A blank line still holds its height, so stanzas stay apart.
+                                            if line.trim().is_empty() { "\u{a0}" } else { "{line}" }
+                                            if let Some(reading) = reading {
+                                                span { class: "block text-xs opacity-70 leading-snug", "{reading}" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Some(None) => rsx! { "" },
                     None => rsx! { "{i18n::t(\"loading_lyrics\")}" },
                 }
@@ -1157,6 +1215,18 @@ mod tests {
         assert_eq!(display[0].end_time, Some(12.0));
         assert_eq!(display[2].start_time, 15.0);
         assert_eq!(display[2].end_time, Some(40.0));
+    }
+
+    #[test]
+    fn readings_skip_the_interludes_slotted_between_lines() {
+        let readings = vec![Some("a".to_string()), None, Some("c".to_string())];
+        let interludes = vec![true, false, true, false, false];
+
+        assert_eq!(
+            display_readings(&readings, &interludes),
+            vec![None, Some("a".into()), None, None, Some("c".into())]
+        );
+        assert_eq!(display_readings(&[], &interludes), vec![None; 5]);
     }
 
     #[test]

@@ -19,7 +19,7 @@ pub(crate) fn FullscreenAndroid(
     current_song_bitrate: Signal<u16>,
     current_queue_index: Signal<usize>,
     items: Vec<api::TrackInfo>,
-    lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
+    lyrics: Signal<hooks::lyrics::LyricsState>,
     background_style: Memo<String>,
     cover_background: Memo<Option<String>>,
 ) -> Element {

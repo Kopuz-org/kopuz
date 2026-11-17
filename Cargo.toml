@@ -145,6 +145,11 @@ wasmtime = { version = "48", default-features = false, features = [
 wasmtime-wasi = { version = "48", default-features = false, features = ["p2"] }
 wit-bindgen = "0.63"
 url = "2.5"
+# Lyrics romanization: small per-script tables, no morphological dictionary.
+wana_kana = { version = "5", default-features = false }
+pinyin = { version = "0.11", default-features = false, features = ["with_tone"] }
+any_ascii = "0.3"
+unicode-script = "0.5"
 
 # Workspace components
 i18n = { package = "kopuz-i18n", version = "0.68.0", path = "./apps/common/i18n" }

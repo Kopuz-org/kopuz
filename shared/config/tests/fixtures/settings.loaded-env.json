@@ -105,6 +105,7 @@
     "preamp_db": 1.5,
     "prevent_clipping": true
   },
+  "romanize_lyrics": false,
   "sample_rate_mode": "System",
   "settings_layout": "Cd",
   "show_row_images": true,

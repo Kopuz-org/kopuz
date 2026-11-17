@@ -66,6 +66,7 @@ pub enum BackgroundEdit {
 pub enum LyricsEdit {
     PreferLocalLyrics(bool),
     EnableMusixmatchLyrics(bool),
+    RomanizeLyrics(bool),
     LyricsOffsetMs(i32),
     LyricsOffsetAuto(bool),
     LyricsDepthBlur(bool),
@@ -411,6 +412,7 @@ impl Lyrics {
         match edit {
             LyricsEdit::PreferLocalLyrics(value) => self.prefer_local_lyrics = value,
             LyricsEdit::EnableMusixmatchLyrics(value) => self.enable_musixmatch_lyrics = value,
+            LyricsEdit::RomanizeLyrics(value) => self.romanize_lyrics = value,
             LyricsEdit::LyricsOffsetMs(value) => self.lyrics_offset_ms = value,
             LyricsEdit::LyricsOffsetAuto(value) => self.lyrics_offset_auto = value,
             LyricsEdit::LyricsDepthBlur(value) => self.lyrics_depth_blur = value,
@@ -556,6 +558,7 @@ pub fn edit_samples() -> Vec<SettingsEdit> {
         SettingsEdit::Background(BackgroundEdit::CustomBackgroundPath("/bg.png".into())),
         SettingsEdit::Lyrics(LyricsEdit::PreferLocalLyrics(true)),
         SettingsEdit::Lyrics(LyricsEdit::EnableMusixmatchLyrics(true)),
+        SettingsEdit::Lyrics(LyricsEdit::RomanizeLyrics(true)),
         SettingsEdit::Lyrics(LyricsEdit::LyricsOffsetMs(-250)),
         SettingsEdit::Lyrics(LyricsEdit::LyricsOffsetAuto(false)),
         SettingsEdit::Lyrics(LyricsEdit::LyricsDepthBlur(false)),
