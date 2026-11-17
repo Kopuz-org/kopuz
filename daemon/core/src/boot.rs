@@ -113,6 +113,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         db::legacy::migrate_json_store(&database, &db::config_dir()).await;
     }
     let data_dir = db_path.parent().unwrap_or_else(|| Path::new("."));
+    server::lyrics::romanize::set_dictionary_dir(data_dir.join("dictionaries"));
     // Installed plugins live beside the library they serve, so a debug build's
     // separate database gets separate plugins too.
     let plugin_dir = std::env::var_os("KOPUZ_PLUGIN_DIR")

@@ -302,6 +302,8 @@ fn scan_candidates(paths: Vec<String>, library: &reader::Library) -> Vec<String>
                     .album_id
                     .strip_prefix("smb:")
                     .is_some_and(reader::metadata::album_id_is_current)
+                // A row stored before bit depth was read: these formats always have one, so it is read once.
+                && !(track.bit_depth == 0 && always_has_bit_depth(&track.id.key()))
         })
         .map(|track| track.id.key().into_owned())
         .collect();
@@ -309,6 +311,18 @@ fn scan_candidates(paths: Vec<String>, library: &reader::Library) -> Vec<String>
         .into_iter()
         .filter(|path| !existing.contains(path))
         .collect()
+}
+
+/// Lossless PCM formats, which always state bits per sample; lossy ones never do, so their 0 is the answer.
+fn always_has_bit_depth(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            ["flac", "wav", "aif", "aiff", "ape", "wv"]
+                .iter()
+                .any(|lossless| ext.eq_ignore_ascii_case(lossless))
+        })
 }
 
 fn cover_candidates(
