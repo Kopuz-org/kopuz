@@ -84,7 +84,7 @@ impl LyricLine {
         }
     }
 
-    /// The colour the voice leaves behind; the dim and the lit states are derived from it.
+    /// The colour of the line being sung; the others take the theme's text colour.
     pub fn ink(mut self, ink: Hsla) -> Self {
         self.ink = ink;
         self
@@ -149,17 +149,19 @@ impl RenderOnce for LyricLine {
         let (lit, background, opposite, paired) =
             (self.lit, self.background, self.opposite, self.paired);
         let sung = self.ink;
+        // The accent can sit close to the backdrop (gruvbox's does), so the lines it is not on wear the text colour.
+        let rest = cx.theme().foreground;
         let tint = if background { BACKGROUND_ALPHA } else { 1.0 };
         let base = if lit {
             sung.alpha(tint)
         } else if background {
-            sung.alpha(BACKGROUND_DIM)
+            rest.alpha(BACKGROUND_DIM)
         } else {
-            sung.alpha(DIM)
+            rest.alpha(DIM)
         };
         let turned = opposite || paired;
         let (start_ms, seek) = (self.start_ms, self.seek);
-        let hover = sung.alpha(DIM_HOVER * tint);
+        let hover = rest.alpha(DIM_HOVER * tint);
         let blur = Some(self.blur).filter(|radius| !lit && *radius > px(0.));
         let group = SharedString::from(format!("lyric-{}", self.index));
 
