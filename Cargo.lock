@@ -344,6 +344,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "any_ascii"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90c6333e01ba7235575b6ab53e5af10f1c327927fd97c36462917e289557ea64"
+
+[[package]]
 name = "anyhow"
 version = "1.0.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7222,6 +7228,7 @@ name = "kopuz-server"
 version = "0.68.0"
 dependencies = [
  "aes-gcm 0.11.0",
+ "any_ascii",
  "arc-swap",
  "async-trait",
  "base64 0.22.1",
@@ -7244,6 +7251,7 @@ dependencies = [
  "md5",
  "nextcloud-rs",
  "percent-encoding",
+ "pinyin",
  "quick-xml 0.37.5",
  "rand 0.10.2",
  "regex",
@@ -7261,8 +7269,10 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tracing",
+ "unicode-script",
  "urlencoding",
  "uuid 1.23.5",
+ "wana_kana",
  "webbrowser",
  "windows 0.62.2",
  "windows-core 0.62.2",
@@ -9934,6 +9944,12 @@ name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+
+[[package]]
+name = "pinyin"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e225f595052d9c46045755be4b8d7950b6d9f3c33e0c0b74ba58f11bbfa8c64b"
 
 [[package]]
 name = "piper"
@@ -14916,6 +14932,16 @@ dependencies = [
  "rust-ini 0.12.2",
  "winapi",
  "winreg 0.9.0",
+]
+
+[[package]]
+name = "wana_kana"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "377032e42ca0992cc94e7fa7ee6645a125978019a4961f933e3cf5eceb9c4ae0"
+dependencies = [
+ "fnv",
+ "lazy_static",
 ]
 
 [[package]]

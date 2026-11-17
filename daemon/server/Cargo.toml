@@ -52,6 +52,10 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 symphonia = { workspace = true }
 smb2 = "0.27.2"
 libloading = { workspace = true }
+wana_kana = { workspace = true }
+pinyin = { workspace = true }
+any_ascii = { workspace = true }
+unicode-script = { workspace = true }
 
 [build-dependencies]
 cc = "1"

@@ -46,6 +46,8 @@ const FADE_STEP: f32 = 0.09;
 const FADE_MAX: f32 = 0.55;
 // `leading-relaxed` on unsynced words.
 const RELAXED: f32 = 1.625;
+// A romanized reading under an unsynced line, quieter than the words it reads.
+const READING_ALPHA: f32 = 0.45;
 
 /// A word or syllable of a line, with the byte range it occupies in the line's text.
 #[derive(Clone, Debug, PartialEq)]
@@ -60,6 +62,7 @@ struct Line {
     start: f64,
     end: Option<f64>,
     text: SharedString,
+    reading: Option<SharedString>,
     chunks: Vec<Chunk>,
     background: bool,
     opposite: bool,
@@ -73,6 +76,7 @@ impl Line {
             start,
             end: Some(end),
             text: SharedString::default(),
+            reading: None,
             chunks: Vec::new(),
             background: false,
             opposite: false,
@@ -122,6 +126,7 @@ fn convert(view: LyricLineView) -> Line {
         start: seconds(view.start_ms),
         end: view.end_ms.map(seconds),
         text: text.into(),
+        reading: view.romanized.map(SharedString::from),
         chunks,
         background: view.background,
         opposite: view.opposite_turn,
@@ -282,6 +287,8 @@ enum Lyrics {
     Idle,
     Loading,
     Plain(SharedString),
+    /// Unsynced words with a reading under some of their lines.
+    Read(Vec<(SharedString, Option<SharedString>)>),
     Synced {
         lines: Vec<Line>,
         main: Vec<usize>,
@@ -300,6 +307,8 @@ pub struct LyricsView {
     lyrics: Lyrics,
     key: Option<String>,
     generation: u64,
+    /// The romanization setting the words on show were asked for under.
+    romanize: bool,
     scroll: ScrollHandle,
     auto_sync: bool,
     active: Option<usize>,
@@ -325,12 +334,17 @@ impl LyricsView {
         let subscriptions = vec![
             cx.observe(&player, |this, player, cx| this.track_changed(&player, cx)),
             cx.observe(&playhead, |this, _, cx| this.on_playhead(cx)),
-            cx.observe(&config, |_, _, cx| cx.notify()),
+            cx.observe(&config, |this, config, cx| {
+                this.config_changed(&config, cx);
+                cx.notify();
+            }),
         ];
+        let romanize = config.read(cx).config().lyrics.romanize_lyrics;
         Self {
             lyrics: Lyrics::Idle,
             key: None,
             generation: 0,
+            romanize,
             scroll: ScrollHandle::new(),
             auto_sync: true,
             active: None,
@@ -390,8 +404,31 @@ impl LyricsView {
         cx.notify();
     }
 
+    /// Romanization is done by the daemon, so turning it on or off asks for the words again.
+    fn config_changed(&mut self, config: &Entity<ConfigModel>, cx: &mut Context<Self>) {
+        let config = config.read(cx);
+        let romanize = config.config().lyrics.romanize_lyrics;
+        // Until the edit is saved the daemon would answer under the old setting.
+        if romanize == self.romanize || config.is_saving() {
+            return;
+        }
+        self.romanize = romanize;
+        if matches!(self.lyrics, Lyrics::Idle) {
+            return;
+        }
+        if let Some(key) = self.key.clone() {
+            self.generation += 1;
+            self.request(key, cx);
+        }
+    }
+
     fn fetch(&mut self, key: String, cx: &mut Context<Self>) {
         self.lyrics = Lyrics::Loading;
+        self.request(key, cx);
+    }
+
+    /// Ask for the words, keeping what is on show until they come.
+    fn request(&mut self, key: String, cx: &mut Context<Self>) {
         let generation = self.generation;
         // The checklist's bug: the words are looked up by the library key, never by the track uid.
         let call = link::Link::global(cx).call(move |api| async move { api.lyrics(key).await });
@@ -530,7 +567,19 @@ impl LyricsView {
 
 fn adopt(view: LyricsSource) -> Lyrics {
     if let Some(plain) = view.plain.filter(|plain| !plain.trim().is_empty()) {
-        return Lyrics::Plain(plain.into());
+        if view.plain_romanized.iter().all(Option::is_none) {
+            return Lyrics::Plain(plain.into());
+        }
+        let mut readings = view.plain_romanized.into_iter();
+        return Lyrics::Read(
+            plain
+                .lines()
+                .map(|line| {
+                    let reading = readings.next().flatten().map(SharedString::from);
+                    (SharedString::from(line.to_owned()), reading)
+                })
+                .collect(),
+        );
     }
     if view.synced.is_empty() {
         return Lyrics::Plain(t("lyrics_not_found"));
@@ -598,6 +647,7 @@ impl Render for LineClock {
         let time = lyric_time(cx);
         let line = &self.line;
         let mut row = LyricLine::new(self.index, start_ms(line), line.text.clone())
+            .reading(line.reading.clone())
             .ink(sung_ink(window, cx))
             .lit(true)
             .background(line.background)
@@ -733,6 +783,29 @@ impl Render for LyricsView {
                 .text_color(style::white(BACKGROUND_ALPHA, cx))
                 .child(text.clone())
                 .into_any_element(),
+            Lyrics::Read(lines) => self
+                .scroller(cx)
+                .py_4()
+                .px_4()
+                .text_sm()
+                .text_center()
+                .font_medium()
+                .line_height(relative(RELAXED))
+                .text_color(style::white(BACKGROUND_ALPHA, cx))
+                .children(lines.iter().map(|(line, reading)| {
+                    if line.trim().is_empty() {
+                        return div().h_5();
+                    }
+                    div()
+                        .child(line.clone())
+                        .children(reading.clone().map(|reading| {
+                            div()
+                                .text_xs()
+                                .text_color(style::white(READING_ALPHA, cx))
+                                .child(reading)
+                        }))
+                }))
+                .into_any_element(),
             Lyrics::Synced { lines, .. } => {
                 let paired = lines.iter().any(|line| line.opposite);
                 let height = self.scroll.bounds().size.height;
@@ -754,6 +827,7 @@ impl Render for LyricsView {
                         depth(index, anchor, is_lit, strength, self.depth, shown.as_ref());
                     children.push(
                         LyricLine::new(index, start_ms(line), line.text.clone())
+                            .reading(line.reading.clone())
                             .ink(sung)
                             .lit(is_lit)
                             .background(line.background)
@@ -802,6 +876,7 @@ mod tests {
             start,
             end,
             text: "la".into(),
+            reading: None,
             chunks: Vec::new(),
             background: false,
             opposite: false,
@@ -876,6 +951,30 @@ mod tests {
 
         assert_eq!(active_secondary(&lines, &main, 3.0, None), vec![1]);
         assert!(active_secondary(&lines, &main, 4.5, Some(2)).is_empty());
+    }
+
+    #[test]
+    fn plain_words_carry_their_readings_line_by_line() {
+        let view = LyricsSource {
+            plain: Some("안녕\n\nhello".into()),
+            plain_romanized: vec![Some("annyeong".into()), None, None],
+            synced: Vec::new(),
+        };
+        let Lyrics::Read(rows) = adopt(view) else {
+            panic!("readings should split the words into lines");
+        };
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].1.as_deref(), Some("annyeong"));
+        assert_eq!(rows[2].1, None);
+    }
+
+    #[test]
+    fn plain_words_without_readings_stay_one_block() {
+        let view = LyricsSource {
+            plain: Some("hello".into()),
+            ..LyricsSource::default()
+        };
+        assert!(matches!(adopt(view), Lyrics::Plain(_)));
     }
 
     #[test]

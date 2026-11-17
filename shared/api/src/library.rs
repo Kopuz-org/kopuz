@@ -197,6 +197,8 @@ pub struct LyricLineView {
     pub parent_line_index: Option<u32>,
     pub background: bool,
     pub opposite_turn: bool,
+    /// A Latin reading of a line in another script, when romanization is on and one can be given.
+    pub romanized: Option<String>,
 }
 
 /// Lyrics for one track: `synced` when timing exists (chunks carry word or
@@ -205,6 +207,8 @@ pub struct LyricLineView {
 pub struct LyricsView {
     pub plain: Option<String>,
     pub synced: Vec<LyricLineView>,
+    /// One reading per line of `plain`, like [`LyricLineView::romanized`]; empty when no line has one.
+    pub plain_romanized: Vec<Option<String>>,
 }
 
 /// Listening stats: the active source's play counts keyed by track uid.

@@ -140,35 +140,73 @@ fn artist_query(
     }
 }
 
-fn lyrics_view(lyrics: server::lyrics::Lyrics) -> api::LyricsView {
+/// The wire's lyrics, with a Latin reading per line when `romanize` asks for one.
+fn lyrics_view(lyrics: server::lyrics::Lyrics, romanize: bool) -> api::LyricsView {
     let to_ms = |seconds: f64| (seconds.max(0.0) * 1000.0) as u64;
+    let readings = |lines: &[String]| {
+        let readings = server::lyrics::romanize::romanize_lines(lines);
+        if readings.iter().any(Option::is_some) {
+            readings
+        } else {
+            Vec::new()
+        }
+    };
     match lyrics {
         server::lyrics::Lyrics::Plain(text) => api::LyricsView {
+            plain_romanized: if romanize {
+                readings(&text.lines().map(str::to_owned).collect::<Vec<_>>())
+            } else {
+                Vec::new()
+            },
             plain: Some(text),
             synced: Vec::new(),
         },
-        server::lyrics::Lyrics::Synced(lines) => api::LyricsView {
-            plain: None,
-            synced: lines
-                .into_iter()
-                .map(|line| api::LyricLineView {
-                    start_ms: to_ms(line.start_time),
-                    end_ms: line.end_time.map(to_ms),
-                    text: line.text,
-                    chunks: line
-                        .chunks
-                        .into_iter()
-                        .map(|chunk| api::LyricChunkView {
-                            start_ms: to_ms(chunk.start_time),
-                            text: chunk.text,
-                        })
-                        .collect(),
-                    parent_line_index: line.parent_line_index.map(|index| index as u32),
-                    background: line.background,
-                    opposite_turn: line.opposite_turn,
-                })
-                .collect(),
-        },
+        server::lyrics::Lyrics::Synced(lines) => {
+            let mut romanized = if romanize {
+                // A word-synced line can leave its text empty and carry the words in its chunks.
+                let texts: Vec<String> = lines
+                    .iter()
+                    .map(|line| {
+                        if line.text.is_empty() {
+                            line.chunks
+                                .iter()
+                                .map(|chunk| chunk.text.as_str())
+                                .collect()
+                        } else {
+                            line.text.clone()
+                        }
+                    })
+                    .collect();
+                readings(&texts)
+            } else {
+                Vec::new()
+            }
+            .into_iter();
+            api::LyricsView {
+                plain: None,
+                plain_romanized: Vec::new(),
+                synced: lines
+                    .into_iter()
+                    .map(|line| api::LyricLineView {
+                        romanized: romanized.next().flatten(),
+                        start_ms: to_ms(line.start_time),
+                        end_ms: line.end_time.map(to_ms),
+                        text: line.text,
+                        chunks: line
+                            .chunks
+                            .into_iter()
+                            .map(|chunk| api::LyricChunkView {
+                                start_ms: to_ms(chunk.start_time),
+                                text: chunk.text,
+                            })
+                            .collect(),
+                        parent_line_index: line.parent_line_index.map(|index| index as u32),
+                        background: line.background,
+                        opposite_turn: line.opposite_turn,
+                    })
+                    .collect(),
+            }
+        }
     }
 }
 
@@ -494,7 +532,7 @@ impl LibraryService {
             },
         };
         lyrics
-            .map(lyrics_view)
+            .map(|lyrics| lyrics_view(lyrics, config.lyrics.romanize_lyrics))
             .ok_or_else(|| ApiError::not_found("no lyrics found"))
     }
 
@@ -752,6 +790,47 @@ fn youtube_music_lyrics_auth(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn synced(text: &str) -> server::lyrics::LyricLine {
+        server::lyrics::LyricLine {
+            start_time: 1.0,
+            end_time: None,
+            text: text.into(),
+            chunks: Vec::new(),
+            parent_line_index: None,
+            background: false,
+            opposite_turn: false,
+        }
+    }
+
+    #[test]
+    fn lyrics_carry_a_reading_only_while_romanization_is_on() {
+        let lyrics = server::lyrics::Lyrics::Synced(vec![synced("사랑해"), synced("love")]);
+
+        let on = lyrics_view(lyrics.clone(), true);
+        let readings: Vec<_> = on
+            .synced
+            .iter()
+            .map(|line| line.romanized.clone())
+            .collect();
+        assert_eq!(readings, vec![Some("saranghae".to_string()), None]);
+
+        let off = lyrics_view(lyrics, false);
+        assert!(off.synced.iter().all(|line| line.romanized.is_none()));
+    }
+
+    #[test]
+    fn plain_lyrics_carry_one_reading_per_line() {
+        let plain = server::lyrics::Lyrics::Plain("Привет\nhello".into());
+        assert_eq!(
+            lyrics_view(plain.clone(), true).plain_romanized,
+            vec![Some("Privet".to_string()), None]
+        );
+        assert!(lyrics_view(plain, false).plain_romanized.is_empty());
+
+        let latin = server::lyrics::Lyrics::Plain("hello\nworld".into());
+        assert!(lyrics_view(latin, true).plain_romanized.is_empty());
+    }
 
     #[test]
     fn youtube_music_lyrics_carry_the_chosen_brand_account() {

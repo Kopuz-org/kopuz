@@ -249,6 +249,7 @@ impl PlaybackSettings {
         let config = model.read(cx).config();
         let prefer_local = config.lyrics.prefer_local_lyrics;
         let musixmatch = config.lyrics.enable_musixmatch_lyrics;
+        let romanize = config.lyrics.romanize_lyrics;
         let auto = config.lyrics.lyrics_offset_auto;
         let latency_ms = PlayerModel::global(cx)
             .read(cx)
@@ -284,6 +285,17 @@ impl PlaybackSettings {
                 )
                 .bind("enable_musixmatch_lyrics", cx)
                 .description(t("enable_musixmatch_lyrics_description"))
+                .shown(cx),
+            )
+            .children(
+                toggle_row(
+                    "romanize_lyrics",
+                    t("romanize_lyrics"),
+                    romanize,
+                    ConfigModel::writer(|on| SettingsEdit::Lyrics(LyricsEdit::RomanizeLyrics(on))),
+                )
+                .bind("romanize_lyrics", cx)
+                .description(t("romanize_lyrics_description"))
                 .shown(cx),
             )
             .children(

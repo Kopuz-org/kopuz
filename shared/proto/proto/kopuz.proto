@@ -1751,6 +1751,8 @@ message Stats {
 message Lyrics {
   optional string plain = 1;
   repeated LyricLine synced = 2;
+  // One reading per line of `plain`, empty for a line that has none.
+  repeated string plain_romanized = 3;
 }
 
 message LyricLine {
@@ -1762,6 +1764,7 @@ message LyricLine {
   optional uint32 parent_line_index = 5;
   bool background = 6;
   bool opposite_turn = 7;
+  optional string romanized = 8;
 }
 
 message LyricChunk {
@@ -1984,6 +1987,7 @@ message ConfigEdit {
     string custom_background_path = 31;
     bool prefer_local_lyrics = 63;
     bool enable_musixmatch_lyrics = 64;
+    bool romanize_lyrics = 89;
     int32 lyrics_offset_ms = 65;
     bool lyrics_offset_auto = 66;
     bool lyrics_depth_blur = 67;
@@ -2111,6 +2115,7 @@ enum SettingKey {
   SETTING_KEY_RADIO_REGISTRIES = 61;
   SETTING_KEY_PREFER_LOCAL_LYRICS = 63;
   SETTING_KEY_ENABLE_MUSIXMATCH_LYRICS = 64;
+  SETTING_KEY_ROMANIZE_LYRICS = 89;
   SETTING_KEY_LYRICS_OFFSET_MS = 65;
   SETTING_KEY_LYRICS_OFFSET_AUTO = 66;
   SETTING_KEY_LYRICS_DEPTH_BLUR = 67;
@@ -2316,6 +2321,7 @@ message Config {
   repeated RegistryEntry radio_registries = 61;
   bool prefer_local_lyrics = 63;
   bool enable_musixmatch_lyrics = 64;
+  bool romanize_lyrics = 89;
   int32 lyrics_offset_ms = 65;
   bool lyrics_offset_auto = 66;
   bool lyrics_depth_blur = 67;

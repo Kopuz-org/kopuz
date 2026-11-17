@@ -261,7 +261,13 @@ pub fn lyrics_to_proto(value: &api::LyricsView) -> Lyrics {
                 parent_line_index: line.parent_line_index,
                 background: line.background,
                 opposite_turn: line.opposite_turn,
+                romanized: line.romanized.clone(),
             })
+            .collect(),
+        plain_romanized: value
+            .plain_romanized
+            .iter()
+            .map(|reading| reading.clone().unwrap_or_default())
             .collect(),
     }
 }
@@ -287,7 +293,13 @@ pub fn lyrics_from_proto(value: &Lyrics) -> api::LyricsView {
                 parent_line_index: line.parent_line_index,
                 background: line.background,
                 opposite_turn: line.opposite_turn,
+                romanized: line.romanized.clone(),
             })
+            .collect(),
+        plain_romanized: value
+            .plain_romanized
+            .iter()
+            .map(|reading| (!reading.is_empty()).then(|| reading.clone()))
             .collect(),
     }
 }

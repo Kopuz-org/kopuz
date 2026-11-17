@@ -434,6 +434,16 @@ pub(super) fn MetadataSection(settings: Signal<Settings>) -> Element {
                 }
             }
             SettingItem {
+                title: i18n::t("romanize_lyrics").to_string(),
+                config_key: "romanize_lyrics",
+                control: rsx! {
+                    ToggleSetting {
+                        enabled: settings.read().lyrics.romanize_lyrics,
+                        on_change: move |val| edits.edit(SettingsEdit::Lyrics(LyricsEdit::RomanizeLyrics(val))),
+                    }
+                }
+            }
+            SettingItem {
                 title: i18n::t("lyrics_offset_auto").to_string(),
                 config_key: "lyrics_offset_auto",
                 control: rsx! {

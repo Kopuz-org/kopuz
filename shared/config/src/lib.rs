@@ -1029,6 +1029,10 @@ pub struct Lyrics {
     #[serde(default)]
     #[garde(skip)]
     pub enable_musixmatch_lyrics: bool,
+    /// Have the daemon add a Latin reading to lyric lines written in another script.
+    #[serde(default)]
+    #[garde(skip)]
+    pub romanize_lyrics: bool,
     /// Milliseconds to hold the lyrics behind the playback clock.
     #[serde(default, deserialize_with = "deserialize_lyrics_offset_ms")]
     #[garde(range(min = -LYRICS_OFFSET_LIMIT_MS, max = LYRICS_OFFSET_LIMIT_MS))]
@@ -1052,6 +1056,7 @@ impl Default for Lyrics {
         Self {
             prefer_local_lyrics: false,
             enable_musixmatch_lyrics: false,
+            romanize_lyrics: false,
             lyrics_offset_ms: 0,
             lyrics_offset_auto: true,
             lyrics_depth_blur: true,

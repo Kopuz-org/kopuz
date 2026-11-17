@@ -12,6 +12,7 @@ mod cache;
 mod local;
 mod lrc;
 mod request;
+pub mod romanize;
 mod server;
 
 pub use cache::prime;
