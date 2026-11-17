@@ -14,6 +14,7 @@ pub mod layout;
 pub mod library;
 pub mod playlists;
 pub mod radio;
+pub mod recap;
 pub mod scroll_persist;
 pub mod search;
 pub mod server;

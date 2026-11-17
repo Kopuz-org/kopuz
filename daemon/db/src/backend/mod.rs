@@ -15,6 +15,7 @@ mod cfg_store;
 mod collation;
 mod dump;
 mod frontend_prefs;
+mod listens;
 mod migrations;
 mod offline_cache;
 mod queries;
@@ -433,6 +434,15 @@ impl ReadStore for Native {
         cfg_store::play_history(&self.pool(), source).await
     }
 
+    async fn listening_recap(
+        &self,
+        source: &crate::Source,
+        window: crate::RecapWindow,
+        top: u32,
+    ) -> Result<crate::ListeningRecap, DbError> {
+        listens::recap(&self.pool(), source, window, top).await
+    }
+
     async fn favorites_liked_at(&self, server_id: &str) -> Result<Vec<(String, i64)>, DbError> {
         queries::favorites_liked_at(&self.pool(), server_id).await
     }
@@ -684,6 +694,14 @@ impl Storage for Native {
         track_key: &str,
     ) -> Result<(), DbError> {
         cfg_store::bump_listen_count(&self.pool(), source, track_key).await
+    }
+
+    async fn record_listen(
+        &self,
+        source: &crate::Source,
+        listen: &crate::Listen,
+    ) -> Result<(), DbError> {
+        listens::record(&self.pool(), source, listen).await
     }
 
     async fn push_recent(&self, source: &crate::Source, track_key: &str) -> Result<(), DbError> {

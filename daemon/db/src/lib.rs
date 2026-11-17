@@ -248,6 +248,73 @@ pub struct PlayRecord {
     pub last_played_at: Option<i64>,
 }
 
+/// A counted listen, with the track as it was played.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Listen {
+    pub track_key: String,
+    pub title: String,
+    pub artist: String,
+    pub artist_key: Option<String>,
+    pub album: String,
+    pub album_id: String,
+    pub duration_ms: u64,
+}
+
+/// One ranked track, artist or album of a recap.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RecapEntry {
+    /// The track key, artist key or album id; `None` where the listens named none.
+    pub key: Option<String>,
+    pub title: String,
+    /// The artist of a track or album; empty for an artist.
+    pub subtitle: String,
+    pub plays: u64,
+    pub listened_ms: u64,
+}
+
+/// What the busiest stretch of a recap is measured in, on the listener's local clock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecapBucket {
+    /// An hour of the day, whatever the date.
+    Hour,
+    Day,
+    Month,
+}
+
+/// The listens a recap reads: `since` (unbounded when `None`) up to before `until`, in Unix seconds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecapWindow {
+    pub since: Option<i64>,
+    pub until: i64,
+    pub bucket: RecapBucket,
+}
+
+/// The busiest bucket of a recap, in local time; the fields finer than the bucket are any listen's in it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RecapPeak {
+    pub year: i32,
+    pub month: u8,
+    pub day: u8,
+    pub hour: u8,
+    pub plays: u64,
+}
+
+/// A source's listens over one window, summed up.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ListeningRecap {
+    pub listened_ms: u64,
+    pub plays: u64,
+    pub tracks: u64,
+    pub artists: u64,
+    pub albums: u64,
+    pub top_tracks: Vec<RecapEntry>,
+    pub top_artists: Vec<RecapEntry>,
+    pub top_albums: Vec<RecapEntry>,
+    pub peak: Option<RecapPeak>,
+    /// Local days in a row with a listen, inside the window.
+    pub longest_streak_days: u32,
+}
+
 /// Per-artist images: `(overrides, photos)`. `overrides` are user-set custom
 /// photos (always a local path, highest priority); `photos` are the synced photo
 /// per artist as a uniform [`reader::ArtistImageRef`] (a server URL or a local
@@ -493,6 +560,14 @@ pub trait ReadStore: Send + Sync {
     /// Every played track of `source`, most played first.
     async fn play_history(&self, source: &Source) -> Result<Vec<PlayRecord>, DbError>;
 
+    /// `source`'s listens inside `window`, with `top` entries per ranking.
+    async fn listening_recap(
+        &self,
+        source: &Source,
+        window: RecapWindow,
+        top: u32,
+    ) -> Result<ListeningRecap, DbError>;
+
     /// `server_id`'s favorite refs with the Unix second each was liked.
     async fn favorites_liked_at(&self, server_id: &str) -> Result<Vec<(String, i64)>, DbError>;
 
@@ -704,6 +779,9 @@ pub trait Storage: ReadStore {
 
     /// Increment one track's play count in its source partition.
     async fn bump_listen_count(&self, source: &Source, track_key: &str) -> Result<(), DbError>;
+
+    /// Count one listen and log it for the recap, in one transaction.
+    async fn record_listen(&self, source: &Source, listen: &Listen) -> Result<(), DbError>;
 
     /// Record a play for this source's recently-played history (caps + trims).
     async fn push_recent(&self, source: &Source, track_key: &str) -> Result<(), DbError>;

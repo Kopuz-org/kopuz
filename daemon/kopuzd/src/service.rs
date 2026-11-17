@@ -953,6 +953,15 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::stats_to_proto(&stats)))
     }
 
+    async fn get_listening_recap(
+        &self,
+        request: Request<proto::ListeningRecapRequest>,
+    ) -> Result<Response<proto::ListeningRecap>, Status> {
+        let period = convert::recap_period_from_proto(request.get_ref().period);
+        let recap = self.0.api.listening_recap(period).await.map_err(failed)?;
+        Ok(Response::new(convert::listening_recap_to_proto(&recap)))
+    }
+
     async fn get_lyrics(
         &self,
         request: Request<proto::TrackRef>,

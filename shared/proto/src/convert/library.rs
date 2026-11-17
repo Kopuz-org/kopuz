@@ -302,6 +302,113 @@ pub fn stats_from_proto(value: &Stats) -> api::StatsView {
     }
 }
 
+fn recap_entry_to_proto(value: &api::RecapEntry) -> RecapEntry {
+    RecapEntry {
+        key: value.key.clone(),
+        title: value.title.clone(),
+        subtitle: value.subtitle.clone(),
+        plays: value.plays,
+        listened_ms: value.listened_ms,
+        artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
+    }
+}
+
+fn recap_entry_from_proto(value: &RecapEntry) -> api::RecapEntry {
+    api::RecapEntry {
+        key: value.key.clone(),
+        title: value.title.clone(),
+        subtitle: value.subtitle.clone(),
+        plays: value.plays,
+        listened_ms: value.listened_ms,
+        artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
+    }
+}
+
+pub fn recap_period_to_proto(value: api::RecapPeriod) -> RecapPeriod {
+    match value {
+        api::RecapPeriod::Day => RecapPeriod::Day,
+        api::RecapPeriod::Week => RecapPeriod::Week,
+        api::RecapPeriod::Month => RecapPeriod::Month,
+        api::RecapPeriod::Year => RecapPeriod::Year,
+        api::RecapPeriod::AllTime => RecapPeriod::AllTime,
+    }
+}
+
+pub fn recap_period_from_proto(value: i32) -> api::RecapPeriod {
+    match RecapPeriod::try_from(value).unwrap_or(RecapPeriod::Unspecified) {
+        RecapPeriod::Day => api::RecapPeriod::Day,
+        RecapPeriod::Week => api::RecapPeriod::Week,
+        RecapPeriod::Year => api::RecapPeriod::Year,
+        RecapPeriod::AllTime => api::RecapPeriod::AllTime,
+        RecapPeriod::Month | RecapPeriod::Unspecified => api::RecapPeriod::Month,
+    }
+}
+
+fn recap_peak_to_proto(value: &api::RecapPeak) -> RecapPeak {
+    RecapPeak {
+        unit: match value.unit {
+            api::RecapUnit::Hour => RecapUnit::Hour,
+            api::RecapUnit::Day => RecapUnit::Day,
+            api::RecapUnit::Month => RecapUnit::Month,
+        } as i32,
+        year: value.year.into(),
+        month: value.month.into(),
+        day: value.day.into(),
+        hour: value.hour.into(),
+        plays: value.plays,
+    }
+}
+
+fn recap_peak_from_proto(value: &RecapPeak) -> api::RecapPeak {
+    let small = |value: u32| u8::try_from(value).unwrap_or_default();
+    api::RecapPeak {
+        unit: match RecapUnit::try_from(value.unit).unwrap_or(RecapUnit::Unspecified) {
+            RecapUnit::Hour => api::RecapUnit::Hour,
+            RecapUnit::Month => api::RecapUnit::Month,
+            RecapUnit::Day | RecapUnit::Unspecified => api::RecapUnit::Day,
+        },
+        year: u16::try_from(value.year).unwrap_or_default(),
+        month: small(value.month),
+        day: small(value.day),
+        hour: small(value.hour),
+        plays: value.plays,
+    }
+}
+
+pub fn listening_recap_to_proto(value: &api::ListeningRecap) -> ListeningRecap {
+    let entries = |entries: &[api::RecapEntry]| entries.iter().map(recap_entry_to_proto).collect();
+    ListeningRecap {
+        period: recap_period_to_proto(value.period) as i32,
+        listened_ms: value.listened_ms,
+        plays: value.plays,
+        tracks: value.tracks,
+        artists: value.artists,
+        albums: value.albums,
+        top_tracks: entries(&value.top_tracks),
+        top_artists: entries(&value.top_artists),
+        top_albums: entries(&value.top_albums),
+        peak: value.peak.as_ref().map(recap_peak_to_proto),
+        longest_streak_days: value.longest_streak_days,
+    }
+}
+
+pub fn listening_recap_from_proto(value: &ListeningRecap) -> api::ListeningRecap {
+    let entries = |entries: &[RecapEntry]| entries.iter().map(recap_entry_from_proto).collect();
+    api::ListeningRecap {
+        period: recap_period_from_proto(value.period),
+        listened_ms: value.listened_ms,
+        plays: value.plays,
+        tracks: value.tracks,
+        artists: value.artists,
+        albums: value.albums,
+        top_tracks: entries(&value.top_tracks),
+        top_artists: entries(&value.top_artists),
+        top_albums: entries(&value.top_albums),
+        peak: value.peak.as_ref().map(recap_peak_from_proto),
+        longest_streak_days: value.longest_streak_days,
+    }
+}
+
 pub fn artwork_request_to_proto(value: &api::ArtworkRequest) -> ArtworkRequest {
     use artwork_request::Entity;
     let entity = match &value.target {
@@ -844,6 +951,61 @@ mod tests {
         assert_eq!(
             Some(request.clone()),
             artwork_request_from_proto(&artwork_request_to_proto(&request))
+        );
+    }
+
+    #[test]
+    fn a_listening_recap_round_trips_every_field() {
+        let entry = |key: Option<&str>, title: &str| api::RecapEntry {
+            key: key.map(Into::into),
+            title: title.into(),
+            subtitle: "Ada".into(),
+            plays: 12,
+            listened_ms: 2_400_000,
+            artwork: Some(api::ArtworkRef::new(
+                api::ArtworkTarget::Album("al-1".into()),
+                7,
+            )),
+        };
+        let recap = api::ListeningRecap {
+            period: api::RecapPeriod::Week,
+            listened_ms: 9_000_000,
+            plays: 40,
+            tracks: 20,
+            artists: 6,
+            albums: 8,
+            top_tracks: vec![entry(Some("/a.flac"), "A")],
+            top_artists: vec![entry(None, "Ada")],
+            top_albums: vec![entry(Some("al-1"), "First")],
+            peak: Some(api::RecapPeak {
+                unit: api::RecapUnit::Day,
+                year: 2026,
+                month: 3,
+                day: 9,
+                hour: 21,
+                plays: 17,
+            }),
+            longest_streak_days: 4,
+        };
+        assert_eq!(
+            listening_recap_from_proto(&listening_recap_to_proto(&recap)),
+            recap
+        );
+        for period in api::RecapPeriod::ALL {
+            let sent = recap_period_to_proto(period) as i32;
+            assert_eq!(recap_period_from_proto(sent), period);
+        }
+        for unit in [api::RecapUnit::Hour, api::RecapUnit::Month] {
+            let peak = api::RecapPeak {
+                unit,
+                ..Default::default()
+            };
+            assert_eq!(recap_peak_from_proto(&recap_peak_to_proto(&peak)), peak);
+        }
+        let empty = api::ListeningRecap::default();
+        assert_eq!(
+            listening_recap_from_proto(&listening_recap_to_proto(&empty)),
+            empty
         );
     }
 }

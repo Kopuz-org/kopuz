@@ -713,6 +713,16 @@ impl api::LibraryApi for LocalApi {
             None => Err(ApiError::unsupported("no library service")),
         }
     }
+
+    async fn listening_recap(
+        &self,
+        period: api::RecapPeriod,
+    ) -> Result<api::ListeningRecap, ApiError> {
+        match &self.library {
+            Some(library) => library.listening_recap(period).await,
+            None => Err(ApiError::unsupported("no library service")),
+        }
+    }
 }
 
 #[async_trait::async_trait]

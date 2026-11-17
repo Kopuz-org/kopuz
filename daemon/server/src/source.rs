@@ -854,10 +854,10 @@ pub trait MediaSource: Send + Sync {
             .map_err(SourceError::from)
     }
 
-    /// Increment a track's play count in this source. DB-cache op.
-    async fn bump_listen_count(&self, track_key: &str) -> Result<(), SourceError> {
+    /// Count a listen in this source and log it for the recap. DB-cache op.
+    async fn record_listen(&self, listen: &db::Listen) -> Result<(), SourceError> {
         self.db()
-            .bump_listen_count(self.source(), track_key)
+            .record_listen(self.source(), listen)
             .await
             .map_err(SourceError::from)
     }

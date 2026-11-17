@@ -242,6 +242,17 @@ impl LibraryService {
         })
     }
 
+    /// One artist's artwork, `None` for an artist the library files no row for.
+    pub(super) async fn artist_artwork(
+        &self,
+        key: &str,
+    ) -> Result<Option<api::ArtworkRef>, ApiError> {
+        let Some(row) = crate::artist_row::find(&self.db, &self.query_source(), key).await? else {
+            return Ok(None);
+        };
+        Ok(self.artist_art(Some(&row.key)).await?.info(row).artwork)
+    }
+
     /// The photos and fallback covers an artist's artwork chain reads: for every artist, or just `one`.
     async fn artist_art(&self, one: Option<&str>) -> Result<ArtistArt, ApiError> {
         let source = self.query_source();

@@ -588,6 +588,7 @@ mod artist_art;
 mod jobs;
 mod lyrics_cache;
 mod reads;
+mod recap;
 
 pub(crate) use reads::album_info;
 

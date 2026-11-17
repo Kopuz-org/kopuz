@@ -666,22 +666,22 @@ pub(crate) async fn write_server_credentials(
     Ok(())
 }
 
+pub(super) const BUMP_LISTEN_COUNT: &str = "INSERT INTO listen_counts (source, track_key, count, last_played_at) \
+     VALUES (?1, ?2, 1, unixepoch()) \
+     ON CONFLICT(source, track_key) DO UPDATE \
+     SET count = count + 1, last_played_at = excluded.last_played_at";
+
 /// Increment one track's play count and stamp when it was played (1-row upsert — no whole-blob rewrite).
 pub async fn bump_listen_count(
     pool: &SqlitePool,
     source: &Source,
     track_key: &str,
 ) -> Result<(), DbError> {
-    sqlx::query(
-        "INSERT INTO listen_counts (source, track_key, count, last_played_at) \
-         VALUES (?1, ?2, 1, unixepoch()) \
-         ON CONFLICT(source, track_key) DO UPDATE \
-         SET count = count + 1, last_played_at = excluded.last_played_at",
-    )
-    .bind(source.as_str())
-    .bind(track_key)
-    .execute(pool)
-    .await?;
+    sqlx::query(BUMP_LISTEN_COUNT)
+        .bind(source.as_str())
+        .bind(track_key)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -804,6 +804,7 @@ pub(super) async fn purge_removable(pool: &SqlitePool) -> Result<(), DbError> {
          UNION SELECT source FROM queue_state WHERE source GLOB 'removable:*' \
          UNION SELECT source FROM recently_played WHERE source GLOB 'removable:*' \
          UNION SELECT source FROM listen_counts WHERE source GLOB 'removable:*' \
+         UNION SELECT source FROM listens WHERE source GLOB 'removable:*' \
          UNION SELECT server_id FROM favorites WHERE server_id GLOB 'removable:*'",
     )
     .fetch_all(&mut *tx)
@@ -828,6 +829,7 @@ pub(super) async fn purge_source(
         "DELETE FROM favorites WHERE server_id = ?1",
         "DELETE FROM recently_played WHERE source = ?1",
         "DELETE FROM listen_counts WHERE source = ?1",
+        "DELETE FROM listens WHERE source = ?1",
         "DELETE FROM kv WHERE kind = ?1",
         "DELETE FROM artist_images WHERE source = ?1",
         "DELETE FROM queue_tracks WHERE source = ?1",
