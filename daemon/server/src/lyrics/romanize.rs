@@ -3,9 +3,13 @@
 //! Hangul follows Revised Romanization with its sound changes between
 //! syllables, kana becomes Hepburn romaji, Chinese characters pinyin with tone
 //! marks, and every other script goes through a general transliteration table.
-//! Japanese kanji has no reading here: getting one right takes a morphological
-//! dictionary, and a Chinese reading of Japanese text is worse than none, so a
-//! line with kanji in a song that has kana anywhere is left alone.
+//! A song with kana anywhere is Japanese, so its kanji is read through MeCab's
+//! dictionary (see [`japanese`]) rather than as Chinese; until that dictionary
+//! is ready, its kanji lines are left unread.
+
+mod japanese;
+
+pub use japanese::set_dictionary_dir;
 
 use pinyin::ToPinyin as _;
 use unicode_script::{Script, UnicodeScript as _};
@@ -26,8 +30,14 @@ fn romanize_line(text: &str, japanese: bool) -> Option<String> {
     if !text.chars().any(needs_reading) {
         return None;
     }
-    if japanese && text.chars().any(is_han) {
-        return None;
+    if japanese {
+        if let Some(out) = japanese::read(text) {
+            return (!out.is_empty() && out != text.trim()).then_some(out);
+        }
+        // A Chinese reading of Japanese kanji is worse than none.
+        if text.chars().any(is_han) {
+            return None;
+        }
     }
 
     let chars: Vec<char> = text.chars().collect();
@@ -298,8 +308,8 @@ mod tests {
     }
 
     #[test]
-    fn japanese_with_kanji_is_left_unread() {
-        assert_eq!(one("君の名は"), None);
+    fn japanese_kanji_waits_for_the_dictionary() {
+        // No dictionary directory is set in tests, so nothing is fetched and kanji stays unread.
         let song = romanize_lines(&["さよなら", "東京"]);
         assert_eq!(song, vec![Some("sayonara".to_owned()), None]);
     }

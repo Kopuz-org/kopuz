@@ -145,8 +145,12 @@ wasmtime = { version = "48", default-features = false, features = [
 wasmtime-wasi = { version = "48", default-features = false, features = ["p2"] }
 wit-bindgen = "0.63"
 url = "2.5"
-# Lyrics romanization: small per-script tables, no morphological dictionary.
+# Lyrics romanization: per-script tables, and a MeCab tokenizer for Japanese whose
+# IPADIC dictionary the daemon downloads and compiles on first use.
 wana_kana = { version = "5", default-features = false }
+vibrato = { version = "0.5", default-features = false }
+flate2 = "1"
+tar = { version = "0.4", default-features = false }
 pinyin = { version = "0.11", default-features = false, features = ["with_tone"] }
 any_ascii = "0.3"
 unicode-script = "0.5"
