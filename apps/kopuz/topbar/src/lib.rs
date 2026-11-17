@@ -27,8 +27,29 @@ pub use bounds::{remember as remember_bounds, saved_bounds};
 pub use settings::register as register_settings;
 pub use switcher::SourceSwitcher;
 
-/// Below this the tab labels go, leaving the glyphs.
+/// Below this the tab labels go, leaving the glyphs; longer labels or the source switcher raise it.
 pub const COMPACT_BELOW: Pixels = px(700.);
+/// History, the search field shrunk to its glyph, the activity and settings buttons, and the gaps between.
+const BESIDE_TABS: Pixels = px(220.);
+/// The source switcher's slot and its gap, while the cluster shows it.
+const SOURCE_SLOT: Pixels = px(188.);
+/// A labelled tab's glyph, gap and padding, plus the strip's gap.
+const TAB_CHROME: f32 = 52.;
+/// An average `text_sm` glyph, wide enough that a label is never underestimated.
+const LABEL_GLYPH: f32 = 7.5;
+
+/// The window width below which labelled tabs no longer fit beside the rest of the bar.
+fn compact_below(label_chars: impl IntoIterator<Item = usize>, source: bool) -> Pixels {
+    let tabs: f32 = label_chars
+        .into_iter()
+        .map(|chars| TAB_CHROME + chars as f32 * LABEL_GLYPH)
+        .sum();
+    let beside = match source {
+        true => BESIDE_TABS + SOURCE_SLOT,
+        false => BESIDE_TABS,
+    };
+    COMPACT_BELOW.max(px(tabs) + beside)
+}
 /// The width past which a table stops stretching and a grid starts centring.
 pub const CONTENT_MAX: Pixels = px(1400.);
 
@@ -70,6 +91,7 @@ pub struct TopBar {
     position: NavPosition,
     activity: Option<AnyView>,
     compact: bool,
+    compact_below: Pixels,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -83,13 +105,16 @@ impl TopBar {
                 cx.notify();
             }),
             cx.observe(&Navigator::global(cx), |_, _, cx| cx.notify()),
-            cx.observe(&ConfigModel::global(cx), |_, _, cx| cx.notify()),
+            // The language and the source switcher's toggle both move where the labels stop fitting.
+            cx.observe_in(&ConfigModel::global(cx), window, |this, _, window, cx| {
+                this.remeasure(cx);
+                this.fit(window);
+                cx.notify();
+            }),
             cx.observe(&SourcesModel::global(cx), |_, _, cx| cx.notify()),
             cx.observe_window_bounds(window, |this, window, cx| {
                 bounds::remember(window, cx);
-                let compact = window.viewport_size().width < COMPACT_BELOW;
-                if compact != this.compact {
-                    this.compact = compact;
+                if this.fit(window) {
                     cx.notify();
                 }
             }),
@@ -98,11 +123,35 @@ impl TopBar {
             destinations: Vec::new(),
             position: NavPosition::Top,
             activity: None,
-            compact: window.viewport_size().width < COMPACT_BELOW,
+            compact: false,
+            compact_below: COMPACT_BELOW,
             _subscriptions: subscriptions,
         };
         this.reread(cx);
+        this.fit(window);
         this
+    }
+
+    /// Where the labels stop fitting, for the tabs and the cluster the bar shows now.
+    fn remeasure(&mut self, cx: &App) {
+        let source = ConfigModel::global(cx)
+            .read(cx)
+            .config()
+            .ui
+            .show_source_toggle;
+        let chars = self
+            .destinations
+            .iter()
+            .map(|name| t(tabs::label(name)).chars().count());
+        self.compact_below = compact_below(chars, source);
+    }
+
+    /// Drop or bring back the labels for the window's width; true when that changed.
+    fn fit(&mut self, window: &Window) -> bool {
+        let compact = window.viewport_size().width < self.compact_below;
+        let changed = compact != self.compact;
+        self.compact = compact;
+        changed
     }
 
     /// Put a view in the slot left of the source switcher; `None` empties it again.
@@ -124,6 +173,7 @@ impl TopBar {
             })
             .collect();
         self.position = nav.position;
+        self.remeasure(cx);
     }
 
     /// Where the bar sits once the skin has had its say.
@@ -320,6 +370,7 @@ impl Render for TopBar {
                                 .h_full()
                                 .flex_1()
                                 .min_w_0()
+                                .overflow_hidden()
                                 .items_center()
                                 .child(
                                     frame::drag_region("nav-drag-start", window, cx)
@@ -503,4 +554,24 @@ fn chrome_button(id: &'static str, glyph: &'static str, cx: &App) -> Button {
         .size(style::chrome().button)
         .rounded(style::icon_corner(style::chrome().button))
         .icon(icons::icon(glyph))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_short_bar_keeps_its_labels_down_to_the_old_floor() {
+        assert_eq!(compact_below([4, 5], false), COMPACT_BELOW);
+    }
+
+    #[test]
+    fn the_source_switcher_and_longer_labels_drop_them_sooner() {
+        let labels = [3, 10, 5, 5, 8];
+        let without = compact_below(labels, false);
+        let with = compact_below(labels, true);
+        assert!(without > COMPACT_BELOW);
+        assert_eq!(with, without + SOURCE_SLOT);
+        assert!(compact_below([3, 10, 5, 5, 20], true) > with);
+    }
 }

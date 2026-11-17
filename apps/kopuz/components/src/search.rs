@@ -164,9 +164,12 @@ impl RenderOnce for SearchTrigger {
         .hover(|trigger| trigger.bg(style::white(style::HOVER, cx)))
         .text_color(style::white(ink, cx))
         .map(|trigger| match field {
+            // Squeezed, the field gives up its label and keycap down to the glyph instead of spilling over its neighbours.
             true => trigger
                 .w_full()
+                .min_w_0()
                 .max_w(FIELD_MAX)
+                .overflow_hidden()
                 .h(style::chrome().search_height)
                 .px_2()
                 .text_sm(),
@@ -192,10 +195,11 @@ impl RenderOnce for SearchTrigger {
                 .truncate()
                 .child(self.label),
         )
-        .children(
-            self.shortcut
-                .map(|keys| crate::keycap::Keycap::stroke(&keys)),
-        )
+        .children(self.shortcut.map(|keys| {
+            div()
+                .when(field, |slot| slot.min_w_0().overflow_hidden())
+                .child(crate::keycap::Keycap::stroke(&keys))
+        }))
         .when(focused, |trigger| {
             trigger.child(focus::ring(style::radius_lg(), cx))
         })
