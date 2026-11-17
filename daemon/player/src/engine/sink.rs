@@ -40,6 +40,12 @@ pub trait AudioSink: Send {
     fn close(&mut self);
     /// The device the next `open` lands on, as a cpal device id; `None` is the system default.
     fn set_device(&mut self, _device: Option<String>) {}
+    /// Whether the next `open` should hold its device alone.
+    fn set_exclusive(&mut self, _exclusive: bool) {}
+    /// The next `open` holds a hardware device alone, so it must run at the source's rate.
+    fn exclusive(&self) -> bool {
+        false
+    }
 }
 
 /// Discards audio: opens successfully, never pulls samples. Lets the full
@@ -143,6 +149,8 @@ pub struct CpalSink {
     device: cpal::Device,
     /// The setting's device id; `None` follows the system default.
     preferred: Option<String>,
+    /// Hold the preferred device's raw hardware path alone instead of sharing it.
+    exclusive: bool,
     caps: Option<DeviceCaps>,
     stream: Option<cpal::Stream>,
     config: Option<SinkConfig>,
@@ -156,16 +164,16 @@ pub struct CpalSink {
 impl CpalSink {
     pub fn try_new(
         preferred: Option<String>,
+        exclusive: bool,
         on_event: impl Fn(SinkEvent) + Send + Sync + 'static,
     ) -> Result<Self, PlayerInitError> {
-        let (device, pick) = crate::output::pick_device(preferred.as_deref())
+        let (device, pick) = crate::output::pick_device(preferred.as_deref(), exclusive)
             .ok_or(PlayerInitError::NoOutputDevice)?;
 
         let on_event = std::sync::Arc::new(on_event);
         let watcher_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let follow_default = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
-            pick != crate::output::Pick::Chosen,
-        ));
+        let follow_default =
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(pick.follows_default()));
         spawn_default_device_watcher(
             on_event.clone(),
             watcher_stop.clone(),
@@ -175,6 +183,7 @@ impl CpalSink {
         Ok(Self {
             device,
             preferred,
+            exclusive,
             caps: None,
             stream: None,
             config: None,
@@ -214,14 +223,12 @@ impl CpalSink {
 
     /// Re-resolve the device and read its caps afresh, letting go of our own stream first if it holds the device.
     fn reacquire(&mut self) -> Result<DeviceCaps, String> {
-        let (device, pick) = crate::output::pick_device(self.preferred.as_deref())
+        let (device, pick) = crate::output::pick_device(self.preferred.as_deref(), self.exclusive)
             .ok_or_else(|| PlayerInitError::NoOutputDevice.to_string())?;
         self.device = device;
         self.caps = None;
-        self.follow_default.store(
-            pick != crate::output::Pick::Chosen,
-            std::sync::atomic::Ordering::Relaxed,
-        );
+        self.follow_default
+            .store(pick.follows_default(), std::sync::atomic::Ordering::Relaxed);
         let caps = match DeviceCaps::query(&self.device) {
             Ok(caps) => caps,
             // A raw hw: device admits one opener, and that may be the stream being replaced.
@@ -448,6 +455,19 @@ impl AudioSink for CpalSink {
 
     fn set_device(&mut self, device: Option<String>) {
         self.preferred = device;
+    }
+
+    fn set_exclusive(&mut self, exclusive: bool) {
+        self.exclusive = exclusive;
+    }
+
+    fn exclusive(&self) -> bool {
+        self.exclusive
+            && self
+                .preferred
+                .as_deref()
+                .and_then(crate::output::exclusive_target)
+                .is_some()
     }
 }
 

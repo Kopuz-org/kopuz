@@ -83,19 +83,22 @@ impl Player {
     }
 
     pub fn try_new() -> Result<Self, PlayerInitError> {
-        Self::try_new_on(None)
+        Self::try_new_on(None, false)
     }
 
-    /// Open on the cpal device `output_device` names, or the system default when it is `None` or gone.
-    pub fn try_new_on(output_device: Option<String>) -> Result<Self, PlayerInitError> {
+    /// Open on the cpal device `output_device` names, or the system default when it is `None` or gone; `exclusive` holds its hardware path alone.
+    pub fn try_new_on(
+        output_device: Option<String>,
+        exclusive: bool,
+    ) -> Result<Self, PlayerInitError> {
         // Android initialises the JNI media session + classloader cache here; the desktop
         // platforms set up their system integration from the app entry point instead.
         #[cfg(target_os = "android")]
         systemint::init();
 
-        let engine = EngineHandle::spawn(|tx| {
+        let engine = EngineHandle::spawn(move |tx| {
             let tx = tx.clone();
-            CpalSink::try_new(output_device, move |event| {
+            CpalSink::try_new(output_device, exclusive, move |event| {
                 let msg = match event {
                     SinkEvent::DeviceLost => ActorMsg::DeviceError { device_lost: true },
                     SinkEvent::StreamStalled => ActorMsg::DeviceError { device_lost: false },
@@ -278,6 +281,11 @@ impl Player {
     /// Move output to another device now, or back to the system default with `None`.
     pub fn set_output_device(&self, device: Option<String>) {
         self.engine.send(Command::SetOutputDevice(device));
+    }
+
+    /// Hold the chosen ALSA device's hardware path alone at each track's rate, or share it again.
+    pub fn set_exclusive_output(&self, exclusive: bool) {
+        self.engine.send(Command::SetExclusiveOutput(exclusive));
     }
 
     pub fn update_metadata(&mut self, token: u64, meta: NowPlayingMeta) {

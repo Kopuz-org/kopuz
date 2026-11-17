@@ -23,6 +23,7 @@ struct FakeShared {
     device_config: SinkConfig,
     /// What the last `set_device` asked for.
     device: Option<String>,
+    exclusive: bool,
 }
 
 impl Default for FakeShared {
@@ -37,6 +38,7 @@ impl Default for FakeShared {
             last_open_request: None,
             device_config: TEST_CONFIG,
             device: None,
+            exclusive: false,
         }
     }
 }
@@ -136,6 +138,14 @@ impl AudioSink for FakeSink {
 
     fn set_device(&mut self, device: Option<String>) {
         self.0.0.lock().unwrap().device = device;
+    }
+
+    fn set_exclusive(&mut self, exclusive: bool) {
+        self.0.0.lock().unwrap().exclusive = exclusive;
+    }
+
+    fn exclusive(&self) -> bool {
+        self.0.0.lock().unwrap().exclusive
     }
 }
 
@@ -993,6 +1003,38 @@ fn source_mode_reopens_at_track_rate() {
     assert!(
         sink.open_calls() > opens_before,
         "Source mode reopens the stream at the track's rate"
+    );
+    assert_eq!(sink.last_open_request(), Some(Some(22_050)));
+    engine.shutdown();
+}
+
+#[test]
+fn exclusive_output_plays_each_track_at_its_own_rate() {
+    let (sink, engine) = spawn_engine();
+    let (factory_a, duration_a) = wav_factory(5.0);
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    assert_eq!(sink.last_open_request(), Some(None), "System mode shares");
+
+    let opens_before = sink.open_calls();
+    engine.send(Command::SetExclusiveOutput(true));
+    wait_until("stream reopened held alone", || {
+        sink.open_calls() > opens_before
+    });
+    assert_eq!(
+        sink.last_open_request(),
+        Some(Some(TEST_CONFIG.sample_rate))
+    );
+
+    let opens_before = sink.open_calls();
+    let bytes = wav_bytes(5 * 22_050, 22_050, TEST_CONFIG.channels as u16);
+    let factory_b: SourceFactory =
+        Box::new(move || Ok(crate::decoder::from_stream(std::io::Cursor::new(bytes))));
+    load(&engine, 2, factory_b, Duration::from_secs(5));
+    wait_until("status switches to token 2", || engine.status().token == 2);
+    assert!(
+        sink.open_calls() > opens_before,
+        "a new rate reopens the device"
     );
     assert_eq!(sink.last_open_request(), Some(Some(22_050)));
     engine.shutdown();

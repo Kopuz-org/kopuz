@@ -881,6 +881,10 @@ pub struct Playback {
     #[serde(default)]
     #[garde(skip)]
     pub output_device: Option<String>,
+    /// Hold `output_device` alone, at each track's rate; only ALSA hardware devices can.
+    #[serde(default)]
+    #[garde(skip)]
+    pub exclusive_output: bool,
     #[serde(default)]
     #[garde(skip)]
     pub stream_quality: StreamQuality,
@@ -908,6 +912,7 @@ impl Default for Playback {
             device_change_behavior: DeviceChangeBehavior::Pause,
             sample_rate_mode: SampleRateMode::System,
             output_device: None,
+            exclusive_output: false,
             stream_quality: StreamQuality::High,
             autoplay_radio: false,
             skip_explicit: false,

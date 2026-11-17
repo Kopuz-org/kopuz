@@ -481,6 +481,8 @@ message OutputDevice {
   string id = 1;
   string name = 2;
   bool is_default = 3;
+  // It can be held alone, which exclusive_output then does.
+  bool exclusive = 4;
 }
 
 message OutputDeviceList {
@@ -1958,6 +1960,7 @@ message ConfigEdit {
     DeviceChangeBehavior device_change_behavior = 46;
     SampleRateMode sample_rate_mode = 47;
     OptionalString output_device = 90;
+    bool exclusive_output = 91;
     StreamQuality stream_quality = 72;
     bool autoplay_radio = 73;
     bool skip_explicit = 74;
@@ -2132,6 +2135,7 @@ enum SettingKey {
   SETTING_KEY_DISCORD_PRESENCE_UPLOAD_COVER = 87;
   SETTING_KEY_DISCORD_PRESENCE_LISTEN_BUTTON = 88;
   SETTING_KEY_OUTPUT_DEVICE = 90;
+  SETTING_KEY_EXCLUSIVE_OUTPUT = 91;
 }
 
 message GetFrontendPrefsRequest {
@@ -2340,6 +2344,7 @@ message Config {
   string listen_address = 86;
   // Absent means the system default output.
   optional string output_device = 90;
+  bool exclusive_output = 91;
 }
 
 message DownloaderOptions {

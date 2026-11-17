@@ -26,6 +26,7 @@ pub enum PlaybackEdit {
     DeviceChangeBehavior(DeviceChangeBehavior),
     SampleRateMode(SampleRateMode),
     OutputDevice(Option<String>),
+    ExclusiveOutput(bool),
     StreamQuality(StreamQuality),
     AutoplayRadio(bool),
     SkipExplicit(bool),
@@ -364,6 +365,7 @@ impl Playback {
             PlaybackEdit::DeviceChangeBehavior(value) => self.device_change_behavior = value,
             PlaybackEdit::SampleRateMode(value) => self.sample_rate_mode = value,
             PlaybackEdit::OutputDevice(value) => self.output_device = value,
+            PlaybackEdit::ExclusiveOutput(value) => self.exclusive_output = value,
             PlaybackEdit::StreamQuality(value) => self.stream_quality = value,
             PlaybackEdit::AutoplayRadio(value) => self.autoplay_radio = value,
             PlaybackEdit::SkipExplicit(value) => self.skip_explicit = value,
@@ -532,6 +534,7 @@ pub fn edit_samples() -> Vec<SettingsEdit> {
         SettingsEdit::Playback(PlaybackEdit::OutputDevice(Some(
             "alsa:hw:CARD=0,DEV=0".into(),
         ))),
+        SettingsEdit::Playback(PlaybackEdit::ExclusiveOutput(true)),
         SettingsEdit::Playback(PlaybackEdit::StreamQuality(StreamQuality::Low)),
         SettingsEdit::Playback(PlaybackEdit::AutoplayRadio(true)),
         SettingsEdit::Playback(PlaybackEdit::SkipExplicit(true)),

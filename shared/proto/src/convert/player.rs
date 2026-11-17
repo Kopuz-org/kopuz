@@ -53,6 +53,7 @@ pub fn output_device_to_proto(value: &api::OutputDevice) -> OutputDevice {
         id: value.id.clone(),
         name: value.name.clone(),
         is_default: value.is_default,
+        exclusive: value.exclusive,
     }
 }
 
@@ -61,6 +62,7 @@ pub fn output_device_from_proto(value: &OutputDevice) -> api::OutputDevice {
         id: value.id.clone(),
         name: value.name.clone(),
         is_default: value.is_default,
+        exclusive: value.exclusive,
     }
 }
 
@@ -193,6 +195,7 @@ mod tests {
             id: "alsa:hw:CARD=0,DEV=0".into(),
             name: "HDA Intel PCH, ALC892 Analog".into(),
             is_default: true,
+            exclusive: true,
         };
         assert_eq!(
             device,

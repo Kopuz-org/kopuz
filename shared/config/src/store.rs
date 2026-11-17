@@ -1357,6 +1357,7 @@ mod tests {
         settings.playback.device_change_behavior = DeviceChangeBehavior::Resume;
         settings.playback.sample_rate_mode = SampleRateMode::Source;
         settings.playback.output_device = Some("alsa:hw:CARD=PCH,DEV=0".into());
+        settings.playback.exclusive_output = true;
         settings.downloads.downloader_output_dir = "/downloads".into();
         settings.ui.titlebar_mode = TitlebarMode::System;
         settings.library.offline_quality = OfflineQuality::Original;

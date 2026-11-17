@@ -53,6 +53,7 @@
     "preamp_db": -4.5,
     "preset": "Custom"
   },
+  "exclusive_output": false,
   "fullscreen_use_player_bar": false,
   "language": "tr",
   "listen_address": "",
