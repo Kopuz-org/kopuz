@@ -30,8 +30,11 @@ pub struct TrackInfo {
     pub album: String,
     pub album_id: String,
     pub duration_ms: Option<u64>,
+    /// The sample rate in Hz, despite the name; 0 when unknown.
     pub khz: u32,
     pub bitrate: u16,
+    /// Bits per sample of lossless audio; 0 for lossy audio or when unknown.
+    pub bit_depth: u8,
     pub track_number: Option<u32>,
     pub disc_number: Option<u32>,
     pub kind: TrackKind,

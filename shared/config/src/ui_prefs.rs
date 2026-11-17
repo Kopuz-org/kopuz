@@ -32,6 +32,8 @@ pub struct UiPrefs {
     pub catalog_home_sections: Vec<HomeSection>,
     pub listen_now_style: ListenNowStyle,
     pub hero_height: u32,
+    /// Track lists show a column with each track's bit depth and sample rate.
+    pub show_quality_column: bool,
 }
 
 impl Default for UiPrefs {
@@ -63,6 +65,7 @@ impl Default for UiPrefs {
             catalog_home_sections: default_catalog_home_sections(),
             listen_now_style: ListenNowStyle::List,
             hero_height: 300,
+            show_quality_column: false,
         }
     }
 }
@@ -175,6 +178,7 @@ mod tests {
             )],
             hero_height: 420,
             listen_now_style: ListenNowStyle::Cards,
+            show_quality_column: true,
             ..UiPrefs::default()
         };
         let entries = prefs.entries();

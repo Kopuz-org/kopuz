@@ -56,6 +56,9 @@ pub struct TrackRow {
     artwork: Option<ArtworkRef>,
     length: SharedString,
     format: SharedString,
+    sample_rate: SharedString,
+    bit_depth: SharedString,
+    bitrate: SharedString,
     plays: u64,
     columns: Layout,
     height: Length,
@@ -90,6 +93,9 @@ impl TrackRow {
             artwork: track.artwork.clone(),
             length: known_duration(track.duration_secs().map(|secs| secs * 1000)),
             format: track.format.clone().unwrap_or_default().into(),
+            sample_rate: crate::format::sample_rate(track.khz),
+            bit_depth: crate::format::bit_depth(track.bit_depth),
+            bitrate: crate::format::bitrate(track.bitrate),
             plays: 0,
             columns: columns::standard(true),
             height: style::row_height().into(),
@@ -430,6 +436,13 @@ impl RenderOnce for TrackRow {
                     .child(self.plays.to_string())
                     .into_any_element(),
                 "format" => dim(cell, cx).child(self.format.clone()).into_any_element(),
+                "sample_rate" => dim(cell, cx)
+                    .child(self.sample_rate.clone())
+                    .into_any_element(),
+                "bit_depth" => dim(cell, cx)
+                    .child(self.bit_depth.clone())
+                    .into_any_element(),
+                "bitrate" => dim(cell, cx).child(self.bitrate.clone()).into_any_element(),
                 // Tabular digits, so the lengths line up rather than wander by glyph width.
                 _ => dim(cell, cx)
                     .font_family(SharedString::new_static("monospace"))

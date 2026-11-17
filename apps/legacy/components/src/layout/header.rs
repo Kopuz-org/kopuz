@@ -26,17 +26,25 @@ pub fn Header(
     >,
     #[props(default = false)] is_reorderable: bool,
 ) -> Element {
-    let columns_vaxry = if is_album {
-        COLUMNS_VAXRY_ALBUM
-    } else {
-        COLUMNS_VAXRY
-    };
+    let show_quality = shows_quality_column();
+    let columns_vaxry = track_columns(
+        if is_album {
+            COLUMNS_VAXRY_ALBUM
+        } else {
+            COLUMNS_VAXRY
+        },
+        show_quality,
+    );
 
-    let columns_normal = if is_album {
-        COLUMNS_NORMAL_ALBUM
-    } else {
-        COLUMNS_NORMAL
-    };
+    let columns_normal = track_columns(
+        if is_album {
+            COLUMNS_NORMAL_ALBUM
+        } else {
+            COLUMNS_NORMAL
+        },
+        show_quality,
+    );
+    let quality_label = i18n::t("library_column_quality");
 
     if cfg!(target_os = "android") {
         if sort_state.is_none() && !is_selection_mode {
@@ -162,6 +170,9 @@ pub fn Header(
                         i { class: "{icon_class(&sort_state, SortField::Album)} text-[9px]" }
                     })}
                 }
+                if show_quality {
+                    div { class: "h-10 flex items-center justify-end truncate", "{quality_label}" }
+                }
                 {sort_button(SortField::Duration, duration_class, rsx! {
                     i { class: "fa-regular fa-clock" }
                     i { class: "{icon_class(&sort_state, SortField::Duration)} text-[9px]" }
@@ -200,6 +211,9 @@ pub fn Header(
                         "{i18n::t(\"album\")}"
                         i { class: "{icon_class(&sort_state, SortField::Album)} text-[10px]" }
                     })}
+                }
+                if show_quality {
+                    div { class: "h-12 flex items-center justify-end truncate", "{quality_label}" }
                 }
                 {sort_button(SortField::Duration, duration_class, rsx! {
                     i { class: "fa-regular fa-clock" }

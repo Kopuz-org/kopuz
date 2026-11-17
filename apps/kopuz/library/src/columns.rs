@@ -89,6 +89,19 @@ mod tests {
     }
 
     #[test]
+    fn the_audio_quality_columns_are_offered_but_hidden() {
+        let columns = resolve(&[]);
+        for id in ["sample_rate", "bit_depth", "bitrate"] {
+            assert!(
+                columns
+                    .iter()
+                    .any(|column| column.id == id && !column.visible),
+                "{id}"
+            );
+        }
+    }
+
+    #[test]
     fn a_column_this_build_no_longer_has_is_dropped() {
         let saved = vec![Column::new("title"), Column::new("gone")];
         let columns = resolve(&saved);

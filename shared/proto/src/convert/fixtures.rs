@@ -19,6 +19,7 @@ pub(super) fn sample_state() -> api::PlayerState {
             duration_ms: Some(223_000),
             khz: 44,
             bitrate: 320,
+            bit_depth: 0,
             kind: api::TrackKind::Normal,
             seekable: true,
             artwork: Some(api::ArtworkRef {

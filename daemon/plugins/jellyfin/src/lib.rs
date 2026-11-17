@@ -65,6 +65,9 @@ fn library_track(item: Item) -> Track {
         .clone()
         .or_else(|| item.artists.as_ref().map(|artists| artists.join(", ")))
         .unwrap_or_default();
+    if let Some(bits) = item.audio_bit_depth() {
+        kopuz_plugin_sdk::report_bit_depth(&item.id, bits);
+    }
     Track {
         cover: item.primary_image(),
         album_id: item
@@ -74,8 +77,8 @@ fn library_track(item: Item) -> Track {
             .unwrap_or_default(),
         album: item.album.clone().unwrap_or_default(),
         duration_secs: item.run_time_ticks.unwrap_or(0) / 10_000_000,
-        sample_rate: item.sample_rate.unwrap_or(0),
-        bitrate_kbps: item.bitrate.unwrap_or(0) / 1000,
+        sample_rate: item.audio_sample_rate().unwrap_or(0),
+        bitrate_kbps: item.audio_bitrate().unwrap_or(0) / 1000,
         track_number: item.index_number,
         disc_number: item.parent_index_number,
         playlist_item_id: item.playlist_item_id.clone(),
@@ -360,6 +363,35 @@ mod tests {
         assert_eq!(track.bitrate_kbps, 320);
         assert_eq!(track.cover.as_deref(), Some("tag1"));
         assert_eq!(track.credits, [ArtistCredit::linked("Ada", "ar1")]);
+    }
+
+    #[test]
+    fn a_library_track_reads_its_quality_off_the_audio_stream() {
+        let hi_res = item(serde_json::json!({
+            "Name": "One",
+            "Id": "t1",
+            "Type": "Audio",
+            "MediaSources": [{
+                "Bitrate": 2_304_000,
+                "MediaStreams": [
+                    { "Type": "EmbeddedImage", "BitDepth": 8 },
+                    { "Type": "Audio", "SampleRate": 96_000, "BitDepth": 24 }
+                ]
+            }]
+        }));
+        assert_eq!(hi_res.audio_bit_depth(), Some(24));
+        let track = library_track(hi_res);
+        assert_eq!(track.sample_rate, 96_000);
+        assert_eq!(track.bitrate_kbps, 2_304);
+
+        let lossy = item(serde_json::json!({
+            "Name": "Two",
+            "Id": "t2",
+            "Type": "Audio",
+            "MediaSources": [{ "MediaStreams": [{ "Type": "Audio", "SampleRate": 44_100 }] }]
+        }));
+        assert_eq!(lossy.audio_bit_depth(), None);
+        assert_eq!(lossy.audio_sample_rate(), Some(44_100));
     }
 
     #[test]

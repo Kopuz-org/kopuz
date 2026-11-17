@@ -72,6 +72,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
     let duration_text = i18n::t("duration").to_string();
     let sample_rate_text = i18n::t("sample_rate").to_string();
     let bitrate_text = i18n::t("bitrate").to_string();
+    let bit_depth_text = i18n::t("bit_depth").to_string();
     let musicbrainz_release_text = i18n::t("musicbrainz_release").to_string();
     let musicbrainz_recording_text = i18n::t("musicbrainz_recording").to_string();
     let musicbrainz_track_text = i18n::t("musicbrainz_track").to_string();
@@ -97,6 +98,9 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
             &sample_rate_text,
             format!("{:.1} kHz", t.khz as f64 / 1000.0),
         );
+    }
+    if t.bit_depth > 0 {
+        push(&bit_depth_text, format!("{}-bit", t.bit_depth));
     }
     if t.bitrate > 0 {
         push(&bitrate_text, format!("{} kbps", t.bitrate));

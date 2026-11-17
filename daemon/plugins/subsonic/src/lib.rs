@@ -87,6 +87,9 @@ fn song_to_track(service: &str, song: SubsonicSong, album: Option<(&str, &str, &
         .clone()
         .unwrap_or_else(|| fallback_artist.to_string());
     let credits = credits_of(&song, &artist);
+    if let Some(bits) = song.bit_depth.and_then(|bits| u8::try_from(bits).ok()) {
+        kopuz_plugin_sdk::report_bit_depth(&song.id, bits);
+    }
     Track {
         cover: Some(cover_ref(service, song.cover_art.as_deref())),
         album_id,
@@ -478,5 +481,22 @@ mod tests {
         assert_eq!(credits.len(), 1);
         assert_eq!(credits[0].name, "Ada feat. Boris");
         assert_eq!(credits[0].id.as_deref(), Some("ar-9"));
+    }
+
+    #[test]
+    fn an_open_subsonic_song_carries_its_sample_rate_and_bitrate() {
+        let song: SubsonicSong = serde_json::from_value(serde_json::json!({
+            "id": "song-1",
+            "title": "Hi-res",
+            "bitRate": 2_304,
+            "samplingRate": 96_000,
+            "bitDepth": 24
+        }))
+        .expect("valid OpenSubsonic song");
+        assert_eq!(song.bit_depth, Some(24));
+
+        let track = song_to_track("subsonic", song, None);
+        assert_eq!(track.sample_rate, 96_000);
+        assert_eq!(track.bitrate_kbps, 2_304);
     }
 }

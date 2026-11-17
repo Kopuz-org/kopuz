@@ -29,6 +29,7 @@ fn local(path: &str, title: &str) -> Track {
         duration: 123,
         khz: 44100,
         bitrate: 900,
+        bit_depth: 0,
         track_number: Some(2),
         disc_number: Some(1),
         musicbrainz_release_id: Some("mbr".into()),
@@ -102,6 +103,46 @@ async fn upsert_then_prune() {
     assert!(remaining.contains(&"/music/a.flac".to_string()));
     assert!(remaining.contains(&"/other/c.flac".to_string()));
     assert!(!remaining.contains(&"/music/b.flac".to_string()));
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn a_tracks_bit_depth_is_stored_and_a_rescan_rewrites_it() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let source = Source::default();
+    let hi_res = Track {
+        khz: 96_000,
+        bit_depth: 24,
+        ..local("/music/hi.flac", "Hi")
+    };
+    db.upsert_tracks(&source, std::slice::from_ref(&hi_res))
+        .await
+        .unwrap();
+
+    let key = vec!["/music/hi.flac".to_string()];
+    let by_key = db.tracks_by_keys(&source, &key).await.unwrap();
+    assert_eq!((by_key[0].khz, by_key[0].bit_depth), (96_000, 24));
+    let page = db
+        .tracks_page(
+            &TrackFilter::new(source.clone()),
+            Page {
+                offset: 0,
+                limit: 10,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page[0].bit_depth, 24);
+
+    let reencoded = Track {
+        bit_depth: 16,
+        ..hi_res
+    };
+    db.upsert_tracks(&source, &[reencoded]).await.unwrap();
+    let folder = db.folder_tracks(&source, "/music/").await.unwrap();
+    assert_eq!(folder[0].bit_depth, 16);
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

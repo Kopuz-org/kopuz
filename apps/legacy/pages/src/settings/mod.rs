@@ -101,6 +101,7 @@ fn settled<T>(resource: &Resource<T>) -> bool {
 pub fn Settings(settings: Signal<config::Settings>) -> Element {
     let ctrl = use_context::<PlayerController>();
     let edits = hooks::settings::use_settings();
+    let mut ui_prefs = hooks::ui_prefs::use_ui_prefs();
     // The sources are the daemon's: it holds their credentials, so the config
     // this page reads never carries them.
     let sources = hooks::sources::use_sources();
@@ -712,6 +713,17 @@ pub fn Settings(settings: Signal<config::Settings>) -> Element {
                                 ToggleSetting {
                                     enabled: settings.read().ui.show_row_images,
                                     on_change: move |val| edits.edit(SettingsEdit::Ui(UiEdit::ShowRowImages(val))),
+                                }
+                            }
+                        }
+                        if !cfg!(target_os = "android") {
+                            SettingItem {
+                                title: i18n::t("show_quality_column").to_string(),
+                                control: rsx! {
+                                    ToggleSetting {
+                                        enabled: ui_prefs.read().show_quality_column,
+                                        on_change: move |val| ui_prefs.write().show_quality_column = val,
+                                    }
                                 }
                             }
                         }

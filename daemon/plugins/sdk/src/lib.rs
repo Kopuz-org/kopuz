@@ -26,6 +26,17 @@ pub use bindings::kopuz::plugin::types::{
 
 pub type Result<T, E = SourceError> = std::result::Result<T, E>;
 
+/// Tell the host a lossless track's bits per sample, which [`Track`] has no
+/// field for. Call it while building the tracks a call returns; 0 is ignored.
+pub fn report_bit_depth(item_id: &str, bits: u8) {
+    #[cfg(target_arch = "wasm32")]
+    if bits > 0 {
+        bindings::kopuz::plugin::details::bit_depth(item_id, bits);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = (item_id, bits);
+}
+
 impl SourceError {
     /// Plain text for a person; the generated `Display` is the debug form.
     pub fn message(&self) -> String {

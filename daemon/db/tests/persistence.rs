@@ -33,6 +33,7 @@ fn server_track(id: &str, title: &str) -> Track {
         duration: 200,
         khz: 0,
         bitrate: 0,
+        bit_depth: 0,
         track_number: None,
         disc_number: None,
         musicbrainz_release_id: None,
@@ -528,7 +529,11 @@ async fn queue_round_trips() {
 
     let snap = QueueSnapshot {
         version: 1,
-        queue: vec![server_track("VID1", "Yt One")],
+        queue: vec![Track {
+            khz: 96_000,
+            bit_depth: 24,
+            ..server_track("VID1", "Yt One")
+        }],
         current_queue_index: 0,
         progress_secs: 42,
         shuffle_order: vec![0],
@@ -541,6 +546,7 @@ async fn queue_round_trips() {
     let q = db.load_queue(&Source::default()).await.unwrap();
     assert_eq!(q.queue.len(), 1);
     assert_eq!(q.queue[0].title, "Yt One");
+    assert_eq!((q.queue[0].khz, q.queue[0].bit_depth), (96_000, 24));
     assert_eq!(q.progress_secs, 42);
     assert!(q.shuffle_enabled);
 

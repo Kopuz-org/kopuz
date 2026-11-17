@@ -464,6 +464,7 @@ pub(super) fn parsed_to_track(p: ParsedRow) -> Track {
         duration: p.duration,
         khz: 0,
         bitrate: 0,
+        bit_depth: 0,
         track_number: None,
         disc_number: None,
         musicbrainz_release_id: None,

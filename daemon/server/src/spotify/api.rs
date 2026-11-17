@@ -774,6 +774,7 @@ pub fn parse_track(item: &Value) -> Option<Track> {
         duration: item["duration_ms"].as_u64().unwrap_or(0) / 1000,
         khz: 0,
         bitrate: 0,
+        bit_depth: 0,
         track_number: item["track_number"].as_u64().map(|n| n as u32),
         disc_number: item["disc_number"].as_u64().map(|n| n as u32),
         musicbrainz_release_id: None,

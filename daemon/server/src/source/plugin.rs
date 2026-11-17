@@ -59,7 +59,8 @@ impl PluginSource {
 
     fn track(&self, mut track: wit::Track) -> reader::Track {
         track.cover = self.artwork().cover(track.cover);
-        track_from(self.service, track)
+        let bit_depth = self.session.bit_depth(&track.item_id);
+        track_from(self.service, track, bit_depth)
     }
 
     fn albums(&self, albums: Vec<wit::Album>) -> Vec<reader::Album> {
@@ -102,7 +103,8 @@ impl PluginSource {
             .into_iter()
             .map(|mut track| {
                 track.cover = artwork.cover(track.cover);
-                track_from(self.service, track)
+                let bit_depth = self.session.bit_depth(&track.item_id);
+                track_from(self.service, track, bit_depth)
             })
             .collect()
     }
@@ -141,7 +143,8 @@ fn intern(operation: String) -> &'static str {
     name
 }
 
-pub(crate) fn track_from(service: MusicService, track: wit::Track) -> reader::Track {
+/// `bit_depth` travels apart from the record, which has no field for it; see `details.wit`.
+pub(crate) fn track_from(service: MusicService, track: wit::Track, bit_depth: u8) -> reader::Track {
     reader::Track {
         id: reader::TrackId::Server {
             service,
@@ -155,6 +158,7 @@ pub(crate) fn track_from(service: MusicService, track: wit::Track) -> reader::Tr
         duration: track.duration_secs,
         khz: track.sample_rate,
         bitrate: track.bitrate_kbps.min(u16::MAX as u32) as u16,
+        bit_depth,
         track_number: track.track_number,
         disc_number: track.disc_number,
         musicbrainz_release_id: track.musicbrainz_release_id,
@@ -875,8 +879,10 @@ mod tests {
                 },
                 explicit: false,
             },
+            24,
         );
         assert_eq!(track.id.uid(), "custom:s1");
+        assert_eq!((track.khz, track.bit_depth), (44_100, 24));
         assert_eq!(track.bitrate, u16::MAX, "an oversized bitrate saturates");
         assert_eq!(track.credits[0].key.as_deref(), Some("ar-1"));
         assert_eq!(track.replay_gain.track_gain_db, Some(-6.0));
