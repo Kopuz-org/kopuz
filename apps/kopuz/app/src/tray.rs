@@ -11,6 +11,7 @@ use store::{ConfigModel, PlayerModel};
 use components::format::t;
 
 /// How far one notch of the wheel over the icon moves the volume.
+#[cfg(target_os = "linux")]
 const VOLUME_STEP: f32 = 0.05;
 
 /// What the tray asks of the app, from whatever thread the platform delivers it on.
@@ -23,6 +24,8 @@ enum Click {
     Previous,
     Shuffle,
     Repeat,
+    /// Only the Linux tray reports the wheel.
+    #[cfg(target_os = "linux")]
     Volume(f32),
 }
 
@@ -137,6 +140,7 @@ fn clicked(click: Click, cx: &mut App) {
             player.set_shuffle(shuffle, cx);
         }),
         Click::Repeat => player.update(cx, |player, cx| player.cycle_loop_mode(cx)),
+        #[cfg(target_os = "linux")]
         Click::Volume(step) => player.update(cx, |player, cx| player.nudge_volume(step, cx)),
     }
 }
