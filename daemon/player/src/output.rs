@@ -55,8 +55,12 @@ struct Listed {
     name: String,
 }
 
+/// ALSA's `null` PCM, which throws every sample away; a stored choice of it still opens, it is just never offered.
+const SILENT: &str = "alsa:null";
+
 /// ALSA names a card's `hw:`, `plughw:` and `front:` paths alike, so a shared name gets its device path.
-fn labelled(listed: Vec<Listed>, default: Option<&str>) -> Vec<OutputDevice> {
+fn labelled(mut listed: Vec<Listed>, default: Option<&str>) -> Vec<OutputDevice> {
+    listed.retain(|device| device.id != SILENT);
     let ids: std::collections::HashSet<String> =
         listed.iter().map(|device| device.id.clone()).collect();
     let mut seen = std::collections::HashSet::new();
@@ -266,6 +270,28 @@ mod tests {
         assert_eq!(defaults, vec![true, false, false]);
         let exclusive: Vec<bool> = devices.iter().map(|device| device.exclusive).collect();
         assert_eq!(exclusive, vec![false, true, true]);
+    }
+
+    #[test]
+    fn the_silent_null_device_is_not_offered() {
+        let devices = labelled(
+            vec![
+                Listed {
+                    id: "alsa:null".into(),
+                    backend_id: "null".into(),
+                    name: "Discard all samples (playback) or generate zero samples (capture)"
+                        .into(),
+                },
+                Listed {
+                    id: "alsa:pipewire".into(),
+                    backend_id: "pipewire".into(),
+                    name: "PipeWire Sound Server".into(),
+                },
+            ],
+            Some("alsa:pipewire"),
+        );
+        let ids: Vec<&str> = devices.iter().map(|device| device.id.as_str()).collect();
+        assert_eq!(ids, ["alsa:pipewire"]);
     }
 
     #[test]
