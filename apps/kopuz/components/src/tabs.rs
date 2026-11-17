@@ -250,16 +250,18 @@ impl TabStrip {
                         row.child(div().flex_1().min_w_0().truncate().child(label))
                     }),
             )
+            // Inside the tab's own edge and centred on it, so the bar lines up whatever the row's height.
             .when(vertical && active && self.bar == Bar::Pill, |frame| {
                 frame.child(
                     div()
                         .absolute()
-                        .left(-thickness)
-                        .top(px(6.))
-                        .h(px(20.))
+                        .left_0()
+                        .top_0()
+                        .bottom_0()
                         .w(thickness)
-                        .rounded_full()
-                        .bg(ink),
+                        .flex()
+                        .items_center()
+                        .child(div().w(thickness).h(px(20.)).rounded_full().bg(ink)),
                 )
             })
             .when(tab.ringed, |frame| frame.child(focus::ring(radius, cx)))
@@ -387,11 +389,9 @@ impl TabStrip {
         let origin = marker::origin(self.along, marks);
         // The bar rides in the flow beside the tabs rather than over them, so it scrolls with them.
         match self.along {
-            Along::Column => h_flex()
-                .w_full()
-                .items_start()
-                .child(v_flex().flex_none().w(thickness))
-                .child(gap(v_flex().w_full()).child(origin).children(tabs))
+            Along::Column => gap(v_flex().w_full())
+                .child(origin)
+                .children(tabs)
                 .into_any_element(),
             Along::Row => {
                 let inset = match self.bar {
