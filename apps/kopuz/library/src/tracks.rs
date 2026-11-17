@@ -315,7 +315,10 @@ impl Library {
         let header = TrackHeader::new("library-header", layout)
             .sort(
                 Some((sort.field.as_str(), sort.descending)),
-                |id| filters::is_server_sortable(id) || id == "format",
+                |id| {
+                    filters::is_server_sortable(id)
+                        || matches!(id, "format" | "sample_rate" | "bit_depth" | "bitrate")
+                },
                 cx.listener(|this, id: &str, _, cx| {
                     let next = match this.is_liked() {
                         true => this.sort().toggled_or_unsorted(id),

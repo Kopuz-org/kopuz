@@ -4,6 +4,7 @@
 //! be swapped while it runs: calls already going finish on the instance they
 //! started on, and every later call opens on the new code.
 
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use tokio::sync::{Mutex, Semaphore};
@@ -19,6 +20,8 @@ const MAX_INSTANCES: usize = 4;
 const MAX_RUNNING: usize = 8;
 
 static RUNNING: Semaphore = Semaphore::const_new(MAX_RUNNING);
+
+const MAX_BIT_DEPTHS: usize = 1_000_000;
 
 /// Requests time out on their own; this stops a plugin that never returns.
 /// A first sync of a large library is one call.
@@ -36,6 +39,8 @@ pub struct Session {
     connection: wit::Connection,
     idle: Mutex<Vec<Live>>,
     slots: Semaphore,
+    /// Every bit depth a call reported, kept for whichever later read converts its track.
+    bit_depths: std::sync::Mutex<HashMap<String, u8>>,
 }
 
 impl std::fmt::Debug for Session {
@@ -54,7 +59,34 @@ impl Session {
             connection,
             idle: Mutex::new(Vec::new()),
             slots: Semaphore::new(MAX_INSTANCES),
+            bit_depths: std::sync::Mutex::default(),
         }
+    }
+
+    /// The bit depth the plugin reported for `item_id`, 0 when it reported none.
+    pub fn bit_depth(&self, item_id: &str) -> u8 {
+        self.bit_depths
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(item_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn keep_details(&self, live: &mut Live) {
+        let reported = std::mem::take(&mut live.instance.store.data_mut().bit_depths);
+        if reported.is_empty() {
+            return;
+        }
+        let mut kept = self
+            .bit_depths
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Starting over beats growing without bound; the next sync reports them again.
+        if kept.len() >= MAX_BIT_DEPTHS {
+            kept.clear();
+        }
+        kept.extend(reported);
     }
 
     /// The plugin new calls run on.
@@ -162,6 +194,7 @@ macro_rules! calls {
                     let call = guest.$call(&mut live.instance.store, live.session, $( $pass ),*);
                     match tokio::time::timeout(CALL_LIMIT, call).await {
                         Ok(Ok(value)) => {
+                            self.keep_details(&mut live);
                             self.checkin(live).await;
                             Ok(value)
                         }

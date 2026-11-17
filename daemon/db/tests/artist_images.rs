@@ -31,6 +31,7 @@ fn track(path: &str, artist: &str, credits: Vec<ArtistCredit>) -> Track {
         duration: 1,
         khz: 44100,
         bitrate: 900,
+        bit_depth: 0,
         track_number: None,
         disc_number: None,
         musicbrainz_release_id: None,

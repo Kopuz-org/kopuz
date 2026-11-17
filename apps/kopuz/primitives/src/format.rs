@@ -63,9 +63,49 @@ pub fn bytes(bytes: u64) -> SharedString {
     }
 }
 
+/// A sample rate given in Hz as "44.1 kHz" or "48 kHz", blank when unknown.
+pub fn sample_rate(hz: u32) -> SharedString {
+    if hz == 0 {
+        return SharedString::default();
+    }
+    let tenths = (hz + 50) / 100;
+    match tenths % 10 {
+        0 => format!("{}\u{a0}kHz", tenths / 10).into(),
+        rest => format!("{}.{rest}\u{a0}kHz", tenths / 10).into(),
+    }
+}
+
+/// "24-bit", blank for lossy audio or when unknown.
+pub fn bit_depth(bits: u8) -> SharedString {
+    match bits {
+        0 => SharedString::default(),
+        bits => format!("{bits}-bit").into(),
+    }
+}
+
+/// "320 kbps", blank when unknown.
+pub fn bitrate(kbps: u16) -> SharedString {
+    match kbps {
+        0 => SharedString::default(),
+        kbps => format!("{kbps}\u{a0}kbps").into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audio_quality_reads_in_its_units_and_blank_when_unknown() {
+        assert_eq!(sample_rate(44_100), "44.1\u{a0}kHz");
+        assert_eq!(sample_rate(48_000), "48\u{a0}kHz");
+        assert_eq!(sample_rate(88_200), "88.2\u{a0}kHz");
+        assert_eq!(sample_rate(0), "");
+        assert_eq!(bit_depth(24), "24-bit");
+        assert_eq!(bit_depth(0), "");
+        assert_eq!(bitrate(320), "320\u{a0}kbps");
+        assert_eq!(bitrate(0), "");
+    }
 
     #[test]
     fn a_size_reads_in_the_largest_unit_it_fills() {

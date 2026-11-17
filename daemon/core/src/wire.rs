@@ -30,6 +30,7 @@ pub(crate) fn track_info(track: &Track, offline: &OfflineIndex) -> TrackInfo {
         duration_ms: (!radio && track.duration > 0).then(|| track.duration.saturating_mul(1000)),
         khz: track.khz,
         bitrate: track.bitrate,
+        bit_depth: track.bit_depth,
         track_number: track.track_number,
         disc_number: track.disc_number,
         kind: if radio {
@@ -138,6 +139,7 @@ mod tests {
             duration: 1,
             khz: 44,
             bitrate: 320,
+            bit_depth: 0,
             track_number: None,
             disc_number: None,
             musicbrainz_release_id: None,

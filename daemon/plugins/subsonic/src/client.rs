@@ -88,6 +88,8 @@ pub struct SubsonicSong {
     pub duration: Option<u64>,
     pub bit_rate: Option<u32>,
     pub sampling_rate: Option<u32>,
+    /// OpenSubsonic only, and absent or 0 for lossy files.
+    pub bit_depth: Option<u32>,
     pub track: Option<u32>,
     pub disc_number: Option<u32>,
     pub cover_art: Option<String>,

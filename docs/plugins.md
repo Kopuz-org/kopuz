@@ -69,6 +69,10 @@ capability is off. Calls block: the HTTP client looks like reqwest without
 the `.await`, and the daemon runs each call on its own async runtime, a few
 instances per source so a long sync never holds up the next track.
 
+A `Track` carries the sample rate and bitrate; a lossless track's bit depth
+goes to `kopuz_plugin_sdk::report_bit_depth(item_id, bits)` while the call
+builds its tracks, so plugins built before it existed keep loading.
+
 Build it for `wasm32-wasip2` (the repository's toolchain file installs the
 target):
 

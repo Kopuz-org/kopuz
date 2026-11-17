@@ -482,6 +482,7 @@ mod tests {
             duration: 1,
             khz: 44_100,
             bitrate: 1_000,
+            bit_depth: 0,
             track_number: None,
             disc_number: None,
             musicbrainz_release_id: None,
@@ -868,6 +869,11 @@ mod tests {
         assert_eq!(library.tracks.len(), 1);
         assert_eq!(library.tracks[0].album, "Untagged");
         assert_eq!(library.tracks[0].album_id, id);
+        // A row stored before bit depth was read gets it from the rescan.
+        assert_eq!(
+            (library.tracks[0].khz, library.tracks[0].bit_depth),
+            (8_000, 16)
+        );
         assert_eq!(
             album_of(&library, path.to_str().expect("utf-8 path")).title,
             "Untagged"

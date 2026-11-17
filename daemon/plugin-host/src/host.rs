@@ -1,5 +1,6 @@
 //! What a plugin can reach: the host side of its imports.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -7,7 +8,7 @@ use wasmtime::component::ResourceTable;
 use wasmtime::{StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxView, WasiView};
 
-use crate::bindings::kopuz::plugin::{http, log};
+use crate::bindings::kopuz::plugin::{details, http, log};
 use crate::manifest::Permissions;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -30,6 +31,8 @@ pub(crate) struct State {
     /// Nothing when it failed to build, since a client without the gate and
     /// redirect policy is no substitute.
     client: Option<reqwest::Client>,
+    /// Bit depths the running call reported, by item id; the session takes them once it returns.
+    pub(crate) bit_depths: HashMap<String, u8>,
 }
 
 impl State {
@@ -63,6 +66,7 @@ impl State {
             permissions,
             server_host,
             client,
+            bit_depths: HashMap::new(),
         }
     }
 }
@@ -250,6 +254,17 @@ impl log::Host for State {
             log::Level::Info => tracing::info!(target: "kopuz_plugin", %plugin, "{message}"),
             log::Level::Warn => tracing::warn!(target: "kopuz_plugin", %plugin, "{message}"),
             log::Level::Error => tracing::error!(target: "kopuz_plugin", %plugin, "{message}"),
+        }
+    }
+}
+
+/// More than any one library holds, so a plugin cannot grow the host's memory without bound.
+const MAX_BIT_DEPTHS: usize = 1_000_000;
+
+impl details::Host for State {
+    async fn bit_depth(&mut self, item_id: String, bits: u8) {
+        if bits > 0 && self.bit_depths.len() < MAX_BIT_DEPTHS {
+            self.bit_depths.insert(item_id, bits);
         }
     }
 }

@@ -1158,6 +1158,7 @@ mod tests {
             duration: 0,
             khz: 0,
             bitrate: 0,
+            bit_depth: 0,
             track_number: None,
             disc_number: None,
             musicbrainz_release_id: None,

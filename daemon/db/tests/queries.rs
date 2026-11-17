@@ -190,6 +190,7 @@ fn track(path: &str, album_id: &str) -> Track {
         duration: 1,
         khz: 44100,
         bitrate: 900,
+        bit_depth: 0,
         track_number: Some(1),
         disc_number: Some(1),
         musicbrainz_release_id: None,

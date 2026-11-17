@@ -1391,6 +1391,9 @@ fn compare(
             left.format.as_deref().unwrap_or_default(),
             right.format.as_deref().unwrap_or_default(),
         ),
+        "sample_rate" => left.khz.cmp(&right.khz),
+        "bit_depth" => left.bit_depth.cmp(&right.bit_depth),
+        "bitrate" => left.bitrate.cmp(&right.bitrate),
         _ => text(&left.title, &right.title),
     }
 }
@@ -1402,6 +1405,29 @@ fn text(left: &str, right: &str) -> std::cmp::Ordering {
 #[cfg(test)]
 mod paging_tests {
     use super::*;
+
+    #[test]
+    fn the_quality_columns_order_by_their_numbers() {
+        let low = TrackInfo {
+            khz: 44_100,
+            bit_depth: 16,
+            bitrate: 900,
+            ..Default::default()
+        };
+        let high = TrackInfo {
+            khz: 96_000,
+            bit_depth: 24,
+            bitrate: 2_300,
+            ..Default::default()
+        };
+        for field in ["sample_rate", "bit_depth", "bitrate"] {
+            assert_eq!(
+                compare(field, &low, &high, &HashMap::new()),
+                std::cmp::Ordering::Less,
+                "{field}"
+            );
+        }
+    }
 
     #[test]
     fn a_large_listing_asks_for_each_new_album_once_in_small_batches() {

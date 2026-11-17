@@ -1,0 +1,7 @@
+/// What a track record has no field for, told to the host while the plugin
+/// builds the tracks a call returns. A new import rather than a new record
+/// field, so plugins built before it still load.
+interface details {
+    /// Bits per sample of a lossless track's audio.
+    bit-depth: func(item-id: string, bits: u8);
+}

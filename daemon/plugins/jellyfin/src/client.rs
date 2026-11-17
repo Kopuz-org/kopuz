@@ -101,9 +101,59 @@ pub struct Item {
     pub sample_rate: Option<u32>,
     pub normalization_gain: Option<f32>,
     pub album_normalization_gain: Option<f32>,
+    /// Absent unless the request's `Fields` asked for `MediaSources`.
+    pub media_sources: Option<Vec<MediaSource>>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "PascalCase")]
+pub struct MediaSource {
+    pub bitrate: Option<u32>,
+    pub media_streams: Option<Vec<MediaStream>>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "PascalCase")]
+pub struct MediaStream {
+    #[serde(rename = "Type")]
+    pub kind: Option<String>,
+    pub sample_rate: Option<u32>,
+    /// Absent for lossy codecs.
+    pub bit_depth: Option<u32>,
 }
 
 impl Item {
+    /// The file's audio stream, where Jellyfin states its sample rate and bit depth.
+    fn audio_stream(&self) -> Option<&MediaStream> {
+        self.media_sources
+            .iter()
+            .flatten()
+            .flat_map(|source| source.media_streams.iter().flatten())
+            .find(|stream| stream.kind.as_deref() == Some("Audio"))
+    }
+
+    /// The sample rate in Hz, from the item or else its audio stream.
+    pub fn audio_sample_rate(&self) -> Option<u32> {
+        self.sample_rate
+            .or_else(|| self.audio_stream().and_then(|stream| stream.sample_rate))
+    }
+
+    pub fn audio_bit_depth(&self) -> Option<u8> {
+        self.audio_stream()
+            .and_then(|stream| stream.bit_depth)
+            .and_then(|bits| u8::try_from(bits).ok())
+    }
+
+    /// Bits per second, from the item or else the file it plays.
+    pub fn audio_bitrate(&self) -> Option<u32> {
+        self.bitrate.or_else(|| {
+            self.media_sources
+                .iter()
+                .flatten()
+                .find_map(|source| source.bitrate)
+        })
+    }
+
     /// Jellyfin derives these from LUFS and publishes no peak, so clip
     /// prevention has nothing to work with on a Jellyfin-supplied gain.
     pub fn replay_gain(&self) -> ReplayGain {

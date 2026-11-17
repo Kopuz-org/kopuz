@@ -26,7 +26,7 @@ use crate::{AlbumQuery, ArtistQuery, DbError, Listing, Page, Source, TrackFilter
 const TRACK_COLUMNS: &str = "t.rowid_pk, t.track_key, t.service, \
     COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS cover_path, \
     t.source_album_id, t.title, \
-    t.artist, t.album, t.duration, t.khz, t.bitrate, t.track_number, t.disc_number, \
+    t.artist, t.album, t.duration, t.khz, t.bitrate, t.bit_depth, t.track_number, t.disc_number, \
     mb.release_id AS mb_release_id, mb.recording_id AS mb_recording_id, mb.track_id AS mb_track_id, \
     t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, t.explicit, t.plays";
 
@@ -381,7 +381,7 @@ pub async fn folder_tracks(
         TrackRow,
         r#"SELECT t.rowid_pk AS "rowid_pk!", t.track_key, t.service,
                   COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
-                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
+                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate, t.bit_depth,
                   t.track_number, t.disc_number,
                   mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
                   t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, t.explicit, t.plays
@@ -477,7 +477,7 @@ pub async fn tracks_by_keys(
         TrackRow,
         r#"SELECT t.rowid_pk AS "rowid_pk!", t.track_key, t.service,
                   COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
-                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
+                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate, t.bit_depth,
                   t.track_number, t.disc_number,
                   mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
                   t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, t.explicit, t.plays
@@ -515,7 +515,7 @@ pub(crate) async fn refresh_from_library(
         TrackRow,
         r#"SELECT t.rowid_pk AS "rowid_pk!", t.track_key, t.service,
                   COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
-                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
+                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate, t.bit_depth,
                   t.track_number, t.disc_number,
                   mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
                   t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, t.explicit, t.plays
@@ -1124,6 +1124,7 @@ mod tests {
             duration: 60,
             khz: 44,
             bitrate: 320,
+            bit_depth: 0,
             track_number: None,
             disc_number: None,
             musicbrainz_release_id: None,

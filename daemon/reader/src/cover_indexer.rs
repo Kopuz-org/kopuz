@@ -171,6 +171,7 @@ mod tests {
             duration: 1,
             khz: 44_100,
             bitrate: 1_000,
+            bit_depth: 0,
             track_number: None,
             disc_number: None,
             musicbrainz_release_id: None,

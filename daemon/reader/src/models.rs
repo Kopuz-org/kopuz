@@ -135,6 +135,9 @@ pub struct Track {
     pub khz: u32,
     #[serde(default)]
     pub bitrate: u16,
+    /// Bits per sample of a lossless stream; 0 for lossy audio or when the source does not say.
+    #[serde(default)]
+    pub bit_depth: u8,
     pub track_number: Option<u32>,
     pub disc_number: Option<u32>,
     #[serde(default)]
@@ -250,6 +253,7 @@ impl Track {
             .map_or(self.duration, |ms| ms.div_ceil(1000));
         other.khz = 0;
         other.bitrate = 0;
+        other.bit_depth = 0;
         other.playlist_item_id = None;
         other.replay_gain = config::ReplayGainInfo::default();
         other.counterpart = Some(Box::new(counterpart.mirrored(item_id.clone(), own_ms)));
@@ -685,6 +689,7 @@ mod tests {
             duration: 0,
             khz: 0,
             bitrate: 0,
+            bit_depth: 0,
             track_number: None,
             disc_number: None,
             musicbrainz_release_id: None,
@@ -961,6 +966,7 @@ mod counterpart_tests {
             duration: 226,
             khz: 48,
             bitrate: 128,
+            bit_depth: 0,
             track_number: Some(1),
             disc_number: None,
             musicbrainz_release_id: None,

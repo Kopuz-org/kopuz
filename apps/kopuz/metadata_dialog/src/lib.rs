@@ -344,6 +344,9 @@ impl MetadataDialog {
                 format!("{:.1} kHz", f64::from(track.khz) / 1000.0),
             );
         }
+        if track.bit_depth > 0 {
+            facts = facts.row(t("bit_depth"), format!("{}-bit", track.bit_depth));
+        }
         if track.bitrate > 0 {
             facts = facts.row(t("bitrate"), format!("{} kbps", track.bitrate));
         }

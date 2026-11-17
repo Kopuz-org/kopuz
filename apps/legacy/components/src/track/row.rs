@@ -86,6 +86,8 @@ pub fn TrackRow(
     let nav_ctrl = use_context::<NavigationController>();
     let is_vaxry = settings.read().ui.ui_style == UiStyle::Vaxry;
     let show_row_images = settings.read().ui.show_row_images;
+    let show_quality = shows_quality_column();
+    let quality = quality_label(track.bit_depth, track.khz);
     let show_selection_highlight = is_selection_mode && is_selected;
     let selection_shadow = if show_selection_highlight {
         "inset 0 0 0 9999px rgba(255,255,255,0.07)"
@@ -157,11 +159,14 @@ pub fn TrackRow(
 
     let file_type = track.format.clone();
 
-    let columns_vaxry = if is_album {
-        COLUMNS_VAXRY_ALBUM
-    } else {
-        COLUMNS_VAXRY
-    };
+    let columns_vaxry = track_columns(
+        if is_album {
+            COLUMNS_VAXRY_ALBUM
+        } else {
+            COLUMNS_VAXRY
+        },
+        show_quality,
+    );
 
     let mut row_swipe = crate::gestures::use_swipe();
     let player = use_context::<hooks::use_player_controller::PlayerController>();
@@ -542,6 +547,16 @@ pub fn TrackRow(
                     }
                 }
 
+                if show_quality {
+                    div { class: "flex items-center justify-end min-w-0",
+                        span {
+                            class: "text-xs truncate",
+                            style: "color: var(--color-white); opacity: 0.35;",
+                            "{quality}"
+                        }
+                    }
+                }
+
                 div { class: "flex items-center justify-end",
                     span {
                         class: "text-xs font-mono",
@@ -582,11 +597,14 @@ pub fn TrackRow(
         };
     }
 
-    let columns_normal = if is_album {
-        COLUMNS_NORMAL_ALBUM
-    } else {
-        COLUMNS_NORMAL
-    };
+    let columns_normal = track_columns(
+        if is_album {
+            COLUMNS_NORMAL_ALBUM
+        } else {
+            COLUMNS_NORMAL
+        },
+        show_quality,
+    );
     // Swallows the whole column gap up to a cover, half of it before bare text.
     let normal_lead_reach = if !is_album && show_row_images {
         "-my-2 -ms-2 -me-6"
@@ -798,6 +816,12 @@ pub fn TrackRow(
                           ondoubleclick: move |evt| evt.stop_propagation(),
                           "{track.album}"
                       }
+                }
+            }
+
+            if show_quality {
+                div { class: "flex items-center justify-end min-w-0",
+                    span { class: "text-xs truncate", style: "color: var(--color-white); opacity: 0.35;", "{quality}" }
                 }
             }
 

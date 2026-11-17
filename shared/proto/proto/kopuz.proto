@@ -1672,6 +1672,8 @@ message TrackInfo {
   optional uint64 duration_ms = 7;
   uint32 khz = 8;
   uint32 bitrate = 9;
+  // Bits per sample of lossless audio; 0 for lossy audio or when unknown.
+  uint32 bit_depth = 28;
   optional uint32 track_number = 10;
   optional uint32 disc_number = 11;
   TrackKind kind = 12;

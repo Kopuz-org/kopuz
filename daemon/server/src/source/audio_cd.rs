@@ -152,6 +152,7 @@ pub(super) fn snapshot(disc: crate::audio_cd::Disc) -> LibrarySnapshot {
             duration: (t.end - t.start) as u64 / 75,
             khz: 44100,
             bitrate: 1411,
+            bit_depth: 16,
             track_number: Some(u32::from(t.number)),
             disc_number: Some(1),
             musicbrainz_release_id: None,
