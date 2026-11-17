@@ -150,6 +150,19 @@ impl NowPlaying {
             (None, _) => None,
         };
         let marks = self.bar_marks(window, cx);
+        let quality = track
+            .as_ref()
+            .filter(|_| store::layout(cx).player.quality)
+            .map(|track| track.quality(false).join(" · "))
+            .filter(|quality| !quality.is_empty())
+            .map(|quality| {
+                div()
+                    .flex_shrink_0()
+                    .whitespace_nowrap()
+                    .text_size(style::text_10() * scale)
+                    .text_color(style::white(style::TEXT_SUBTLE, cx))
+                    .child(quality)
+            });
 
         let block = h_flex()
             .id("track-meta")
@@ -158,6 +171,7 @@ impl NowPlaying {
             .gap(rems(scale))
             .child(cover)
             .children(title)
+            .children(quality)
             .child(marks);
 
         block.with_context_menu(menus::pictured(target.map(menus::menu_for), picture))
