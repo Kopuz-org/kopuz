@@ -73,6 +73,7 @@ fn smb_rescans_only_new_or_incomplete_tracks() {
     let file = TaggedFile::new(FileType::Flac, FileProperties::default(), Vec::new());
     let mut known = metadata("Album/known.flac", &file, 0);
     known.track.duration = 60;
+    known.track.bit_depth = 16;
     let incomplete = metadata("Album/incomplete.flac", &file, 0);
     let mut legacy = metadata("Album/legacy.flac", &file, 0);
     legacy.track.duration = 60;
@@ -98,6 +99,28 @@ fn smb_rescans_only_new_or_incomplete_tracks() {
             "Album/new.flac"
         ]
     );
+}
+
+#[test]
+fn smb_reads_lossless_tracks_stored_before_bit_depth_once() {
+    let file = TaggedFile::new(FileType::Flac, FileProperties::default(), Vec::new());
+    let mut stale = metadata("Album/stale.flac", &file, 0);
+    stale.track.duration = 60;
+    let mut read = metadata("Album/read.flac", &file, 0);
+    read.track.duration = 60;
+    read.track.bit_depth = 24;
+    let mut lossy = metadata("Album/lossy.mp3", &file, 0);
+    lossy.track.duration = 60;
+    lossy.track.album_id = stale.track.album_id.clone();
+    let library = reader::Library {
+        albums: vec![stale.album],
+        tracks: vec![stale.track, read.track, lossy.track],
+        ..Default::default()
+    };
+    let paths = ["Album/stale.flac", "Album/read.flac", "Album/lossy.mp3"]
+        .map(str::to_owned)
+        .to_vec();
+    assert_eq!(scan_candidates(paths, &library), ["Album/stale.flac"]);
 }
 
 #[test]
