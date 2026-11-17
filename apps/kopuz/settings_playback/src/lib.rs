@@ -328,13 +328,18 @@ impl PlaybackSettings {
         let device_change = config.playback.device_change_behavior;
         let sample_rate = config.playback.sample_rate_mode;
         let output_device = config.playback.output_device.clone();
-        let devices = output_device_options(
-            self.output_devices
-                .read(cx)
-                .value()
-                .map_or(&[], Vec::as_slice),
-            output_device.as_deref(),
-        );
+        let listed = self
+            .output_devices
+            .read(cx)
+            .value()
+            .map_or(&[][..], Vec::as_slice);
+        let devices = output_device_options(listed, output_device.as_deref());
+        let exclusive = config.playback.exclusive_output;
+        // Only a device the daemon can hold alone offers it; one left on stays so it can be turned off.
+        let offers_exclusive = exclusive
+            || listed
+                .iter()
+                .any(|device| device.exclusive && Some(&device.id) == output_device.as_ref());
         let autoplay_radio = config.playback.autoplay_radio;
         let skip_explicit = config.playback.skip_explicit;
         let stream_quality = config.playback.stream_quality;
@@ -478,6 +483,21 @@ impl PlaybackSettings {
                     )
                     .shown(cx),
             )
+            .when(offers_exclusive, |section| {
+                section.children(
+                    toggle_row(
+                        "exclusive_output",
+                        t("exclusive_output"),
+                        exclusive,
+                        ConfigModel::writer(|on| {
+                            SettingsEdit::Playback(PlaybackEdit::ExclusiveOutput(on))
+                        }),
+                    )
+                    .bind("exclusive_output", cx)
+                    .description(t("exclusive_output_description"))
+                    .shown(cx),
+                )
+            })
             .children(
                 SettingRow::new(t("sample_rate_mode"))
                     .bind("sample_rate_mode", cx)

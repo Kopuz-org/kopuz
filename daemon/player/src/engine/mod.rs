@@ -164,6 +164,8 @@ pub enum Command {
     SetSampleRateMode(config::SampleRateMode),
     /// Move output to this cpal device id (`None`: the system default), rebuilding a live stream there.
     SetOutputDevice(Option<String>),
+    /// Hold the chosen device's hardware path alone at each track's rate, rebuilding a live stream.
+    SetExclusiveOutput(bool),
     SetDuration(Duration),
     Subscribe(tokio::sync::mpsc::UnboundedSender<Event>),
     Shutdown,

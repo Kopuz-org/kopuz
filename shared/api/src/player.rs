@@ -102,6 +102,8 @@ pub struct OutputDevice {
     pub name: String,
     /// The one the system default currently resolves to.
     pub is_default: bool,
+    /// It can be held alone at each track's rate, which `Playback::exclusive_output` does.
+    pub exclusive: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

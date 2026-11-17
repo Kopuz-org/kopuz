@@ -50,6 +50,14 @@ fn output_device_options(
     options
 }
 
+/// Only a device the daemon can hold alone offers exclusive output; one left on stays so it can be turned off.
+fn offers_exclusive(devices: &[api::OutputDevice], playback: &config::Playback) -> bool {
+    playback.exclusive_output
+        || devices
+            .iter()
+            .any(|device| device.exclusive && Some(&device.id) == playback.output_device.as_ref())
+}
+
 #[component]
 pub(super) fn ConnectivitySection() -> Element {
     let changed = use_signal(|| 0u64);
@@ -648,6 +656,22 @@ pub(super) fn PlayerSection(settings: Signal<Settings>) -> Element {
                             edits.edit(SettingsEdit::Playback(PlaybackEdit::OutputDevice(device)));
                         },
                         class: "settings-select",
+                    }
+                }
+            }
+            if offers_exclusive(
+                &output_devices().unwrap_or_default(),
+                &settings.read().playback,
+            ) {
+                SettingItem {
+                    title: i18n::t("exclusive_output").to_string(),
+                    config_key: "exclusive_output",
+                    nested: true,
+                    control: rsx! {
+                        ToggleSetting {
+                            enabled: settings.read().playback.exclusive_output,
+                            on_change: move |on| edits.edit(SettingsEdit::Playback(PlaybackEdit::ExclusiveOutput(on))),
+                        }
                     }
                 }
             }

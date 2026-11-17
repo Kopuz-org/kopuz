@@ -458,6 +458,10 @@ impl Actor {
                 // The user picked it, so this is not a device change to hold paused on.
                 self.handle_device_error(false);
             }
+            Command::SetExclusiveOutput(exclusive) => {
+                self.sink.set_exclusive(exclusive);
+                self.handle_device_error(false);
+            }
             Command::SetDuration(duration) => {
                 if let Some(current) = &mut self.current {
                     current.duration = duration;
@@ -1265,6 +1269,10 @@ impl Actor {
     /// The rate to ask the sink for: the source's native rate in Source mode,
     /// `None` (device default) in System mode, where the worker resamples.
     fn desired_output_rate(&self, source_sample_rate: Option<u32>) -> Option<u32> {
+        // Nothing mixes behind a held hardware device, so it plays each track at its own rate.
+        if self.sink.exclusive() {
+            return source_sample_rate;
+        }
         match self.sample_rate_mode {
             config::SampleRateMode::Source => source_sample_rate,
             config::SampleRateMode::System => None,

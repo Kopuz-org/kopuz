@@ -65,6 +65,7 @@ pub static ROWS: &[Entry] = &[
     entry("channel_mode", "player"),
     entry("device_change_behavior", "player"),
     entry("output_device", "player"),
+    entry("exclusive_output", "player"),
     entry("sample_rate_mode", "player"),
     entry("replay_gain", "player"),
     entry("replay_gain_preamp", "player"),

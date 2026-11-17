@@ -449,6 +449,7 @@ impl api::PlayerApi for LocalApi {
                 id: device.id,
                 name: device.name,
                 is_default: device.is_default,
+                exclusive: device.exclusive,
             })
             .collect())
     }
