@@ -1228,3 +1228,42 @@ swiped_play_next = "{ $title }" spelas härnäst
 swiped_add_to_queue = "{ $title }" lades till i kön
 listen_address = Serve the API on a TCP address
 listen_address_description = An <ip>:<port> where kopuzctl and other clients can reach Kopuz without the local socket. Anyone who can reach it can control playback, so keep it on 127.0.0.1 unless you trust your network. Takes effect after a restart.
+recap_tab_most_played = Most played
+recap_minutes_listened = Minutes listened
+recap_top_tracks = Top tracks
+recap_top_artists = Top artists
+recap_top_albums = Top albums
+recap_streak = Longest streak
+recap_streak_days =
+    { $count ->
+        [one] { $count } day in a row
+       *[other] { $count } days in a row
+    }
+recap_month =
+    { $month ->
+        [1] January
+        [2] February
+        [3] March
+        [4] April
+        [5] May
+        [6] June
+        [7] July
+        [8] August
+        [9] September
+        [10] October
+        [11] November
+       *[12] December
+    }
+recap_tab = Recap
+recap_period_day = Last 24 hours
+recap_period_week = Last 7 days
+recap_period_month = Last 30 days
+recap_period_year = Last 12 months
+recap_period_all_time = All time
+recap_busiest_hour = Busiest hour
+recap_busiest_day = Busiest day
+recap_busiest_month = Busiest month
+recap_peak_hour = { $hour }:00
+recap_peak_day = { $month } { $day }
+recap_peak_month = { $month } { $year }
+recap_empty = Nothing played in this period yet. Songs you play from now on count toward your recap.

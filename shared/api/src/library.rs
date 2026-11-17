@@ -210,6 +210,90 @@ pub struct StatsView {
     pub listen_counts: std::collections::HashMap<String, u64>,
 }
 
+/// One ranked track, artist or album of a [`ListeningRecap`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecapEntry {
+    /// The track key, artist key or album id; `None` where the listens named none.
+    pub key: Option<String>,
+    pub title: String,
+    /// The artist of a track or album; empty for an artist.
+    pub subtitle: String,
+    pub plays: u64,
+    pub listened_ms: u64,
+    pub artwork: Option<crate::ArtworkRef>,
+}
+
+/// How far back a recap looks, as a rolling window ending now.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum RecapPeriod {
+    /// The last 24 hours.
+    Day,
+    Week,
+    /// The last 30 days.
+    #[default]
+    Month,
+    /// The last 365 days.
+    Year,
+    AllTime,
+}
+
+impl RecapPeriod {
+    pub const ALL: [RecapPeriod; 5] = [
+        RecapPeriod::Day,
+        RecapPeriod::Week,
+        RecapPeriod::Month,
+        RecapPeriod::Year,
+        RecapPeriod::AllTime,
+    ];
+
+    /// What the busiest stretch of this period is measured in.
+    pub fn peak_unit(self) -> RecapUnit {
+        match self {
+            RecapPeriod::Day => RecapUnit::Hour,
+            RecapPeriod::Week | RecapPeriod::Month => RecapUnit::Day,
+            RecapPeriod::Year | RecapPeriod::AllTime => RecapUnit::Month,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum RecapUnit {
+    /// An hour of the day, whatever the date.
+    Hour,
+    #[default]
+    Day,
+    Month,
+}
+
+/// The busiest stretch of a recap on the listener's local clock; fields finer than `unit` mean nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RecapPeak {
+    pub unit: RecapUnit,
+    pub year: u16,
+    pub month: u8,
+    pub day: u8,
+    pub hour: u8,
+    pub plays: u64,
+}
+
+/// The active source's listens over one [`RecapPeriod`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ListeningRecap {
+    pub period: RecapPeriod,
+    pub listened_ms: u64,
+    pub plays: u64,
+    pub tracks: u64,
+    pub artists: u64,
+    pub albums: u64,
+    pub top_tracks: Vec<RecapEntry>,
+    pub top_artists: Vec<RecapEntry>,
+    pub top_albums: Vec<RecapEntry>,
+    /// `None` in a period without a listen.
+    pub peak: Option<RecapPeak>,
+    /// Calendar days in a row with a listen, inside the period.
+    pub longest_streak_days: u32,
+}
+
 /// A window into a filtered track listing. `total` always reflects the whole
 /// filtered set so clients can paginate without a second count request.
 #[derive(Debug, Clone, Default, PartialEq)]

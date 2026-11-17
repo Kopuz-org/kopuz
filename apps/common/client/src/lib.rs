@@ -748,6 +748,20 @@ impl api::LibraryApi for GrpcApi {
             .map_err(wire_error)?;
         Ok(convert::stats_from_proto(stats.get_ref()))
     }
+
+    async fn listening_recap(
+        &self,
+        period: api::RecapPeriod,
+    ) -> Result<api::ListeningRecap, ApiError> {
+        let recap = self
+            .client()
+            .get_listening_recap(Request::new(proto::ListeningRecapRequest {
+                period: convert::recap_period_to_proto(period) as i32,
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::listening_recap_from_proto(recap.get_ref()))
+    }
 }
 
 #[async_trait::async_trait]

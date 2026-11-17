@@ -2001,6 +2001,42 @@ async fn folders_and_stats_agree_across_transports() {
     assert_eq!(local_stats, wire_stats);
 }
 
+#[tokio::test]
+async fn a_listening_recap_agrees_across_transports() {
+    let pair = spawn_pair().await;
+    let listen = db::Listen {
+        track_key: "/lib/seed-0.flac".into(),
+        title: "Seed".into(),
+        artist: "Ada".into(),
+        album: "First".into(),
+        duration_ms: 1000,
+        ..Default::default()
+    };
+    pair.database
+        .record_listen(&config::Source::default(), &listen)
+        .await
+        .unwrap();
+
+    for period in api::RecapPeriod::ALL {
+        let local = pair
+            .local
+            .listening_recap(period)
+            .await
+            .expect("recap locally");
+        let wire = pair
+            .wire
+            .listening_recap(period)
+            .await
+            .expect("recap over the wire");
+        assert_eq!(local, wire);
+        assert_eq!(wire.period, period);
+        assert_eq!((wire.plays, wire.listened_ms), (1, 1000));
+        assert_eq!(wire.top_tracks[0].key.as_deref(), Some("/lib/seed-0.flac"));
+        let peak = wire.peak.expect("a busiest stretch");
+        assert_eq!((peak.unit, peak.plays), (period.peak_unit(), 1));
+    }
+}
+
 /// The TCP transport is the same API with no credentials: a client that
 /// presents nothing is served, and reads agree with the socket.
 #[tokio::test]

@@ -6,6 +6,7 @@ mod facet;
 mod filters;
 mod grid;
 mod playlists;
+mod recap;
 mod settings;
 mod states;
 mod tracks;
@@ -198,6 +199,9 @@ pub struct Library {
     counts: Entity<Query<Counts>>,
     years: Entity<Query<Option<(u16, u16)>>>,
     meta_asked: MetaAsks,
+    // Built on first visit, so the Activity page asks for no recap until one is wanted.
+    recap: Option<Entity<recap::Recap>>,
+    showing_recap: bool,
 
     // Derived on change, never in render: a notify from the playhead would otherwise rebuild these.
     rows: Vec<TrackInfo>,
@@ -415,6 +419,8 @@ impl Library {
             counts,
             years,
             meta_asked: MetaAsks::default(),
+            recap: None,
+            showing_recap: false,
             rows: Vec::new(),
             lines: Vec::new(),
             tiles: Vec::new(),
@@ -455,6 +461,18 @@ impl Library {
 
     pub(crate) fn is_activity(&self) -> bool {
         self.activity
+    }
+
+    pub(crate) fn showing_recap(&self) -> bool {
+        self.activity && self.showing_recap
+    }
+
+    pub(crate) fn show_recap(&mut self, show: bool, cx: &mut Context<Self>) {
+        if show && self.recap.is_none() {
+            self.recap = Some(cx.new(recap::Recap::new));
+        }
+        self.showing_recap = show;
+        cx.notify();
     }
 
     pub(crate) fn is_liked(&self) -> bool {
@@ -1147,6 +1165,14 @@ fn window_item<T>(items: &[T], offset: usize, index: usize) -> Option<&T> {
 impl Render for Library {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _timing = profile::render("library");
+        if self.showing_recap()
+            && let Some(recap) = self.recap.clone()
+        {
+            return components::page()
+                .child(self.recap_chrome(cx))
+                .child(recap)
+                .into_any_element();
+        }
         if !self.frozen {
             self.shared = Shared {
                 stale: self.stale(cx),
@@ -1188,6 +1214,7 @@ impl Render for Library {
                     .child(body),
             )
             .children(bar)
+            .into_any_element()
     }
 }
 

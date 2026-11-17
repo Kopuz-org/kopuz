@@ -43,9 +43,29 @@ impl PlaybackRecorder for SourceRecorder {
         let Some(source) = source else {
             return;
         };
-        if let Err(error) = source.bump_listen_count(&track.id.key()).await {
+        if let Err(error) = source.record_listen(&listen(track)).await {
             tracing::warn!(%error, "listen count persist failed");
         }
+    }
+}
+
+/// The track as the recap remembers it; the artist key is the billed credit's, else the lead's.
+fn listen(track: &Track) -> db::Listen {
+    let billed = track.artist.trim().to_lowercase();
+    let artist_key = track
+        .credits
+        .iter()
+        .find(|credit| credit.name.trim().to_lowercase() == billed)
+        .or_else(|| track.credits.first())
+        .and_then(|credit| credit.key.clone());
+    db::Listen {
+        track_key: track.id.key().into_owned(),
+        title: track.title.clone(),
+        artist: track.artist.clone(),
+        artist_key,
+        album: track.album.clone(),
+        album_id: track.album_id.clone(),
+        duration_ms: track.duration.saturating_mul(1000),
     }
 }
 

@@ -447,6 +447,22 @@ pub fn use_listen_counts(
     })
 }
 
+/// The active source's recap over `period`, re-read when a listen is counted
+/// or the source changes.
+pub fn use_listening_recap(
+    source: Memo<String>,
+    period: Signal<api::RecapPeriod>,
+) -> Memo<Option<Result<api::ListeningRecap, api::ApiError>>> {
+    let api = use_api();
+    let gens = use_generations();
+    use_source_query(source, move |s| {
+        let _ = (s, gens.generation(Table::Tracks));
+        let _ = gens.generation(Table::Recents);
+        let (api, period) = (api.clone(), period());
+        async move { api.listening_recap(period).await }
+    })
+}
+
 /// The playlist catalog for the active source, re-queried on a
 /// playlists/folders bump or a source switch.
 pub fn use_playlists() -> Memo<Option<api::PlaylistCatalog>> {

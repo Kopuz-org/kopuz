@@ -82,6 +82,7 @@ service Kopuz {
   rpc DeletePlaylistFolder(PlaylistFolderId) returns (Unit);
   rpc MovePlaylist(MovePlaylistRequest) returns (Unit);
   rpc GetStats(GetStatsRequest) returns (Stats);
+  rpc GetListeningRecap(ListeningRecapRequest) returns (ListeningRecap);
   rpc GetLyrics(TrackRef) returns (Lyrics);
   rpc GetFavorites(GetFavoritesRequest) returns (Favorites);
   rpc GetJobs(GetJobsRequest) returns (JobList);
@@ -1728,6 +1729,58 @@ message TrackRef {
 
 message Stats {
   map<string, uint64> listen_counts = 1;
+}
+
+enum RecapPeriod {
+  RECAP_PERIOD_UNSPECIFIED = 0;
+  RECAP_PERIOD_DAY = 1;
+  RECAP_PERIOD_WEEK = 2;
+  RECAP_PERIOD_MONTH = 3;
+  RECAP_PERIOD_YEAR = 4;
+  RECAP_PERIOD_ALL_TIME = 5;
+}
+
+enum RecapUnit {
+  RECAP_UNIT_UNSPECIFIED = 0;
+  RECAP_UNIT_HOUR = 1;
+  RECAP_UNIT_DAY = 2;
+  RECAP_UNIT_MONTH = 3;
+}
+
+message ListeningRecapRequest {
+  RecapPeriod period = 1;
+}
+
+message RecapPeak {
+  RecapUnit unit = 1;
+  uint32 year = 2;
+  uint32 month = 3;
+  uint32 day = 4;
+  uint32 hour = 5;
+  uint64 plays = 6;
+}
+
+message RecapEntry {
+  optional string key = 1;
+  string title = 2;
+  string subtitle = 3;
+  uint64 plays = 4;
+  uint64 listened_ms = 5;
+  optional ArtworkRef artwork = 6;
+}
+
+message ListeningRecap {
+  RecapPeriod period = 1;
+  uint64 listened_ms = 2;
+  uint64 plays = 3;
+  uint64 tracks = 4;
+  uint64 artists = 5;
+  uint64 albums = 6;
+  repeated RecapEntry top_tracks = 7;
+  repeated RecapEntry top_artists = 8;
+  repeated RecapEntry top_albums = 9;
+  optional RecapPeak peak = 10;
+  uint32 longest_streak_days = 11;
 }
 
 message Lyrics {

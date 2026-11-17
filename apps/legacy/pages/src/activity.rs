@@ -110,35 +110,77 @@ pub fn Activity(settings: Signal<Settings>) -> Element {
     };
 
     let subtitle = i18n::t("most_played_tracks");
+    let mut showing_recap = use_signal(|| false);
+    let tab_class = |active: bool| match active {
+        true => "px-4 py-1.5 rounded-full text-sm font-medium bg-white/10 text-white",
+        false => {
+            "px-4 py-1.5 rounded-full text-sm font-medium text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+        }
+    };
+    let tabs = rsx! {
+        div { class: "max-w-[1600px] mx-auto w-full shrink-0 flex gap-2 mb-6",
+            button {
+                class: tab_class(!showing_recap()),
+                onclick: move |_| showing_recap.set(false),
+                "{i18n::t(\"recap_tab_most_played\")}"
+            }
+            button {
+                class: tab_class(showing_recap()),
+                onclick: move |_| showing_recap.set(true),
+                "{i18n::t(\"recap_tab\")}"
+            }
+        }
+    };
+
+    // The app header names the page on a phone.
+    let title = rsx! {
+        if !cfg!(target_os = "android") {
+            div { class: "max-w-[1600px] mx-auto w-full shrink-0 mb-6 flex items-end justify-between",
+                div {
+                    if is_vaxry {
+                        p {
+                            class: "text-[10px] font-bold mb-0.5",
+                            style: "color: rgba(255,255,255,0.35);",
+                            "{i18n::t(\"library\")}"
+                        }
+                    }
+                    h1 { class: if is_vaxry { "text-2xl font-semibold tracking-tight text-white mb-1" } else { "text-3xl font-semibold tracking-tight text-white mb-2" },
+                        "{i18n::t(\"listening_logs\")}"
+                    }
+                    if !showing_recap() {
+                        p { class: "text-slate-400 text-sm", "{subtitle}" }
+                    }
+                }
+                if !is_vaxry {
+                    div {
+                        div { class: "w-12 h-12 rounded-full flex items-center justify-center bg-white/5 border border-white/10 text-slate-400",
+                            i { class: "fa-solid fa-chart-simple" }
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    if showing_recap() {
+        return rsx! {
+            div { class: crate::layout::page_container_class(&settings.read().ui.ui_style),
+                {title}
+                {tabs}
+                div { class: "max-w-[1600px] mx-auto w-full flex-1 min-h-0 flex flex-col",
+                    crate::recap::ListeningRecapView {}
+                }
+            }
+        };
+    }
 
     rsx! {
         div { class: crate::layout::page_container_class(&settings.read().ui.ui_style),
-            // The app header names the page and a phone has no room for the columns.
+            {title}
+            {tabs}
+            // A phone has no room for the columns.
             if !cfg!(target_os = "android") {
                 div { class: "max-w-[1600px] mx-auto w-full shrink-0",
-                    div { class: "mb-8 flex items-end justify-between",
-                        div {
-                            if is_vaxry {
-                                p {
-                                    class: "text-[10px] font-bold mb-0.5",
-                                    style: "color: rgba(255,255,255,0.35);",
-                                    "{i18n::t(\"library\")}"
-                                }
-                            }
-                            h1 { class: if is_vaxry { "text-2xl font-semibold tracking-tight text-white mb-1" } else { "text-3xl font-semibold tracking-tight text-white mb-2" },
-                                "{i18n::t(\"listening_logs\")}"
-                            }
-                            p { class: "text-slate-400 text-sm", "{subtitle}" }
-                        }
-                        if !is_vaxry {
-                            div {
-                                div { class: "w-12 h-12 rounded-full flex items-center justify-center bg-white/5 border border-white/10 text-slate-400",
-                                    i { class: "fa-solid fa-chart-simple" }
-                                }
-                            }
-                        }
-                    }
-
                     // Same column classes and scrollbar gutter as the rows below, inside
                     // the same width cap, so every heading sits over its column.
                     div {

@@ -43,9 +43,10 @@ pub use jobs::{
 };
 pub use library::{
     AlbumInfo, AlbumPage, AlbumQuery, ArtistCredit, ArtistDetail, ArtistInfo, ArtistPage,
-    ArtistQuery, DEFAULT_PAGE_LIMIT, LyricChunkView, LyricLineView, LyricsView, Page,
-    SearchRequest, SearchResults, SearchSuggestion, StatsView, TrackCounterpart, TrackFilter,
-    TrackInfo, TrackPage, TrackSort, TrackVersion, total_duration_secs,
+    ArtistQuery, DEFAULT_PAGE_LIMIT, ListeningRecap, LyricChunkView, LyricLineView, LyricsView,
+    Page, RecapEntry, RecapPeak, RecapPeriod, RecapUnit, SearchRequest, SearchResults,
+    SearchSuggestion, StatsView, TrackCounterpart, TrackFilter, TrackInfo, TrackPage, TrackSort,
+    TrackVersion, total_duration_secs,
 };
 pub use mutations::{ArtworkChange, ArtworkUpload, TrackMetadataPatch};
 pub use player::{
@@ -309,6 +310,9 @@ pub trait LibraryApi: Send + Sync {
     async fn lyrics(&self, key: String) -> Result<LyricsView, ApiError>;
 
     async fn stats(&self) -> Result<StatsView, ApiError>;
+
+    /// The active source's listens over `period`, ending now.
+    async fn listening_recap(&self, period: RecapPeriod) -> Result<ListeningRecap, ApiError>;
 
     async fn favorites(&self) -> Result<FavoritesView, ApiError>;
 

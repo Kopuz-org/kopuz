@@ -179,6 +179,7 @@ Data: windowed `api.tracks(TrackFilter{sort: PlayCount})` + count; genre per alb
 - [x] "listening_logs" / "most_played_tracks" header on an Activity page of its own (no facets or stat cards, its own layout, by plays most first); columns # title artist album genre time plays; genre is the album's, read for the album ids the loaded rows reference
 - [x] Row click → fetch all with same filter → PLAY_LIST(all, idx); virtualized; scroll persisted
 - [x] Spinner / "no_tracks_in_library"
+- [x] "recap_tab_most_played" / "recap_tab" switch; Recap (`pages/recap.rs`) reads `api.listening_recap(period)`: period picker (last 24 hours, 7 days, 30 days, 12 months, all time), minutes, plays, busiest hour/day/month by period, longest streak, distinct tracks/artists/albums, top 5 tracks/artists/albums with plays; "recap_empty" for a period without listens
 
 ### 2.12 Radio (`pages/radio.rs`)
 Data: `api.radio_stations()` (refetched after pin) · `api.search_radio(query, 60)` (empty query = top stations)

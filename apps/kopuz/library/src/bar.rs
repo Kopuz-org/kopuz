@@ -82,10 +82,50 @@ impl Library {
             .children(sync)
             .children(playlist_sync)
             .children(refreshing)
+            .children(self.is_activity().then(|| self.activity_switch(cx)))
             .children(switch)
             .child(filter_bar)
             .into_any_element()
             .tap(window)
+    }
+
+    /// The Activity page's heading over its recap, in place of the listing's chrome.
+    pub(crate) fn recap_chrome(&self, cx: &mut Context<Self>) -> AnyElement {
+        v_flex()
+            .w_full()
+            .flex_shrink_0()
+            .gap_4()
+            .pb_4()
+            .child(PageHeader::new(self.title()).flush())
+            .child(self.activity_switch(cx))
+            .into_any_element()
+    }
+
+    /// Most played or the recap: the two things the Activity page shows.
+    fn activity_switch(&self, cx: &mut Context<Self>) -> AnyElement {
+        let page = cx.entity().downgrade();
+        div()
+            .flex()
+            .self_start()
+            .child(
+                Segmented::new("activity-view")
+                    .segment(
+                        Segment::new("most-played")
+                            .icon(icons::ACTIVITY)
+                            .label(t("recap_tab_most_played")),
+                    )
+                    .segment(
+                        Segment::new("recap")
+                            .icon(icons::HISTORY)
+                            .label(t("recap_tab")),
+                    )
+                    .selected(Some(usize::from(self.showing_recap())))
+                    .on_select(move |index, _, cx| {
+                        page.update(cx, |this, cx| this.show_recap(*index == 1, cx))
+                            .ok();
+                    }),
+            )
+            .into_any_element()
     }
 
     /// The header's count, in the facet's own unit; the playlists facet counts playlists, not the folders beside them.
@@ -346,7 +386,7 @@ impl Library {
                 .w_full()
                 .gap_3()
                 .children(cards.into_iter().filter_map(|(key, icon, value)| {
-                    value.map(|value| stat_card(key, icon, value, cx))
+                    value.map(|value| stat_card(t(key), icon, value.to_string(), cx))
                 }))
                 .into_any_element(),
         )
@@ -728,7 +768,12 @@ async fn gather(
     Ok(keys)
 }
 
-fn stat_card(key: &'static str, icon: &'static str, value: u32, cx: &App) -> AnyElement {
+pub(crate) fn stat_card(
+    label: SharedString,
+    icon: &'static str,
+    value: impl Into<SharedString>,
+    cx: &App,
+) -> AnyElement {
     h_flex()
         .flex_1()
         .min_w_0()
@@ -757,13 +802,13 @@ fn stat_card(key: &'static str, icon: &'static str, value: u32, cx: &App) -> Any
                         .text_xs()
                         .truncate()
                         .text_color(style::slate_500(cx))
-                        .child(t(key)),
+                        .child(label),
                 )
                 .child(
                     div()
                         .text_xl()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child(value.to_string()),
+                        .child(value.into()),
                 ),
         )
         .into_any_element()
