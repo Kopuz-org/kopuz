@@ -21,6 +21,8 @@ struct FakeShared {
     /// What the next open() lands on — a "device" whose config tests can
     /// switch to exercise rebuild-onto-a-different-rate paths.
     device_config: SinkConfig,
+    /// What the last `set_device` asked for.
+    device: Option<String>,
 }
 
 impl Default for FakeShared {
@@ -34,6 +36,7 @@ impl Default for FakeShared {
             open_calls: 0,
             last_open_request: None,
             device_config: TEST_CONFIG,
+            device: None,
         }
     }
 }
@@ -129,6 +132,10 @@ impl AudioSink for FakeSink {
         shared.callback = None;
         shared.opened = None;
         shared.playing = false;
+    }
+
+    fn set_device(&mut self, device: Option<String>) {
+        self.0.0.lock().unwrap().device = device;
     }
 }
 
@@ -1727,6 +1734,47 @@ fn default_device_change_leaves_radio_alone() {
     );
     assert_eq!(engine.status().phase, Phase::Playing);
     wait_until("radio audio continues", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+
+    engine.shutdown();
+}
+
+#[test]
+fn choosing_an_output_device_moves_playback_without_pausing() {
+    let (sink, engine) = spawn_engine();
+    engine.send(Command::SetDeviceChangeBehavior(
+        config::DeviceChangeBehavior::Pause,
+    ));
+    let (factory, duration) = wav_factory(30.0);
+    load(&engine, 1, factory, duration);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("played one second", || {
+        sink.pull(TEST_CONFIG.sample_rate as usize * TEST_CONFIG.channels);
+        engine.status().position() >= Duration::from_secs(1)
+    });
+    let position_before = engine.status().position();
+    let opens_before = sink.open_calls();
+
+    engine.send(Command::SetOutputDevice(Some(
+        "alsa:hw:CARD=0,DEV=0".into(),
+    )));
+
+    wait_until("stream reopened on the chosen device", || {
+        sink.open_calls() > opens_before
+    });
+    assert_eq!(
+        sink.0.lock().unwrap().device.as_deref(),
+        Some("alsa:hw:CARD=0,DEV=0")
+    );
+    wait_until("still playing on the chosen device", || {
+        engine.status().phase == Phase::Playing
+    });
+    assert!(
+        engine.status().position() >= position_before.saturating_sub(Duration::from_millis(500)),
+        "position survives the move"
+    );
+    wait_until("audio on the chosen device", || {
         sink.pull(4096).iter().any(|s| *s != 0.0)
     });
 

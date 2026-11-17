@@ -4,6 +4,9 @@
 pub mod decoder;
 pub mod engine;
 pub mod eq;
+pub mod output;
 pub mod player;
 pub(crate) mod replaygain;
 pub mod systemint;
+
+pub use output::{OutputDevice, output_devices};

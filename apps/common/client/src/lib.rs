@@ -267,6 +267,20 @@ impl api::PlayerApi for GrpcApi {
         Ok(())
     }
 
+    async fn output_devices(&self) -> Result<Vec<api::OutputDevice>, ApiError> {
+        let list = self
+            .client()
+            .get_output_devices(Request::new(proto::GetOutputDevicesRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(list
+            .get_ref()
+            .devices
+            .iter()
+            .map(convert::output_device_from_proto)
+            .collect())
+    }
+
     async fn open_listen_link(&self, link: String) -> Result<(), ApiError> {
         self.client()
             .open_listen_link(Request::new(proto::OpenListenLinkRequest { link }))

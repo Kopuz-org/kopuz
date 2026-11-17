@@ -301,7 +301,7 @@ impl SessionHandle {
         materializer: Arc<dyn QueueMaterializer>,
         services: PlaybackServices,
     ) -> Result<Self, PlayerInitError> {
-        let player = Player::try_new()?;
+        let player = Player::try_new_on(services.settings.playback.output_device.clone())?;
         Ok(Self::spawn_with_player(materializer, player, services))
     }
 
@@ -1876,6 +1876,9 @@ impl Session {
                 SettingKey::Playback(PlaybackKey::SampleRateMode) => self
                     .player
                     .set_sample_rate_mode(settings.playback.sample_rate_mode),
+                SettingKey::Playback(PlaybackKey::OutputDevice) => self
+                    .player
+                    .set_output_device(settings.playback.output_device.clone()),
                 SettingKey::Playback(PlaybackKey::DeviceChangeBehavior) => {
                     self.player
                         .set_device_change_behavior(settings.playback.device_change_behavior);

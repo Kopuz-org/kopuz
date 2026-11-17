@@ -82,6 +82,7 @@
   "offline_cache_enabled": true,
   "offline_cache_max_bytes": 5000000000,
   "offline_quality": "Kbps256",
+  "output_device": null,
   "pause_watch_history": false,
   "player_bar_position": "Bottom",
   "prefer_local_lyrics": false,

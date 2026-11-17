@@ -31,6 +31,25 @@ fn volume_scroll_step_edit(value: &str) -> Option<SettingsEdit> {
     )))
 }
 
+/// "System default" (the empty id) first, then every device; a chosen device that is unplugged still shows as itself.
+fn output_device_options(
+    devices: &[api::OutputDevice],
+    current: Option<&str>,
+) -> Vec<(String, String)> {
+    let mut options = vec![(String::new(), i18n::t("output_device_system_default"))];
+    options.extend(
+        devices
+            .iter()
+            .map(|device| (device.id.clone(), device.name.clone())),
+    );
+    if let Some(current) = current
+        && !devices.iter().any(|device| device.id == current)
+    {
+        options.push((current.to_string(), current.to_string()));
+    }
+    options
+}
+
 #[component]
 pub(super) fn ConnectivitySection() -> Element {
     let changed = use_signal(|| 0u64);
@@ -458,6 +477,13 @@ pub(super) fn PlayerSection(settings: Signal<Settings>) -> Element {
     let ctrl = use_context::<PlayerController>();
     let caps = hooks::sources::use_capabilities();
     let caps = caps.read().clone();
+    let output_devices = use_resource(|| async move {
+        hooks::consume_api()
+            .output_devices()
+            .await
+            .inspect_err(|error| tracing::warn!(%error, "listing output devices failed"))
+            .unwrap_or_default()
+    });
     let crossfade_label = if settings.read().playback.crossfade_seconds == 0 {
         i18n::t("crossfade_off")
     } else {
@@ -604,6 +630,24 @@ pub(super) fn PlayerSection(settings: Signal<Settings>) -> Element {
                         on_change: move |behavior| {
                             edits.edit(SettingsEdit::Playback(PlaybackEdit::DeviceChangeBehavior(behavior)));
                         }
+                    }
+                }
+            }
+            SettingItem {
+                title: i18n::t("output_device").to_string(),
+                config_key: "output_device",
+                control: rsx! {
+                    AppSelect {
+                        value: settings.read().playback.output_device.clone().unwrap_or_default(),
+                        options: output_device_options(
+                            &output_devices().unwrap_or_default(),
+                            settings.read().playback.output_device.as_deref(),
+                        ),
+                        on_change: move |id: String| {
+                            let device = (!id.is_empty()).then_some(id);
+                            edits.edit(SettingsEdit::Playback(PlaybackEdit::OutputDevice(device)));
+                        },
+                        class: "settings-select",
                     }
                 }
             }

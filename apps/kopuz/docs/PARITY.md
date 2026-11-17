@@ -416,6 +416,7 @@ Category → rows. **[H]** = hardcoded `Settings` field (applied to the local co
 - [x] [H] `channel_mode` Stereo/Mono/LeftOnly/RightOnly/SwapLeftRight
 - [x] [H] `device_change_behavior` Resume/Pause
 - [x] [H] `sample_rate_mode` System/Source
+- [x] [H] `output_device` System default or one listed output
 - [x] [H]+[A] Equalizer panel (`equalizer`): enable/disable, preset (Flat, BassBoost, TrebleBoost, VocalBoost, Loudness, Custom; animated band interpolation; preset preamp default), preamp slider, 10 band sliders on a curve graph; every change → `api.preview_equalizer(eq)` live, commit writes `cfg.equalizer`
 - [x] [H] `autoplay_radio` toggle
 - [x] [H] `skip_explicit` toggle (`caps.explicit_flags`)

@@ -1205,3 +1205,6 @@ swiped_play_next = "{ $title }" li kalama lon poka
 swiped_add_to_queue = "{ $title }" li tawa nasin kalama
 listen_address = Serve the API on a TCP address
 listen_address_description = An <ip>:<port> where kopuzctl and other clients can reach Kopuz without the local socket. Anyone who can reach it can control playback, so keep it on 127.0.0.1 unless you trust your network. Takes effect after a restart.
+output_device = Output device
+output_device_description = Where Kopuz plays. A device picked here stays put when the system default changes.
+output_device_system_default = System default

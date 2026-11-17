@@ -438,6 +438,21 @@ impl api::PlayerApi for LocalApi {
             .await
     }
 
+    async fn output_devices(&self) -> Result<Vec<api::OutputDevice>, ApiError> {
+        // Enumeration probes sound cards, so it stays off the async workers.
+        let devices = tokio::task::spawn_blocking(player::output_devices)
+            .await
+            .map_err(|error| ApiError::internal(format!("listing output devices: {error}")))?;
+        Ok(devices
+            .into_iter()
+            .map(|device| api::OutputDevice {
+                id: device.id,
+                name: device.name,
+                is_default: device.is_default,
+            })
+            .collect())
+    }
+
     async fn video(&self, request: api::VideoRequest) -> Result<api::VideoChunk, ApiError> {
         self.video
             .as_deref()

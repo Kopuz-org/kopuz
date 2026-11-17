@@ -453,6 +453,11 @@ impl Actor {
                 // live stream keeps its rate to avoid an audible glitch now.
                 self.sample_rate_mode = mode;
             }
+            Command::SetOutputDevice(device) => {
+                self.sink.set_device(device);
+                // The user picked it, so this is not a device change to hold paused on.
+                self.handle_device_error(false);
+            }
             Command::SetDuration(duration) => {
                 if let Some(current) = &mut self.current {
                     current.duration = duration;
