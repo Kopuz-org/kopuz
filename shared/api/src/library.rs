@@ -330,6 +330,29 @@ impl TrackInfo {
     pub fn is_radio(&self) -> bool {
         self.kind == TrackKind::Radio
     }
+
+    /// What is known of the audio, for a frontend to join: "FLAC", "24-bit", "96 kHz", and "2304 kbps" when `bitrate` asks for it.
+    pub fn quality(&self, bitrate: bool) -> Vec<String> {
+        let mut parts = Vec::new();
+        if let Some(format) = self.format.as_deref().filter(|format| !format.is_empty()) {
+            parts.push(format.to_owned());
+        }
+        if self.bit_depth > 0 {
+            parts.push(format!("{}-bit", self.bit_depth));
+        }
+        if self.khz > 0 {
+            // `khz` holds Hz; a rate that is not whole kHz keeps its tenth, as 44.1 does.
+            let tenths = (self.khz + 50) / 100;
+            parts.push(match tenths % 10 {
+                0 => format!("{} kHz", tenths / 10),
+                rest => format!("{}.{rest} kHz", tenths / 10),
+            });
+        }
+        if bitrate && self.bitrate > 0 {
+            parts.push(format!("{} kbps", self.bitrate));
+        }
+        parts
+    }
 }
 
 /// The summed seconds of the tracks whose duration is known; `None` when none is.
@@ -343,6 +366,29 @@ pub fn total_duration_secs<'a>(tracks: impl IntoIterator<Item = &'a TrackInfo>) 
 #[cfg(test)]
 mod tests {
     use super::{ArtistCredit, TrackInfo, total_duration_secs};
+
+    #[test]
+    fn quality_names_what_is_known() {
+        let hi_res = TrackInfo {
+            format: Some("FLAC".into()),
+            bit_depth: 24,
+            khz: 96_000,
+            bitrate: 2304,
+            ..Default::default()
+        };
+        assert_eq!(
+            hi_res.quality(true),
+            ["FLAC", "24-bit", "96 kHz", "2304 kbps"]
+        );
+        assert_eq!(hi_res.quality(false), ["FLAC", "24-bit", "96 kHz"]);
+        let cd = TrackInfo {
+            khz: 44_100,
+            bitrate: 320,
+            ..Default::default()
+        };
+        assert_eq!(cd.quality(true), ["44.1 kHz", "320 kbps"]);
+        assert!(TrackInfo::default().quality(true).is_empty());
+    }
 
     #[test]
     fn a_total_skips_unknown_durations_and_is_none_without_any() {

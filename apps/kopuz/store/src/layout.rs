@@ -395,6 +395,8 @@ pub struct Player {
     pub lyrics: bool,
     pub queue: bool,
     pub favorite: bool,
+    /// The track's format, bit depth and sample rate beside it, and its full stats in Now Playing.
+    pub quality: bool,
     pub cover: TileSize,
 }
 
@@ -408,6 +410,7 @@ impl Default for Player {
             lyrics: true,
             queue: true,
             favorite: true,
+            quality: false,
             cover: TileSize::Medium,
         }
     }

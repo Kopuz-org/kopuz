@@ -133,6 +133,16 @@ impl Render for PlayerSettings {
                             |on, cx| LayoutModel::edit(cx, |layout| layout.player.favorite = on),
                         )
                         .shown(cx),
+                    )
+                    .children(
+                        toggle_row(
+                            "player-quality",
+                            t("interface_player_quality"),
+                            player.quality,
+                            |on, cx| LayoutModel::edit(cx, |layout| layout.player.quality = on),
+                        )
+                        .description(t("interface_player_quality_description"))
+                        .shown(cx),
                     ),
             )
             .into_any_element()

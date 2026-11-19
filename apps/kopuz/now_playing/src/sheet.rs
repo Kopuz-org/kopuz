@@ -368,13 +368,13 @@ impl NowPlaying {
                 }
             })
             .child(div().pt_2().child(marks))
-            .when(track.bitrate > 0, |block| {
+            .when_some(stats(track, cx), |block, stats| {
                 block.child(
                     div()
                         .pt_1()
                         .text_size(style::text_10())
                         .text_color(style::white(0.6, cx))
-                        .child(format!("{} kbps", track.bitrate)),
+                        .child(stats),
                 )
             })
     }
@@ -525,6 +525,18 @@ fn reveal_button(side: Side) -> impl IntoElement {
                 .tooltip(t("show_side_panel"))
                 .on_click(|_, _, cx| set_collapsed(false, cx)),
         )
+}
+
+/// The line under the sheet's marks: the full audio quality when the preference asks, else the bitrate alone.
+fn stats(track: &api::TrackInfo, cx: &App) -> Option<String> {
+    let parts = match store::layout(cx).player.quality {
+        true => track.quality(true),
+        false => (track.bitrate > 0)
+            .then(|| format!("{} kbps", track.bitrate))
+            .into_iter()
+            .collect(),
+    };
+    (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
 fn set_collapsed(collapsed: bool, cx: &mut App) {
