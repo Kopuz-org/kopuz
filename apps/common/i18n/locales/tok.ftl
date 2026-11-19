@@ -43,9 +43,7 @@ no_subfolders = poki lili li ala
 loading_folders = mi kama jo e poki...
 folder_browse_failed = mi ken ala lukin e poki: { $error }
 add_source = o namako e pana
-connect_to_lastfm = o lon tawa Last.fm
 connect_to_librefm = o lon tawa Libre.fm
-lastfm_connected = Last.fm li lon
 librefm_connected = Libre.fm li lon
 server_details = sona pana
 source_name = nimi
@@ -212,10 +210,6 @@ search_placeholder = o alasa e jan pali, e kulupu pi kalama sama, e kalama...
 quick_search_placeholder = o sitelen tawa alasa, o luka e Enter tawa kalama musi…
 no_results_found = "{ $query }" li lon ala
 listenbrainz_token_placeholder = o pana e "token ListenBrainz"
-lastfm_api_key_placeholder = o pana e Last.fm API key sina
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = o pana e Last.fm API secret sina
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = kulupu pi kalama sama li lon ala
@@ -288,7 +282,6 @@ repeat_track = o sin: wan
 rescan_library = o lukin sin e poki kalama
 refresh_music_library = o lukin sin e poki kalama
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 librefm = Libre.fm
 enable_tracing = o open e lukin
 tracing_warning = o open sin e ilo
@@ -472,9 +465,7 @@ lyrics_offset = tenpo ante pi nimi kalama
 lyrics_offset_auto = ilo o alasa e tenpo ante pi nimi kalama
 cover_fetch_strategy = nasin kama sitelen
 musicbrainz_first = MusicBrainz nanpa wan
-lastfm_first = Last.fm nanpa wan
 musicbrainz_only = MusicBrainz taso
-lastfm_only = Last.fm taso
 remove_cover = o weka e sitelen
 
 # Radio Page

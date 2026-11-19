@@ -153,7 +153,6 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         sources.active.clone(),
         station_registry.clone(),
         cover_cache,
-        credentials.clone(),
     ));
     server::ytmusic::player::init_tier_store(database.clone());
     db::cache::init(database.clone());

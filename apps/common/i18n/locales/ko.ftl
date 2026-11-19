@@ -43,9 +43,7 @@ no_subfolders = 하위 폴더 없음
 loading_folders = 폴더 불러오는 중…
 folder_browse_failed = 폴더를 불러올 수 없습니다: { $error }
 add_source = 소스 추가
-connect_to_lastfm = Last.fm에 연결
 connect_to_librefm = Libre.fm에 연결
-lastfm_connected = Last.fm 연결됨
 librefm_connected = Libre.fm 연결됨
 server_details = 서버 세부 정보
 source_name = 이름
@@ -212,10 +210,6 @@ search_placeholder = 아티스트, 앨범 또는 트랙 검색...
 quick_search_placeholder = 입력하여 검색, Enter로 재생…
 no_results_found = "{ $query }"에 대한 결과가 없습니다
 listenbrainz_token_placeholder = ListenBrainz 토큰 입력
-lastfm_api_key_placeholder = Last.fm API 키를 입력하세요
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = Last.fm API 비밀 키를 입력하세요
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = 앨범을 찾을 수 없습니다
@@ -288,7 +282,6 @@ repeat_track = 반복: 트랙
 rescan_library = 라이브러리 다시 스캔
 refresh_music_library = 음악 라이브러리 새로고침
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 librefm = Libre.fm
 enable_tracing = 성능 추적 활성화
 tracing_warning = 오버헤드가 늘고 추적 파일이 커집니다. 다시 시작한 후 적용됩니다.
@@ -472,9 +465,7 @@ lyrics_offset = 가사 오프셋
 lyrics_offset_auto = 가사 오프셋 자동 결정
 cover_fetch_strategy = 커버 가져오기 전략
 musicbrainz_first = MusicBrainz 우선
-lastfm_first = Last.fm 우선
 musicbrainz_only = MusicBrainz만
-lastfm_only = Last.fm만
 remove_cover = 커버 제거
 
 # Radio Page

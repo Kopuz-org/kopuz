@@ -14,9 +14,9 @@ pub fn SettingItem(
     /// The top-level `Settings` key this row edits, rendered locked when a managed layer (Nix/hjem file, drop-in, env var) pins it; empty is never locked.
     #[props(default)]
     config_key: String,
-    /// The other top-level fields a composite control edits (the Last.fm
-    /// credentials, say). The row locks when *any* of its keys is managed —
-    /// locking on `config_key` alone would leave the rest editable.
+    /// The other top-level fields a composite control edits. The row locks
+    /// when *any* of its keys is managed. Locking on `config_key` alone
+    /// would leave the rest editable.
     #[props(default)]
     extra_config_keys: Vec<&'static str>,
     /// Put the control below the title at full width instead of beside it —

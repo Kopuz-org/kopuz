@@ -43,9 +43,7 @@ no_subfolders = 没有子文件夹
 loading_folders = 正在加载文件夹…
 folder_browse_failed = 无法列出文件夹：{ $error }
 add_source = 添加来源
-connect_to_lastfm = 连接到 Last.fm
 connect_to_librefm = 连接到 Libre.fm
-lastfm_connected = 已连接到 Last.fm
 librefm_connected = 已连接到 Libre.fm
 server_details = 服务器详情
 source_name = 名称
@@ -212,10 +210,6 @@ search_placeholder = 搜索艺术家、专辑或曲目...
 quick_search_placeholder = 输入以搜索，回车播放…
 no_results_found = 没有找到“{ $query }”的结果
 listenbrainz_token_placeholder = 输入你的 ListenBrainz 令牌
-lastfm_api_key_placeholder = 输入你的 Last.fm API 密钥
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = 输入你的 Last.fm API 密钥（Secret）
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = 未找到专辑
@@ -288,7 +282,6 @@ repeat_track = 重复播放：单曲
 rescan_library = 重新扫描媒体库
 refresh_music_library = 刷新音乐库
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 librefm = Libre.fm
 enable_tracing = 启用性能追踪
 tracing_warning = 会增加开销并使追踪文件变大；重启后生效。
@@ -472,9 +465,7 @@ lyrics_offset = 歌词偏移
 lyrics_offset_auto = 自动确定歌词偏移
 cover_fetch_strategy = 获取封面策略
 musicbrainz_first = 优先 MusicBrainz
-lastfm_first = 优先 Last.fm
 musicbrainz_only = 仅限 MusicBrainz
-lastfm_only = 仅限 Last.fm
 remove_cover = 移除封面
 
 # Radio Page

@@ -24,10 +24,13 @@ pub use ui_prefs::UiPrefs;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum FetchStrategy {
     #[default]
-    MusicBrainzFirst,
-    LastFmFirst,
+    // Keep existing settings files readable after retiring the other providers.
+    #[serde(
+        alias = "MusicBrainzFirst",
+        alias = "LastFmFirst",
+        alias = "LastFmOnly"
+    )]
     MusicBrainzOnly,
-    LastFmOnly,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1397,6 +1400,28 @@ mod tests {
         EqualizerSettings, ReplayGainInfo, ReplayGainMode, ReplayGainSettings, Settings,
         SettingsLayout, loudness_gain,
     };
+
+    #[test]
+    fn retired_cover_strategies_keep_existing_settings_readable() {
+        for strategy in [
+            "MusicBrainzFirst",
+            "LastFmFirst",
+            "LastFmOnly",
+            "MusicBrainzOnly",
+        ] {
+            let settings: Settings = toml::from_str(&format!(
+                "theme = \"light\"\ncover_fetch_strategy = \"{strategy}\""
+            ))
+            .expect("existing settings still load");
+            assert_eq!(settings.ui.theme, "light");
+            assert_eq!(
+                settings.library.cover_fetch_strategy,
+                super::FetchStrategy::MusicBrainzOnly
+            );
+            let saved = toml::to_string(&settings).expect("serialize");
+            assert!(saved.contains("cover_fetch_strategy = \"MusicBrainzOnly\""));
+        }
+    }
 
     fn tagged() -> ReplayGainInfo {
         ReplayGainInfo {

@@ -1,4 +1,4 @@
-//! Shared Last.fm-compatible request signing and payloads.
+//! Request signing and payloads for Libre.fm.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

@@ -43,9 +43,7 @@ no_subfolders = Χωρίς υποφακέλους
 loading_folders = Φόρτωση φακέλων…
 folder_browse_failed = Δεν ήταν δυνατή η προβολή των φακέλων: { $error }
 add_source = Προσθήκη πηγής
-connect_to_lastfm = Σύνδεση στο Last.fm
 connect_to_librefm = Σύνδεση στο Libre.fm
-lastfm_connected = Συνδεδεμένο με το Last.fm
 librefm_connected = Συνδεδεμένο με το Libre.fm
 server_details = Λεπτομέρειες Διακομιστή
 source_name = Όνομα
@@ -232,10 +230,6 @@ search_placeholder = Αναζήτηση καλλιτέχνη, άλμπουμ ή 
 quick_search_placeholder = Πληκτρολογήστε για αναζήτηση, Enter για αναπαραγωγή…
 no_results_found = Δεν βρέθηκαν αποτελέσματα για "{ $query }"
 listenbrainz_token_placeholder = Εισάγετε το token σας στο ListenBrainz
-lastfm_api_key_placeholder = Εισαγάγετε το κλειδί API του Last.fm
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = Εισαγάγετε το μυστικό API του Last.fm
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Το άλμπουμ δεν βρέθηκε
@@ -320,7 +314,6 @@ repeat_track = Επανάληψη: Κομμάτι
 rescan_library = Επανάληψη Σάρωσης Βιβλιοθήκης
 refresh_music_library = Ανανέωση Μουσικής Βιβλιοθήκης
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 librefm = Libre.fm
 enable_tracing = Ενεργοποίηση καταγραφής επιδόσεων
 tracing_warning = Προσθέτει επιβάρυνση και μεγαλώνει το αρχείο καταγραφής· εφαρμόζεται μετά την επανεκκίνηση.
@@ -504,9 +497,7 @@ lyrics_offset = Μετατόπιση στίχων
 lyrics_offset_auto = Αυτόματος υπολογισμός μετατόπισης στίχων
 cover_fetch_strategy = Στρατηγική λήψης εξωφύλλων
 musicbrainz_first = MusicBrainz πρώτα
-lastfm_first = Last.fm πρώτα
 musicbrainz_only = Μόνο MusicBrainz
-lastfm_only = Μόνο Last.fm
 remove_cover = Αφαίρεση εξωφύλλου
 
 # Radio Page

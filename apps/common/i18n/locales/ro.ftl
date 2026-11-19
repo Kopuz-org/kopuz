@@ -43,9 +43,7 @@ no_subfolders = Fără subfoldere
 loading_folders = Se încarcă folderele…
 folder_browse_failed = Nu s-au putut lista folderele: { $error }
 add_source = Adaugă sursă
-connect_to_lastfm = Conectează-te la Last.fm
 connect_to_librefm = Conectează-te la Libre.fm
-lastfm_connected = Conectat la Last.fm
 librefm_connected = Conectat la Libre.fm
 server_details = Detalii Server
 source_name = Nume
@@ -237,10 +235,6 @@ search_placeholder = Caută artiști, albume sau piese...
 quick_search_placeholder = Tastați pentru a căuta, Enter pentru redare…
 no_results_found = Niciun rezultat pentru "{ $query }"
 listenbrainz_token_placeholder = Introdu token-ul ListenBrainz
-lastfm_api_key_placeholder = Introdu cheia API Last.fm
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = Introdu secretul API Last.fm
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Albumul nu a fost găsit
@@ -328,7 +322,6 @@ repeat_track = Repetare: Piesă
 rescan_library = Rescanare Bibliotecă
 refresh_music_library = Actualizează Biblioteca
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 librefm = Libre.fm
 enable_tracing = Activează urmărirea performanței
 tracing_warning = Adaugă supraîncărcare și mărește fișierul de urmărire; are efect după repornire.
@@ -512,9 +505,7 @@ lyrics_offset = Decalaj versuri
 lyrics_offset_auto = Determină automat decalajul versurilor
 cover_fetch_strategy = Strategie de preluare coperți
 musicbrainz_first = MusicBrainz mai întâi
-lastfm_first = Last.fm mai întâi
 musicbrainz_only = Doar MusicBrainz
-lastfm_only = Doar Last.fm
 remove_cover = Elimină coperta
 
 # Radio Page

@@ -43,8 +43,6 @@ no_subfolders = துணைக் கோப்புறைகள் இல்�
 loading_folders = கோப்புறைகள் ஏற்றப்படுகின்றன…
 folder_browse_failed = கோப்புறைகளைப் பட்டியலிட முடியவில்லை: { $error }
 add_source = மூலத்தைச் சேர்
-connect_to_lastfm = Last.fm உடன் இணை
-lastfm_connected = Last.fm இணைக்கப்பட்டது
 connect_to_librefm = Libre.fm உடன் இணை
 librefm_connected = Libre.fm இணைக்கப்பட்டது
 server_details = சேவையக விவரங்கள்
@@ -302,10 +300,6 @@ search_placeholder = கலைஞர்கள், ஆல்பங்கள் �
 quick_search_placeholder = தேட தட்டச்சு செய்யவும், இயக்க Enter…
 no_results_found = "{ $query }" க்கு முடிவுகள் எதுவும் கண்டுபிடிக்கப்படவில்லை
 listenbrainz_token_placeholder = உங்கள் ListenBrainz டோக்கனை உள்ளிடவும்
-lastfm_api_key_placeholder = உங்கள் Last.fm API விசையை உள்ளிடவும்
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = உங்கள் Last.fm API சீக்ரெட்டை உள்ளிடவும்
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = ஆல்பம் கண்டுபிடிக்கப்படவில்லை
@@ -468,7 +462,6 @@ repeat_track = மீண்டும்: தடம்
 rescan_library = நூலகத்தை மீண்டும் ஸ்கேன் செய்
 refresh_music_library = இசை நூலகத்தைப் புதுப்பி
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 enable_tracing = செயல்திறன் ட்ரேசிங்கை இயக்கு
 tracing_warning = ரன்டைம் மேல்நிலையைச் சேர்க்கிறது மற்றும் ட்ரேஸ் கோப்பு வளர்கிறது; மறுதொடக்கத்திற்குப் பிறகு நடைமுறைக்கு வரும்.
 export_logs = பதிவுகளை ஏற்றுமதி செய்
@@ -567,9 +560,7 @@ lyrics_offset = பாடல் வரிகள் நேர மாற்றம�
 lyrics_offset_auto = பாடல் வரிகள் நேர மாற்றத்தை தானாகக் கண்டறி
 cover_fetch_strategy = கவர் பெறும் உத்தி
 musicbrainz_first = MusicBrainz முதலில்
-lastfm_first = Last.fm முதலில்
 musicbrainz_only = MusicBrainz மட்டும்
-lastfm_only = Last.fm மட்டும்
 remove_cover = கவரை அகற்று
 
 # Radio Page

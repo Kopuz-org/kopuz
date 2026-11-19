@@ -1711,20 +1711,14 @@ struct LegacyData {
     volume: f32,
     discord_presence_paused: Option<bool>,
     musicbrainz_token: String,
-    lastfm_api_key: String,
-    lastfm_api_secret: String,
-    lastfm_session_key: String,
     librefm_session_key: String,
 }
 
 impl LegacyData {
     /// Each credential under the `integration_credentials` key it is stored by.
-    fn credentials(&self) -> [(&'static str, &str); 5] {
+    fn credentials(&self) -> [(&'static str, &str); 2] {
         [
             ("musicbrainz_token", &self.musicbrainz_token),
-            ("lastfm_api_key", &self.lastfm_api_key),
-            ("lastfm_api_secret", &self.lastfm_api_secret),
-            ("lastfm_session_key", &self.lastfm_session_key),
             ("librefm_session_key", &self.librefm_session_key),
         ]
     }
@@ -1742,9 +1736,6 @@ impl Default for LegacyData {
             volume: 1.0,
             discord_presence_paused: Some(true),
             musicbrainz_token: String::new(),
-            lastfm_api_key: String::new(),
-            lastfm_api_secret: String::new(),
-            lastfm_session_key: String::new(),
             librefm_session_key: String::new(),
         }
     }
@@ -2047,7 +2038,7 @@ mod row_fill_tests {
         .await
         .unwrap();
         sqlx::raw_sql(
-            r#"INSERT INTO app_config (id, json) VALUES (1, '{"theme":"dark","volume":0.3,"discord_presence_paused":false,"active_source":{"Server":"yt-1"},"album_sort":[{"field":"Year","direction":"Desc"}],"lastfm_session_key":"sk","offline_tracks":{"t1":"/c/t1.flac"},"pinned_stations":["{\"id\":\"moe\"}", "not json"]}');
+            r#"INSERT INTO app_config (id, json) VALUES (1, '{"theme":"dark","volume":0.3,"discord_presence_paused":false,"active_source":{"Server":"yt-1"},"album_sort":[{"field":"Year","direction":"Desc"}],"librefm_session_key":"sk","offline_tracks":{"t1":"/c/t1.flac"},"pinned_stations":["{\"id\":\"moe\"}", "not json"]}');
                INSERT INTO servers (id, name, url, service, updated_at) VALUES ('yt-1', 'yt', '', 'YtMusic', 0);
                INSERT INTO kv (name, kind, value) VALUES
                  ('yt_sync', 'timestamps', '{"last_yt_sync_at":1700000000,"last_yt_playlists_sync_at":null}'),
@@ -2124,7 +2115,7 @@ mod row_fill_tests {
             "the blob's sort reaches each frontend's prefs"
         );
         let secret: String = sqlx::query_scalar(
-            "SELECT value FROM integration_credentials WHERE key = 'lastfm_session_key'",
+            "SELECT value FROM integration_credentials WHERE key = 'librefm_session_key'",
         )
         .fetch_one(&pool)
         .await
@@ -2135,7 +2126,7 @@ mod row_fill_tests {
             .parse()
             .unwrap();
         assert_eq!(written["theme"].as_str(), Some("dark"));
-        assert!(!written.contains_key("volume") && !written.contains_key("lastfm_session_key"));
+        assert!(!written.contains_key("volume") && !written.contains_key("librefm_session_key"));
         assert!(!written.contains_key("discord_presence_paused"));
 
         let kv: Vec<(String, String, String)> =

@@ -2,7 +2,7 @@
 //!
 //! A scrobble that fails with a transient error (no response or a 5xx) is
 //! persisted here and resubmitted later with its original listen timestamp.
-//! Both protocols support backdated submissions: Last.fm/Libre.fm
+//! Both protocols support backdated submissions: Libre.fm
 //! `track.scrobble` takes a `timestamp`, ListenBrainz takes `listened_at`.
 //! Permanent failures (4xx, e.g. bad credentials) are never queued, retrying
 //! them can't succeed.
@@ -12,7 +12,7 @@
 //! is several rows sharing a timestamp, so delivering one service never blocks
 //! the others.
 
-use crate::{lastfm, librefm, musicbrainz};
+use crate::{librefm, musicbrainz};
 use db::{Db, QueuedScrobbleRow};
 use std::collections::HashMap;
 
@@ -31,8 +31,6 @@ pub fn is_transient(error: &reqwest::Error) -> bool {
 /// Credentials snapshot for draining; `None` skips that service.
 #[derive(Debug, Clone, Default)]
 pub struct Credentials {
-    /// (api_key, api_secret, session_key)
-    pub lastfm: Option<(String, String, String)>,
     pub librefm_session_key: Option<String>,
     /// Raw token as stored in config; "Token " prefix added when missing.
     pub listenbrainz_token: Option<String>,
@@ -149,16 +147,6 @@ async fn submit_one(
 ) -> Outcome {
     let album = item.album.as_deref();
     let result = match service {
-        ScrobbleService::LastFm => {
-            let Some((key, secret, session)) = &creds.lastfm else {
-                return Outcome::NoCredentials;
-            };
-            let scrobble =
-                lastfm::make_scrobble_at(&item.artist, &item.title, album, item.listened_at);
-            lastfm::submit_scrobble(key, secret, session, &scrobble)
-                .await
-                .map(|_| ())
-        }
         ScrobbleService::LibreFm => {
             let Some(session) = &creds.librefm_session_key else {
                 return Outcome::NoCredentials;
@@ -238,7 +226,7 @@ mod tests {
 
         enqueue(
             &t.db,
-            ScrobbleService::LastFm,
+            ScrobbleService::LibreFm,
             "Artist",
             "Song",
             Some("Album"),
@@ -260,7 +248,7 @@ mod tests {
         .await;
         enqueue(
             &t.db,
-            ScrobbleService::LastFm,
+            ScrobbleService::LibreFm,
             "Artist",
             "Song",
             Some("Album"),
@@ -272,7 +260,7 @@ mod tests {
         let rows = t.db.scrobble_queue_all().await.unwrap();
         assert_eq!(rows.len(), 2);
         let services: Vec<ScrobbleService> = rows.iter().map(|r| r.service).collect();
-        assert!(services.contains(&ScrobbleService::LastFm));
+        assert!(services.contains(&ScrobbleService::LibreFm));
         assert!(services.contains(&ScrobbleService::ListenBrainz));
         let lb = rows
             .iter()
@@ -286,7 +274,7 @@ mod tests {
         let t = temp_db("nocreds").await;
         enqueue(
             &t.db,
-            ScrobbleService::LastFm,
+            ScrobbleService::LibreFm,
             "Artist",
             "Song",
             None,

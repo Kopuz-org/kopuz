@@ -43,8 +43,6 @@ no_subfolders = Alt klasör yok
 loading_folders = Klasörler yükleniyor…
 folder_browse_failed = Klasörler listelenemedi: { $error }
 add_source = Kaynak Ekle
-connect_to_lastfm = Last.fm'ye bağlan
-lastfm_connected = Last.fm'e bağlandı
 connect_to_librefm = Libre.fm'ye bağlan
 librefm_connected = Libre.fm'e bağlandı
 server_details = Sunucu Detayları
@@ -212,10 +210,6 @@ search_placeholder = Sanatçı, albüm veya parça ara...
 quick_search_placeholder = Aramak için yazın, çalmak için Enter…
 no_results_found = "{ $query }" için sonuç bulunamadı
 listenbrainz_token_placeholder = ListenBrainz token'ınızı girin
-lastfm_api_key_placeholder = Last.fm API anahtarınızı girin
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = Last.fm API gizli anahtarınızı girin
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Albüm bulunamadı
@@ -288,7 +282,6 @@ repeat_track = Tekrar: Parça
 rescan_library = Kütüphaneyi Tara
 refresh_music_library = Müzik Kütüphaneni Yenile
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 enable_tracing = Performans izlemeyi etkinleştir
 tracing_warning = Ek yük getirir ve izleme dosyasını büyütür; yeniden başlatınca etkinleşir.
 export_logs = Günlükleri dışa aktar
@@ -472,9 +465,7 @@ lyrics_offset = Şarkı sözü kayması
 lyrics_offset_auto = Şarkı sözü kaymasını otomatik belirle
 cover_fetch_strategy = Kapak getirme stratejisi
 musicbrainz_first = Önce MusicBrainz
-lastfm_first = Önce Last.fm
 musicbrainz_only = Yalnızca MusicBrainz
-lastfm_only = Yalnızca Last.fm
 remove_cover = Kapağı kaldır
 
 # Radio Page

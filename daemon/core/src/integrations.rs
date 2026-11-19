@@ -730,7 +730,6 @@ fn project(
 /// The integration ids a client addresses these by.
 const DISCORD: &str = "discord";
 const LISTENBRAINZ: &str = "listenbrainz";
-const LASTFM: &str = "lastfm";
 const LIBREFM: &str = "librefm";
 
 /// The field keys a form and its answers agree on.
@@ -740,8 +739,6 @@ const PRESENCE_SOURCE: &str = "source";
 const UPLOAD_COVER: &str = "upload_cover";
 const LISTEN_BUTTON: &str = "listen_button";
 const TOKEN: &str = "token";
-const API_KEY: &str = "api_key";
-const API_SECRET: &str = "api_secret";
 
 fn toggle_field(key: &str, config_key: &str, value: bool) -> FieldSpec {
     FieldSpec {
@@ -831,34 +828,11 @@ fn listenbrainz(credentials: &Credentials) -> IntegrationInfo {
     }
 }
 
-fn lastfm(credentials: &Credentials) -> IntegrationInfo {
-    IntegrationInfo {
-        id: LASTFM.to_string(),
-        name: Text::key("lastfm"),
-        icon: Icon::Class("fa-brands fa-lastfm".into()),
-        // A session key is what scrobbles; the api key alone only reaches the sign-in page.
-        configured: !credentials.lastfm_session_key.trim().is_empty(),
-        connect: ConnectKind::WebSignIn,
-        fields: vec![
-            secret_field(
-                API_KEY,
-                Text::key("lastfm_api_key_label"),
-                "lastfm_api_key_placeholder",
-            ),
-            secret_field(
-                API_SECRET,
-                Text::key("lastfm_api_secret_label"),
-                "lastfm_api_secret_placeholder",
-            ),
-        ],
-    }
-}
-
 fn librefm(credentials: &Credentials) -> IntegrationInfo {
     IntegrationInfo {
         id: LIBREFM.to_string(),
         name: Text::key("librefm"),
-        icon: Icon::Class("fa-brands fa-lastfm".into()),
+        icon: Icon::Class("fa-solid fa-music".into()),
         configured: !credentials.librefm_session_key.trim().is_empty(),
         connect: ConnectKind::WebSignIn,
 
@@ -874,7 +848,6 @@ fn all(config: &config::Settings, credentials: &Credentials, paused: bool) -> Ve
         published.push(discord(config, paused));
     }
     published.push(listenbrainz(credentials));
-    published.push(lastfm(credentials));
     published.push(librefm(credentials));
     published
 }
@@ -941,13 +914,8 @@ fn apply_presence(values: &[FieldValue], config: &mut config::Settings) {
 }
 
 fn apply_credentials(id: &str, values: &[FieldValue], credentials: &mut Credentials) {
-    match id {
-        LISTENBRAINZ => set_secret(values, TOKEN, &mut credentials.musicbrainz_token),
-        LASTFM => {
-            set_secret(values, API_KEY, &mut credentials.lastfm_api_key);
-            set_secret(values, API_SECRET, &mut credentials.lastfm_api_secret);
-        }
-        _ => {}
+    if id == LISTENBRAINZ {
+        set_secret(values, TOKEN, &mut credentials.musicbrainz_token);
     }
 }
 
@@ -955,11 +923,6 @@ fn apply_credentials(id: &str, values: &[FieldValue], credentials: &mut Credenti
 fn clear_credentials(id: &str, credentials: &mut Credentials) {
     match id {
         LISTENBRAINZ => credentials.musicbrainz_token.clear(),
-        LASTFM => {
-            credentials.lastfm_api_key.clear();
-            credentials.lastfm_api_secret.clear();
-            credentials.lastfm_session_key.clear();
-        }
         LIBREFM => credentials.librefm_session_key.clear(),
         _ => {}
     }
@@ -1005,10 +968,8 @@ impl PresencePause {
 
 /// Scrobbling, metadata and presence accounts.
 ///
-/// The credentials for these lived in the settings UI, which meant a Last.fm
-/// api secret sat in a Dioxus signal and the scrobbler that used it ran in the
-/// frontend. They are write-only here: a caller answers a published field list
-/// and asks whether one is configured, never what it holds.
+/// Credentials are write-only: callers answer a published field list and ask
+/// whether an account is configured, never what it holds.
 pub struct IntegrationService {
     config: Arc<crate::config_service::ConfigService>,
     credentials: CredentialStore,
@@ -1105,9 +1066,7 @@ impl IntegrationService {
 
     /// Run a service's web sign-in and keep the session key it returns.
     ///
-    /// Last.fm and Libre.fm both hand out a token, open a page for the person
-    /// to approve, then trade the token for a session key -- a browser and a
-    /// poll loop, which is why it is not a frontend's job.
+    /// Libre.fm opens an approval page, then trades the token for a session key.
     pub async fn authenticate(&self, id: &str) -> Result<IntegrationInfo, ApiError> {
         let info = self.info(id).await?;
         if info.connect != ConnectKind::WebSignIn {
@@ -1116,29 +1075,10 @@ impl IntegrationService {
             )
             .because(ErrorReason::ConnectNotOffered));
         }
-        let librefm = id == LIBREFM;
-        let (api_key, api_secret) = if librefm {
-            (
-                scrobble::librefm::API_KEY.to_string(),
-                scrobble::librefm::API_SECRET.to_string(),
-            )
-        } else {
-            let held = self.credentials.snapshot();
-            (held.lastfm_api_key, held.lastfm_api_secret)
-        };
-        if api_key.trim().is_empty() || api_secret.trim().is_empty() {
-            return Err(ApiError::invalid_input("set the API key and secret first")
-                .because(ErrorReason::ApiKeyMissing));
-        }
-        let session_key = web_sign_in(id, &api_key, &api_secret).await?;
+        let session_key =
+            web_sign_in(scrobble::librefm::API_KEY, scrobble::librefm::API_SECRET).await?;
         self.credentials
-            .update(move |credentials| {
-                if librefm {
-                    credentials.librefm_session_key = session_key;
-                } else {
-                    credentials.lastfm_session_key = session_key;
-                }
-            })
+            .update(move |credentials| credentials.librefm_session_key = session_key)
             .await
             .map_err(database_error)?;
         self.info(id).await
@@ -1254,33 +1194,21 @@ const PRESENCE_KEYS: [config::SettingKey; 4] = [
 /// Open the approval page, then poll for the session key. The person has to
 /// click through in a browser, so the wait is generous and bounded.
 #[cfg(not(target_os = "android"))]
-async fn web_sign_in(id: &str, api_key: &str, api_secret: &str) -> Result<String, ApiError> {
-    let librefm = id == LIBREFM;
-    let token = if librefm {
-        scrobble::librefm::get_auth_token(api_key).await
-    } else {
-        scrobble::lastfm::get_auth_token(api_key).await
-    }
-    .map_err(|error| {
-        ApiError::internal(format!("could not start the sign-in: {error}"))
-            .because(ErrorReason::SignInNotStarted)
-    })?;
-    let url = if librefm {
-        scrobble::librefm::auth_url(api_key, &token)
-    } else {
-        scrobble::lastfm::auth_url(api_key, &token)
-    };
+async fn web_sign_in(api_key: &str, api_secret: &str) -> Result<String, ApiError> {
+    let token = scrobble::librefm::get_auth_token(api_key)
+        .await
+        .map_err(|error| {
+            ApiError::internal(format!("could not start the sign-in: {error}"))
+                .because(ErrorReason::SignInNotStarted)
+        })?;
+    let url = scrobble::librefm::auth_url(api_key, &token);
     webbrowser::open(&url).map_err(|error| {
         ApiError::internal(format!("could not open a browser: {error}"))
             .because(ErrorReason::BrowserNotOpened)
     })?;
     for _ in 0..60 {
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        let session = if librefm {
-            scrobble::librefm::get_session_key(api_key, api_secret, &token).await
-        } else {
-            scrobble::lastfm::get_session_key(api_key, api_secret, &token).await
-        };
+        let session = scrobble::librefm::get_session_key(api_key, api_secret, &token).await;
         if let Ok(session) = session {
             return Ok(session);
         }
@@ -1290,7 +1218,7 @@ async fn web_sign_in(id: &str, api_key: &str, api_secret: &str) -> Result<String
 }
 
 #[cfg(target_os = "android")]
-async fn web_sign_in(_id: &str, _api_key: &str, _api_secret: &str) -> Result<String, ApiError> {
+async fn web_sign_in(_api_key: &str, _api_secret: &str) -> Result<String, ApiError> {
     Err(
         ApiError::unsupported("web sign-in runs in the app on Android")
             .because(ErrorReason::ConnectNotOffered),
@@ -1442,11 +1370,11 @@ mod tests {
             assert_eq!(refused.code, api::ErrorCode::Unsupported, "{id}");
             assert_eq!(refused.reason, Some(ErrorReason::ConnectNotOffered), "{id}");
         }
-        let keyless = service
-            .authenticate(LASTFM)
+        let removed = service
+            .authenticate("lastfm")
             .await
-            .expect_err("no API key to sign in with");
-        assert_eq!(keyless.reason, Some(ErrorReason::ApiKeyMissing));
+            .expect_err("Last.fm is no longer supported");
+        assert_eq!(removed.code, api::ErrorCode::NotFound);
         let unknown = service
             .authenticate("nope")
             .await

@@ -43,8 +43,6 @@ no_subfolders = Tidak ada subfolder
 loading_folders = Memuat folder…
 folder_browse_failed = Tidak dapat menampilkan folder: { $error }
 add_source = Tambah Sumber
-connect_to_lastfm = Hubungkan ke Last.fm
-lastfm_connected = Last.fm Terhubung
 connect_to_librefm = Hubungkan ke Libre.fm
 librefm_connected = Libre.fm Terhubung
 server_details = Detail Peladen
@@ -278,10 +276,6 @@ search_placeholder = Cari untuk artis, album atau trek...
 quick_search_placeholder = Ketik untuk mencari, Enter untuk memutar…
 no_results_found = Tidak ada hasil yang ditemukan untuk "{ $query }"
 listenbrainz_token_placeholder = Masukkan token ListenBrainz anda
-lastfm_api_key_placeholder = Masukkan Last.fm API Key anda
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = Masukkan Last.fm API Secret anda
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Album tidak ditemukan
@@ -432,7 +426,6 @@ repeat_track = Ulangi: Trek
 rescan_library = Pindai ulang Pustaka
 refresh_music_library = Segarkan Pustaka Musik
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 enable_tracing = Aktifkan Performa Tracing
 tracing_warning = Menambah beban kerja saat runtime dan memperbesar ukuran file jejak; berlaku setelah memulai ulang.
 export_logs = Ekspor Log
@@ -531,9 +524,7 @@ lyrics_offset = Offset lirik
 lyrics_offset_auto = Tentukan offset lirik secara otomatis
 cover_fetch_strategy = Strategi pengambilan sampul
 musicbrainz_first = Pertama MusicBrainz
-lastfm_first = Pertama Last.fm
 musicbrainz_only = Hanya MusicBrainz
-lastfm_only = Hanya Last.fm
 remove_cover = Hapus sampul
 
 # Radio Page

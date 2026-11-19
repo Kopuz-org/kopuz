@@ -819,8 +819,7 @@ Both of these live on the Spotify row under **Settings → Media servers**:
 Saved tracks show up as favorites, saved albums as your library, and your
 playlists are browsable. There is a **Discover** page with On repeat, Jump back
 in, and All-time favorites, search across tracks/albums/artists, liking and
-unliking, and scrobbling to Last.fm, Libre.fm, and ListenBrainz like any other
-source.
+unliking, and scrobbling to Libre.fm and ListenBrainz like any other source.
 
 ### What Spotify limits
 

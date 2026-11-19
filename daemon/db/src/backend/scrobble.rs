@@ -1,13 +1,12 @@
 //! Offline scrobble domain types (issue #335). `db` owns the `scrobble_queue`
 //! table these describe, so the enum and row live here; `kopuz-scrobble`
-//! re-exports them so its Last.fm/Libre.fm/ListenBrainz backends and the queue
+//! re-exports them so its Libre.fm/ListenBrainz backends and the queue
 //! share one representation. This crate only persists — the retry
 //! orchestration lives in `kopuz-scrobble`.
 
 /// A scrobble destination. Kept in sync with the `service` column tags below.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScrobbleService {
-    LastFm,
     LibreFm,
     ListenBrainz,
 }
@@ -15,7 +14,6 @@ pub enum ScrobbleService {
 impl ScrobbleService {
     pub fn label(self) -> &'static str {
         match self {
-            ScrobbleService::LastFm => "Last.fm",
             ScrobbleService::LibreFm => "Libre.fm",
             ScrobbleService::ListenBrainz => "ListenBrainz",
         }
@@ -23,7 +21,6 @@ impl ScrobbleService {
 
     pub fn as_tag(self) -> &'static str {
         match self {
-            ScrobbleService::LastFm => "lastfm",
             ScrobbleService::LibreFm => "librefm",
             ScrobbleService::ListenBrainz => "listenbrainz",
         }
@@ -31,7 +28,6 @@ impl ScrobbleService {
 
     pub fn from_tag(tag: &str) -> Option<Self> {
         match tag {
-            "lastfm" => Some(ScrobbleService::LastFm),
             "librefm" => Some(ScrobbleService::LibreFm),
             "listenbrainz" => Some(ScrobbleService::ListenBrainz),
             _ => None,

@@ -74,19 +74,13 @@ pub fn device_change_behavior_from_proto(value: i32) -> config::DeviceChangeBeha
 
 pub fn fetch_strategy_to_proto(value: config::FetchStrategy) -> FetchStrategy {
     match value {
-        config::FetchStrategy::MusicBrainzFirst => FetchStrategy::MusicBrainzFirst,
-        config::FetchStrategy::LastFmFirst => FetchStrategy::LastFmFirst,
         config::FetchStrategy::MusicBrainzOnly => FetchStrategy::MusicBrainzOnly,
-        config::FetchStrategy::LastFmOnly => FetchStrategy::LastFmOnly,
     }
 }
 
 pub fn fetch_strategy_from_proto(value: i32) -> config::FetchStrategy {
     match FetchStrategy::try_from(value).unwrap_or(FetchStrategy::Unspecified) {
-        FetchStrategy::MusicBrainzFirst => config::FetchStrategy::MusicBrainzFirst,
-        FetchStrategy::LastFmFirst => config::FetchStrategy::LastFmFirst,
         FetchStrategy::MusicBrainzOnly => config::FetchStrategy::MusicBrainzOnly,
-        FetchStrategy::LastFmOnly => config::FetchStrategy::LastFmOnly,
         FetchStrategy::Unspecified => config::FetchStrategy::default(),
     }
 }
@@ -594,6 +588,20 @@ pub fn config_from_proto(value: &Config) -> config::Settings {
 mod tests {
     use super::*;
     use prost::Message;
+
+    #[test]
+    fn retired_cover_strategy_numbers_fall_back_to_musicbrainz() {
+        for value in [0, 1, 2, 3, 4, 999] {
+            assert_eq!(
+                fetch_strategy_from_proto(value),
+                config::FetchStrategy::MusicBrainzOnly
+            );
+        }
+        assert_eq!(
+            fetch_strategy_to_proto(config::FetchStrategy::MusicBrainzOnly) as i32,
+            3
+        );
+    }
 
     #[test]
     fn appearance_survives_the_wire_round_trip() {
