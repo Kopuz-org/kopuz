@@ -5,6 +5,10 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      windows_legacy_tag:
+        description: Build only the Windows Legacy installer from this existing release tag
+        type: string
 
 permissions:
   contents: read
@@ -14,7 +18,7 @@ permissions:
 jobs:
   linux-legacy:
     # Kopuz Nightly is the GPUI app alone; Legacy and Android ship only with releases.
-    if: ${{ !(github.ref_type == 'tag' && contains(github.ref_name, '-nightly.')) }}
+    if: ${{ !inputs.windows_legacy_tag && !(github.ref_type == 'tag' && contains(github.ref_name, '-nightly.')) }}
     runs-on: ubuntu-22.04
 
     steps:
@@ -150,6 +154,7 @@ jobs:
           if-no-files-found: error
 
   linux:
+    if: ${{ !inputs.windows_legacy_tag }}
     runs-on: ubuntu-22.04
 
     steps:
@@ -276,7 +281,7 @@ jobs:
           if-no-files-found: error
 
   macos-legacy:
-    if: ${{ !(github.ref_type == 'tag' && contains(github.ref_name, '-nightly.')) }}
+    if: ${{ !inputs.windows_legacy_tag && !(github.ref_type == 'tag' && contains(github.ref_name, '-nightly.')) }}
     runs-on: macos-15
 
     steps:
@@ -346,6 +351,7 @@ jobs:
           if-no-files-found: error
 
   macos:
+    if: ${{ !inputs.windows_legacy_tag }}
     runs-on: macos-15
 
     steps:
@@ -441,6 +447,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.windows_legacy_tag && format('refs/tags/{0}', inputs.windows_legacy_tag) || '' }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -473,7 +481,14 @@ jobs:
       - name: Read and verify version
         id: version
         shell: bash
-        run: bash scripts/release-version.sh
+        env:
+          WINDOWS_LEGACY_TAG: ${{ inputs.windows_legacy_tag }}
+        run: |
+          if [[ -n "$WINDOWS_LEGACY_TAG" ]]; then
+            GITHUB_REF_TYPE=tag GITHUB_REF_NAME="$WINDOWS_LEGACY_TAG" bash scripts/release-version.sh
+          else
+            bash scripts/release-version.sh
+          fi
 
       - name: Build EXE and MSI installers
         shell: pwsh
@@ -481,11 +496,32 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
-          dx bundle --release --platform desktop --package kopuz-legacy --package-types nsis --out-dir bundle-nsis --locked
-          if ($LASTEXITCODE -ne 0) { throw "dx bundle nsis failed" }
+          $nsisOutput = 'bundle-nsis'
+          dx bundle --release --platform desktop --package kopuz-legacy --package-types nsis --out-dir $nsisOutput --locked 2>&1 |
+            Tee-Object -FilePath dx-nsis.log
+          if ($LASTEXITCODE -ne 0) {
+            if ($env:PRERELEASE -ne 'true' -or !(Select-String -Path dx-nsis.log -SimpleMatch 'invalid VIProductVersion format')) {
+              throw "dx bundle nsis failed"
+            }
+
+            # Dioxus 0.7.9 reuses the SemVer string for the numeric Windows version resource.
+            # Repair that field in the generated script, preserving the beta version in the binary and installer text.
+            $nsisOutput = 'target/dx/kopuz-legacy/bundle/windows/nsis'
+            $scriptPath = Join-Path $nsisOutput 'KopuzLegacy.nsi'
+            $script = Get-Content -LiteralPath $scriptPath -Raw
+            $versionPattern = '(?m)^VIProductVersion "' + [regex]::Escape($env:VERSION) + '\.0"(?=\r?$)'
+            if ([regex]::Matches($script, $versionPattern).Count -ne 1) {
+              throw "Expected one pre-release VIProductVersion field in $scriptPath"
+            }
+            $numericVersion = ($env:VERSION -split '-', 2)[0]
+            $script = [regex]::Replace($script, $versionPattern, "VIProductVersion `"$numericVersion.0`"")
+            Set-Content -LiteralPath $scriptPath -Value $script -Encoding utf8 -NoNewline
+            & (Join-Path $HOME '.dx/tools/nsis-3.11/makensis.exe') -NOCD (Resolve-Path -LiteralPath $scriptPath).Path
+            if ($LASTEXITCODE -ne 0) { throw "makensis failed with the numeric version" }
+          }
 
           New-Item -ItemType Directory -Path dist -Force | Out-Null
-          $exe = @(Get-ChildItem bundle-nsis -Filter *.exe)
+          $exe = @(Get-ChildItem $nsisOutput -Filter '*-setup.exe')
           if ($exe.Count -ne 1) {
             throw "Expected one EXE installer, found $($exe.Count)"
           }
@@ -522,6 +558,7 @@ jobs:
           if-no-files-found: error
 
   windows:
+    if: ${{ !inputs.windows_legacy_tag }}
     runs-on: windows-latest
 
     steps:
@@ -611,7 +648,7 @@ jobs:
 
   android:
     # Kopuz Nightly is the GPUI app alone; Legacy and Android ship only with releases.
-    if: ${{ !(github.ref_type == 'tag' && contains(github.ref_name, '-nightly.')) }}
+    if: ${{ !inputs.windows_legacy_tag && !(github.ref_type == 'tag' && contains(github.ref_name, '-nightly.')) }}
     # 24.04, not 22.04: the binstall'd dx is built against glibc 2.39, and an
     # APK has no host-glibc compatibility concerns (unlike the Linux job).
     runs-on: ubuntu-24.04
