@@ -48,6 +48,11 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.0" date="2026-11-19">
+      <description>
+        <p>Kopuz 1.0 introduces the native GPUI desktop app alongside Kopuz Legacy. This release adds a marketplace for source plugins, M3U playlist import, and playback output selection with exclusive ALSA support. It also adds romanized lyrics, sample rate and bit depth in track lists, and a persistent playlist sidebar in Legacy.</p>
+      </description>
+    </release>
     <release version="0.67.0" date="2026-10-26">
       <description>
         <p>
