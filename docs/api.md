@@ -329,7 +329,7 @@ message, not JSON in a string: the settings are a closed Rust struct on both
 ends of one binary, so the schema says so and a wrong key or type fails to
 compile rather than at runtime.
 
-Credentials (media-server logins, Last.fm and Libre.fm keys, the MusicBrainz
+Credentials (media-server logins, Libre.fm keys, the MusicBrainz
 token) and machine-local path state (`offline_tracks`) are not settings and
 never cross.
 

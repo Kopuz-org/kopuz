@@ -43,9 +43,7 @@ no_subfolders = لا توجد مجلدات فرعية
 loading_folders = جارٍ تحميل المجلدات…
 folder_browse_failed = تعذر عرض المجلدات: { $error }
 add_source = إضافة مصدر
-connect_to_lastfm = الاتصال بـ Last.fm
 connect_to_librefm = الاتصال بـ Libre.fm
-lastfm_connected = تم الاتصال بـ Last.fm
 librefm_connected = تم الاتصال بـ Libre.fm
 server_details = تفاصيل الخادم
 source_name = الاسم
@@ -232,10 +230,6 @@ search_placeholder = ابحث عن فنانين أو ألبومات أو مقا�
 quick_search_placeholder = اكتب للبحث، اضغط Enter للتشغيل…
 no_results_found = لم يتم العثور على نتائج لـ "{ $query }"
 listenbrainz_token_placeholder = أدخل رمز ListenBrainz الخاص بك
-lastfm_api_key_placeholder = أدخل مفتاح API الخاص بـ Last.fm
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = أدخل سر API الخاص بـ Last.fm
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = لم يتم العثور على الألبوم
@@ -320,7 +314,6 @@ repeat_track = تكرار: المقطع
 rescan_library = تحديث المكتبة
 refresh_music_library = تحديث مكتبة الموسيقى
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 librefm = Libre.fm
 enable_tracing = تفعيل تتبع الأداء
 tracing_warning = يضيف حملًا على الأداء ويُكبّر ملف التتبع؛ يسري بعد إعادة التشغيل.
@@ -510,9 +503,7 @@ lyrics_offset = إزاحة كلمات الأغنية
 lyrics_offset_auto = تحديد إزاحة كلمات الأغنية تلقائيًا
 cover_fetch_strategy = استراتيجية جلب الغلاف
 musicbrainz_first = MusicBrainz أولاً
-lastfm_first = Last.fm أولاً
 musicbrainz_only = MusicBrainz فقط
-lastfm_only = Last.fm فقط
 remove_cover = إزالة الغلاف
 
 # Radio Page

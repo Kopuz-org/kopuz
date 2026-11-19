@@ -333,7 +333,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let database = db::init(&dir.path().join("cfg.db")).await.expect("db");
         database
-            .set_integration_credential("lastfm_session_key", "secret")
+            .set_integration_credential("librefm_session_key", "secret")
             .await
             .expect("seed credential");
         let mut held = config::Settings::default();

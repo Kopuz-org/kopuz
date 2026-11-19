@@ -43,9 +43,7 @@ no_subfolders = Нет вложенных папок
 loading_folders = Загрузка папок…
 folder_browse_failed = Не удалось получить список папок: { $error }
 add_source = Добавить источник
-connect_to_lastfm = Подключиться к Last.fm
 connect_to_librefm = Подключиться к Libre.fm
-lastfm_connected = Подключено к Last.fm
 librefm_connected = Подключено к Libre.fm
 server_details = Данные сервера
 source_name = Название
@@ -243,10 +241,6 @@ search_placeholder = Поиск артистов, альбомов или тре
 quick_search_placeholder = Введите для поиска, Enter для воспроизведения…
 no_results_found = По запросу "{ $query }" ничего не найдено
 listenbrainz_token_placeholder = Введите ваш токен ListenBrainz
-lastfm_api_key_placeholder = Введите ваш API-ключ Last.fm
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = Введите ваш API-секрет Last.fm
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Альбом не найден
@@ -337,7 +331,6 @@ repeat_track = Повтор: Трек
 rescan_library = Пересканировать библиотеку
 refresh_music_library = Обновить музыкальную библиотеку
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 librefm = Libre.fm
 enable_tracing = Включить трассировку производительности
 tracing_warning = Увеличивает нагрузку и размер файла трассировки; применяется после перезапуска.
@@ -521,9 +514,7 @@ lyrics_offset = Смещение текста
 lyrics_offset_auto = Определять смещение текста автоматически
 cover_fetch_strategy = Стратегия загрузки обложек
 musicbrainz_first = Сначала MusicBrainz
-lastfm_first = Сначала Last.fm
 musicbrainz_only = Только MusicBrainz
-lastfm_only = Только Last.fm
 remove_cover = Удалить обложку
 
 # Radio Page

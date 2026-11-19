@@ -218,27 +218,8 @@ impl Scrobbler {
 
         let Credentials {
             musicbrainz_token: token_mb,
-            lastfm_api_key,
-            lastfm_api_secret,
-            lastfm_session_key,
             librefm_session_key,
         } = credentials;
-        let has_lastfm = !lastfm_api_key.is_empty() && !lastfm_api_secret.is_empty();
-        if has_lastfm && !offline {
-            let playing_now =
-                scrobble::lastfm::make_playing_now(&track.artist, &track.title, Some(&track.album));
-            if let Err(error) = scrobble::lastfm::submit_now_playing(
-                &lastfm_api_key,
-                &lastfm_api_secret,
-                &lastfm_session_key,
-                &playing_now,
-            )
-            .await
-            {
-                tracing::warn!(%error, "Last.fm now playing failed");
-            }
-        }
-
         let has_librefm = !librefm_session_key.is_empty();
         if has_librefm && !offline {
             let playing_now = scrobble::librefm::make_playing_now(
@@ -276,43 +257,6 @@ impl Scrobbler {
         }
 
         let mut scrobble_ok = false;
-        if has_lastfm {
-            let submission = scrobble::lastfm::make_scrobble_at(
-                &track.artist,
-                &track.title,
-                Some(&track.album),
-                started_at,
-            );
-            match scrobble::lastfm::submit_scrobble(
-                &lastfm_api_key,
-                &lastfm_api_secret,
-                &lastfm_session_key,
-                &submission,
-            )
-            .await
-            {
-                Ok(_) => {
-                    scrobble_ok = true;
-                    tracing::info!("Last.fm scrobbled: {} - {}", track.artist, track.title);
-                }
-                Err(error) => {
-                    tracing::warn!(%error, "Last.fm scrobble failed");
-                    if scrobble::queue::is_transient(&error) {
-                        scrobble::queue::enqueue(
-                            &self.db,
-                            scrobble::queue::ScrobbleService::LastFm,
-                            &track.artist,
-                            &track.title,
-                            Some(&track.album),
-                            started_at,
-                            None,
-                        )
-                        .await;
-                    }
-                }
-            }
-        }
-
         if has_librefm {
             let submission = scrobble::librefm::make_scrobble_at(
                 &track.artist,
@@ -463,15 +407,7 @@ impl Scrobbler {
             return;
         }
         let held = self.credentials.snapshot();
-        let has_lastfm = !held.lastfm_api_key.is_empty() && !held.lastfm_api_secret.is_empty();
         let creds = scrobble::queue::Credentials {
-            lastfm: has_lastfm.then(|| {
-                (
-                    held.lastfm_api_key.clone(),
-                    held.lastfm_api_secret.clone(),
-                    held.lastfm_session_key.clone(),
-                )
-            }),
             librefm_session_key: (!held.librefm_session_key.is_empty())
                 .then(|| held.librefm_session_key.clone()),
             listenbrainz_token: (!held.musicbrainz_token.trim().is_empty())

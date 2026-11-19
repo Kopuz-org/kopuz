@@ -43,9 +43,7 @@ no_subfolders = poki lili li ala
 loading_folders = mi kama jo e poki...
 folder_browse_failed = mi ken ala lukin e poki: { $error }
 add_source = 󱥄󱥸︀󱤉󱥌
-connect_to_lastfm = o lon tawa Last.fm
 connect_to_librefm = o lon tawa Libre.fm
-lastfm_connected = Last.fm li lon
 librefm_connected = Libre.fm li lon
 server_details = 󱥡󱥌
 source_name = 󱥂󱥌
@@ -220,10 +218,6 @@ search_placeholder = 󱥄󱤃󱤉󱤑󱥉, 󱤉󱤟󱥍󱤕󱥖, 󱤉󱤕󱦜�
 quick_search_placeholder = 󱥄󱤃, 󱥄󱤕󱤻󱦜󱦜󱦜
 no_results_found = "{ $query }"󱤧󱤬󱤂
 listenbrainz_token_placeholder = 󱥄󱥌󱤉"token ListenBrainz"
-lastfm_api_key_placeholder = o pana e Last.fm API key sina
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = o pana e Last.fm API secret sina
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = 󱤟󱥍󱦗󱤕󱥖󱦘󱤧󱤬󱤂
@@ -289,7 +283,6 @@ repeat_track = 󱥄󱥝󱦝󱥳
 rescan_library = 󱥄󱤮󱥝󱤉󱥓󱤕
 refresh_music_library = 󱥄󱤮󱥝󱤉󱥓󱤕
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 librefm = Libre.fm
 enable_tracing = 󱥄󱥇󱤉󱤮
 tracing_warning = 󱥄󱥇󱥝󱤉󱤎
@@ -485,9 +478,7 @@ lyrics_offset = Lyrics offset
 lyrics_offset_auto = Determine lyrics offset automatically
 cover_fetch_strategy = Cover fetch strategy
 musicbrainz_first = MusicBrainz first
-lastfm_first = Last.fm first
 musicbrainz_only = MusicBrainz only
-lastfm_only = Last.fm only
 remove_cover = Remove cover
 
 # Radio Page

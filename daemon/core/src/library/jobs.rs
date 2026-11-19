@@ -236,14 +236,8 @@ impl LibraryService {
 
             if config.library.auto_fetch_covers && !ctx.cancelled() {
                 ctx.progress("fetching covers", None, None, None);
-                let lastfm_key = {
-                    let key = self.credentials.snapshot().lastfm_api_key.trim().to_owned();
-                    (!key.is_empty()).then_some(key)
-                };
                 let fetcher = reader::cover_fetcher::CoverFetcher::new(
                     self.cover_cache.clone(),
-                    config.library.cover_fetch_strategy,
-                    lastfm_key,
                     progress.clone(),
                 );
                 let missing_before = reader::missing_cover_ids(&library);

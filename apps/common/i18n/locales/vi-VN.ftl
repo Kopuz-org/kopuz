@@ -43,8 +43,6 @@ no_subfolders = Không có thư mục con
 loading_folders = Đang tải thư mục…
 folder_browse_failed = Không thể liệt kê thư mục: { $error }
 add_source = Thêm nguồn
-connect_to_lastfm = Kết nối với Last.fm
-lastfm_connected = Đã kết nối Last.fm
 connect_to_librefm = Kết nối với Libre.fm
 librefm_connected = Đã kết nối Libre.fm
 server_details = Chi tiết máy chủ
@@ -278,10 +276,6 @@ search_placeholder = Tìm nghệ sĩ, album hoặc bài hát...
 quick_search_placeholder = Gõ để tìm, Enter để phát…
 no_results_found = Không tìm thấy kết quả cho "{ $query }"
 listenbrainz_token_placeholder = Nhập token ListenBrainz của bạn
-lastfm_api_key_placeholder = Nhập API Key Last.fm của bạn
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = Nhập API Secret Last.fm của bạn
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Không tìm thấy album
@@ -432,7 +426,6 @@ repeat_track = Lặp: Bài hiện tại
 rescan_library = Quét lại thư viện
 refresh_music_library = Làm mới thư viện nhạc
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 enable_tracing = Bật theo dõi hiệu năng
 tracing_warning = Tăng chi phí xử lý khi chạy và làm tệp theo dõi phình to; có hiệu lực sau khi khởi động lại.
 export_logs = Xuất nhật ký
@@ -531,9 +524,7 @@ lyrics_offset = Độ lệch lời bài hát
 lyrics_offset_auto = Tự động xác định độ lệch lời bài hát
 cover_fetch_strategy = Cách tải bìa
 musicbrainz_first = Ưu tiên MusicBrainz
-lastfm_first = Ưu tiên Last.fm
 musicbrainz_only = Chỉ MusicBrainz
-lastfm_only = Chỉ Last.fm
 remove_cover = Xóa bìa
 
 # Radio Page

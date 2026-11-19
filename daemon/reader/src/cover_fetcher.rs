@@ -1,7 +1,6 @@
 use crate::cover_indexer::missing_cover_ids;
 use crate::models::Library;
 use crate::utils::save_cover;
-use config::FetchStrategy;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,21 +17,11 @@ pub struct FetchReport {
 pub struct CoverFetcher {
     client: reqwest::Client,
     cache_dir: PathBuf,
-    strategy: FetchStrategy,
-    lastfm_api_key: Option<String>,
     on_progress: Arc<dyn Fn(String) + Send + Sync>,
 }
 
 impl CoverFetcher {
-    pub fn new(
-        cache_dir: PathBuf,
-        strategy: FetchStrategy,
-        lastfm_api_key: Option<String>,
-        on_progress: Arc<dyn Fn(String) + Send + Sync>,
-    ) -> Self {
-        let lastfm_api_key = lastfm_api_key
-            .map(|key| key.trim().to_string())
-            .filter(|key| !key.is_empty());
+    pub fn new(cache_dir: PathBuf, on_progress: Arc<dyn Fn(String) + Send + Sync>) -> Self {
         let client = ::utils::http::builder()
             .user_agent(concat!(
                 "Kopuz/",
@@ -45,8 +34,6 @@ impl CoverFetcher {
         Self {
             client,
             cache_dir,
-            strategy,
-            lastfm_api_key,
             on_progress,
         }
     }
@@ -131,30 +118,7 @@ impl CoverFetcher {
         album: &str,
         artist: &str,
     ) -> Option<Vec<u8>> {
-        match self.strategy {
-            FetchStrategy::MusicBrainzFirst => {
-                let result = self.try_musicbrainz(release_id, album, artist).await;
-                if result.is_some() {
-                    return result;
-                }
-                let key = self.lastfm_api_key.as_deref().filter(|k| !k.is_empty())?;
-                self.try_lastfm(album, artist, key).await
-            }
-            FetchStrategy::LastFmFirst => {
-                if let Some(key) = self.lastfm_api_key.as_deref().filter(|k| !k.is_empty()) {
-                    let result = self.try_lastfm(album, artist, key).await;
-                    if result.is_some() {
-                        return result;
-                    }
-                }
-                self.try_musicbrainz(release_id, album, artist).await
-            }
-            FetchStrategy::MusicBrainzOnly => self.try_musicbrainz(release_id, album, artist).await,
-            FetchStrategy::LastFmOnly => {
-                let key = self.lastfm_api_key.as_deref().filter(|k| !k.is_empty())?;
-                self.try_lastfm(album, artist, key).await
-            }
-        }
+        self.try_musicbrainz(release_id, album, artist).await
     }
 
     async fn try_musicbrainz(
@@ -266,68 +230,6 @@ impl CoverFetcher {
             .into_iter()
             .find(|r| r.score >= 80)
             .map(|r| r.id)
-    }
-
-    async fn try_lastfm(&self, album: &str, artist: &str, api_key: &str) -> Option<Vec<u8>> {
-        tracing::info!(
-            "Cover fetcher: querying Last.fm for album \"{}\" by artist \"{}\"",
-            album,
-            artist
-        );
-        self.sleep_rate_limit().await;
-        let resp = self
-            .client
-            .get("https://ws.audioscrobbler.com/2.0/")
-            .query(&[
-                ("method", "album.getinfo"),
-                ("api_key", api_key),
-                ("artist", artist),
-                ("album", album),
-                ("format", "json"),
-            ])
-            .send()
-            .await
-            .ok()?;
-
-        #[derive(Deserialize)]
-        struct LastfmResponse {
-            album: Option<LastfmAlbum>,
-        }
-        #[derive(Deserialize)]
-        struct LastfmAlbum {
-            image: Vec<LastfmImage>,
-        }
-        #[derive(Deserialize)]
-        struct LastfmImage {
-            #[serde(rename = "#text")]
-            url: String,
-            size: String,
-        }
-
-        let body: LastfmResponse = resp.json().await.ok()?;
-        let image = body.album?.image;
-
-        let url = image
-            .iter()
-            .find(|i| i.size == "mega")
-            .or_else(|| image.iter().find(|i| i.size == "extralarge"))
-            .or_else(|| image.iter().find(|i| i.size == "large"))?;
-
-        if url.url.is_empty() {
-            return None;
-        }
-
-        self.client
-            .get(&url.url)
-            .send()
-            .await
-            .ok()?
-            .error_for_status()
-            .ok()?
-            .bytes()
-            .await
-            .ok()
-            .map(|b| b.to_vec())
     }
 
     async fn sleep_rate_limit(&self) {

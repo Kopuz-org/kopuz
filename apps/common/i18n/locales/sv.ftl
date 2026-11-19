@@ -43,8 +43,6 @@ no_subfolders = Inga undermappar
 loading_folders = Laddar mappar…
 folder_browse_failed = Kunde inte lista mappar: { $error }
 add_source = Lägg till källa
-connect_to_lastfm = Anslut till Last.fm
-lastfm_connected = Last.fm ansluten
 connect_to_librefm = Anslut till Libre.fm
 librefm_connected = Libre.fm ansluten
 server_details = Serverinformation
@@ -298,10 +296,6 @@ search_placeholder = Sök efter artister, album eller låtar...
 quick_search_placeholder = Skriv för att söka, Enter för att spela…
 no_results_found = Inga resultat hittades för "{ $query }"
 listenbrainz_token_placeholder = Ange din ListenBrainz-token
-lastfm_api_key_placeholder = Ange din Last.fm API-nyckel
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = Ange din Last.fm API-hemlighet
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Album hittades inte
@@ -464,7 +458,6 @@ repeat_track = Repetera: Låt
 rescan_library = Skanna om biblioteket
 refresh_music_library = Uppdatera musikbiblioteket
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 enable_tracing = Aktivera prestandaspårning
 tracing_warning = Ger ökad belastning under körning och gör spårningsfilen större. Börjar gälla efter omstart.
 export_logs = Exportera loggar
@@ -563,9 +556,7 @@ lyrics_offset = Textförskjutning
 lyrics_offset_auto = Bestäm textförskjutning automatiskt
 cover_fetch_strategy = Strategi för omslagshämtning
 musicbrainz_first = MusicBrainz först
-lastfm_first = Last.fm först
 musicbrainz_only = Endast MusicBrainz
-lastfm_only = Endast Last.fm
 remove_cover = Ta bort omslag
 
 # Radio Page

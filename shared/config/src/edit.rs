@@ -577,7 +577,9 @@ pub fn edit_samples() -> Vec<SettingsEdit> {
             directories: vec!["/music".into()],
         }])),
         SettingsEdit::Library(LibraryEdit::AutoFetchCovers(true)),
-        SettingsEdit::Library(LibraryEdit::CoverFetchStrategy(FetchStrategy::LastFmOnly)),
+        SettingsEdit::Library(LibraryEdit::CoverFetchStrategy(
+            FetchStrategy::MusicBrainzOnly,
+        )),
         SettingsEdit::Library(LibraryEdit::OfflineQuality(OfflineQuality::Kbps160)),
         SettingsEdit::Library(LibraryEdit::OfflineCacheEnabled(false)),
         SettingsEdit::Library(LibraryEdit::OfflineCacheMaxBytes(2_000_000_000)),
@@ -667,6 +669,14 @@ mod tests {
             let name = SettingKey::of(&edit).name();
             let mut next = base.clone();
             next.apply(edit.clone());
+            // The old provider preference is retained as a no-op for existing clients.
+            if matches!(
+                edit,
+                SettingsEdit::Library(LibraryEdit::CoverFetchStrategy(_))
+            ) {
+                assert_eq!(next, base);
+                continue;
+            }
             let after = json_of(&next);
             let moved: Vec<&String> = after
                 .iter()

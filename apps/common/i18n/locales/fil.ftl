@@ -43,8 +43,6 @@ no_subfolders = Walang subfolder
 loading_folders = Naglo-load ng mga folder…
 folder_browse_failed = Hindi ma-list ang mga folder: { $error }
 add_source = Magdagdag ng Source
-connect_to_lastfm = Kumonekta sa Last.fm
-lastfm_connected = Konektado sa Last.fm
 connect_to_librefm = Kumonekta sa Libre.fm
 librefm_connected = Konektado sa Libre.fm
 server_details = Detalye ng Server
@@ -278,10 +276,6 @@ search_placeholder = Maghanap ng mga artista, album, o track...
 quick_search_placeholder = Mag-type para maghanap, Enter para tumugtog…
 no_results_found = Walang nahanap na resulta para sa "{ $query }"
 listenbrainz_token_placeholder = Ilagay ang iyong ListenBrainz token
-lastfm_api_key_placeholder = Ilagay ang iyong Last.fm API Key
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = Ilagay ang iyong Last.fm API Secret
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Hindi natagpuan ang album
@@ -432,7 +426,6 @@ repeat_track = Repeat: Track
 rescan_library = I-rescan ang Aklatan
 refresh_music_library = I-refresh ang Aklatan ng Musika
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 enable_tracing = I-enable ang Performance Tracing
 tracing_warning = Nagdaragdag ng runtime overhead at pinapalaki ang trace file; magkakabisa pagkatapos mag-restart.
 export_logs = I-export ang mga Log
@@ -531,9 +524,7 @@ lyrics_offset = Offset ng lirik
 lyrics_offset_auto = Awtomatikong tukuyin ang offset ng lirik
 cover_fetch_strategy = Estratehiya sa pagkuha ng cover
 musicbrainz_first = MusicBrainz muna
-lastfm_first = Last.fm muna
 musicbrainz_only = MusicBrainz lamang
-lastfm_only = Last.fm lamang
 remove_cover = Alisin ang cover
 
 # Radio Page

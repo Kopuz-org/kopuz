@@ -4,9 +4,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, PoisonError, RwLock};
 
 const MUSICBRAINZ_TOKEN: &str = "musicbrainz_token";
-const LASTFM_API_KEY: &str = "lastfm_api_key";
-const LASTFM_API_SECRET: &str = "lastfm_api_secret";
-const LASTFM_SESSION_KEY: &str = "lastfm_session_key";
 const LIBREFM_SESSION_KEY: &str = "librefm_session_key";
 
 /// Each value is empty while it is unset.
@@ -14,9 +11,6 @@ const LIBREFM_SESSION_KEY: &str = "librefm_session_key";
 pub struct Credentials {
     /// The ListenBrainz user token.
     pub musicbrainz_token: String,
-    pub lastfm_api_key: String,
-    pub lastfm_api_secret: String,
-    pub lastfm_session_key: String,
     pub librefm_session_key: String,
 }
 
@@ -25,20 +19,14 @@ impl Credentials {
         let mut take = |key: &str| rows.remove(key).unwrap_or_default();
         Self {
             musicbrainz_token: take(MUSICBRAINZ_TOKEN),
-            lastfm_api_key: take(LASTFM_API_KEY),
-            lastfm_api_secret: take(LASTFM_API_SECRET),
-            lastfm_session_key: take(LASTFM_SESSION_KEY),
             librefm_session_key: take(LIBREFM_SESSION_KEY),
         }
     }
 
     /// Each value under the `integration_credentials` key it is stored by.
-    fn rows(&self) -> [(&'static str, &str); 5] {
+    fn rows(&self) -> [(&'static str, &str); 2] {
         [
             (MUSICBRAINZ_TOKEN, &self.musicbrainz_token),
-            (LASTFM_API_KEY, &self.lastfm_api_key),
-            (LASTFM_API_SECRET, &self.lastfm_api_secret),
-            (LASTFM_SESSION_KEY, &self.lastfm_session_key),
             (LIBREFM_SESSION_KEY, &self.librefm_session_key),
         ]
     }
@@ -110,27 +98,31 @@ mod tests {
             .set_integration_credential("librefm_api_key", "dead")
             .await
             .expect("seed");
+        database
+            .set_integration_credential("lastfm_session_key", "retired")
+            .await
+            .expect("seed retired credential");
         let store = CredentialStore::load(&database).await.expect("load");
         assert_eq!(store.snapshot(), Credentials::default());
 
         store
             .update(|held| {
-                held.lastfm_api_key = "key".into();
-                held.lastfm_session_key = "session".into();
+                held.musicbrainz_token = "key".into();
+                held.librefm_session_key = "session".into();
             })
             .await
             .expect("set");
         store
-            .update(|held| held.lastfm_session_key.clear())
+            .update(|held| held.librefm_session_key.clear())
             .await
             .expect("clear");
 
         let reloaded = CredentialStore::load(&database).await.expect("reload");
         assert_eq!(reloaded.snapshot(), store.snapshot());
-        assert_eq!(reloaded.snapshot().lastfm_api_key, "key");
-        assert!(reloaded.snapshot().lastfm_session_key.is_empty());
+        assert_eq!(reloaded.snapshot().musicbrainz_token, "key");
+        assert!(reloaded.snapshot().librefm_session_key.is_empty());
         let rows = database.integration_credentials().await.expect("rows");
-        assert!(!rows.contains_key("lastfm_session_key"));
+        assert!(!rows.contains_key("librefm_session_key"));
         assert_eq!(
             rows.get("librefm_api_key").map(String::as_str),
             Some("dead"),
@@ -141,13 +133,13 @@ mod tests {
     #[test]
     fn debug_never_prints_a_value() {
         let credentials = Credentials {
-            lastfm_api_secret: "hunter2".into(),
+            musicbrainz_token: "hunter2".into(),
             ..Default::default()
         };
         let rendered = format!("{credentials:?}");
         assert!(!rendered.contains("hunter2"), "{rendered}");
         assert!(
-            rendered.contains("lastfm_api_secret: \"set\""),
+            rendered.contains("musicbrainz_token: \"set\""),
             "{rendered}"
         );
     }

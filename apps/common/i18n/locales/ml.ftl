@@ -43,8 +43,6 @@ no_subfolders = ഉപഫോൾഡറുകളില്ല
 loading_folders = ഫോൾഡറുകൾ ലോഡ് ചെയ്യുന്നു…
 folder_browse_failed = ഫോൾഡറുകൾ ലിസ്റ്റ് ചെയ്യാനായില്ല: { $error }
 add_source = ഉറവിടം ചേർക്കുക
-connect_to_lastfm = Last.fm-ലേക്ക് ബന്ധിപ്പിക്കുക
-lastfm_connected = Last.fm ബന്ധിപ്പിച്ചു
 connect_to_librefm = Libre.fm-ലേക്ക് ബന്ധിപ്പിക്കുക
 librefm_connected = Libre.fm ബന്ധിപ്പിച്ചു
 server_details = സെർവർ വിശദാംശങ്ങൾ
@@ -302,10 +300,6 @@ search_placeholder = കലാകാരന്മാർ, ആൽബങ്ങൾ �
 quick_search_placeholder = തിരയാൻ ടൈപ്പ് ചെയ്യുക, പ്ലേ ചെയ്യാൻ Enter…
 no_results_found = "{ $query }" എന്നതിന് ഫലങ്ങളൊന്നും കണ്ടെത്തിയില്ല
 listenbrainz_token_placeholder = നിങ്ങളുടെ ListenBrainz ടോക്കൺ നൽകുക
-lastfm_api_key_placeholder = നിങ്ങളുടെ Last.fm API കീ നൽകുക
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = നിങ്ങളുടെ Last.fm API സീക്രട്ട് നൽകുക
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = ആൽബം കണ്ടെത്തിയില്ല
@@ -468,7 +462,6 @@ repeat_track = ആവർത്തനം: ട്രാക്ക്
 rescan_library = ലൈബ്രറി വീണ്ടും സ്കാൻ ചെയ്യുക
 refresh_music_library = സംഗീത ലൈബ്രറി പുതുക്കുക
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 enable_tracing = പ്രകടന ട്രേസിംഗ് പ്രവർത്തനക്ഷമമാക്കുക
 tracing_warning = റൺടൈം ഓവർഹെഡ് ചേർക്കുകയും ട്രേസ് ഫയൽ വളരുകയും ചെയ്യുന്നു; പുനരാരംഭത്തിന് ശേഷം പ്രാബല്യത്തിൽ വരും.
 export_logs = ലോഗുകൾ കയറ്റുമതി ചെയ്യുക
@@ -567,9 +560,7 @@ lyrics_offset = വരികളുടെ സമയ ക്രമീകരണം
 lyrics_offset_auto = വരികളുടെ സമയ ക്രമീകരണം സ്വയമേവ കണ്ടെത്തുക
 cover_fetch_strategy = കവർ ലഭ്യമാക്കൽ തന്ത്രം
 musicbrainz_first = MusicBrainz ആദ്യം
-lastfm_first = Last.fm ആദ്യം
 musicbrainz_only = MusicBrainz മാത്രം
-lastfm_only = Last.fm മാത്രം
 remove_cover = കവർ നീക്കം ചെയ്യുക
 
 # Radio Page

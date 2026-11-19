@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM scrobble_queue WHERE service = 'lastfm'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "bf885f02bf769dbb67d759724595f85550fcb5f74b4fd363ff4404dc17c85d91"
+}

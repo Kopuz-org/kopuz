@@ -1365,7 +1365,7 @@ mod tests {
         settings.ui.ui_style = UiStyle::Vaxry;
         settings.ui.settings_layout = SettingsLayout::TopBar;
         settings.library.auto_fetch_covers = true;
-        settings.library.cover_fetch_strategy = FetchStrategy::LastFmOnly;
+        settings.library.cover_fetch_strategy = FetchStrategy::MusicBrainzOnly;
         settings.integrations.radio_registries = vec![RegistryEntry {
             url: "https://example.invalid/index.json".into(),
             enabled: false,

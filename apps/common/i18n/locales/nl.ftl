@@ -43,8 +43,6 @@ no_subfolders = Geen submappen
 loading_folders = Mappen laden…
 folder_browse_failed = Kon mappen niet ophalen: { $error }
 add_source = Bron toevoegen
-connect_to_lastfm = Verbinden met Last.fm
-lastfm_connected = Verbonden met Last.fm
 connect_to_librefm = Verbinden met Libre.fm
 librefm_connected = Verbonden met Libre.fm
 server_details = Servergegevens
@@ -298,10 +296,6 @@ search_placeholder = Zoek naar artiesten, albums of nummers...
 quick_search_placeholder = Typ om te zoeken, Enter om af te spelen…
 no_results_found = Geen resultaten gevonden voor "{ $query }"
 listenbrainz_token_placeholder = Voer je ListenBrainz-token in
-lastfm_api_key_placeholder = Voer je Last.fm-API-sleutel in
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = Voer je Last.fm-API-geheim in
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Album niet gevonden
@@ -464,7 +458,6 @@ repeat_track = Herhalen: nummer
 rescan_library = Bibliotheek opnieuw scannen
 refresh_music_library = Muziekbibliotheek vernieuwen
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 enable_tracing = Prestatie-tracing inschakelen
 tracing_warning = Veroorzaakt extra belasting en laat het tracebestand groeien; wordt actief na een herstart.
 export_logs = Logboeken exporteren
@@ -563,9 +556,7 @@ lyrics_offset = Songtekstverschuiving
 lyrics_offset_auto = Songtekstverschuiving automatisch bepalen
 cover_fetch_strategy = Strategie voor ophalen van hoezen
 musicbrainz_first = MusicBrainz eerst
-lastfm_first = Last.fm eerst
 musicbrainz_only = Alleen MusicBrainz
-lastfm_only = Alleen Last.fm
 remove_cover = Hoes verwijderen
 
 # Radio Page

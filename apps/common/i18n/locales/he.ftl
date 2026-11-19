@@ -43,9 +43,7 @@ no_subfolders = אין תיקיות משנה
 loading_folders = טוען תיקיות…
 folder_browse_failed = לא ניתן להציג את התיקיות: { $error }
 add_source = הוספת מקור
-connect_to_lastfm = התחבר ל־Last.fm
 connect_to_librefm = התחבר ל־Libre.fm
-lastfm_connected = מחובר ל־Last.fm
 librefm_connected = מחובר ל־Libre.fm
 server_details = פרטי שרת
 source_name = שם
@@ -232,10 +230,6 @@ search_placeholder = חיפוש אמנים, אלבומים או שירים...
 quick_search_placeholder = הקלידו לחיפוש, Enter לניגון…
 no_results_found = לא נמצאו תוצאות עבור "{ $query }"
 listenbrainz_token_placeholder = הזנת טוקן ListenBrainz
-lastfm_api_key_placeholder = הזן את מפתח ה-API של Last.fm
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = הזן את סוד ה-API של Last.fm
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = האלבום לא נמצא
@@ -320,7 +314,6 @@ repeat_track = חזרה: שיר
 rescan_library = סרוק ספרייה מחדש
 refresh_music_library = רענון ספריית מוזיקה
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 librefm = Libre.fm
 enable_tracing = הפעלת מעקב ביצועים
 tracing_warning = מוסיף עומס ומגדיל את קובץ המעקב; ייכנס לתוקף לאחר הפעלה מחדש.
@@ -504,9 +497,7 @@ lyrics_offset = היסט מילות השיר
 lyrics_offset_auto = קביעת היסט מילות השיר אוטומטית
 cover_fetch_strategy = אסטרטגיית הבאת עטיפות
 musicbrainz_first = MusicBrainz תחילה
-lastfm_first = Last.fm תחילה
 musicbrainz_only = MusicBrainz בלבד
-lastfm_only = Last.fm בלבד
 remove_cover = הסר עטיפה
 
 # Radio Page

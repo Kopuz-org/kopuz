@@ -43,9 +43,7 @@ no_subfolders = サブフォルダがありません
 loading_folders = フォルダを読み込み中…
 folder_browse_failed = フォルダを一覧できませんでした: { $error }
 add_source = ソースを追加
-connect_to_lastfm = Last.fm に接続
 connect_to_librefm = Libre.fm に接続
-lastfm_connected = Last.fm 接続済み
 librefm_connected = Libre.fm 接続済み
 server_details = サーバーの詳細
 source_name = 名前
@@ -212,10 +210,6 @@ search_placeholder = アーティスト、アルバム、曲を検索...
 quick_search_placeholder = 入力して検索、Enterで再生…
 no_results_found = "{ $query }" の結果が見つかりません
 listenbrainz_token_placeholder = ListenBrainzトークンを入力
-lastfm_api_key_placeholder = Last.fm の API キーを入力
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = Last.fm の API シークレットを入力
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = アルバムが見つかりません
@@ -288,7 +282,6 @@ repeat_track = リピート: トラック
 rescan_library = ライブラリを再スキャン
 refresh_music_library = 音楽ライブラリを更新
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 librefm = Libre.fm
 enable_tracing = パフォーマンストレースを有効化
 tracing_warning = オーバーヘッドが増え、トレースファイルが大きくなります。再起動後に有効になります。
@@ -478,9 +471,7 @@ lyrics_offset = 歌詞のオフセット
 lyrics_offset_auto = 歌詞のオフセットを自動で決定
 cover_fetch_strategy = カバー取得戦略
 musicbrainz_first = MusicBrainz優先
-lastfm_first = Last.fm優先
 musicbrainz_only = MusicBrainzのみ
-lastfm_only = Last.fmのみ
 remove_cover = カバーを削除
 
 # Radio Page

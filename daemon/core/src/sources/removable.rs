@@ -236,7 +236,6 @@ mod tests {
             saved.active.clone(),
             Arc::new(radio::registry::StationRegistry::default()),
             root.path().join("covers"),
-            crate::CredentialStore::load(&db).await.unwrap(),
         ));
         let player =
             player::player::Player::try_with_sink(Box::new(player::engine::NullSink::new()))

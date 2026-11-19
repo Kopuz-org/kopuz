@@ -7,7 +7,7 @@ use sqlx::SqlitePool;
 use crate::{DbError, QueuedScrobbleRow, ScrobbleService};
 
 /// Newest listens kept; when the backlog overflows the oldest are dropped. A
-/// "listen" is one `listened_at` group, so a listen owed to three services
+/// "listen" is one `listened_at` group, so a listen owed to multiple services
 /// still counts as one toward the cap.
 const MAX_QUEUED_LISTENS: i64 = 500;
 
@@ -52,6 +52,9 @@ pub async fn push(pool: &SqlitePool, row: &QueuedScrobbleRow) -> Result<(), DbEr
     )
     .execute(&mut *tx)
     .await?;
+    sqlx::query!("DELETE FROM scrobble_queue WHERE service = 'lastfm'")
+        .execute(&mut *tx)
+        .await?;
     sqlx::query!(
         "DELETE FROM scrobble_queue WHERE listened_at NOT IN \
          (SELECT listened_at FROM scrobble_queue \
@@ -110,35 +113,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retired_lastfm_listens_are_not_returned_for_retry() {
+        let pool = mem_pool().await;
+        sqlx::query(
+            "INSERT INTO scrobble_queue (listened_at, artist, title, service) \
+             VALUES (42, 'Artist', 'Song', 'lastfm')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        push(&pool, &row("Song", 42, ScrobbleService::LibreFm))
+            .await
+            .unwrap();
+        let rows = all(&pool).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].service, ScrobbleService::LibreFm);
+    }
+
+    #[tokio::test]
+    async fn retired_listens_do_not_evict_supported_listens() {
+        let pool = mem_pool().await;
+        push(&pool, &row("Old", 0, ScrobbleService::LibreFm))
+            .await
+            .unwrap();
+        for timestamp in 1..MAX_QUEUED_LISTENS {
+            sqlx::query(
+                "INSERT INTO scrobble_queue (listened_at, artist, title, service) \
+                 VALUES (?1, 'Artist', 'Retired', 'lastfm')",
+            )
+            .bind(timestamp)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        push(
+            &pool,
+            &row("New", MAX_QUEUED_LISTENS, ScrobbleService::LibreFm),
+        )
+        .await
+        .unwrap();
+        let rows = all(&pool).await.unwrap();
+        assert_eq!(
+            rows.iter().map(|row| row.listened_at).collect::<Vec<_>>(),
+            [0, MAX_QUEUED_LISTENS],
+            "retired listens must not evict an older supported listen"
+        );
+        let retired: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM scrobble_queue WHERE service = 'lastfm'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(retired, 0);
+    }
+
+    #[tokio::test]
     async fn push_caps_backlog_and_drops_oldest_listens() {
         let pool = mem_pool().await;
         for i in 0..(MAX_QUEUED_LISTENS + 10) {
-            push(&pool, &row(&format!("t{i}"), i, ScrobbleService::LastFm))
-                .await
-                .unwrap();
+            for service in [ScrobbleService::LibreFm, ScrobbleService::ListenBrainz] {
+                push(&pool, &row(&format!("t{i}"), i, service))
+                    .await
+                    .unwrap();
+            }
         }
         let all = all(&pool).await.unwrap();
-        assert_eq!(all.len() as i64, MAX_QUEUED_LISTENS);
+        assert_eq!(all.len() as i64, 2 * MAX_QUEUED_LISTENS);
         assert_eq!(all.first().unwrap().listened_at, 10);
+        assert_eq!(all.last().unwrap().listened_at, MAX_QUEUED_LISTENS + 9);
     }
 
     #[tokio::test]
     async fn push_merges_same_listen_and_delete_is_per_service() {
         let pool = mem_pool().await;
-        push(&pool, &row("Song", 42, ScrobbleService::LastFm))
+        push(&pool, &row("Song", 42, ScrobbleService::LibreFm))
             .await
             .unwrap();
         let mut lb = row("Song", 42, ScrobbleService::ListenBrainz);
         lb.listen_info = Some(r#"{"duration_ms":180000}"#.into());
         push(&pool, &lb).await.unwrap();
-        push(&pool, &row("Song", 42, ScrobbleService::LastFm))
+        push(&pool, &row("Song", 42, ScrobbleService::LibreFm))
             .await
             .unwrap();
 
         let all_rows = all(&pool).await.unwrap();
         assert_eq!(all_rows.len(), 2);
 
-        delete(&pool, 42, "Artist", "Song", ScrobbleService::LastFm)
+        delete(&pool, 42, "Artist", "Song", ScrobbleService::LibreFm)
             .await
             .unwrap();
         let rest = all(&pool).await.unwrap();

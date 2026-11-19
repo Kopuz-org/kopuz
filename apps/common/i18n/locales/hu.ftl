@@ -43,9 +43,7 @@ no_subfolders = Nincsenek almappák
 loading_folders = Mappák betöltése…
 folder_browse_failed = Nem sikerült listázni a mappákat: { $error }
 add_source = Forrás hozzáadása
-connect_to_lastfm = Csatlakozás a Last.fm-hez
 connect_to_librefm = Csatlakozás a Libre.fm-hez
-lastfm_connected = Csatlakozva a Last.fm-hez
 librefm_connected = Csatlakozva a Libre.fm-hez
 server_details = Szerver részletei
 source_name = Név
@@ -212,10 +210,6 @@ search_placeholder = Keress előadókra, albumokra vagy dalokra...
 quick_search_placeholder = Írjon a kereséshez, Enter a lejátszáshoz…
 no_results_found = Nincs találat a következőre: "{ $query }"
 listenbrainz_token_placeholder = Add meg a ListenBrainz tokent
-lastfm_api_key_placeholder = Add meg a Last.fm API-kulcsodat
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = Add meg a Last.fm API-titkodat
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Album nem található
@@ -288,7 +282,6 @@ repeat_track = Ismétlés: Dal
 rescan_library = Könyvtár újraolvasása
 refresh_music_library = Zenetár frissítése
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 librefm = Libre.fm
 enable_tracing = Teljesítménykövetés engedélyezése
 tracing_warning = Többletterhelést okoz és növeli a nyomkövetési fájlt; újraindítás után lép életbe.
@@ -472,9 +465,7 @@ lyrics_offset = Dalszöveg eltolása
 lyrics_offset_auto = Dalszöveg eltolásának automatikus meghatározása
 cover_fetch_strategy = Borító letöltési stratégia
 musicbrainz_first = MusicBrainz először
-lastfm_first = Last.fm először
 musicbrainz_only = Csak MusicBrainz
-lastfm_only = Csak Last.fm
 remove_cover = Borító eltávolítása
 
 # Radio Page

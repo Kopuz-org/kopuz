@@ -52,8 +52,6 @@ no_subfolders = No subfolders
 loading_folders = Loading folders…
 folder_browse_failed = Could not list folders: { $error }
 add_source = Add Source
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
 connect_to_librefm = Connect to Libre.fm
 librefm_connected = Libre.fm Connected
 server_details = Server Details
@@ -324,10 +322,6 @@ search_placeholder = Search for artists, albums or tracks...
 quick_search_placeholder = Type to search, Enter to play…
 no_results_found = No results found for "{ $query }"
 listenbrainz_token_placeholder = Enter your ListenBrainz token
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Album not found
@@ -490,7 +484,6 @@ repeat_track = Repeat: Track
 rescan_library = Rescan Library
 refresh_music_library = Refresh Music Library
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 enable_tracing = Enable Performance Tracing
 tracing_warning = Adds runtime overhead and grows the trace file; takes effect after a restart.
 export_logs = Export Logs
@@ -589,9 +582,7 @@ lyrics_offset = Lyrics offset
 lyrics_offset_auto = Determine lyrics offset automatically
 cover_fetch_strategy = Cover fetch strategy
 musicbrainz_first = MusicBrainz first
-lastfm_first = Last.fm first
 musicbrainz_only = MusicBrainz only
-lastfm_only = Last.fm only
 remove_cover = Remove cover
 
 # Radio Page

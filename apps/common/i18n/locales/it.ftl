@@ -43,9 +43,7 @@ no_subfolders = Nessuna sottocartella
 loading_folders = Caricamento cartelle…
 folder_browse_failed = Impossibile elencare le cartelle: { $error }
 add_source = Aggiungi sorgente
-connect_to_lastfm = Connessione a Last.fm 
 connect_to_librefm = Connessione a Libre.fm 
-lastfm_connected = Connesso a Last.fm 
 librefm_connected = Connesso a Libre.fm 
 server_details = Dettagli del server
 source_name = Nome
@@ -294,10 +292,6 @@ search_placeholder = Cerca un artista, album o traccia...
 quick_search_placeholder = Digita per cercare, Invio per riprodurre…
 no_results_found = Nessun risultato per "{ $query }"
 listenbrainz_token_placeholder = Inserisci il tuo token di ListenBrainz
-lastfm_api_key_placeholder = Inserisci la tua chiave API per Last.fm
-lastfm_api_key_label = API key
-lastfm_api_secret_placeholder = Inserisci il tuo segreto per l'API di Last.fm
-lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Album non trovato
@@ -408,7 +402,6 @@ repeat_track = Ripetizione: Traccia
 rescan_library = Ri-scansiona libreria
 refresh_music_library = Aggiorna libreria della musica
 listenbrainz = ListenBrainz
-lastfm = Last.fm
 librefm = Libre.fm
 enable_tracing = Abilita il tracciamento delle prestazioni
 tracing_warning = Aggiunge sovraccarico e ingrandisce il file di traccia; ha effetto dopo il riavvio.
@@ -507,9 +500,7 @@ lyrics_offset = Sfasamento del testo
 lyrics_offset_auto = Determina automaticamente lo sfasamento del testo
 cover_fetch_strategy = Strategia di ricerca delle copertine 
 musicbrainz_first = MusicBrainz per primo 
-lastfm_first = Last.fm per primo
 musicbrainz_only = Solo MusicBrainz
-lastfm_only = Solo Last.fm
 remove_cover = Elimina copertina
 
 # Radio Page
