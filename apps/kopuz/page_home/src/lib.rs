@@ -31,7 +31,8 @@ use gpui_kit::{
 };
 use store::layout::Ordered;
 use store::{
-    DownloadsModel, FavoritesModel, ForYouModel, LayoutModel, PlaylistsModel, Query, SourcesModel,
+    DownloadsModel, FavoritesModel, ForYouModel, LayoutModel, PlayerModel, PlaylistsModel, Query,
+    SourcesModel,
 };
 
 use data::{RECENT_TRACKS_WINDOW, RECENTLY_ADDED_WINDOW, Shelf};
@@ -92,8 +93,8 @@ impl Shared {
             .map(SharedString::from);
         Self {
             strapline,
-            resume: resume::Resume::read(cx),
-            now: cards::Now::read(cx),
+            resume: resume::Resume::read(home.playing, cx),
+            now: cards::Now::read(home.playing, cx),
             for_you: for_you::Status::read(cx),
             offline: sources.offline_reads(),
             catalog: sources.has_catalog(),
@@ -149,6 +150,7 @@ pub struct Home {
     // The last frame's reads of shared models, which a frozen page keeps drawing.
     shared: Shared,
     frozen: bool,
+    playing: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -262,6 +264,13 @@ impl Home {
             cx.observe(&SourcesModel::global(cx), |this, _, cx| this.rebuild(cx)),
             cx.observe(&ForYouModel::global(cx), |this, _, cx| this.rebuild(cx)),
             cx.observe(&DownloadsModel::global(cx), |this, _, cx| this.rebuild(cx)),
+            cx.observe(&PlayerModel::global(cx), |this: &mut Self, player, cx| {
+                let playing = player.read(cx).is_playing();
+                if playing != this.playing {
+                    this.playing = playing;
+                    cx.notify();
+                }
+            }),
         ];
 
         Self {
@@ -289,6 +298,7 @@ impl Home {
             for_you_last: Rc::from([]),
             shared: Shared::default(),
             frozen: false,
+            playing: PlayerModel::global(cx).read(cx).is_playing(),
             _subscriptions: subscriptions,
         }
     }

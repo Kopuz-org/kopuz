@@ -398,6 +398,8 @@ pub struct Player {
     /// The track's format, bit depth and sample rate beside it, and its full stats in Now Playing.
     pub quality: bool,
     pub cover: TileSize,
+    pub mini_frameless: bool,
+    pub mini_hides_main: bool,
 }
 
 impl Default for Player {
@@ -412,6 +414,8 @@ impl Default for Player {
             favorite: true,
             quality: false,
             cover: TileSize::Medium,
+            mini_frameless: false,
+            mini_hides_main: false,
         }
     }
 }

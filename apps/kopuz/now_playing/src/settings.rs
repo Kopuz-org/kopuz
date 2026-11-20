@@ -143,6 +143,30 @@ impl Render for PlayerSettings {
                         )
                         .description(t("interface_player_quality_description"))
                         .shown(cx),
+                    )
+                    .children(
+                        toggle_row(
+                            "player-mini-frameless",
+                            t("interface_player_mini_frameless"),
+                            player.mini_frameless,
+                            |on, cx| {
+                                LayoutModel::edit(cx, |layout| layout.player.mini_frameless = on)
+                            },
+                        )
+                        .description(t("interface_player_mini_frameless_description"))
+                        .shown(cx),
+                    )
+                    .children(
+                        toggle_row(
+                            "player-mini-hides-main",
+                            t("interface_player_mini_hides_main"),
+                            player.mini_hides_main,
+                            |on, cx| {
+                                LayoutModel::edit(cx, |layout| layout.player.mini_hides_main = on)
+                            },
+                        )
+                        .description(t("interface_player_mini_hides_main_description"))
+                        .shown(cx),
                     ),
             )
             .into_any_element()

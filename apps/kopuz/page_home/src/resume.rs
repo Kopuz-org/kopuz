@@ -15,13 +15,12 @@ pub(crate) struct Resume {
 
 impl Resume {
     /// Nothing when no queue was left behind.
-    pub(crate) fn read(cx: &App) -> Option<Self> {
+    pub(crate) fn read(playing: bool, cx: &App) -> Option<Self> {
         let queue = QueueModel::global(cx).read(cx);
         let track = queue.current()?.clone();
         let left = queue
             .len()
             .saturating_sub(queue.position().unwrap_or(0) as usize + 1);
-        let playing = PlayerModel::global(cx).read(cx).is_playing();
         Some(Self {
             track,
             left,

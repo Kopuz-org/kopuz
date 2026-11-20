@@ -252,11 +252,12 @@ fn window_of(handle: &ScrollHandle, stride: Pixels, count: usize) -> (usize, usi
 fn wheel(handle: ScrollHandle) -> impl Fn(&ScrollWheelEvent, &mut Window, &mut App) + 'static {
     move |event, window, cx| {
         let delta = event.delta.pixel_delta(window.line_height());
-        if !event.modifiers.shift || delta.y == px(0.) {
-            return;
+        if event.modifiers.shift && delta.y != px(0.) {
+            scroll::nudge_x(&handle, -delta.y);
+            cx.stop_propagation();
+        } else if delta.x.abs() > delta.y.abs() {
+            cx.stop_propagation();
         }
-        scroll::nudge_x(&handle, -delta.y);
-        cx.stop_propagation();
     }
 }
 

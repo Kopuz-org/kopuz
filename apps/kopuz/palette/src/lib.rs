@@ -1070,6 +1070,7 @@ impl Render for Palette {
             .pt(window.viewport_size().height * TOP)
             .opacity(revealed)
             .bg(style::black(SCRIM, cx))
+            .occlude()
             .capture_action(cx.listener(|this, _: &MoveUp, _, cx| {
                 this.move_selection(false, cx);
                 cx.stop_propagation();

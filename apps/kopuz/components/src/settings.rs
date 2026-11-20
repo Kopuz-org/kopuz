@@ -747,11 +747,17 @@ impl RenderOnce for SettingRow {
                 .into_any_element();
         }
         let control = self.control.map(|control| {
-            h_flex().gap_2().items_center().children(tick).child(
-                div()
-                    .when(held < 1., |fading| fading.opacity(held))
-                    .child(control(locked)),
-            )
+            h_flex()
+                .min_w_0()
+                .gap_2()
+                .items_center()
+                .children(tick)
+                .child(
+                    div()
+                        .min_w_0()
+                        .when(held < 1., |fading| fading.opacity(held))
+                        .child(control(locked)),
+                )
         });
         h_flex()
             .id(scoped("row", &self.title))
@@ -764,7 +770,7 @@ impl RenderOnce for SettingRow {
             .items_center()
             .bg(surface)
             .on_hover(motion::track(hovered))
-            .child(label)
+            .child(label.flex_1().min_w(rems(12.)))
             .children(control)
             .into_any_element()
     }

@@ -66,6 +66,7 @@ pub struct Shelves {
     // Search results: a song seeds a radio where the source asks for that, and "Show all" switches the filter.
     searching: bool,
     topping_up: Option<usize>,
+    playing: bool,
     _play: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -84,9 +85,16 @@ impl Shelves {
             offer_more: false,
             searching: false,
             topping_up: None,
+            playing: player.read(cx).is_playing(),
             _play: None,
             _subscriptions: vec![
-                cx.observe(&player, |_, _, cx| cx.notify()),
+                cx.observe(&player, |this, player, cx| {
+                    let playing = player.read(cx).is_playing();
+                    if playing != this.playing {
+                        this.playing = playing;
+                        cx.notify();
+                    }
+                }),
                 cx.observe(&marks, |this, marks, cx| this.drop_removed(marks, cx)),
             ],
         }
@@ -638,7 +646,7 @@ impl Shelves {
         let route = Route::catalog(item);
         let playing = song
             .as_deref()
-            .is_some_and(|song| self.play_state(song, cx) == PlayState::Playing);
+            .is_some_and(|song| self.play_state(song) == PlayState::Playing);
         let click = cx.listener(move |this, _, _, cx| match (&song, &route) {
             (Some(song), _) => this.start_song(song.clone(), radio, cx),
             (None, Some(route)) => Navigator::navigate(route.clone(), cx),
@@ -683,7 +691,7 @@ impl Shelves {
                     artist: track.artist.clone().into(),
                     title: track.title.clone().into(),
                 })
-                .playing(self.play_state(&key, cx) == PlayState::Playing)
+                .playing(self.play_state(&key) == PlayState::Playing)
                 .menu(Some(Target::track(key.clone(), track.title.clone())))
                 .on_click(
                     cx.listener(move |this, _, _, cx| this.start_song(key.clone(), radio, cx)),
@@ -755,7 +763,7 @@ impl Shelves {
             .menu(menu_of(item, cx))
             .prefetch(kind, id.clone())
             .play(
-                self.play_state(&id, cx),
+                self.play_state(&id),
                 cx.listener(move |this, _, _, cx| this.toggle_or_play(kind, id.clone(), cx)),
             )
             .into_any_element()
@@ -775,19 +783,17 @@ impl Shelves {
         .menu(Some(Target::track(track.key.clone(), track.title.clone())))
         .on_click(cx.listener(move |this, _, _, cx| this.start_song(key.clone(), radio, cx)))
         .play(
-            self.play_state(&track.key, cx),
+            self.play_state(&track.key),
             cx.listener(move |this, _, _, cx| this.start_song(press.clone(), radio, cx)),
         )
         .into_any_element()
     }
 
-    fn play_state(&self, id: &str, cx: &App) -> PlayState {
+    fn play_state(&self, id: &str) -> PlayState {
         if self.pending.as_deref() == Some(id) {
             return PlayState::Loading;
         }
-        match self.now_playing.as_deref() == Some(id)
-            && PlayerModel::global(cx).read(cx).is_playing()
-        {
+        match self.now_playing.as_deref() == Some(id) && self.playing {
             true => PlayState::Playing,
             false => PlayState::Idle,
         }

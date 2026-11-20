@@ -71,6 +71,7 @@ impl RenderOnce for GenreCard {
                 tile.child(
                     Cover::new(Some(&artwork))
                         .fill()
+                        .frame(TILE_HEIGHT)
                         .rounded(radius)
                         .zoom(motion::channel(&key, COVER), hovered)
                         .zoom_factor(motion::ZOOM_LG)
