@@ -425,7 +425,7 @@ impl AppearanceSettings {
                             "settings_layout",
                             cfg.ui.settings_layout,
                             vec![
-                                (SettingsLayout::Cd, t("settings_layout_cd")),
+                                (SettingsLayout::Cd, t("settings_layout_sidebar")),
                                 (SettingsLayout::TopBar, t("settings_layout_topbar")),
                             ],
                         )

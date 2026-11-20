@@ -4,6 +4,7 @@ is_rtl = false
 settings = 󱤿󱤎
 settings_layout = nasin tawa pi lipu nasin
 settings_layout_cd = CD
+settings_layout_sidebar = Sidebar
 settings_layout_topbar = nasin sewi
 theme_editor = 󱥄󱤆󱤉󱤮
 appearance = 󱤮

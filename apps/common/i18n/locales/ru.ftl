@@ -4,6 +4,7 @@ is_rtl = false
 settings = Настройки
 settings_layout = Навигация настроек
 settings_layout_cd = CD
+settings_layout_sidebar = Sidebar
 settings_layout_topbar = Верхняя панель
 theme_editor = Редактор тем
 appearance = Внешний вид

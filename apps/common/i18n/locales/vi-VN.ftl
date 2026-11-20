@@ -4,6 +4,7 @@ is_rtl = false
 settings = Cài đặt
 settings_layout = Điều hướng cài đặt
 settings_layout_cd = CD
+settings_layout_sidebar = Sidebar
 settings_layout_topbar = Thanh trên cùng
 theme_editor = Trình chỉnh sửa chủ đề
 appearance = Giao diện

@@ -4,6 +4,7 @@ is_rtl = false
 settings = Ρυθμίσεις
 settings_layout = Πλοήγηση ρυθμίσεων
 settings_layout_cd = CD
+settings_layout_sidebar = Sidebar
 settings_layout_topbar = Επάνω γραμμή
 theme_editor = Επεξεργαστής Θέματος
 appearance = Εμφάνιση

@@ -4,6 +4,7 @@ is_rtl = false
 settings = அமைப்புகள்
 settings_layout = அமைப்புகள் வழிசெலுத்தல்
 settings_layout_cd = CD
+settings_layout_sidebar = Sidebar
 settings_layout_topbar = மேல் பட்டை
 theme_editor = தீம் எடிட்டர்
 appearance = தோற்றம்

@@ -4,6 +4,7 @@ is_rtl = false
 settings = 设置
 settings_layout = 设置导航
 settings_layout_cd = CD
+settings_layout_sidebar = Sidebar
 settings_layout_topbar = 顶栏
 theme_editor = 主题编辑器
 appearance = 外观

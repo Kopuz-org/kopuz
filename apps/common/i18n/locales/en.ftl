@@ -4,6 +4,7 @@ is_rtl = false
 settings = Settings
 settings_layout = Settings Navigation
 settings_layout_cd = CD
+settings_layout_sidebar = Sidebar
 settings_layout_topbar = Top Bar
 settings_general = General
 settings_customization = Appearance

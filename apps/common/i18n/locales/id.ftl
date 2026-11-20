@@ -4,6 +4,7 @@ is_rtl = false
 settings = Pengaturan
 settings_layout = Navigasi pengaturan
 settings_layout_cd = CD
+settings_layout_sidebar = Sidebar
 settings_layout_topbar = Bilah atas
 theme_editor = Penyunting Tema
 appearance = Penampilan

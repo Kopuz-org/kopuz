@@ -4,6 +4,7 @@ is_rtl = false
 settings = 설정
 settings_layout = 설정 탐색
 settings_layout_cd = CD
+settings_layout_sidebar = Sidebar
 settings_layout_topbar = 상단 표시줄
 theme_editor = 테마 편집기
 appearance = 모양

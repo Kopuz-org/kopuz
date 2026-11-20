@@ -4,6 +4,7 @@ is_rtl = false
 settings = Ajustes
 settings_layout = Navegación de ajustes
 settings_layout_cd = CD
+settings_layout_sidebar = Sidebar
 settings_layout_topbar = Barra superior
 theme_editor = Editar tema
 appearance = Apariencia

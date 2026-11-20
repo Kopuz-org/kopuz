@@ -4,6 +4,7 @@ is_rtl = true
 settings = الإعدادات
 settings_layout = تنقل الإعدادات
 settings_layout_cd = قرص
+settings_layout_sidebar = Sidebar
 settings_layout_topbar = الشريط العلوي
 theme_editor = محرر السمات
 appearance = المظهر
