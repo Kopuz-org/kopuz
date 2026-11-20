@@ -22,7 +22,7 @@ pub(crate) struct Now {
 }
 
 impl Now {
-    pub(crate) fn read(cx: &App) -> Self {
+    pub(crate) fn read(playing: bool, cx: &App) -> Self {
         let queue = QueueModel::global(cx);
         let Some(track) = queue.read(cx).current() else {
             return Self::default();
@@ -30,7 +30,7 @@ impl Now {
         Self {
             album_id: track.album_id.clone(),
             key: track.key.clone(),
-            playing: PlayerModel::global(cx).read(cx).is_playing(),
+            playing,
         }
     }
 
