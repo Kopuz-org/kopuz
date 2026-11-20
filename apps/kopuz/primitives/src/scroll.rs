@@ -229,15 +229,35 @@ pub fn smooth_list(
 
 const REACH: f32 = 0.5;
 
+fn out_of_reach(bounds: Bounds<Pixels>, window: &Window) -> bool {
+    let height = window.viewport_size().height;
+    bounds.bottom() < -height * REACH || bounds.top() > height * (1. + REACH)
+}
+
 #[derive(Clone, Default)]
 pub struct Windowed(Rc<RefCell<HashMap<SharedString, Bounds<Pixels>>>>);
 
 impl Windowed {
     pub fn far(&self, key: &SharedString, window: &Window) -> Option<AnyElement> {
-        let height = window.viewport_size().height;
         let bounds = self.0.borrow().get(key).copied()?;
-        let out = bounds.bottom() < -height * REACH || bounds.top() > height * (1. + REACH);
-        out.then(|| self.section(key.clone(), div().h(bounds.size.height)))
+        if !out_of_reach(bounds, window) {
+            return None;
+        }
+        let drawn = self.0.clone();
+        let key = key.clone();
+        Some(
+            div()
+                .w_full()
+                .flex_shrink_0()
+                .h(bounds.size.height)
+                .on_prepaint(move |bounds, window, _| {
+                    if !out_of_reach(bounds, window) {
+                        window.request_animation_frame();
+                    }
+                    drawn.borrow_mut().insert(key, bounds);
+                })
+                .into_any_element(),
+        )
     }
 
     pub fn forget(&self) {
