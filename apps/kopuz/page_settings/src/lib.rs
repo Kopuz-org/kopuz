@@ -245,7 +245,8 @@ impl Settings {
             .overflow_x_scroll()
             .restrict_scroll_to_axis()
             .on_scroll_wheel(|event, window, cx| {
-                if event.delta.pixel_delta(window.line_height()).x != gpui_kit::px(0.) {
+                let delta = event.delta.pixel_delta(window.line_height());
+                if delta.x.abs() > delta.y.abs() {
                     cx.stop_propagation();
                 }
             })
