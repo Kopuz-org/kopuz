@@ -244,6 +244,11 @@ impl Settings {
             .mb_4()
             .overflow_x_scroll()
             .restrict_scroll_to_axis()
+            .on_scroll_wheel(|event, window, cx| {
+                if event.delta.pixel_delta(window.line_height()).x != gpui_kit::px(0.) {
+                    cx.stop_propagation();
+                }
+            })
             .border_b_1()
             .border_color(style::white(FAN_BORDER, cx))
             .bg(components::settings::panel_background(FAN_BG, cx))
