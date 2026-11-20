@@ -16,6 +16,8 @@ finish-args:
   - --filesystem=xdg-music
   - --filesystem=xdg-download:ro
   - --filesystem=xdg-run/discord-ipc-0
+  - --filesystem=xdg-run/app/com.discordapp.Discord:create
+  - --filesystem=xdg-run/app/dev.vencord.Vesktop:create
   - --filesystem=xdg-run/tray-icon:create
   - --talk-name=org.freedesktop.Notifications
   - --talk-name=org.freedesktop.secrets
