@@ -48,6 +48,11 @@
   </screenshots>
 
   <releases>
+    <release version="1.0.1" date="2026-11-20">
+      <description>
+        <p>Kopuz 1.0.1 fixes bugs reported after 1.0. The command palette works with the arrow keys again, scrolling no longer leaks between rows and pages, and the mini player can be reopened after closing it. It also shows audio quality in the player bar and Now Playing.</p>
+      </description>
+    </release>
     <release version="1.0.0" date="2026-11-19">
       <description>
         <p>Kopuz 1.0 introduces the native GPUI desktop app alongside Kopuz Legacy. This release adds a marketplace for source plugins, M3U playlist import, and playback output selection with exclusive ALSA support. It also adds romanized lyrics, sample rate and bit depth in track lists, and a persistent playlist sidebar in Legacy.</p>
