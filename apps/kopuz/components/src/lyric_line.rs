@@ -29,15 +29,16 @@ const TURN_WIDTH: f32 = 18.;
 const SNUG: f32 = 1.375;
 // A romanized reading sits under its line, quieter than the words it reads.
 const READING_ALPHA: f32 = 0.7;
-// GPUI filters no text, so a blur is sampled: the words again around one ring, each copy faint.
+// GPUI filters no text, so a blur is sampled: the words again around two rings, each copy faint.
 const BLUR_TAPS: usize = 6;
 // Weights of the ink kept at the centre and given to each tap; together under one, so a blurred line reads lighter.
-const BLUR_CENTRE: f32 = 0.35;
-const BLUR_TAP: f32 = 0.05;
+const BLUR_CENTRE: f32 = 0.30;
+const BLUR_INNER_TAP: f32 = 0.035;
+const BLUR_TAP: f32 = 0.025;
 // Wider than this the copies part into ghost lines instead of a blur.
-const BLUR_RING_MAX: Pixels = px(8.);
+const BLUR_RING_MAX: Pixels = px(16.);
 /// How much of a sharp line's ink a blurred one shows, whatever its radius.
-pub const BLURRED_INK: f32 = BLUR_CENTRE + BLUR_TAPS as f32 * BLUR_TAP;
+pub const BLURRED_INK: f32 = BLUR_CENTRE + BLUR_TAPS as f32 * (BLUR_INNER_TAP + BLUR_TAP);
 
 type Seek = Rc<dyn Fn(u64, &mut Window, &mut App)>;
 
@@ -269,11 +270,16 @@ fn blurred(
     radius: Pixels,
     group: SharedString,
 ) -> impl IntoElement {
-    let ring = ink.alpha(ink.a * BLUR_TAP);
     let radius = radius.min(BLUR_RING_MAX);
-    let copies = (0..BLUR_TAPS).map(move |tap| {
-        let angle = std::f32::consts::TAU * tap as f32 / BLUR_TAPS as f32;
-        (radius * angle.cos(), radius * angle.sin())
+    let rings = [
+        (radius / 2., ink.alpha(ink.a * BLUR_INNER_TAP), 0.5),
+        (radius, ink.alpha(ink.a * BLUR_TAP), 0.),
+    ];
+    let copies = rings.into_iter().flat_map(move |(reach, ring, turn)| {
+        (0..BLUR_TAPS).map(move |tap| {
+            let angle = std::f32::consts::TAU * (tap as f32 + turn) / BLUR_TAPS as f32;
+            (reach * angle.cos(), reach * angle.sin(), ring)
+        })
     });
     div()
         .relative()
@@ -284,7 +290,7 @@ fn blurred(
                 .group_hover(group.clone(), move |style| style.text_color(hover))
                 .child(text.clone()),
         )
-        .children(copies.map(move |(x, y)| {
+        .children(copies.map(move |(x, y, ring)| {
             div()
                 .absolute()
                 .top(y)
