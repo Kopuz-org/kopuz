@@ -372,6 +372,7 @@ impl RenderOnce for PathField {
                 }
             });
         h_flex()
+            .min_w_0()
             .gap_2()
             .items_center()
             .children(self.input.map(|input| {
