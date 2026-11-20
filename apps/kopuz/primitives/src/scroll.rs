@@ -1,11 +1,16 @@
 //! Smooth scrolling. GPUI turns a wheel notch into `line_height * delta` and applies it at once,
 //! so the view teleports; here the drawn offset glides toward where the wheel has put it.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui_kit::{App, ElementId, Pixels, ScrollHandle, UniformListScrollHandle, Window, point, px};
+use gpui_kit::base::ElementExt as _;
+use gpui_kit::{
+    AnyElement, App, Bounds, ElementId, IntoElement, ParentElement as _, Pixels, ScrollHandle,
+    SharedString, Styled as _, UniformListScrollHandle, Window, div, point, px,
+};
 
 use crate::motion;
 
@@ -220,6 +225,36 @@ pub fn smooth_list(
 ) {
     let base = handle.0.borrow().base_handle.clone();
     smooth(id, &base, window, cx);
+}
+
+const REACH: f32 = 0.5;
+
+#[derive(Clone, Default)]
+pub struct Windowed(Rc<RefCell<HashMap<SharedString, Bounds<Pixels>>>>);
+
+impl Windowed {
+    pub fn far(&self, key: &SharedString, window: &Window) -> Option<AnyElement> {
+        let height = window.viewport_size().height;
+        let bounds = self.0.borrow().get(key).copied()?;
+        let out = bounds.bottom() < -height * REACH || bounds.top() > height * (1. + REACH);
+        out.then(|| self.section(key.clone(), div().h(bounds.size.height)))
+    }
+
+    pub fn forget(&self) {
+        self.0.borrow_mut().clear();
+    }
+
+    pub fn section(&self, key: SharedString, content: impl IntoElement) -> AnyElement {
+        let drawn = self.0.clone();
+        div()
+            .w_full()
+            .flex_shrink_0()
+            .child(content)
+            .on_prepaint(move |bounds, _, _| {
+                drawn.borrow_mut().insert(key, bounds);
+            })
+            .into_any_element()
+    }
 }
 
 #[cfg(test)]

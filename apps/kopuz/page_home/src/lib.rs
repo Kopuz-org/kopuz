@@ -151,6 +151,7 @@ pub struct Home {
     shared: Shared,
     frozen: bool,
     playing: bool,
+    windowed: components::scroll::Windowed,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -299,6 +300,7 @@ impl Home {
             shared: Shared::default(),
             frozen: false,
             playing: PlayerModel::global(cx).read(cx).is_playing(),
+            windowed: Default::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -488,6 +490,17 @@ impl Render for Home {
             None => row,
         };
         for row in &arranged {
+            let key = SharedString::from(row.name);
+            if !editing
+                && row.drawn.is_some()
+                && let Some(stand_in) = self.windowed.far(&key, window)
+            {
+                if matches!(row.drawn, Some(Drawn::Catalog)) || row.name == "for_you" {
+                    chips.take();
+                }
+                rows.push(stand_in);
+                continue;
+            }
             let drawn: Option<AnyElement> = match row.drawn {
                 None => None,
                 Some(Drawn::Catalog) => catalog
@@ -542,7 +555,7 @@ impl Render for Home {
                         }))
                         .into_any_element(),
                 ),
-                false => rows.extend(drawn),
+                false => rows.extend(drawn.map(|drawn| self.windowed.section(key, drawn))),
             }
         }
         // Asked only once the row is on screen, and outside the frame being drawn.
