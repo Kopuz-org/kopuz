@@ -42,6 +42,7 @@ pub struct Cover {
     zoom_speed: Duration,
     zoom_factor: f32,
     fill: bool,
+    frame: Option<Pixels>,
     scrim: Option<Scrim>,
     spot: Option<Spot>,
 }
@@ -58,6 +59,7 @@ impl Cover {
             zoom_speed: motion::SLOW,
             zoom_factor: motion::ZOOM_SM,
             fill: false,
+            frame: None,
             scrim: None,
             spot: None,
         }
@@ -122,6 +124,11 @@ impl Cover {
         self
     }
 
+    pub fn frame(mut self, shorter_side: Pixels) -> Self {
+        self.frame = Some(shorter_side);
+        self
+    }
+
     /// A wash over the picture; a filled cover without artwork still draws it.
     pub fn scrim(mut self, scrim: Scrim) -> Self {
         self.scrim = Some(scrim);
@@ -145,6 +152,8 @@ impl Cover {
         };
         let hq = self.hq;
         let radius = self.rounded;
+        let overhang = self.frame.map(|side| side * -bleed).unwrap_or_default();
+        let picture_radius = radius.map(|radius| zoomed_radius(radius, overhang));
         div()
             .absolute()
             .inset_0()
@@ -162,7 +171,7 @@ impl Cover {
                         .w(relative(1. - 2. * bleed))
                         .h(relative(1. - 2. * bleed))
                         // The frame's mask is a rect, so the picture rounds its own corners.
-                        .when_some(radius, |picture, radius| picture.rounded(radius))
+                        .when_some(picture_radius, |picture, radius| picture.rounded(radius))
                         .object_fit(ObjectFit::Cover),
                 )
             })
@@ -181,6 +190,10 @@ impl Cover {
             })
             .into_any_element()
     }
+}
+
+fn zoomed_radius(radius: Pixels, overhang: Pixels) -> Pixels {
+    radius + overhang * (2. + std::f32::consts::SQRT_2)
 }
 
 /// How far `artwork` has faded in: nothing until its picture is first drawn, then up over [`motion::FAST`].
@@ -251,7 +264,7 @@ impl RenderOnce for Cover {
                         .size(drawn)
                         .flex_shrink_0()
                         // The frame's mask is a rect, so the picture rounds its own corners.
-                        .rounded(radius)
+                        .rounded(zoomed_radius(radius, (drawn - self.size) / 2.))
                         .object_fit(ObjectFit::Cover)
                         // A cover that will not load is otherwise a blank square, which reads as slow.
                         .with_fallback(move || {
