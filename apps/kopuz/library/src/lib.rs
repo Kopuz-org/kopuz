@@ -75,9 +75,9 @@ pub fn register(cx: &mut App) {
         KeyBinding::new("ctrl-tab", NextFacet, Some("Library")),
         KeyBinding::new("ctrl-shift-tab", PreviousFacet, Some("Library")),
         // The deeper Input context wins, so "/" typed into a filter box stays a character.
-        KeyBinding::new("/", gpui_kit::NoAction, Some("Input")),
-        KeyBinding::new("down", gpui_kit::NoAction, Some("Input")),
-        KeyBinding::new("up", gpui_kit::NoAction, Some("Input")),
+        KeyBinding::new("/", gpui_kit::NoAction, Some("Library > Input")),
+        KeyBinding::new("down", gpui_kit::NoAction, Some("Library > Input")),
+        KeyBinding::new("up", gpui_kit::NoAction, Some("Library > Input")),
     ]);
 }
 
