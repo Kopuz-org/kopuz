@@ -1,0 +1,158 @@
+name: Flatpak
+
+# Builds Kopuz, Kopuz Legacy or Kopuz Nightly's Flatpaks from a tag's published .debs onto the repo served from R2 at flatpak.kopuz.moe.
+on:
+  # release.yml calls this once its tag's packages are on the GitHub release.
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+  # Republish a tag by hand, built with this branch's manifests.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to publish, e.g. v1.0.1 or v1.0.1-nightly.20261121
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  flatpak:
+    runs-on: ubuntu-24.04
+    # Each run rewrites the repo's index, so two at once would lose one's commit.
+    concurrency:
+      group: flatpak-repo
+      cancel-in-progress: false
+    env:
+      # The repo-wide files; each app's manifest and .flatpakref sit in its own directory.
+      REPO_DIR: packaging/kopuz-nightly/flatpak
+      AWS_DEFAULT_REGION: auto
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the Linux packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "*.deb" --dir dist
+
+      - name: Pick the apps
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          # Each line: manifest directory, app ID, the .deb it wraps, and the name its commits go under.
+          {
+            if [[ "$TAG" == *-nightly.* ]]; then
+              printf '%s\t%s\t%s\t%s\n' packaging/kopuz-nightly/flatpak moe.kopuz.kopuz.nightly \
+                "kopuz-nightly_${version}_amd64.deb" "Kopuz Nightly"
+            else
+              printf '%s\t%s\t%s\t%s\n' packaging/kopuz/flatpak moe.kopuz.kopuz \
+                "kopuz_${version}-1_amd64.deb" "Kopuz"
+              printf '%s\t%s\t%s\t%s\n' packaging/kopuz-legacy/flatpak moe.kopuz.legacy \
+                "kopuz-legacy_${version}_amd64.deb" "Kopuz Legacy"
+            fi
+          } > "$RUNNER_TEMP/flatpak-apps"
+          cat "$RUNNER_TEMP/flatpak-apps"
+
+          # Kopuz Legacy's tray library comes from Flathub's shared modules, pinned so a release rebuilds the same.
+          if [[ "$TAG" != *-nightly.* ]]; then
+            git init -q packaging/kopuz-legacy/flatpak/shared-modules
+            git -C packaging/kopuz-legacy/flatpak/shared-modules fetch -q --depth=1 \
+              https://github.com/flathub/shared-modules.git c91a81101cf9bcf9fc8132e8c3ebed741ad8bae6
+            git -C packaging/kopuz-legacy/flatpak/shared-modules checkout -q FETCH_HEAD
+          fi
+
+      - name: Read the R2 secrets and the signing key
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          # A pasted secret often ends in a newline, which breaks the request signature.
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY R2_ENDPOINT R2_BUCKET; do
+            value=$(printf '%s' "${!name}" | tr -d '[:space:]')
+            if [[ -z "$value" ]]; then
+              echo "::error::$name is empty; check the R2_* secrets"
+              exit 1
+            fi
+            echo "::add-mask::$value"
+            echo "$name=$value" >> "$GITHUB_ENV"
+          done
+          if [[ -z "$GPG_PRIVATE_KEY" ]]; then
+            echo "::error::GPG_PRIVATE_KEY is not set; copy the key kopuz-flatpak signs with"
+            exit 1
+          fi
+          printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          fingerprint=$(gpg --list-secret-keys --with-colons | awk -F: '$1 == "fpr" { print $10; exit }')
+          echo "GPG_KEY=$fingerprint" >> "$GITHUB_ENV"
+
+      - name: Install Flatpak tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder appstream
+          flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install -y --noninteractive flathub \
+            org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08 org.gnome.Platform//49 org.gnome.Sdk//49
+
+      - name: Build onto the published repo
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          # The repo's history lives in R2, so this commit lands on top of the builds already there.
+          aws s3 sync "s3://$R2_BUCKET/repo" repo --endpoint-url "$R2_ENDPOINT" --only-show-errors
+          # R2 keeps no empty directories, and ostree will not open a repo missing these.
+          if [[ -f repo/config ]]; then
+            mkdir -p repo/refs/{heads,mirrors,remotes} repo/objects repo/state repo/tmp/cache repo/extensions
+          fi
+          while IFS=$'\t' read -r dir id deb title; do
+            echo "::group::${id}"
+            dpkg-deb -x "dist/${deb}" "${dir}/payload"
+            flatpak-builder --user --force-clean --disable-rofiles-fuse \
+              --default-branch=stable --gpg-sign="$GPG_KEY" --repo=repo \
+              --subject="${title} ${version}" \
+              "build-${id}" "${dir}/${id}.yml"
+            echo "::endgroup::"
+          done < "$RUNNER_TEMP/flatpak-apps"
+          flatpak build-update-repo --gpg-sign="$GPG_KEY" --title=Kopuz --default-branch=stable \
+            --generate-static-deltas --prune --prune-depth=10 repo
+
+      - name: Upload to R2
+        run: |
+          set -euo pipefail
+          s3() { aws s3 "$@" --endpoint-url "$R2_ENDPOINT" --only-show-errors; }
+          key=$(gpg --export "$GPG_KEY" | base64 -w0)
+          sed "s|@GPGKEY@|$key|" "$REPO_DIR/kopuz.flatpakrepo.in" > kopuz.flatpakrepo
+          # Objects first and the index last, so nobody updating mid-upload sees a commit whose objects are missing.
+          for dir in objects deltas; do
+            if [[ -d "repo/$dir" ]]; then
+              s3 sync "repo/$dir" "s3://$R2_BUCKET/repo/$dir" --cache-control "public, max-age=31536000, immutable"
+            fi
+          done
+          s3 sync repo "s3://$R2_BUCKET/repo" --exclude 'objects/*' --exclude 'deltas/*' --exclude 'tmp/*' \
+            --cache-control no-cache --delete
+          while IFS=$'\t' read -r dir id _ _; do
+            sed "s|@GPGKEY@|$key|" "${dir}/${id}.flatpakref.in" > "${id}.flatpakref"
+            s3 cp "${id}.flatpakref" "s3://$R2_BUCKET/${id}.flatpakref" \
+              --cache-control no-cache --content-type application/vnd.flatpak.ref
+          done < "$RUNNER_TEMP/flatpak-apps"
+          s3 cp kopuz.flatpakrepo "s3://$R2_BUCKET/kopuz.flatpakrepo" \
+            --cache-control no-cache --content-type application/vnd.flatpak.repo
+          # What pruning dropped goes only once the new index no longer names it.
+          for dir in objects deltas; do
+            if [[ -d "repo/$dir" ]]; then
+              s3 sync "repo/$dir" "s3://$R2_BUCKET/repo/$dir" --delete
+            fi
+          done
+
