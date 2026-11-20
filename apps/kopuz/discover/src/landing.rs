@@ -44,7 +44,6 @@ pub struct Landing {
     started: bool,
     // Each row's fade over its placeholder, by row name.
     reveals: HashMap<String, motion::Fade>,
-    windowed: components::scroll::Windowed,
     // The mixes and the page rows, which play and page as the catalog's own shelves do.
     shelves: Entity<Shelves>,
     never_played: ScrollHandle,
@@ -82,7 +81,6 @@ impl Landing {
             generation: 0,
             started: false,
             reveals: HashMap::new(),
-            windowed: Default::default(),
             shelves: cx.new(Shelves::new),
             never_played: ScrollHandle::new(),
             forgotten: ScrollHandle::new(),
@@ -377,18 +375,15 @@ impl Render for Landing {
             Some(caps) => rows::landing(caps, &self.rows, &self.page_rows),
             None => rows::Landing::Waiting,
         };
-        let windowed = self.windowed.clone();
         let body = match landing {
             rows::Landing::Rows(planned) => v_flex()
                 .w_full()
                 .gap_10()
-                .children(planned.into_iter().map(|(row, fill)| {
-                    let key = SharedString::from(row_name(row, &self.pages));
-                    match windowed.far(&key, window) {
-                        Some(stand_in) => stand_in,
-                        None => windowed.section(key, self.row(row, fill, window, cx)),
-                    }
-                }))
+                .children(
+                    planned
+                        .into_iter()
+                        .map(|(row, fill)| self.row(row, fill, window, cx)),
+                )
                 .into_any_element(),
             rows::Landing::Waiting => placeholder_bands(cx),
             // The genres are something to browse, so an empty landing above them says nothing.

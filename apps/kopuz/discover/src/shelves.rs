@@ -67,7 +67,6 @@ pub struct Shelves {
     searching: bool,
     topping_up: Option<usize>,
     playing: bool,
-    windowed: components::scroll::Windowed,
     _play: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -87,7 +86,6 @@ impl Shelves {
             searching: false,
             topping_up: None,
             playing: player.read(cx).is_playing(),
-            windowed: Default::default(),
             _play: None,
             _subscriptions: vec![
                 cx.observe(&player, |this, player, cx| {
@@ -140,7 +138,6 @@ impl Shelves {
     pub fn set(&mut self, shelves: Vec<CatalogShelf>, cx: &mut Context<Self>) {
         self.views.retain(|view| view.row.is_some());
         self.topping_up = None;
-        self.windowed.forget();
         self.extend(shelves, cx);
     }
 
@@ -804,18 +801,12 @@ impl Shelves {
 }
 
 impl Render for Shelves {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let mut sections = Vec::with_capacity(self.views.len());
         for index in 0..self.views.len() {
-            if self.views[index].row.is_some() {
-                continue;
+            if self.views[index].row.is_none() {
+                sections.push(self.section(index, cx));
             }
-            let key = self.views[index].key.clone();
-            let section = match self.windowed.far(&key, window) {
-                Some(stand_in) => stand_in,
-                None => self.windowed.section(key, self.section(index, cx)),
-            };
-            sections.push(section);
         }
         v_flex().w_full().gap_12().children(sections)
     }
