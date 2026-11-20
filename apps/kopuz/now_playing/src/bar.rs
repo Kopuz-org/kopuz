@@ -13,7 +13,7 @@ use store::{Chrome, ConfigModel, SidePanel};
 
 use crate::NowPlaying;
 
-const UTILITY_GLYPH: Pixels = px(12.);
+const UTILITY_GLYPH: Pixels = px(16.);
 const TRANSPORT_WIDTH: Pixels = px(640.);
 /// Material's surface-container: the text colour at 7% over the window.
 const FLOATING_TINT: f32 = 0.07;
