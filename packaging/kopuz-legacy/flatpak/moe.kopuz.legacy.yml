@@ -6,6 +6,8 @@ runtime: org.gnome.Platform
 runtime-version: '49'
 sdk: org.gnome.Sdk
 command: kopuz-legacy
+build-options:
+  libdir: /app/lib
 finish-args:
   - --share=ipc
   - --share=network
