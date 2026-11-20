@@ -13,6 +13,8 @@ use std::os::raw::{c_char, c_int};
 #[cfg(not(target_os = "android"))]
 use std::sync::{Arc, OnceLock};
 
+#[cfg(target_os = "android")]
+pub mod android;
 pub mod discover;
 pub mod fetch;
 pub mod mediadrm;
@@ -174,12 +176,9 @@ pub struct Cdm {
 
 /// Android reaches Widevine through `MediaDrm`, which manages licences but cannot
 /// decrypt: content keys are issued decrypt-to-codec-only, so the plaintext is
-/// only ever produced inside `MediaCodec` and comes out as PCM. That makes Apple
-/// Music on Android a second playback path rather than another `Cdm` — see
-/// [`mediadrm`] for the detail and for the pieces that path will need.
-///
-/// Until it exists, every entry point says so rather than failing at link time or
-/// playing silence.
+/// only ever produced inside `MediaCodec` and comes out as PCM. Apple Music there
+/// plays through [`android`] and [`pcm`](super::pcm) instead, so this `Cdm` is
+/// never opened on Android and every entry point says so.
 #[cfg(target_os = "android")]
 impl Cdm {
     /// Every entry point returns this. Written once rather than routed through
@@ -188,8 +187,8 @@ impl Cdm {
     /// be worse than the unsupported error.
     fn unsupported<T>() -> Result<T, String> {
         Err(
-            "Apple Music playback isn't supported on Android yet: Widevine there \
-             decrypts only inside MediaCodec, which needs a separate playback path"
+            "the browser CDM doesn't exist on Android: Widevine there decrypts \
+             only inside MediaCodec"
                 .to_string(),
         )
     }

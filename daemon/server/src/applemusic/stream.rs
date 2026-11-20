@@ -237,16 +237,17 @@ async fn read_encrypted_playlist(
 ///
 /// Nothing is returned: the content key stays sealed inside the CDM, which is
 /// the point of driving the real one rather than a hand-rolled protocol.
-async fn load_license(
-    cdm: &super::widevine::Cdm,
-    session: &super::widevine::LicenseSession,
-    cdm_session: &super::widevine::CdmSession,
+/// Send a licence challenge to Apple and return the licence it answers with.
+///
+/// The same request whichever Widevine produced the challenge: Apple's licence
+/// server sees only the opaque blob.
+async fn fetch_license(
     license_request: &[u8],
     adam_id: &str,
     key: &CachedKeyInfo,
     bearer_token: &str,
     media_user_token: &str,
-) -> Result<(), String> {
+) -> Result<Vec<u8>, String> {
     let envelope = serde_json::json!({
         "challenge": STANDARD.encode(license_request),
         "key-system": "com.widevine.alpha",
@@ -332,27 +333,68 @@ async fn load_license(
         .decode(license_b64)
         .map_err(|e| format!("decode license: {e}"))?;
 
-    tracing::debug!(
-        "am.license: license binary len={}, loading into CDM",
-        license_data.len()
-    );
-
-    cdm.update(session, cdm_session, &license_data)
-        .map_err(|e| {
-            tracing::warn!("am.license: loading the license failed: {e}");
-            e
-        })?;
-
-    tracing::debug!("am.license: keys loaded");
-    Ok(())
+    tracing::debug!("am.license: license binary len={}", license_data.len());
+    Ok(license_data)
 }
 
-/// Full pipeline: resolve + download + decrypt. Returns decrypted fMP4 bytes.
-/// Resolve a track to a decrypted, readable stream.
+/// What playback reads for an Apple Music track.
 ///
-/// Returns as soon as the licence is loaded and the ciphertext is in hand — the
-/// CDM work then runs behind the returned [`ProgressiveTrack`], so playback can
-/// start on the first fragment instead of waiting out the whole track.
+/// The fMP4 itself where the CDM hands back decrypted samples, or PCM on
+/// Android, where only `MediaCodec` ever sees the cleartext.
+pub enum AppleMusicTrack {
+    Fmp4(super::progressive::ProgressiveTrack),
+    Pcm(super::pcm::PcmTrack),
+}
+
+impl AppleMusicTrack {
+    pub fn total_size(&self) -> u64 {
+        match self {
+            Self::Fmp4(track) => track.total_size(),
+            Self::Pcm(track) => track.total_size(),
+        }
+    }
+
+    /// The file extension that tells the decoder what it is reading.
+    pub fn extension(&self) -> &'static str {
+        match self {
+            Self::Fmp4(_) => "m4a",
+            Self::Pcm(_) => "wav",
+        }
+    }
+}
+
+impl std::io::Read for AppleMusicTrack {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Fmp4(track) => track.read(out),
+            Self::Pcm(track) => track.read(out),
+        }
+    }
+}
+
+impl std::io::Seek for AppleMusicTrack {
+    fn seek(&mut self, from: std::io::SeekFrom) -> std::io::Result<u64> {
+        match self {
+            Self::Fmp4(track) => track.seek(from),
+            Self::Pcm(track) => track.seek(from),
+        }
+    }
+}
+
+/// What a licence request names, and who is asking.
+struct Licensing<'a> {
+    adam_id: &'a str,
+    key: &'a CachedKeyInfo,
+    key_id: Vec<u8>,
+    bearer_token: &'a str,
+    media_user_token: &'a str,
+}
+
+/// Resolve a track to a readable stream.
+///
+/// Returns as soon as the licence is loaded and the first audio is ready; the
+/// rest decrypts behind the returned track, so playback starts on the first
+/// fragment instead of waiting out the whole download.
 pub async fn resolve_and_decrypt(
     adam_id: &str,
     media_user_token: &str,
@@ -360,7 +402,7 @@ pub async fn resolve_and_decrypt(
     language: &str,
     progress: Option<crate::stream::stream_buffer::BufferProgressCallback>,
     complete: Option<crate::stream::stream_buffer::CompleteSink>,
-) -> Result<super::progressive::ProgressiveTrack, String> {
+) -> Result<AppleMusicTrack, String> {
     let hand_over = |bytes: &[u8], complete: Option<crate::stream::stream_buffer::CompleteSink>| {
         if let Some(complete) = complete {
             complete(crate::stream::stream_buffer::Captured {
@@ -393,7 +435,9 @@ pub async fn resolve_and_decrypt(
                     p(0, total, Some(total));
                 }
                 hand_over(&cached, complete);
-                return Ok(super::progressive::ProgressiveTrack::ready(cached));
+                return Ok(AppleMusicTrack::Fmp4(
+                    super::progressive::ProgressiveTrack::ready(cached),
+                ));
             }
         }
         CachePolicy::Ciphertext => {
@@ -402,19 +446,27 @@ pub async fn resolve_and_decrypt(
                 && !cached.is_empty()
             {
                 tracing::info!(
-                    "am.stream: reusing encrypted {} ({} bytes) — licensing it again",
+                    "am.stream: reusing encrypted {} ({} bytes), licensing it again",
                     cache_path.display(),
                     cached.len()
                 );
-                return licence_and_decrypt(
-                    cached,
-                    &adam_id,
-                    &key,
-                    &bearer_token,
+                let key_id = STANDARD
+                    .decode(&key.kid_base64)
+                    .map_err(|e| format!("decode cached KID: {e}"))?;
+                let (track, sink) =
+                    super::progressive::ProgressiveTrack::streaming(cached.len() as u64);
+                sink.push(&cached);
+                sink.finish();
+                let licensing = Licensing {
+                    adam_id: &adam_id,
+                    key: &key,
+                    key_id,
+                    bearer_token: &bearer_token,
                     media_user_token,
-                    progress,
-                    complete,
-                )
+                };
+                return start_playback(track, licensing, progress, move |decrypted| {
+                    hand_over(&decrypted, complete);
+                })
                 .await;
             }
         }
@@ -435,7 +487,9 @@ pub async fn resolve_and_decrypt(
             }
             store_decrypted_blocking(&cache_path, &bytes);
             hand_over(&bytes, complete);
-            return Ok(super::progressive::ProgressiveTrack::ready(bytes));
+            return Ok(AppleMusicTrack::Fmp4(
+                super::progressive::ProgressiveTrack::ready(bytes),
+            ));
         }
     };
 
@@ -446,12 +500,6 @@ pub async fn resolve_and_decrypt(
     let key_id = STANDARD
         .decode(&playback.kid_base64)
         .map_err(|e| format!("decode KID: {e}"))?;
-    let init_data = super::widevine::build_pssh(&key_id);
-    tracing::debug!(
-        "am.stream: pssh box built ({} bytes) for kid={}",
-        init_data.len(),
-        playback.kid_base64
-    );
 
     let track = match open_asset_stream(&playback.file_url, media_user_token).await? {
         AssetStream::Sized { response, total } => {
@@ -475,6 +523,47 @@ pub async fn resolve_and_decrypt(
         }
     };
 
+    let plaintext_cache = (cache_policy() == CachePolicy::Decrypted).then_some(cache_path.clone());
+    let licensing = Licensing {
+        adam_id: &adam_id,
+        key: &key,
+        key_id,
+        bearer_token: &bearer_token,
+        media_user_token,
+    };
+    let track = start_playback(track, licensing, progress, move |decrypted| {
+        if let Some(path) = plaintext_cache {
+            store_decrypted_blocking(&path, &decrypted);
+        }
+        hand_over(&decrypted, complete);
+    })
+    .await?;
+
+    if cache_policy() == CachePolicy::Ciphertext
+        && let Err(e) = write_sidecar(&cache_path, &key)
+    {
+        tracing::debug!("am.stream: could not write the cache sidecar ({e})");
+    }
+    Ok(track)
+}
+
+/// License `track` with the browser CDM and start decrypting it in place.
+///
+/// `on_complete` gets the whole decrypted file once the last sample is done.
+#[cfg(not(target_os = "android"))]
+async fn start_playback(
+    track: super::progressive::ProgressiveTrack,
+    licensing: Licensing<'_>,
+    progress: Option<crate::stream::stream_buffer::BufferProgressCallback>,
+    on_complete: impl FnOnce(Vec<u8>) + Send + 'static,
+) -> Result<AppleMusicTrack, String> {
+    let init_data = super::widevine::build_pssh(&licensing.key_id);
+    tracing::debug!(
+        "am.stream: pssh box built ({} bytes) for kid={}",
+        init_data.len(),
+        licensing.key.kid_base64
+    );
+
     let phase = std::time::Instant::now();
     let cdm = super::widevine::Cdm::open_system().await?;
     tracing::info!(
@@ -484,108 +573,108 @@ pub async fn resolve_and_decrypt(
     let phase = std::time::Instant::now();
 
     let license = cdm.begin_license().await;
-
     let (license_request, cdm_session) = cdm.challenge(&license, &init_data)?;
     tracing::info!(
         "am.timing: challenge in {:.2}s (includes waiting for the licence lock)",
         phase.elapsed().as_secs_f64()
     );
     let phase = std::time::Instant::now();
-    tracing::debug!(
-        "am.stream: license challenge generated ({} bytes)",
-        license_request.len()
-    );
 
-    tracing::debug!("am.stream: exchanging license with Apple");
-
-    load_license(
-        &cdm,
-        &license,
-        &cdm_session,
+    let license_data = fetch_license(
         &license_request,
-        &adam_id,
-        &key,
-        &bearer_token,
-        media_user_token,
+        licensing.adam_id,
+        licensing.key,
+        licensing.bearer_token,
+        licensing.media_user_token,
     )
     .await?;
-
+    cdm.update(&license, &cdm_session, &license_data)
+        .map_err(|e| {
+            tracing::warn!("am.license: loading the license failed: {e}");
+            e
+        })?;
     tracing::info!(
         "am.timing: licence exchanged in {:.2}s",
         phase.elapsed().as_secs_f64()
     );
     drop(license);
 
-    if cache_policy() == CachePolicy::Ciphertext
-        && let Err(e) = write_sidecar(&cache_path, &key)
-    {
-        tracing::debug!("am.stream: could not write the cache sidecar ({e})");
-    }
-
-    let plaintext_cache = (cache_policy() == CachePolicy::Decrypted).then_some(cache_path);
-    track.begin_decrypt(cdm, cdm_session, key_id, progress, move |decrypted| {
-        if let Some(path) = plaintext_cache {
-            store_decrypted_blocking(&path, &decrypted);
-        }
-        hand_over(&decrypted, complete);
-    })?;
-    Ok(track)
+    track.begin_decrypt(cdm, cdm_session, licensing.key_id, progress, on_complete)?;
+    Ok(AppleMusicTrack::Fmp4(track))
 }
 
-/// Play bytes we already hold, by licensing them again.
+/// License `track` with `MediaDrm` and start decoding it to PCM.
 ///
-/// The ciphertext cache path: no `webPlayback`, no M3U8, no download — the key id
-/// and key URI came out of the sidecar, so this is a licence round trip and the
-/// prebuffer.
-async fn licence_and_decrypt(
-    encrypted: Vec<u8>,
-    adam_id: &str,
-    key: &CachedKeyInfo,
-    bearer_token: &str,
-    media_user_token: &str,
+/// `on_complete` is never called: the decrypted AAC never leaves `MediaCodec`,
+/// so there is no file to hand over.
+#[cfg(target_os = "android")]
+async fn start_playback(
+    track: super::progressive::ProgressiveTrack,
+    licensing: Licensing<'_>,
     progress: Option<crate::stream::stream_buffer::BufferProgressCallback>,
-    complete: Option<crate::stream::stream_buffer::CompleteSink>,
-) -> Result<super::progressive::ProgressiveTrack, String> {
-    let key_id = STANDARD
-        .decode(&key.kid_base64)
-        .map_err(|e| format!("decode cached KID: {e}"))?;
-    let init_data = super::widevine::build_pssh(&key_id);
+    _on_complete: impl FnOnce(Vec<u8>) + Send + 'static,
+) -> Result<AppleMusicTrack, String> {
+    use super::widevine::android::{DrmSession, MediaCodecAac};
 
-    let cdm = super::widevine::Cdm::open_system().await?;
-    let license = cdm.begin_license().await;
-    let (license_request, cdm_session) = cdm.challenge(&license, &init_data)?;
-    load_license(
-        &cdm,
-        &license,
-        &cdm_session,
-        &license_request,
-        adam_id,
-        key,
-        bearer_token,
-        media_user_token,
+    let joined = |e: tokio::task::JoinError| format!("MediaDrm task: {e}");
+    let init_data = super::widevine::build_pssh(&licensing.key_id);
+
+    let phase = std::time::Instant::now();
+    let (drm, challenge) = tokio::task::spawn_blocking(move || {
+        let drm = DrmSession::open()?;
+        let challenge = drm.key_request(&init_data)?;
+        Ok::<_, String>((drm, challenge))
+    })
+    .await
+    .map_err(joined)??;
+    tracing::info!(
+        "am.timing: MediaDrm challenge in {:.2}s",
+        phase.elapsed().as_secs_f64()
+    );
+
+    let license_data = fetch_license(
+        &challenge,
+        licensing.adam_id,
+        licensing.key,
+        licensing.bearer_token,
+        licensing.media_user_token,
     )
     .await?;
-    drop(license);
-
-    let total = encrypted.len() as u64;
-    let (track, sink) = super::progressive::ProgressiveTrack::streaming(total);
-    sink.push(&encrypted);
-    sink.finish();
-    // Already cached here, so only a sink hears when it finishes.
-    track.begin_decrypt(cdm, cdm_session, key_id, progress, move |decrypted| {
-        if let Some(complete) = complete {
-            complete(crate::stream::stream_buffer::Captured {
-                bytes: decrypted,
-                content_type: Some("audio/mp4".into()),
-            });
-        }
+    drm.provide_key_response(&license_data).map_err(|e| {
+        tracing::warn!("am.license: MediaDrm rejected the licence: {e}");
+        e
     })?;
-    Ok(track)
+    tracing::info!(
+        "am.timing: licence loaded in {:.2}s",
+        phase.elapsed().as_secs_f64()
+    );
+
+    let key_id = licensing.key_id;
+    let pcm = tokio::task::spawn_blocking(move || {
+        let init = track.init_segment()?;
+        let config =
+            super::cenc::audio_config(&init).ok_or("the init segment has no AAC configuration")?;
+        let duration = match super::cenc::track_duration(&init) {
+            Some(duration) => duration,
+            None => {
+                let samples = track.sample_count()? as u64;
+                std::time::Duration::from_secs_f64(
+                    (samples * super::pcm::AAC_FRAME_SAMPLES) as f64
+                        / f64::from(config.sample_rate.max(1)),
+                )
+            }
+        };
+        let decoder = MediaCodecAac::new(drm, &key_id, &config)?;
+        super::pcm::PcmTrack::start(track, decoder, config.sample_rate, duration, progress)
+    })
+    .await
+    .map_err(joined)??;
+    Ok(AppleMusicTrack::Pcm(pcm))
 }
 
 /// The whole track, decrypted, for storing offline.
 ///
-/// Same pipeline as playback — there is no separate download endpoint, and the
+/// Same pipeline as playback: there is no separate download endpoint, and the
 /// asset is encrypted either way, so a plain HTTP GET would only ever yield
 /// ciphertext. The difference is pacing: playback decrypts just ahead of the
 /// listener, this asks for all of it at once.
@@ -611,6 +700,13 @@ pub async fn download_decrypted(
     .await
     .map_err(|e| format!("resolve for download: {e}"))?;
 
+    let AppleMusicTrack::Fmp4(track) = track else {
+        return Err(
+            "this device can't save Apple Music tracks: its DRM decrypts only into the \
+             audio decoder, never to a file"
+                .to_string(),
+        );
+    };
     tokio::task::spawn_blocking(move || {
         track.request_all();
         track.wait_until_decrypted()
