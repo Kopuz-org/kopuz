@@ -110,9 +110,15 @@ fn open_window(kind: WindowKind, cx: &mut App) -> Option<AnyWindowHandle> {
 
 /// Whether a mini player is up, in either of its forms.
 pub fn is_open(cx: &App) -> bool {
-    cx.try_global::<MiniHandle>()
-        .is_some_and(|handle| handle.0.is_some())
-        || Chrome::global(cx).read(cx).is_mini()
+    mini_window(cx).is_some() || Chrome::global(cx).read(cx).is_mini()
+}
+
+fn mini_window(cx: &App) -> Option<AnyWindowHandle> {
+    let handle = cx.try_global::<MiniHandle>()?.0?;
+    cx.windows()
+        .iter()
+        .any(|open| open.window_id() == handle.window_id())
+        .then_some(handle)
 }
 
 /// Shrink to the mini player: a window of its own where the compositor allows it, else in place.
@@ -136,8 +142,9 @@ pub fn open_mini(cx: &mut App) {
 
 /// Put the full player back, whichever way the mini one was showing.
 pub fn close_mini(cx: &mut App) {
-    if let Some(handle) = cx.try_global::<MiniHandle>().and_then(|handle| handle.0) {
-        cx.set_global(MiniHandle(None));
+    let open = mini_window(cx);
+    cx.set_global(MiniHandle(None));
+    if let Some(handle) = open {
         // The restore button runs inside the mini window's own update, where GPUI cannot reach that window.
         cx.defer(move |cx| {
             if let Err(error) = handle.update(cx, |_, window, _| window.remove_window()) {
