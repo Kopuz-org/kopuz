@@ -204,6 +204,7 @@ impl Segmented {
                         .border_color(style::white(M3_OUTLINE, cx))
                 })
                 .text_sm(),
+            false if self.pill => frame.rounded(cx.theme().radius_full()).text_xs(),
             false => frame.rounded(style::thumb_radius()).text_xs(),
         })
         .bg(wash)
