@@ -64,6 +64,10 @@ unicode-script = { workspace = true }
 [build-dependencies]
 cc = "1"
 
+# The NDK's MediaDrm and MediaCodec, which play Apple Music on Android.
+[target.'cfg(target_os = "android")'.dependencies]
+ndk-sys = { version = "0.6", features = ["media"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = { workspace = true }
 

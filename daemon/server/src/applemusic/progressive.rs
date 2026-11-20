@@ -346,6 +346,82 @@ impl ProgressiveTrack {
         Ok(())
     }
 
+    /// The init segment, once it has arrived.
+    pub fn init_segment(&self) -> Result<Vec<u8>, String> {
+        let end = self.wait_for_init()?;
+        let s = self
+            .state
+            .lock()
+            .map_err(|_| "decrypt state poisoned".to_string())?;
+        Ok(s.buf[..end].to_vec())
+    }
+
+    /// Sample `index` as it was downloaded, still encrypted, with what decrypting
+    /// it takes. Waits for its fragment; `None` once the track has no more.
+    ///
+    /// For a decoder that decrypts by itself, as Android's does: the bytes are
+    /// copied out and never written back, so nothing here decrypts.
+    pub fn encrypted_sample(
+        &self,
+        index: usize,
+    ) -> Result<Option<(cenc::EncryptedSample, Vec<u8>)>, String> {
+        let deadline = Instant::now() + WAIT_TIMEOUT;
+        loop {
+            {
+                let mut s = self
+                    .state
+                    .lock()
+                    .map_err(|_| "decrypt state poisoned".to_string())?;
+                if let Some(e) = &s.error {
+                    return Err(e.clone());
+                }
+                if index >= s.layout.samples.len() {
+                    s.reindex();
+                }
+                if let Some(sample) = s.layout.samples.get(index) {
+                    let bytes = s.buf[sample.start..sample.end()].to_vec();
+                    return Ok(Some((sample.clone(), bytes)));
+                }
+                if s.complete {
+                    return Ok(None);
+                }
+            }
+            if Instant::now() >= deadline {
+                return Err("the download stalled before the next fragment".to_string());
+            }
+            std::thread::sleep(WAIT_POLL);
+        }
+    }
+
+    /// How many samples the whole track has. Waits for the download to finish.
+    pub fn sample_count(&self) -> Result<usize, String> {
+        let mut deadline = Instant::now() + WAIT_TIMEOUT;
+        let mut seen = 0;
+        loop {
+            {
+                let mut s = self
+                    .state
+                    .lock()
+                    .map_err(|_| "decrypt state poisoned".to_string())?;
+                if let Some(e) = &s.error {
+                    return Err(e.clone());
+                }
+                if s.complete {
+                    s.reindex();
+                    return Ok(s.layout.samples.len());
+                }
+                if s.downloaded != seen {
+                    seen = s.downloaded;
+                    deadline = Instant::now() + WAIT_TIMEOUT;
+                }
+            }
+            if Instant::now() >= deadline {
+                return Err("the download stalled before it finished".to_string());
+            }
+            std::thread::sleep(WAIT_POLL);
+        }
+    }
+
     /// Wait for the init segment, whose length sets where the prebuffer ends.
     fn wait_for_init(&self) -> Result<usize, String> {
         let deadline = Instant::now() + WAIT_TIMEOUT;

@@ -2,6 +2,7 @@ pub mod api;
 pub mod auth;
 
 pub mod cenc;
+pub mod pcm;
 pub mod progressive;
 pub mod signin;
 pub mod stream;

@@ -182,8 +182,9 @@ pub(crate) fn network_factory(
                 .map_err(std::io::Error::other)?;
 
                 let len = Some(track.total_size());
+                let extension = track.extension();
                 let (source, mut hint) = decoder::from_stream_with_len(track, len);
-                hint.with_extension("m4a");
+                hint.with_extension(extension);
                 Ok((source, hint))
             } else {
                 match server::stream::range_source::RangeStreamSource::new_with_progress(
