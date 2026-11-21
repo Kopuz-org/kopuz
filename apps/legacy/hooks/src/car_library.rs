@@ -68,7 +68,6 @@ pub(crate) enum MediaId {
     PlayArtist { index: u32, key: String },
     PlayPlaylist { index: u32, id: String },
     PlayRecent(String),
-    PlayTrack(String),
 }
 
 impl MediaId {
@@ -93,7 +92,6 @@ impl MediaId {
                 let (what, rest) = rest.split_once('/')?;
                 match what {
                     "recent" => Some(Self::PlayRecent(rest.to_owned())),
-                    "track" => Some(Self::PlayTrack(rest.to_owned())),
                     _ => {
                         let (index, id) = rest.split_once('/')?;
                         let index = index.parse().ok()?;
@@ -125,7 +123,6 @@ impl MediaId {
             Self::PlayArtist { index, key } => format!("play/artist/{index}/{key}"),
             Self::PlayPlaylist { index, id } => format!("play/playlist/{index}/{id}"),
             Self::PlayRecent(key) => format!("play/recent/{key}"),
-            Self::PlayTrack(key) => format!("play/track/{key}"),
         }
     }
 }
@@ -224,8 +221,7 @@ pub(crate) async fn children(api: &dyn KopuzApi, parent: &str) -> Result<Vec<Car
         MediaId::PlayAlbum { .. }
         | MediaId::PlayArtist { .. }
         | MediaId::PlayPlaylist { .. }
-        | MediaId::PlayRecent(_)
-        | MediaId::PlayTrack(_) => Vec::new(),
+        | MediaId::PlayRecent(_) => Vec::new(),
     };
     Ok(items)
 }
@@ -242,17 +238,6 @@ async fn playlist_tracks(api: &dyn KopuzApi, id: &str) -> Result<Vec<TrackInfo>,
     let mut keys = playlist.track_keys;
     keys.truncate(LIST_LIMIT as usize);
     api.tracks_by_keys(keys).await
-}
-
-/// Tracks matching `query`, each played on its own when picked.
-pub(crate) async fn search(api: &dyn KopuzApi, query: &str) -> Result<Vec<CarItem>, ApiError> {
-    let results = api.search(api::SearchRequest::new(query)).await?;
-    Ok(results
-        .tracks
-        .iter()
-        .take(SEARCH_LIMIT)
-        .map(|track| CarItem::track(MediaId::PlayTrack(track.key.clone()).encode(), track))
-        .collect())
 }
 
 async fn set_queue(
@@ -300,9 +285,6 @@ pub(crate) async fn play(api: &dyn KopuzApi, media_id: &str) -> Result<(), ApiEr
                 }
                 None => set_queue(api, QueueContext::Tracks { keys: vec![key] }, None).await,
             }
-        }
-        MediaId::PlayTrack(key) => {
-            set_queue(api, QueueContext::Tracks { keys: vec![key] }, None).await
         }
         MediaId::Root
         | MediaId::Recent
@@ -362,7 +344,6 @@ mod tests {
                 id: "p".into(),
             },
             MediaId::PlayRecent("local:/music/a.flac".into()),
-            MediaId::PlayTrack("yt/abc".into()),
         ];
         for id in ids {
             assert_eq!(MediaId::parse(&id.encode()), Some(id));

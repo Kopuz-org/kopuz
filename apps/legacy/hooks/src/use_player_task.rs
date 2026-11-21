@@ -93,15 +93,6 @@ mod android_media {
                     });
                 let _ = reply.send(rows(items));
             }
-            CarRequest::Search { query, reply } => {
-                let items = car_library::search(api.as_ref(), &query)
-                    .await
-                    .unwrap_or_else(|error| {
-                        tracing::warn!(%error, "car search failed");
-                        Vec::new()
-                    });
-                let _ = reply.send(rows(items));
-            }
             CarRequest::Play { media_id } => {
                 if let Err(error) = car_library::play(api.as_ref(), &media_id).await {
                     tracing::warn!(%error, media_id, "car play failed");

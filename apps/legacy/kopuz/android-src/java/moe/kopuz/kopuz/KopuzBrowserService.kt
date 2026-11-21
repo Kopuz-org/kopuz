@@ -26,7 +26,6 @@ class KopuzBrowserService : MediaBrowserService() {
     override fun onGetRoot(clientPackageName: String, clientUid: Int, rootHints: Bundle?): BrowserRoot? {
         if (!isTrusted(clientPackageName, clientUid)) return null
         val extras = Bundle().apply {
-            putBoolean(SEARCH_SUPPORTED, true)
             putInt(CONTENT_STYLE_BROWSABLE, CONTENT_STYLE_LIST)
             putInt(CONTENT_STYLE_PLAYABLE, CONTENT_STYLE_LIST)
         }
@@ -38,13 +37,6 @@ class KopuzBrowserService : MediaBrowserService() {
         result.detach()
         Thread {
             result.sendResult(load { nativeChildren(parentId) })
-        }.apply { isDaemon = true }.start()
-    }
-
-    override fun onSearch(query: String, extras: Bundle?, result: Result<MutableList<MediaItem>>) {
-        result.detach()
-        Thread {
-            result.sendResult(load { nativeSearch(query) })
         }.apply { isDaemon = true }.start()
     }
 
@@ -71,7 +63,6 @@ class KopuzBrowserService : MediaBrowserService() {
     companion object {
         private const val ROOT = "root"
 
-        private const val SEARCH_SUPPORTED = "android.media.browse.SEARCH_SUPPORTED"
         private const val CONTENT_STYLE_BROWSABLE =
             "android.media.browse.CONTENT_STYLE_BROWSABLE_HINT"
         private const val CONTENT_STYLE_PLAYABLE =
@@ -125,9 +116,6 @@ class KopuzBrowserService : MediaBrowserService() {
         /** Encoded rows, or null before the app has registered its handler. */
         @JvmStatic
         external fun nativeChildren(parentId: String): String?
-
-        @JvmStatic
-        external fun nativeSearch(query: String): String?
 
         @JvmStatic
         external fun nativePlay(mediaId: String): Boolean

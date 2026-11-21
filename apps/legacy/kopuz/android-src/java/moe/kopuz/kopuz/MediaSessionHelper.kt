@@ -170,10 +170,7 @@ object MediaSessionHelper {
         s.setPlaybackState(
             PlaybackState.Builder()
                 .setState(PlaybackState.STATE_ERROR, 0, 0f)
-                .setErrorMessage(
-                    PlaybackState.ERROR_CODE_APP_ERROR,
-                    "Open Kopuz on your phone once, then try again"
-                )
+                .setErrorMessage("Open Kopuz on your phone once, then try again")
                 .setActions(BROWSE_ACTIONS)
                 .build()
         )

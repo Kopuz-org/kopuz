@@ -1,5 +1,5 @@
 //! Android Auto's side of the JNI bridge. `KopuzBrowserService` asks for the
-//! rows of a browse screen, a search, or a play by media id; the frontend
+//! rows of a browse screen, a play by media id or a voice search; the frontend
 //! registers the handler that answers from the library, since only it holds
 //! the API handle.
 
@@ -30,10 +30,6 @@ pub struct BrowseItem {
 pub enum CarRequest {
     Children {
         parent: String,
-        reply: Sender<Vec<BrowseItem>>,
-    },
-    Search {
-        query: String,
         reply: Sender<Vec<BrowseItem>>,
     },
     Play {
@@ -144,19 +140,6 @@ pub extern "system" fn Java_moe_kopuz_kopuz_KopuzBrowserService_nativeChildren(
         return std::ptr::null_mut();
     };
     let items = ask(|reply| CarRequest::Children { parent, reply });
-    answer(&mut env, items)
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_moe_kopuz_kopuz_KopuzBrowserService_nativeSearch(
-    mut env: JNIEnv,
-    _class: JClass,
-    query: JString,
-) -> jstring {
-    let Some(query) = read(&mut env, &query) else {
-        return std::ptr::null_mut();
-    };
-    let items = ask(|reply| CarRequest::Search { query, reply });
     answer(&mut env, items)
 }
 
