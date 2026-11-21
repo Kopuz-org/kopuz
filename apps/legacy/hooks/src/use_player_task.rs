@@ -60,6 +60,51 @@ mod android_media {
         }
         cmds
     }
+
+    /// Answer one Android Auto request from the library. Errors leave the car
+    /// with an empty screen, which is what it shows for a list that failed.
+    pub(super) async fn answer_car(
+        api: std::sync::Arc<dyn api::KopuzApi>,
+        request: player::systemint::CarRequest,
+    ) {
+        use crate::car_library;
+        use player::systemint::{BrowseItem, CarRequest};
+
+        fn rows(items: Vec<car_library::CarItem>) -> Vec<BrowseItem> {
+            items
+                .into_iter()
+                .map(|item| BrowseItem {
+                    id: item.id,
+                    title: item.title,
+                    subtitle: item.subtitle,
+                    browsable: item.browsable,
+                    playable: item.playable,
+                })
+                .collect()
+        }
+
+        match request {
+            CarRequest::Children { parent, reply } => {
+                let items = car_library::children(api.as_ref(), &parent)
+                    .await
+                    .unwrap_or_else(|error| {
+                        tracing::warn!(%error, parent, "car browse failed");
+                        Vec::new()
+                    });
+                let _ = reply.send(rows(items));
+            }
+            CarRequest::Play { media_id } => {
+                if let Err(error) = car_library::play(api.as_ref(), &media_id).await {
+                    tracing::warn!(%error, media_id, "car play failed");
+                }
+            }
+            CarRequest::PlaySearch { query } => {
+                if let Err(error) = car_library::play_search(api.as_ref(), &query).await {
+                    tracing::warn!(%error, "car voice search failed");
+                }
+            }
+        }
+    }
 }
 
 pub fn use_player_task(
@@ -79,6 +124,25 @@ pub fn use_player_task(
     #[cfg(target_os = "android")]
     {
         use android_media::BgCmd;
+        let car_requests = use_hook(|| {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            player::systemint::set_car_handler(move |request| {
+                let _ = tx.send(request);
+            });
+            std::rc::Rc::new(std::cell::RefCell::new(Some(rx)))
+        });
+        use_future(move || {
+            let requests = car_requests.borrow_mut().take();
+            async move {
+                let Some(mut requests) = requests else {
+                    return;
+                };
+                while let Some(request) = requests.recv().await {
+                    let api = ctrl.api.peek().clone();
+                    spawn(android_media::answer_car(api, request));
+                }
+            }
+        });
         use_hook(move || {
             android_media::init_bg_channel();
 

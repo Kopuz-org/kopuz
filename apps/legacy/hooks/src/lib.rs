@@ -4,6 +4,8 @@
 pub mod api;
 pub mod artwork;
 pub mod artwork_settings;
+#[cfg(any(target_os = "android", test))]
+mod car_library;
 pub mod catalog_cache;
 pub mod config_view;
 pub mod db_reactivity;

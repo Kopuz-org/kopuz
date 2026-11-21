@@ -24,6 +24,8 @@ pub use windows::{SystemEvent, attach_window, init, poll_event, update_now_playi
 
 #[cfg(target_os = "android")]
 mod android;
+#[cfg(target_os = "android")]
+mod android_auto;
 
 #[cfg(target_os = "android")]
 pub use android::{
@@ -33,6 +35,8 @@ pub use android::{
     set_keepalive, set_tokio_waker, stop_session, take_back_pressed, update_modes,
     update_now_playing, wait_back_pressed, wake_run_loop,
 };
+#[cfg(target_os = "android")]
+pub use android_auto::{BrowseItem, CarRequest, set_car_handler};
 
 #[cfg(not(target_os = "android"))]
 pub fn request_permissions() {}
