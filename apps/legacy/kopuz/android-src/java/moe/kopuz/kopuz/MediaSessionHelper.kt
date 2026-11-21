@@ -130,9 +130,66 @@ object MediaSessionHelper {
                 override fun onCustomAction(action: String, extras: android.os.Bundle?) {
                     MediaReceiver.nativeOnAction(action)
                 }
+                // Android Auto: a row picked from the browse tree, and voice search.
+                override fun onPlayFromMediaId(mediaId: String, extras: android.os.Bundle?) {
+                    if (!KopuzBrowserService.play(mediaId)) showNotReady()
+                }
+                override fun onPlayFromSearch(query: String?, extras: android.os.Bundle?) {
+                    if (!KopuzBrowserService.playSearch(query ?: "")) showNotReady()
+                }
             })
+            // Until the first track renders, the car still needs to know it can
+            // start playback from its browse screens.
+            setPlaybackState(
+                PlaybackState.Builder()
+                    .setState(PlaybackState.STATE_NONE, 0, 0f)
+                    .setActions(BROWSE_ACTIONS or PlaybackState.ACTION_PLAY)
+                    .build()
+            )
             isActive = true
         }
+    }
+
+    /** What Android Auto needs to play from its browse and search screens. */
+    private const val BROWSE_ACTIONS =
+        PlaybackState.ACTION_PLAY_FROM_MEDIA_ID or PlaybackState.ACTION_PLAY_FROM_SEARCH
+
+    @JvmStatic
+    fun token(): MediaSession.Token? = session?.sessionToken
+
+    @Volatile private var notReady = false
+
+    /**
+     * The car woke the browse service before the app ever started, so there is
+     * no library to list. Android Auto shows an error state's message on screen.
+     */
+    @JvmStatic
+    fun showNotReady() {
+        val s = session ?: return
+        notReady = true
+        s.setPlaybackState(
+            PlaybackState.Builder()
+                .setState(PlaybackState.STATE_ERROR, 0, 0f)
+                .setErrorMessage(
+                    PlaybackState.ERROR_CODE_APP_ERROR,
+                    "Open Kopuz on your phone once, then try again"
+                )
+                .setActions(BROWSE_ACTIONS)
+                .build()
+        )
+    }
+
+    @JvmStatic
+    fun clearNotReady() {
+        if (!notReady) return
+        notReady = false
+        val s = session ?: return
+        s.setPlaybackState(
+            PlaybackState.Builder()
+                .setState(PlaybackState.STATE_NONE, 0, 0f)
+                .setActions(BROWSE_ACTIONS or PlaybackState.ACTION_PLAY)
+                .build()
+        )
     }
 
     // Artwork is cached by path so we don't decode on every update.
@@ -273,6 +330,7 @@ object MediaSessionHelper {
         art: Bitmap?,
     ) {
         val s = session ?: run { init(context); session } ?: return
+        notReady = false
 
         val metaBuilder = MediaMetadata.Builder()
             .putString(MediaMetadata.METADATA_KEY_TITLE, title)
@@ -291,7 +349,8 @@ object MediaSessionHelper {
             PlaybackState.ACTION_PLAY_PAUSE or
             PlaybackState.ACTION_STOP or
             PlaybackState.ACTION_SKIP_TO_NEXT or
-            PlaybackState.ACTION_SKIP_TO_PREVIOUS
+            PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+            BROWSE_ACTIONS
         // SEEK_TO is what makes the notification's progress bar draggable. A
         // radio stream or a track with no known length has nothing to seek in.
         if (durationMs in 1 until MAX_SEEKABLE_MS) {
@@ -392,6 +451,7 @@ object MediaSessionHelper {
         session?.setPlaybackState(
             PlaybackState.Builder()
                 .setState(PlaybackState.STATE_STOPPED, 0, 1f)
+                .setActions(BROWSE_ACTIONS or PlaybackState.ACTION_PLAY)
                 .build()
         )
     }
