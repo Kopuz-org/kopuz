@@ -237,6 +237,14 @@ impl ReadStore for Native {
         cfg_store::recently_played(&self.pool(), source, limit).await
     }
 
+    async fn listening(
+        &self,
+        source: &crate::Source,
+        since: Option<i64>,
+    ) -> Result<crate::ListeningRows, DbError> {
+        cfg_store::listening(&self.pool(), source, since).await
+    }
+
     async fn artist_sample_tracks(
         &self,
         source: &crate::Source,

@@ -2024,6 +2024,7 @@ mod row_fill_tests {
             "ALTER TABLE tracks DROP COLUMN bit_depth",
             "ALTER TABLE listen_counts DROP COLUMN last_played_at",
             "DROP TABLE offline_cache",
+            "DROP TABLE listen_events",
             "DELETE FROM _sqlx_migrations WHERE version >= 20260930000000",
         ] {
             sqlx::query(sql).execute(&pool).await.unwrap();

@@ -427,6 +427,61 @@ impl LibraryService {
         })
     }
 
+    pub async fn listening_stats(
+        &self,
+        days: Option<u32>,
+    ) -> Result<api::ListeningStats, ApiError> {
+        let since = days.map(|days| {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_secs() as i64)
+                .unwrap_or_default();
+            now - i64::from(days) * 86_400
+        });
+        let rows = self
+            .db
+            .listening(&self.query_source(), since)
+            .await
+            .map_err(db_error)?;
+        Ok(api::ListeningStats {
+            plays: rows.plays,
+            seconds: rows.seconds,
+            tracks: rows
+                .tracks
+                .into_iter()
+                .map(|(key, title, artist, plays)| api::RankedTrack {
+                    key,
+                    title,
+                    artist,
+                    plays,
+                })
+                .collect(),
+            artists: rows
+                .artists
+                .into_iter()
+                .map(|(name, plays)| api::Ranked {
+                    name,
+                    detail: String::new(),
+                    plays,
+                })
+                .collect(),
+            albums: rows
+                .albums
+                .into_iter()
+                .map(|(name, detail, plays)| api::Ranked {
+                    name,
+                    detail,
+                    plays,
+                })
+                .collect(),
+            days: rows
+                .days
+                .into_iter()
+                .map(|(day, plays)| api::DayPlays { day, plays })
+                .collect(),
+        })
+    }
+
     pub async fn stats(&self) -> Result<api::StatsView, ApiError> {
         let own = self.query_source().listen_count_key("");
         let listen_counts = self
