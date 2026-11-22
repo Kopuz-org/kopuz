@@ -1263,3 +1263,6 @@ listening_plays = { $count } spelningar
 listening_hours = { $hours } timmar
 listening_top_artists = Toppartister
 listening_top_albums = Toppalbum
+interface_panel_show_pins = Visa fästa
+interface_panel_show_playlists = Visa spellistor
+interface_panel_no_pins = Inget fäst än. Högerklicka på ett album, en artist eller en spellista och välj Fäst i sidofältet.

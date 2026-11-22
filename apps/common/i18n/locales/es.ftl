@@ -1270,3 +1270,6 @@ listening_plays = { $count } reproducciones
 listening_hours = { $hours } horas
 listening_top_artists = Artistas más escuchados
 listening_top_albums = Álbumes más escuchados
+interface_panel_show_pins = Mostrar fijados
+interface_panel_show_playlists = Mostrar listas
+interface_panel_no_pins = Aún no hay nada fijado. Haz clic derecho en un álbum, artista o lista y elige Fijar en la barra lateral.

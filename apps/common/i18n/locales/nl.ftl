@@ -1263,3 +1263,6 @@ listening_plays = { $count } keer afgespeeld
 listening_hours = { $hours } uur
 listening_top_artists = Topartiesten
 listening_top_albums = Topalbums
+interface_panel_show_pins = Vastgezette items tonen
+interface_panel_show_playlists = Afspeellijsten tonen
+interface_panel_no_pins = Nog niets vastgezet. Klik met rechts op een album, artiest of afspeellijst en kies Vastzetten in zijbalk.

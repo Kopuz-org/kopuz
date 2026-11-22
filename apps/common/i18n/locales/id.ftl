@@ -1231,3 +1231,6 @@ listening_plays = { $count } putaran
 listening_hours = { $hours } jam
 listening_top_artists = Artis teratas
 listening_top_albums = Album teratas
+interface_panel_show_pins = Tampilkan yang disematkan
+interface_panel_show_playlists = Tampilkan daftar putar
+interface_panel_no_pins = Belum ada yang disematkan. Klik kanan album, artis, atau daftar putar lalu pilih Sematkan ke bilah samping.

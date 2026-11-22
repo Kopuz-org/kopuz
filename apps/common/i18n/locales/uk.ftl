@@ -1285,3 +1285,6 @@ listening_plays = Прослуховувань: { $count }
 listening_hours = Годин: { $hours }
 listening_top_artists = Топ виконавців
 listening_top_albums = Топ альбомів
+interface_panel_show_pins = Показувати закріплене
+interface_panel_show_playlists = Показувати плейлисти
+interface_panel_no_pins = Поки нічого не закріплено. Клацніть правою кнопкою на альбом, виконавця чи плейлист і виберіть Закріпити на бічній панелі.

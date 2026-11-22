@@ -2,12 +2,15 @@
 
 use components::format::t;
 use components::settings::{SettingRow, choice, nearest, section, toggle_row};
-use gpui_kit::component::v_flex;
+use components::{icons, style};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::{Disableable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
-    App, AppContext as _, Context, IntoElement, ParentElement as _, Render, Styled, Window,
+    App, AppContext as _, Context, IntoElement, ParentElement as _, Render, SharedString, Styled,
+    Window,
 };
 use store::LayoutModel;
-use store::layout::{Panel, Section as Group};
+use store::layout::{Panel, PinKind, Section as Group};
 
 /// The widths the panel offers, inside what the drag handle allows.
 const WIDTHS: &[f32] = &[200., 260., 320., 380.];
@@ -33,6 +36,72 @@ impl PanelSettings {
     }
 }
 
+fn pin_rows(panel: &Panel, cx: &App) -> Vec<SettingRow> {
+    let count = panel.pins.len();
+    if count == 0 {
+        return SettingRow::new(t("pinned"))
+            .description(t("interface_panel_no_pins"))
+            .shown(cx)
+            .into_iter()
+            .collect();
+    }
+    panel
+        .pins
+        .iter()
+        .enumerate()
+        .filter_map(|(index, pin)| {
+            let kind = match pin.kind {
+                PinKind::Album => t("album"),
+                PinKind::Artist => t("artist"),
+                PinKind::Playlist => t("pinned_playlist"),
+                PinKind::Folder => t("pinned_folder"),
+            };
+            let button = |name: &str, glyph: &'static str, enabled: bool, to: Option<usize>| {
+                let (kind, id) = (pin.kind, pin.id.clone());
+                Button::new(SharedString::from(format!(
+                    "pin-{name}-{:?}-{}",
+                    pin.kind, pin.id
+                )))
+                .small()
+                .custom(style::quiet_button(style::slate_400(cx), cx))
+                .icon(icons::icon(glyph))
+                .disabled(!enabled)
+                .on_click(move |_, _, cx| {
+                    let id = id.clone();
+                    LayoutModel::edit(cx, move |layout| match to {
+                        Some(to) => layout.panel.move_pin(kind, &id, to),
+                        None => layout
+                            .panel
+                            .pins
+                            .retain(|held| !(held.kind == kind && held.id == id)),
+                    });
+                })
+            };
+            SettingRow::new(SharedString::from(pin.name.clone()))
+                .description(kind)
+                .control(
+                    h_flex()
+                        .gap_1()
+                        .items_center()
+                        .child(button(
+                            "up",
+                            icons::CHEVRON_UP,
+                            index > 0,
+                            Some(index.saturating_sub(1)),
+                        ))
+                        .child(button(
+                            "down",
+                            icons::CHEVRON_DOWN,
+                            index + 1 < count,
+                            Some(index + 2),
+                        ))
+                        .child(button("remove", icons::CLOSE, true, None)),
+                )
+                .shown(cx)
+        })
+        .collect()
+}
+
 fn pixels(width: f32) -> gpui_kit::SharedString {
     gpui_kit::SharedString::from(format!("{} px", width.round() as i32))
 }
@@ -56,6 +125,26 @@ impl Render for PanelSettings {
                         .shown(cx),
                     )
                     .children(
+                        toggle_row(
+                            "interface-panel-show-pins",
+                            t("interface_panel_show_pins"),
+                            panel.show_pins,
+                            |on, cx| LayoutModel::edit(cx, |layout| layout.panel.show_pins = on),
+                        )
+                        .shown(cx),
+                    )
+                    .children(
+                        toggle_row(
+                            "interface-panel-show-playlists",
+                            t("interface_panel_show_playlists"),
+                            panel.show_playlists,
+                            |on, cx| {
+                                LayoutModel::edit(cx, |layout| layout.panel.show_playlists = on)
+                            },
+                        )
+                        .shown(cx),
+                    )
+                    .children(
                         SettingRow::new(t("interface_panel_width"))
                             .description(t("interface_panel_width_description"))
                             .control(choice(
@@ -67,7 +156,8 @@ impl Render for PanelSettings {
                                 },
                             ))
                             .shown(cx),
-                    ),
+                    )
+                    .children(pin_rows(&panel, cx)),
             )
             .into_any_element()
     }

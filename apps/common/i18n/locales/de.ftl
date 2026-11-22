@@ -1238,3 +1238,6 @@ listening_plays = { $count } Wiedergaben
 listening_hours = { $hours } Stunden
 listening_top_artists = Top-Künstler
 listening_top_albums = Top-Alben
+interface_panel_show_pins = Angeheftetes anzeigen
+interface_panel_show_playlists = Playlists anzeigen
+interface_panel_no_pins = Noch nichts angeheftet. Rechtsklick auf ein Album, einen Künstler oder eine Playlist und An Seitenleiste anheften wählen.

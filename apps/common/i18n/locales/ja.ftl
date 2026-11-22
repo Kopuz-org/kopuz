@@ -1243,3 +1243,6 @@ listening_plays = { $count } 回再生
 listening_hours = { $hours } 時間
 listening_top_artists = よく聴くアーティスト
 listening_top_albums = よく聴くアルバム
+interface_panel_show_pins = ピン留めを表示
+interface_panel_show_playlists = プレイリストを表示
+interface_panel_no_pins = まだ何もピン留めされていません。アルバム、アーティスト、プレイリストを右クリックしてサイドバーにピン留めを選んでください。
