@@ -90,6 +90,7 @@ pub struct TopBar {
     destinations: Vec<&'static str>,
     position: NavPosition,
     activity: Option<AnyView>,
+    rail: Option<AnyView>,
     compact: bool,
     compact_below: Pixels,
     _subscriptions: Vec<Subscription>,
@@ -123,6 +124,7 @@ impl TopBar {
             destinations: Vec::new(),
             position: NavPosition::Top,
             activity: None,
+            rail: None,
             compact: false,
             compact_below: COMPACT_BELOW,
             _subscriptions: subscriptions,
@@ -158,6 +160,21 @@ impl TopBar {
     pub fn set_activity(&mut self, view: Option<AnyView>, cx: &mut Context<Self>) {
         self.activity = view;
         cx.notify();
+    }
+
+    pub fn set_rail(&mut self, view: Option<AnyView>, cx: &mut Context<Self>) {
+        if self.rail.as_ref().map(AnyView::entity_id) != view.as_ref().map(AnyView::entity_id) {
+            self.rail = view;
+            cx.notify();
+        }
+    }
+
+    fn rail_room(&self) -> gpui_kit::Div {
+        div()
+            .w_full()
+            .flex_1()
+            .min_h_0()
+            .children(self.rail.clone())
     }
 
     fn reread(&mut self, cx: &App) {
@@ -410,7 +427,7 @@ impl Render for TopBar {
                 .child(history)
                 .child(search)
                 .child(strip)
-                .child(div().flex_1().min_h_0())
+                .child(self.rail_room())
                 .child(v_flex().w_full().gap_1().child(cluster))
                 .into_any_element(),
         }
@@ -491,7 +508,7 @@ impl TopBar {
             .child(
                 v_flex()
                     .id("nav-sidebar-entries")
-                    .flex_1()
+                    .when(self.rail.is_none(), |entries| entries.flex_1())
                     .min_h_0()
                     .overflow_y_scroll()
                     .px_1()
@@ -507,6 +524,9 @@ impl TopBar {
                     )
                     .child(entry_strip("tools", skin::TOOLS.to_vec(), lit)),
             )
+            .when(self.rail.is_some(), |sidebar| {
+                sidebar.child(self.rail_room().px_1())
+            })
             .child(
                 h_flex()
                     .w_full()

@@ -503,6 +503,16 @@ impl Render for Shell {
             window.focus(&self.focus, cx);
         }
         let connected = self.connection.read(cx).is_connected();
+        let nav_left = components::skin::nav_position(store::layout(cx).nav.position)
+            == store::layout::NavPosition::Left;
+        let playlists = self.playlists_panel.read(cx);
+        let playlists_open = playlists.is_open(cx) && connected;
+        let playlists_width = playlists.width();
+        let in_rail = nav_left && playlists_open;
+        self.playlists_panel
+            .update(cx, |panel, cx| panel.set_merged(nav_left, cx));
+        let rail = in_rail.then(|| gpui_kit::AnyView::from(self.playlists_panel.clone()));
+        self.topbar.update(cx, |bar, cx| bar.set_rail(rail, cx));
         let chrome = Chrome::global(cx).read(cx);
         // The sheet is a full-window overlay, not a body state: its hero cover flies out of the
         // bar's own cover slot, so the bar has to still be there underneath it.
@@ -510,13 +520,8 @@ impl Render for Shell {
         // A disconnect outranks compact: a mini player with nothing behind it would keep showing
         // the last track it saw, with no way to learn the daemon had gone.
         let compact = chrome.is_compact() && connected;
-        let nav_left = components::skin::nav_position(store::layout(cx).nav.position)
-            == store::layout::NavPosition::Left;
         let rtl = i18n::is_rtl();
         let bar = Some(self.topbar.clone());
-        let playlists = self.playlists_panel.read(cx);
-        let playlists_open = playlists.is_open(cx) && connected;
-        let playlists_width = playlists.width();
         let panel_open = chrome.panel().is_some();
         let quick_search_shown =
             chrome.is_quick_search_open() || self.quick_search.read(cx).is_visible();
@@ -577,7 +582,7 @@ impl Render for Shell {
                                 .when(!nav_left, |body| body.pl(skin.pane_gap * 1.5))
                         })
                         .children(bar.filter(|_| nav_left))
-                        .when(playlists_open, |body| {
+                        .when(playlists_open && !in_rail, |body| {
                             body.child(
                                 div()
                                     .w(playlists_width)

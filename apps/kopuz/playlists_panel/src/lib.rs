@@ -99,6 +99,7 @@ pub struct PlaylistsPanel {
     // The window was too narrow to spare a column at launch; asking for the panel clears it.
     suppressed: bool,
     shown: bool,
+    merged: bool,
     scroll: UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -131,6 +132,7 @@ impl PlaylistsPanel {
             roving: Roving::new(Axis::Column, cx),
             suppressed: shown && window.viewport_size().width < NARROW_WINDOW,
             shown,
+            merged: false,
             scroll: UniformListScrollHandle::new(),
             _subscriptions: subscriptions,
         };
@@ -143,8 +145,15 @@ impl PlaylistsPanel {
         self.width
     }
 
+    pub fn set_merged(&mut self, merged: bool, cx: &mut Context<Self>) {
+        if self.merged != merged {
+            self.merged = merged;
+            cx.notify();
+        }
+    }
+
     fn collapsed(&self) -> bool {
-        self.width <= RAIL_WIDTH
+        !self.merged && self.width <= RAIL_WIDTH
     }
 
     /// Whether the shell should give the panel a slot at all.
@@ -314,10 +323,22 @@ impl Render for PlaylistsPanel {
             .track_scroll(&self.scroll)
             .flex_1()
             .min_h_0()
-            .px_2()
+            .when(!self.merged, |list| list.px_2())
             .py_1()
             .into_any_element(),
         };
+        if self.merged {
+            return self
+                .roving
+                .group(v_flex().id("playlists-panel"), "PlaylistsPanel")
+                .size_full()
+                .pt_2()
+                .border_t_1()
+                .border_color(style::white(style::BORDER_SOFT, cx))
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.key(event, cx)))
+                .child(div().px_2().pt_1().pb_1().child(self.header(cx)))
+                .child(body);
+        }
         let panel = cx.entity().downgrade();
         // Right to left the panel sits right of the content, so it borders it on its left.
         let edge = match i18n::is_rtl() {
