@@ -1269,3 +1269,5 @@ sleep_timer_off = Вимк.
 sleep_timer_minutes = { $count } хв
 sleep_timer_end_of_track = Кінець треку
 sleep_timer_left = Зупинка через { $minutes } хв
+export_m3u = Експорт у M3U
+playlist_exported = Збережено треків у файл: { $count }.

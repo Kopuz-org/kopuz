@@ -1247,3 +1247,5 @@ sleep_timer_off = Av
 sleep_timer_minutes = { $count } minuter
 sleep_timer_end_of_track = Slutet av låten
 sleep_timer_left = Stannar om { $minutes } min
+export_m3u = Exportera som M3U
+playlist_exported = Sparade { $count } låtar i filen.

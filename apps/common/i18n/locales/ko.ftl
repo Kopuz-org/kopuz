@@ -1221,3 +1221,5 @@ sleep_timer_off = 끄기
 sleep_timer_minutes = { $count }분
 sleep_timer_end_of_track = 트랙이 끝나면
 sleep_timer_left = { $minutes }분 후 정지
+export_m3u = M3U로 내보내기
+playlist_exported = { $count }곡을 파일에 저장했습니다.

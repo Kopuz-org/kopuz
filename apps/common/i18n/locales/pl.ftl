@@ -1269,3 +1269,5 @@ sleep_timer_off = Wyłączony
 sleep_timer_minutes = { $count } min
 sleep_timer_end_of_track = Koniec utworu
 sleep_timer_left = Zatrzyma za { $minutes } min
+export_m3u = Eksportuj jako M3U
+playlist_exported = Zapisano { $count } utworów do pliku.

@@ -1253,3 +1253,5 @@ sleep_timer_off = Ανενεργό
 sleep_timer_minutes = { $count } λεπτά
 sleep_timer_end_of_track = Τέλος κομματιού
 sleep_timer_left = Διακοπή σε { $minutes } λεπτά
+export_m3u = Εξαγωγή ως M3U
+playlist_exported = Αποθηκεύτηκαν { $count } τραγούδια στο αρχείο.

@@ -1251,3 +1251,5 @@ sleep_timer_off = ഓഫ്
 sleep_timer_minutes = { $count } മിനിറ്റ്
 sleep_timer_end_of_track = ട്രാക്കിന്റെ അവസാനം
 sleep_timer_left = { $minutes } മിനിറ്റിൽ നിർത്തും
+export_m3u = M3U ആയി എക്സ്പോർട്ട് ചെയ്യുക
+playlist_exported = { $count } പാട്ടുകൾ ഫയലിൽ സേവ് ചെയ്തു.

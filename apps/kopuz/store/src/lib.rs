@@ -18,6 +18,7 @@ mod freeze;
 mod invalidation;
 mod jobs;
 pub mod layout;
+mod m3u;
 mod nav;
 mod notices;
 mod opener;
@@ -55,6 +56,7 @@ pub use invalidation::{Invalidation, TablesChanged};
 pub use jobs::{Finished, JobEvent, JobProgressed, JobsModel, kind_key, kind_label};
 pub use layout::{Layout, LayoutModel};
 pub use link::{Link, api};
+pub use m3u::{export as export_m3u, import as import_m3u};
 pub use nav::{Navigator, Route};
 pub use notices::{DAEMON_GONE, Notice, Notices, Record, Retracted, Undo};
 pub use opener::{
