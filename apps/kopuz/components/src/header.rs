@@ -259,6 +259,7 @@ pub enum HeaderLayout {
 
 /// `w-80`: the column layout's width, a cover and a little air.
 const COLUMN: Pixels = px(320.);
+const TITLE_MIN: Pixels = px(224.);
 
 /// The block every detail page opens with: the cover, what it is, and what you can do to it.
 #[derive(IntoElement)]
@@ -459,13 +460,14 @@ impl DetailHeader {
         };
         h_flex()
             .w_full()
+            .flex_wrap()
             .gap(pages.hero_gap)
             .items_end()
             .child(div().flex_shrink_0().child(cover))
             .child(
                 v_flex()
                     .flex_1()
-                    .min_w_0()
+                    .min_w(TITLE_MIN)
                     .children(self.eyebrow.map(|eyebrow| div().mb_2().child(eyebrow)))
                     .child(
                         div()
