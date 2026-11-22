@@ -1244,3 +1244,5 @@ import = Nhập
 theme_exported = Đã lưu chủ đề vào tệp.
 theme_copy_of = Bản sao { $name }
 theme_import_failed = Không đọc được chủ đề: { $error }
+interface_player_tray_lyrics = Lời bài hát trên khay
+interface_player_tray_lyrics_description = Hiện câu đang hát làm tiêu đề và chú thích của biểu tượng khay. Trên macOS hiện ở thanh menu. Cần bật biểu tượng khay.

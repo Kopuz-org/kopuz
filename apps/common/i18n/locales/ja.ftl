@@ -1256,3 +1256,5 @@ import = 読み込む
 theme_exported = テーマをファイルに保存しました。
 theme_copy_of = { $name } のコピー
 theme_import_failed = テーマを読み込めませんでした: { $error }
+interface_player_tray_lyrics = トレイに歌詞
+interface_player_tray_lyrics_description = 歌っている行をトレイアイコンのタイトルとツールチップに表示します。macOSではメニューバーに表示。トレイアイコンが必要です。

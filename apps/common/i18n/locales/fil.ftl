@@ -1244,3 +1244,5 @@ import = I-import
 theme_exported = Na-save ang tema sa file.
 theme_copy_of = Kopya ng { $name }
 theme_import_failed = Hindi mabasa ang tema: { $error }
+interface_player_tray_lyrics = Lyrics sa tray
+interface_player_tray_lyrics_description = Ipakita ang linyang kinakanta bilang title at tooltip ng tray icon. Sa macOS, nasa menu bar. Kailangan ang tray icon.

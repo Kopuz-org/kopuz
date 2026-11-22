@@ -1250,3 +1250,5 @@ import = 导入
 theme_exported = 主题已保存到文件。
 theme_copy_of = { $name } 副本
 theme_import_failed = 无法读取该主题：{ $error }
+interface_player_tray_lyrics = 托盘歌词
+interface_player_tray_lyrics_description = 把正在唱的那句显示为托盘图标的标题和提示。macOS 上显示在菜单栏。需要开启托盘图标。

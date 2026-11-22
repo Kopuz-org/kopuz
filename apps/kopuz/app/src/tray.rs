@@ -43,10 +43,12 @@ struct Menu {
     show_hide: String,
     quit: String,
     tooltip: String,
+    lyric: Option<String>,
 }
 
 impl Menu {
-    fn current(cx: &App) -> Self {
+    fn current(cx: &mut App) -> Self {
+        let lyric = current_lyric(cx);
         let player = PlayerModel::global(cx).read(cx);
         let track = player.track().map(|track| match track.artist.is_empty() {
             true => track.title.clone(),
@@ -54,7 +56,11 @@ impl Menu {
         });
         let app = config::flavor::Flavor::current().display_name().to_string();
         Self {
-            tooltip: track.clone().unwrap_or_else(|| app.clone()),
+            tooltip: match (&lyric, &track) {
+                (Some(line), Some(track)) => format!("{line}\n{track}"),
+                _ => track.clone().unwrap_or_else(|| app.clone()),
+            },
+            lyric,
             track,
             play_pause: t(match player.is_playing() {
                 true => "pause",
@@ -110,9 +116,23 @@ pub fn init(cx: &mut App) {
         clicks: sender,
         icon: None,
     });
+    cx.set_global(TrayLyrics::default());
     sync(cx);
     cx.observe(&ConfigModel::global(cx), |_, cx| sync(cx))
         .detach();
+    cx.spawn(async move |cx| {
+        loop {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(500))
+                .await;
+            cx.update(|cx| {
+                if store::layout(cx).player.tray_lyrics {
+                    sync(cx);
+                }
+            });
+        }
+    })
+    .detach();
     cx.observe(&PlayerModel::global(cx), |_, cx| sync(cx))
         .detach();
 }
@@ -143,6 +163,73 @@ fn clicked(click: Click, cx: &mut App) {
         #[cfg(target_os = "linux")]
         Click::Volume(step) => player.update(cx, |player, cx| player.nudge_volume(step, cx)),
     }
+}
+
+#[derive(Default)]
+struct TrayLyrics {
+    key: Option<String>,
+    lines: Vec<(u64, String)>,
+    _fetch: Option<Task<()>>,
+}
+
+impl Global for TrayLyrics {}
+
+fn current_lyric(cx: &mut App) -> Option<String> {
+    if !store::layout(cx).player.tray_lyrics {
+        return None;
+    }
+    let player = PlayerModel::global(cx).read(cx);
+    let key = player.track().map(|track| track.key.clone());
+    let position = player.position_ms();
+    let held = cx.try_global::<TrayLyrics>()?;
+    if held.key != key {
+        fetch_lyrics(key, cx);
+        return None;
+    }
+    held.lines
+        .iter()
+        .rev()
+        .find(|(start, _)| *start <= position)
+        .map(|(_, text)| text.clone())
+        .filter(|text| !text.trim().is_empty())
+}
+
+fn fetch_lyrics(key: Option<String>, cx: &mut App) {
+    let Some(wanted) = key.clone() else {
+        cx.set_global(TrayLyrics::default());
+        return;
+    };
+    let call = store::Link::global(cx).call(move |api| async move { api.lyrics(wanted).await });
+    let asked = key.clone();
+    let fetch = cx.spawn(async move |cx| {
+        let lines = match call.await {
+            Ok(view) => view
+                .synced
+                .into_iter()
+                .filter(|line| !line.background && line.parent_line_index.is_none())
+                .map(|line| (line.start_ms, line.text))
+                .collect(),
+            Err(error) => {
+                tracing::debug!(%error, "no lyrics for the tray");
+                Vec::new()
+            }
+        };
+        cx.update(|cx| {
+            if let Some(held) = cx.try_global::<TrayLyrics>().map(|held| held.key.clone())
+                && held == asked
+            {
+                let mut held = cx.remove_global::<TrayLyrics>();
+                held.lines = lines;
+                cx.set_global(held);
+                sync(cx);
+            }
+        });
+    });
+    cx.set_global(TrayLyrics {
+        key,
+        lines: Vec::new(),
+        _fetch: Some(fetch),
+    });
 }
 
 /// Put the icon up or take it down as the setting says, and redraw its menu when what it shows changes.
@@ -257,6 +344,7 @@ mod platform {
             if let Err(error) = self.0.set_tooltip(Some(&menu.tooltip)) {
                 tracing::warn!(%error, "could not update the tray tooltip");
             }
+            self.0.set_title(menu.lyric.as_deref());
             self.0
                 .set_menu(native(&menu).map(|menu| Box::new(menu) as Box<dyn ContextMenu>));
         }
@@ -354,7 +442,10 @@ mod platform {
         }
 
         fn title(&self) -> String {
-            config::flavor::Flavor::current().display_name().to_string()
+            self.menu
+                .lyric
+                .clone()
+                .unwrap_or_else(|| config::flavor::Flavor::current().display_name().to_string())
         }
 
         fn category(&self) -> ksni::Category {
@@ -367,8 +458,8 @@ mod platform {
 
         fn tool_tip(&self) -> ksni::ToolTip {
             ksni::ToolTip {
-                title: self.title(),
-                description: self.menu.track.clone().unwrap_or_default(),
+                title: config::flavor::Flavor::current().display_name().to_string(),
+                description: self.menu.tooltip.clone(),
                 ..Default::default()
             }
         }

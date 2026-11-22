@@ -1271,3 +1271,5 @@ import = Importa
 theme_exported = Tema salvato in un file.
 theme_copy_of = Copia di { $name }
 theme_import_failed = Impossibile leggere il tema: { $error }
+interface_player_tray_lyrics = Testo nell'area di notifica
+interface_player_tray_lyrics_description = Mostra la riga cantata come titolo e suggerimento dell'icona. Su macOS scorre nella barra dei menu. Richiede l'icona attiva.

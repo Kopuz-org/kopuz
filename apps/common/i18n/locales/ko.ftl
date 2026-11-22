@@ -1250,3 +1250,5 @@ import = 가져오기
 theme_exported = 테마를 파일로 저장했습니다.
 theme_copy_of = { $name } 사본
 theme_import_failed = 테마를 읽을 수 없습니다: { $error }
+interface_player_tray_lyrics = 트레이에 가사
+interface_player_tray_lyrics_description = 부르는 줄을 트레이 아이콘의 제목과 툴팁으로 표시합니다. macOS에서는 메뉴 막대에 나옵니다. 트레이 아이콘이 켜져 있어야 합니다.

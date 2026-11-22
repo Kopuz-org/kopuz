@@ -1244,3 +1244,5 @@ import = Impor
 theme_exported = Tema disimpan ke berkas.
 theme_copy_of = Salinan { $name }
 theme_import_failed = Tidak bisa membaca tema: { $error }
+interface_player_tray_lyrics = Lirik di baki
+interface_player_tray_lyrics_description = Tampilkan baris yang dinyanyikan sebagai judul dan tooltip ikon baki. Di macOS muncul di bilah menu. Perlu ikon baki aktif.

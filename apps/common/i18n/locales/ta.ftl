@@ -1280,3 +1280,5 @@ import = இறக்குமதி
 theme_exported = தீம் கோப்பில் சேமிக்கப்பட்டது.
 theme_copy_of = { $name } நகல்
 theme_import_failed = தீமைப் படிக்க முடியவில்லை: { $error }
+interface_player_tray_lyrics = ட்ரேயில் பாடல் வரிகள்
+interface_player_tray_lyrics_description = பாடப்படும் வரியை ட்ரே ஐகானின் தலைப்பாகவும் குறிப்பாகவும் காட்டு. macOS-இல் மெனு பட்டியில். ட்ரே ஐகான் தேவை.

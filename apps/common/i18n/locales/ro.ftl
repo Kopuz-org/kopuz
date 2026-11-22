@@ -1290,3 +1290,5 @@ import = Importă
 theme_exported = Tema a fost salvată într-un fișier.
 theme_copy_of = Copie { $name }
 theme_import_failed = Tema nu a putut fi citită: { $error }
+interface_player_tray_lyrics = Versuri în bara de sistem
+interface_player_tray_lyrics_description = Arată versul cântat ca titlu și indiciu al pictogramei. Pe macOS apare în bara de meniu. Necesită pictograma activă.

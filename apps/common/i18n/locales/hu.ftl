@@ -1250,3 +1250,5 @@ import = Importálás
 theme_exported = Téma fájlba mentve.
 theme_copy_of = { $name } másolata
 theme_import_failed = Nem sikerült beolvasni a témát: { $error }
+interface_player_tray_lyrics = Dalszöveg a tálcán
+interface_player_tray_lyrics_description = Az éppen énekelt sor a tálcaikon címeként és súgójaként. macOS-en a menüsorban. A tálcaikon kell hozzá.

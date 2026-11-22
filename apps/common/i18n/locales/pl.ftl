@@ -1298,3 +1298,5 @@ import = Importuj
 theme_exported = Motyw zapisano do pliku.
 theme_copy_of = Kopia { $name }
 theme_import_failed = Nie można odczytać motywu: { $error }
+interface_player_tray_lyrics = Tekst w zasobniku
+interface_player_tray_lyrics_description = Pokazuj śpiewaną linię jako tytuł i podpowiedź ikony w zasobniku. Na macOS na pasku menu. Wymaga ikony w zasobniku.

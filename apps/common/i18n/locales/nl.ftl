@@ -1276,3 +1276,5 @@ import = Importeren
 theme_exported = Thema opgeslagen in een bestand.
 theme_copy_of = Kopie van { $name }
 theme_import_failed = Kon dat thema niet lezen: { $error }
+interface_player_tray_lyrics = Songtekst in het systeemvak
+interface_player_tray_lyrics_description = Toon de gezongen regel als titel en tooltip van het pictogram. Op macOS loopt hij in de menubalk. Vereist het systeemvakpictogram.

@@ -1276,3 +1276,5 @@ import = Importera
 theme_exported = Temat sparades i en fil.
 theme_copy_of = Kopia av { $name }
 theme_import_failed = Kunde inte läsa temat: { $error }
+interface_player_tray_lyrics = Låttext i systemfältet
+interface_player_tray_lyrics_description = Visa raden som sjungs som ikonens titel och knappbeskrivning. På macOS i menyraden. Kräver ikonen i systemfältet.
