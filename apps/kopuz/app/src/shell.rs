@@ -95,6 +95,7 @@ pub struct Shell {
     focus: FocusHandle,
     connection: Entity<Connection>,
     topbar: Entity<topbar::TopBar>,
+    control_bar: Entity<topbar::ControlBar>,
     playlists_panel: Entity<playlists_panel::PlaylistsPanel>,
     player_bar: Entity<now_playing::NowPlaying>,
     side_panel: Entity<now_playing::NowPlaying>,
@@ -236,11 +237,13 @@ impl Shell {
         let topbar = cx.new(|cx| topbar::TopBar::new(window, cx));
         let cluster = cx.new(|cx| status::StatusCluster::new(window, cx));
         topbar.update(cx, |bar, cx| bar.set_activity(Some(cluster.into()), cx));
+        let control_bar = cx.new(|cx| topbar::ControlBar::new(topbar.clone(), cx));
         Self {
             router: Router::default(),
             focus,
             connection,
             topbar,
+            control_bar,
             playlists_panel: cx.new(|cx| playlists_panel::PlaylistsPanel::new(window, cx)),
             player_bar: cx.new(|cx| now_playing::NowPlaying::bar(window, cx)),
             side_panel: cx.new(|cx| now_playing::NowPlaying::panel(window, cx)),
@@ -522,7 +525,9 @@ impl Render for Shell {
         let compact = chrome.is_compact() && connected;
         let rtl = i18n::is_rtl();
         let chrome_metrics = components::style::chrome();
-        let rail_bar = nav_left.then(|| {
+        let controls_on_top = self.topbar.read(cx).controls_on_top();
+        let rail_hidden = controls_on_top && store::layout(cx).nav.rail_hidden;
+        let rail_bar = (nav_left && !rail_hidden).then(|| {
             gpui_kit::AnyView::from(self.topbar.clone()).cached(
                 gpui_kit::StyleRefinement::default()
                     .h_full()
@@ -579,6 +584,16 @@ impl Render for Shell {
             v_flex()
                 .size_full()
                 .w_full()
+                .when(controls_on_top, |body| {
+                    body.child(
+                        gpui_kit::AnyView::from(self.control_bar.clone()).cached(
+                            gpui_kit::StyleRefinement::default()
+                                .w_full()
+                                .h(chrome_metrics.bar_height)
+                                .flex_shrink_0(),
+                        ),
+                    )
+                })
                 .children(top_bar)
                 .when(show_player_bar && player_at_top, |body| {
                     body.child(self.player_bar.clone())

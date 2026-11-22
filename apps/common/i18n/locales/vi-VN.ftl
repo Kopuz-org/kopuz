@@ -1234,3 +1234,7 @@ listening_top_albums = Album nghe nhiều
 interface_panel_show_pins = Hiện mục đã ghim
 interface_panel_show_playlists = Hiện danh sách phát
 interface_panel_no_pins = Chưa ghim gì. Nhấp chuột phải vào album, nghệ sĩ hoặc danh sách phát và chọn Ghim vào thanh bên.
+interface_nav_controls_up_top = Điều khiển ở trên
+interface_nav_controls_up_top_description = Đặt lùi, tiến, tìm kiếm và nút trạng thái vào thanh mảnh ở trên, thanh bên chỉ dành cho các trang.
+toggle_sidebar = Hiện hoặc ẩn thanh bên
+listening_nothing_yet = Chưa phát gì trong khoảng này. Lượt phát được tính từ phiên bản này.

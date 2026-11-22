@@ -453,6 +453,13 @@ impl Render for PlaylistsPanel {
         let collapsed = self.collapsed();
         let body = match count {
             0 if collapsed => div().flex_1().min_h_0().into_any_element(),
+            0 if self.merged => div()
+                .px_2()
+                .py_1()
+                .text_xs()
+                .text_color(style::slate_400(cx))
+                .child(t("no_playlists_yet"))
+                .into_any_element(),
             0 => div()
                 .flex_1()
                 .min_h_0()

@@ -1273,3 +1273,7 @@ listening_top_albums = Álbumes más escuchados
 interface_panel_show_pins = Mostrar fijados
 interface_panel_show_playlists = Mostrar listas
 interface_panel_no_pins = Aún no hay nada fijado. Haz clic derecho en un álbum, artista o lista y elige Fijar en la barra lateral.
+interface_nav_controls_up_top = Controles arriba
+interface_nav_controls_up_top_description = Pon atrás, adelante, buscar y los botones de estado en una barra fina arriba, y deja la barra lateral para los lugares.
+toggle_sidebar = Mostrar u ocultar la barra lateral
+listening_nothing_yet = Aún no se reprodujo nada en este periodo. Las reproducciones cuentan desde esta versión.

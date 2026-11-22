@@ -1288,3 +1288,7 @@ listening_top_albums = Топ альбомів
 interface_panel_show_pins = Показувати закріплене
 interface_panel_show_playlists = Показувати плейлисти
 interface_panel_no_pins = Поки нічого не закріплено. Клацніть правою кнопкою на альбом, виконавця чи плейлист і виберіть Закріпити на бічній панелі.
+interface_nav_controls_up_top = Керування згори
+interface_nav_controls_up_top_description = Кнопки назад, вперед, пошук і статус у тонкій смузі згори, а бічна панель лише для розділів.
+toggle_sidebar = Показати або сховати бічну панель
+listening_nothing_yet = За цей період ще нічого не грало. Прослуховування рахуються з цієї версії.

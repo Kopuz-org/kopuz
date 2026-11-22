@@ -1234,3 +1234,7 @@ listening_top_albums = Album teratas
 interface_panel_show_pins = Tampilkan yang disematkan
 interface_panel_show_playlists = Tampilkan daftar putar
 interface_panel_no_pins = Belum ada yang disematkan. Klik kanan album, artis, atau daftar putar lalu pilih Sematkan ke bilah samping.
+interface_nav_controls_up_top = Kontrol di atas
+interface_nav_controls_up_top_description = Taruh kembali, maju, cari, dan tombol status di bilah tipis atas, bilah samping hanya untuk halaman.
+toggle_sidebar = Tampilkan atau sembunyikan bilah samping
+listening_nothing_yet = Belum ada yang diputar di rentang ini. Putaran dihitung mulai versi ini.

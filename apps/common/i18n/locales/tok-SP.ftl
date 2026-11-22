@@ -1253,3 +1253,7 @@ listening_top_albums = kulupu kalama pi kute mute
 interface_panel_show_pins = o lukin e ijo awen
 interface_panel_show_playlists = o lukin e kulupu kalama
 interface_panel_no_pins = ijo awen li lon ala. o luka sinpin e kulupu kalama anu jan kalama, o pana e ona tawa poka.
+interface_nav_controls_up_top = ilo lawa li lon sewi
+interface_nav_controls_up_top_description = o pana e ilo tawa monsi, tawa sinpin, alasa en ilo sona lon linja lili sewi.
+toggle_sidebar = o lukin ala lukin e poka
+listening_nothing_yet = tenpo ni la kalama ala li kama. mi nanpa e kute tan nanpa ni.

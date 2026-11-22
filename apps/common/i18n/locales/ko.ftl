@@ -1240,3 +1240,7 @@ listening_top_albums = 많이 들은 앨범
 interface_panel_show_pins = 고정 항목 표시
 interface_panel_show_playlists = 재생목록 표시
 interface_panel_no_pins = 아직 고정된 항목이 없습니다. 앨범, 아티스트 또는 재생목록을 오른쪽 클릭하고 사이드바에 고정을 선택하세요.
+interface_nav_controls_up_top = 컨트롤을 위쪽에
+interface_nav_controls_up_top_description = 뒤로, 앞으로, 검색, 상태 버튼을 위쪽의 얇은 막대에 두고 사이드바는 이동용으로만 씁니다.
+toggle_sidebar = 사이드바 표시 또는 숨기기
+listening_nothing_yet = 이 기간에는 아직 재생된 곡이 없습니다. 재생은 이 버전부터 집계됩니다.

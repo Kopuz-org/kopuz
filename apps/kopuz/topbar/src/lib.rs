@@ -13,7 +13,7 @@ use components::skin::{self, Nav};
 use components::{Bar, SearchTrigger, Tab, TabStrip, icons, style};
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{Disableable as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Disableable as _, Selectable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, AnyView, App, Context, FontWeight, InteractiveElement as _, IntoElement,
@@ -89,6 +89,7 @@ pub fn mouse_history(root: gpui_kit::Div) -> gpui_kit::Div {
 pub struct TopBar {
     destinations: Vec<&'static str>,
     position: NavPosition,
+    controls_up_top: bool,
     activity: Option<AnyView>,
     rail: Option<AnyView>,
     compact: bool,
@@ -113,6 +114,7 @@ impl TopBar {
                 cx.notify();
             }),
             cx.observe(&SourcesModel::global(cx), |_, _, cx| cx.notify()),
+            cx.observe(&store::Chrome::global(cx), |_, _, cx| cx.notify()),
             cx.observe_window_bounds(window, |this, window, cx| {
                 bounds::remember(window, cx);
                 if this.fit(window) {
@@ -123,6 +125,7 @@ impl TopBar {
         let mut this = Self {
             destinations: Vec::new(),
             position: NavPosition::Top,
+            controls_up_top: false,
             activity: None,
             rail: None,
             compact: false,
@@ -190,7 +193,79 @@ impl TopBar {
             })
             .collect();
         self.position = nav.position;
+        self.controls_up_top = nav.controls_up_top;
         self.remeasure(cx);
+    }
+
+    pub fn controls_on_top(&self) -> bool {
+        self.controls_up_top
+            && self.position() == NavPosition::Left
+            && skin::arrangement().nav == Nav::Strip
+    }
+
+    pub fn render_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let history = self.history(cx);
+        let search = self.search(cx);
+        let rail_shown = !store::layout(cx).nav.rail_hidden;
+        let side = store::Chrome::global(cx).read(cx).panel().is_some();
+        let settings = chrome_button("controls-settings", icons::SETTINGS, cx)
+            .tooltip(commands::tooltip("app.settings", t("settings"), cx))
+            .on_click(|_, _, cx| Navigator::navigate(Route::Settings { section: None }, cx));
+        h_flex()
+            .w_full()
+            .h(style::chrome().bar_height)
+            .flex_shrink_0()
+            .items_center()
+            .gap_1()
+            .px_2()
+            .bg(style::black(SCRIM, cx))
+            .border_b_1()
+            .border_color(style::white(style::BORDER_SOFT, cx))
+            .children(frame::traffic_lights(window, cx).map(|inset| {
+                frame::drag_region("controls-traffic-lights", window, cx)
+                    .h_full()
+                    .w(inset)
+                    .flex_shrink_0()
+            }))
+            .child(
+                chrome_button("controls-sidebar", icons::PANEL_LEFT, cx)
+                    .tooltip(t("toggle_sidebar"))
+                    .when(rail_shown, |button| button.selected(true))
+                    .on_click(|_, _, cx| {
+                        LayoutModel::edit(cx, |layout| {
+                            layout.nav.rail_hidden = !layout.nav.rail_hidden
+                        })
+                    }),
+            )
+            .child(history)
+            .child(
+                chrome_button("controls-refresh", icons::REFRESH, cx)
+                    .tooltip(t("refresh"))
+                    .on_click(|_, _, cx| {
+                        store::Invalidation::global(cx)
+                            .update(cx, |tables, cx| tables.invalidate_all(cx))
+                    }),
+            )
+            .child(
+                frame::drag_region("controls-drag", window, cx)
+                    .h_full()
+                    .flex_1(),
+            )
+            .child(div().w(px(260.)).flex_shrink_1().min_w_0().child(search))
+            .children(self.activity.clone())
+            .children(offline::indicator(true, cx))
+            .child(settings)
+            .child(
+                chrome_button("controls-side-panel", icons::PANEL_RIGHT, cx)
+                    .tooltip(t("up_next"))
+                    .when(side, |button| button.selected(true))
+                    .on_click(|_, _, cx| {
+                        store::Chrome::global(cx).update(cx, |chrome, cx| {
+                            chrome.toggle_panel(store::SidePanel::Queue, cx)
+                        })
+                    }),
+            )
+            .into_any_element()
     }
 
     /// Where the bar sits once the skin has had its say.
@@ -424,11 +499,14 @@ impl Render for TopBar {
                             .flex_shrink_0(),
                     )
                 })
-                .child(history)
-                .child(search)
+                .when(!self.controls_on_top(), |rail| {
+                    rail.child(history).child(search)
+                })
                 .child(strip)
                 .child(self.rail_room())
-                .child(v_flex().w_full().gap_1().child(cluster))
+                .when(!self.controls_on_top(), |rail| {
+                    rail.child(v_flex().w_full().gap_1().child(cluster))
+                })
                 .into_any_element(),
         }
     }
@@ -574,6 +652,28 @@ fn chrome_button(id: &'static str, glyph: &'static str, cx: &App) -> Button {
         .size(style::chrome().button)
         .rounded(style::icon_corner(style::chrome().button))
         .icon(icons::icon(glyph))
+}
+
+pub struct ControlBar {
+    bar: gpui_kit::Entity<TopBar>,
+    _bar: Subscription,
+}
+
+impl ControlBar {
+    pub fn new(bar: gpui_kit::Entity<TopBar>, cx: &mut Context<Self>) -> Self {
+        let observed = cx.observe(&bar, |_, _, cx| cx.notify());
+        Self {
+            bar,
+            _bar: observed,
+        }
+    }
+}
+
+impl Render for ControlBar {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.bar
+            .update(cx, |bar, cx| bar.render_controls(window, cx))
+    }
 }
 
 #[cfg(test)]

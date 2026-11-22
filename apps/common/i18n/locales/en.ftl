@@ -1269,3 +1269,7 @@ listening_top_albums = Top albums
 interface_panel_show_pins = Show pinned items
 interface_panel_show_playlists = Show playlists
 interface_panel_no_pins = Nothing pinned yet. Right click an album, artist or playlist and pick Pin to sidebar.
+interface_nav_controls_up_top = Controls along the top
+interface_nav_controls_up_top_description = Put back, forward, search and the status buttons in a slim bar across the top, and keep the sidebar for places.
+toggle_sidebar = Show or hide the sidebar
+listening_nothing_yet = Nothing played in this span yet. Plays are counted from this version on.

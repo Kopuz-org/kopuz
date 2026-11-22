@@ -1273,3 +1273,7 @@ listening_top_albums = Albums les plus écoutés
 interface_panel_show_pins = Afficher les éléments épinglés
 interface_panel_show_playlists = Afficher les playlists
 interface_panel_no_pins = Rien d'épinglé. Faites un clic droit sur un album, un artiste ou une playlist et choisissez Épingler dans la barre latérale.
+interface_nav_controls_up_top = Commandes en haut
+interface_nav_controls_up_top_description = Placer précédent, suivant, recherche et les boutons d'état dans une fine barre en haut, et garder la barre latérale pour les lieux.
+toggle_sidebar = Afficher ou masquer la barre latérale
+listening_nothing_yet = Rien d'écouté sur cette période. Les écoutes sont comptées à partir de cette version.

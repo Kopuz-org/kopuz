@@ -1229,3 +1229,7 @@ listening_top_albums = En çok dinlenen albümler
 interface_panel_show_pins = Sabitlenenleri göster
 interface_panel_show_playlists = Çalma listelerini göster
 interface_panel_no_pins = Henüz sabitlenen yok. Bir albüme, sanatçıya veya çalma listesine sağ tıklayıp Kenar çubuğuna sabitle'yi seçin.
+interface_nav_controls_up_top = Kontroller üstte
+interface_nav_controls_up_top_description = Geri, ileri, arama ve durum düğmelerini üstte ince bir çubuğa taşı, kenar çubuğunda yalnızca sayfalar kalsın.
+toggle_sidebar = Kenar çubuğunu göster veya gizle
+listening_nothing_yet = Bu aralıkta henüz bir şey dinlenmedi. Dinlemeler bu sürümden itibaren sayılıyor.
