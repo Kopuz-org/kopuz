@@ -4,9 +4,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use api::schema::{FieldKind, FieldSpec, FieldValue, Problem};
-use gpui_kit::component::Disableable as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::switch::Switch;
 use gpui_kit::component::v_flex;
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, EventEmitter, Focusable as _, IntoElement,
@@ -16,6 +14,7 @@ use gpui_kit::{
 use crate::fields::{ComboChoice, FieldFrame, PathField, RadioGroup, SecretInput};
 use crate::folders::{FolderList, pick_folders};
 use crate::format::{t, text};
+use crate::settings::{SettingRow, Toggle};
 use crate::states::FieldProblem;
 use crate::style;
 
@@ -294,11 +293,7 @@ impl SchemaForm {
         };
         Some(match &spec.kind {
             FieldKind::Note => return None,
-            FieldKind::Toggle => Switch::new(SharedString::from(format!("toggle-{key}")))
-                .checked(value == "true")
-                .disabled(locked)
-                .on_click(move |checked: &bool, _, cx| answer(checked.to_string(), cx))
-                .into_any_element(),
+            FieldKind::Toggle => return None,
             FieldKind::Directory => {
                 let field = PathField::new(format!("browse-{key}"), value.to_string())
                     .locked(locked)
@@ -356,15 +351,18 @@ impl SchemaForm {
         })
     }
 
-    fn field(&self, spec: &FieldSpec, cx: &mut Context<Self>) -> impl IntoElement {
+    fn field(&self, spec: &FieldSpec, cx: &mut Context<Self>) -> AnyElement {
         let locked = self.is_locked(spec);
         let value = self.values.get(&spec.key).cloned().unwrap_or_default();
-        let control = self.control(spec, &value, locked, cx);
         let cause = spec
             .config_key
             .as_deref()
             .filter(|_| locked)
             .and_then(|key| crate::settings::lock_cause(key, cx));
+        if matches!(spec.kind, FieldKind::Toggle) {
+            return self.toggle_row(spec, &value, locked, cause, cx);
+        }
+        let control = self.control(spec, &value, locked, cx);
         FieldFrame::new(spec.key.clone(), text(&spec.label))
             .help(spec.help.as_ref().map(text))
             .locked(locked)
@@ -372,6 +370,34 @@ impl SchemaForm {
             .note(control.is_none())
             .problem(self.problem_for(&spec.key))
             .children(control)
+            .into_any_element()
+    }
+
+    fn toggle_row(
+        &self,
+        spec: &FieldSpec,
+        value: &str,
+        locked: bool,
+        cause: Option<SharedString>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let form = cx.entity().downgrade();
+        let key = spec.key.clone();
+        let toggle = Toggle::new(format!("toggle-{key}"))
+            .enabled(value == "true")
+            .on_change(move |enabled: &bool, _, cx| {
+                form.update(cx, |form, cx| form.answer(&key, enabled.to_string(), cx))
+                    .ok();
+            });
+        let row = SettingRow::new(text(&spec.label))
+            .locked(locked)
+            .lock_cause(cause)
+            .setting(toggle);
+        match spec.help.as_ref().map(text).filter(|help| !help.is_empty()) {
+            Some(help) => row.description(help),
+            None => row,
+        }
+        .into_any_element()
     }
 
     /// The folders list, answering with the whole encoded list each time one is added or dropped.
