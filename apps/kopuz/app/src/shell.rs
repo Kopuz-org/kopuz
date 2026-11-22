@@ -521,7 +521,23 @@ impl Render for Shell {
         // the last track it saw, with no way to learn the daemon had gone.
         let compact = chrome.is_compact() && connected;
         let rtl = i18n::is_rtl();
-        let bar = Some(self.topbar.clone());
+        let chrome_metrics = components::style::chrome();
+        let rail_bar = nav_left.then(|| {
+            gpui_kit::AnyView::from(self.topbar.clone()).cached(
+                gpui_kit::StyleRefinement::default()
+                    .h_full()
+                    .w(chrome_metrics.rail_width)
+                    .flex_shrink_0(),
+            )
+        });
+        let top_bar = (!nav_left).then(|| {
+            gpui_kit::AnyView::from(self.topbar.clone()).cached(
+                gpui_kit::StyleRefinement::default()
+                    .w_full()
+                    .h(chrome_metrics.bar_height)
+                    .flex_shrink_0(),
+            )
+        });
         let panel_open = chrome.panel().is_some();
         let quick_search_shown =
             chrome.is_quick_search_open() || self.quick_search.read(cx).is_visible();
@@ -563,7 +579,7 @@ impl Render for Shell {
             v_flex()
                 .size_full()
                 .w_full()
-                .children(bar.clone().filter(|_| !nav_left))
+                .children(top_bar)
                 .when(show_player_bar && player_at_top, |body| {
                     body.child(self.player_bar.clone())
                 })
@@ -581,13 +597,13 @@ impl Render for Shell {
                                 .pr(skin.pane_gap * 1.5)
                                 .when(!nav_left, |body| body.pl(skin.pane_gap * 1.5))
                         })
-                        .children(bar.filter(|_| nav_left))
+                        .children(rail_bar)
                         .when(playlists_open && !in_rail, |body| {
                             body.child(
-                                div()
-                                    .w(playlists_width)
-                                    .flex_shrink_0()
-                                    .child(self.playlists_panel.clone()),
+                                div().w(playlists_width).flex_shrink_0().child(
+                                    gpui_kit::AnyView::from(self.playlists_panel.clone())
+                                        .cached(gpui_kit::StyleRefinement::default().size_full()),
+                                ),
                             )
                         })
                         .child(

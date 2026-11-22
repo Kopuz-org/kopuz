@@ -129,6 +129,7 @@ impl PlaylistsPanel {
         let playlists = PlaylistsModel::global(cx);
         let layout = LayoutModel::global(cx);
         let subscriptions = vec![
+            cx.observe(&Navigator::global(cx), |_, _, cx| cx.notify()),
             cx.observe(&playlists, |this: &mut Self, _, cx| {
                 this.reread(cx);
                 cx.notify();

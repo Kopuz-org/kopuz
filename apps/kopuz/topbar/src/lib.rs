@@ -170,11 +170,11 @@ impl TopBar {
     }
 
     fn rail_room(&self) -> gpui_kit::Div {
-        div()
-            .w_full()
-            .flex_1()
-            .min_h_0()
-            .children(self.rail.clone())
+        div().w_full().flex_1().min_h_0().children(
+            self.rail
+                .clone()
+                .map(|view| view.cached(gpui_kit::StyleRefinement::default().size_full())),
+        )
     }
 
     fn reread(&mut self, cx: &App) {
