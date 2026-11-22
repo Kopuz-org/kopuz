@@ -211,6 +211,7 @@ pub struct Library {
     // Artists already sent for a photo; the daemon remembers its misses, this saves the round trip.
     asked_artwork: HashSet<String>,
     playing: store::Playing,
+    sounding: bool,
     // The playing row lights only while the queue is this listing, judged as the Dioxus table did: by length.
     queued: bool,
     pager: Pager,
@@ -424,6 +425,7 @@ impl Library {
             playlist_offline: HashMap::new(),
             asked_artwork: HashSet::new(),
             playing: store::Playing::default(),
+            sounding: false,
             queued: false,
             pager: Pager::new(),
             window_request: None,
@@ -890,6 +892,11 @@ impl Library {
             .track()
             .map(store::Playing::of)
             .unwrap_or_default();
+        let sounding = player.read(cx).is_playing();
+        if sounding != self.sounding {
+            self.sounding = sounding;
+            cx.notify();
+        }
         if playing == self.playing {
             return;
         }

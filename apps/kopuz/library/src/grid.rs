@@ -1,13 +1,15 @@
 //! Albums, artists and playlists: one virtualized band grid, with a jump rail and type-ahead.
 
-use api::{AlbumInfo, ArtistInfo, PlaylistInfo};
+use api::{AlbumInfo, ArtistInfo, PlaylistInfo, QueueContext};
 use components::format::t_with;
-use components::{DownloadToggle, Frame, GridMode, JumpRail, TileRow, ToggleSize, rail_letter};
+use components::{
+    DownloadToggle, Frame, GridMode, JumpRail, PlayState, TileRow, ToggleSize, rail_letter,
+};
 use gpui_kit::{
     AnyElement, App, ClickEvent, Context, IntoElement, Pixels, SharedString, Window, px,
 };
 use store::layout::ViewMode;
-use store::{Navigator, Pictured, Route, Target};
+use store::{Navigator, Pictured, PlayerModel, Route, Target, actions};
 
 use crate::facet::Facet;
 use crate::{Library, Tile};
@@ -196,6 +198,25 @@ impl Library {
             .on_click(self.click_listener(tile.clone(), index, cx))
             .corner(corner)
             .menu(Some(tile.target.clone()));
+        let context = match &tile.target {
+            Target::Album { id, .. } => Some(QueueContext::Album { id: id.to_string() }),
+            Target::Playlist { id, .. } => Some(QueueContext::Playlist { id: id.to_string() }),
+            _ => None,
+        };
+        let card = match context {
+            Some(context) => {
+                let current = tile.playing;
+                let state = match current && PlayerModel::global(cx).read(cx).is_playing() {
+                    true => PlayState::Playing,
+                    false => PlayState::Idle,
+                };
+                card.play(state, move |_, _, cx| match current {
+                    true => PlayerModel::global(cx).update(cx, |player, cx| player.toggle(cx)),
+                    false => actions::play_context(context.clone(), Some(0), cx),
+                })
+            }
+            None => card,
+        };
         match tile.pictured.clone() {
             Some(pictured) => card.pictured(pictured),
             None => card,
