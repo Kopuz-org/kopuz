@@ -1247,3 +1247,7 @@ pinned_playlist = പ്ലേലിസ്റ്റ്
 pinned_folder = ഫോൾഡർ
 interface_lyrics_size = വരികളുടെ വലുപ്പം
 interface_lyrics_size_description = പ്ലേയറിൽ വരികൾ എത്ര വലുതായി കാണിക്കണം.
+sleep_timer_off = ഓഫ്
+sleep_timer_minutes = { $count } മിനിറ്റ്
+sleep_timer_end_of_track = ട്രാക്കിന്റെ അവസാനം
+sleep_timer_left = { $minutes } മിനിറ്റിൽ നിർത്തും

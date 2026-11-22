@@ -1211,3 +1211,7 @@ pinned_playlist = Playlist
 pinned_folder = Folder
 interface_lyrics_size = Laki ng lyrics
 interface_lyrics_size_description = Kung gaano kalaki ipinapakita ang lyrics sa player.
+sleep_timer_off = Naka-off
+sleep_timer_minutes = { $count } minuto
+sleep_timer_end_of_track = Pagtapos ng kanta
+sleep_timer_left = Hihinto sa loob ng { $minutes } min

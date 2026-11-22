@@ -1265,3 +1265,7 @@ pinned_playlist = Playlista
 pinned_folder = Folder
 interface_lyrics_size = Rozmiar tekstu piosenki
 interface_lyrics_size_description = Jak duży jest tekst piosenki w odtwarzaczu.
+sleep_timer_off = Wyłączony
+sleep_timer_minutes = { $count } min
+sleep_timer_end_of_track = Koniec utworu
+sleep_timer_left = Zatrzyma za { $minutes } min

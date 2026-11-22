@@ -1211,3 +1211,7 @@ pinned_playlist = Danh sách phát
 pinned_folder = Thư mục
 interface_lyrics_size = Cỡ chữ lời bài hát
 interface_lyrics_size_description = Lời bài hát hiển thị lớn cỡ nào trong trình phát.
+sleep_timer_off = Tắt
+sleep_timer_minutes = { $count } phút
+sleep_timer_end_of_track = Hết bài
+sleep_timer_left = Dừng sau { $minutes } phút

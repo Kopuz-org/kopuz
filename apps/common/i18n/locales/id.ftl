@@ -1211,3 +1211,7 @@ pinned_playlist = Daftar putar
 pinned_folder = Folder
 interface_lyrics_size = Ukuran lirik
 interface_lyrics_size_description = Seberapa besar lirik ditampilkan di pemutar.
+sleep_timer_off = Mati
+sleep_timer_minutes = { $count } menit
+sleep_timer_end_of_track = Akhir lagu
+sleep_timer_left = Berhenti dalam { $minutes } mnt

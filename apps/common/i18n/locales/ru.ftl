@@ -1266,3 +1266,7 @@ pinned_playlist = Плейлист
 pinned_folder = Папка
 interface_lyrics_size = Размер текста песни
 interface_lyrics_size_description = Насколько крупно показывается текст песни в плеере.
+sleep_timer_off = Выкл.
+sleep_timer_minutes = { $count } мин
+sleep_timer_end_of_track = Конец трека
+sleep_timer_left = Остановка через { $minutes } мин

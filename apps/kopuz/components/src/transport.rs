@@ -13,10 +13,13 @@ use gpui_kit::{
 };
 
 use crate::cover_overlay::PlayState;
-use crate::format::t;
+use crate::format::{t, t_with};
 use crate::icon_button::{IconButton, IconTone};
 use crate::menu_button::{MenuButton, MenuVariant};
 use crate::menus::Menu;
+use store::SleepAfter;
+
+const SLEEP_MINUTES: [u64; 5] = [5, 15, 30, 45, 60];
 use crate::{icons, motion, style};
 
 /// The channel the play button keeps its glyph swap under.
@@ -572,12 +575,52 @@ impl TransportOverflow {
 
 impl RenderOnce for TransportOverflow {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        let menu: Menu = Rc::new(|menu, _, _| {
+        let menu: Menu = Rc::new(|menu, window, cx| {
+            let timer = store::SleepTimer::global(cx).read(cx);
+            let armed = timer.armed();
+            let title = match timer.remaining() {
+                Some(left) => t_with(
+                    "sleep_timer_left",
+                    &[("minutes", left.as_secs().div_ceil(60).into())],
+                ),
+                None if armed == Some(SleepAfter::EndOfTrack) => t("sleep_timer_end_of_track"),
+                None => t("sleep_timer"),
+            };
             menu.label(t("playback_extras"))
-                .item(
-                    PopupMenuItem::new(t("sleep_timer"))
-                        .icon(icons::icon(TIMER))
-                        .disabled(true),
+                .submenu_with_icon(
+                    Some(icons::icon(TIMER)),
+                    title,
+                    window,
+                    cx,
+                    move |menu, _, cx| {
+                        let armed = store::SleepTimer::global(cx).read(cx).armed();
+                        let choice = |label: SharedString, after: Option<SleepAfter>| {
+                            PopupMenuItem::new(label).checked(armed == after).on_click(
+                                move |_, _, cx| {
+                                    store::SleepTimer::global(cx)
+                                        .update(cx, |timer, cx| timer.set(after, cx));
+                                },
+                            )
+                        };
+                        SLEEP_MINUTES
+                            .iter()
+                            .fold(
+                                menu.item(choice(t("sleep_timer_off"), None)),
+                                |menu, minutes| {
+                                    menu.item(choice(
+                                        t_with(
+                                            "sleep_timer_minutes",
+                                            &[("count", (*minutes).into())],
+                                        ),
+                                        Some(SleepAfter::Minutes(*minutes)),
+                                    ))
+                                },
+                            )
+                            .item(choice(
+                                t("sleep_timer_end_of_track"),
+                                Some(SleepAfter::EndOfTrack),
+                            ))
+                    },
                 )
                 .item(
                     PopupMenuItem::new(t("playback_speed"))

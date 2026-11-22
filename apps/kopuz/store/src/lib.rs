@@ -32,6 +32,7 @@ mod queue;
 mod settings_filter;
 mod setup;
 mod signin;
+mod sleep;
 mod sources;
 mod target;
 mod updates;
@@ -74,6 +75,7 @@ pub use signin::{
     SignInWait, browser as browser_sign_in, register_password_form, register_session_chooser,
     sign_in_again, sign_in_wait, start_sign_in,
 };
+pub use sleep::{SleepAfter, SleepTimer};
 pub use sources::{NetworkNotice, SourceStatus, SourcesModel, SwitchStarted};
 pub use target::{CatalogEntry, Kind, RowEdit, RowScope, Target, TrackActions};
 pub use updates::UpdateModel;
@@ -147,6 +149,7 @@ pub fn init(cx: &mut App) {
     register(cx, SourcesModel::new);
     register(cx, PlayerModel::new);
     register(cx, Playhead::new);
+    register(cx, SleepTimer::new);
     register(cx, QueueModel::new);
     register(cx, FavoritesModel::new);
     register(cx, PlaylistsModel::new);

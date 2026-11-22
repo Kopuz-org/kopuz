@@ -1246,3 +1246,7 @@ pinned_playlist = Playlist
 pinned_folder = Folder
 interface_lyrics_size = Lyrics size
 interface_lyrics_size_description = How big the lyrics are drawn in the player.
+sleep_timer_off = Off
+sleep_timer_minutes = { $count } minutes
+sleep_timer_end_of_track = End of track
+sleep_timer_left = Sleeping in { $minutes } min

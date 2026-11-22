@@ -1230,3 +1230,7 @@ pinned_playlist = kulupu kalama
 pinned_folder = poki
 interface_lyrics_size = suli pi nimi kalama
 interface_lyrics_size_description = nimi kalama li suli seme lon ilo kalama.
+sleep_timer_off = ala
+sleep_timer_minutes = tenpo lili { $count }
+sleep_timer_end_of_track = pini kalama
+sleep_timer_left = tenpo lili { $minutes } la ona li pini

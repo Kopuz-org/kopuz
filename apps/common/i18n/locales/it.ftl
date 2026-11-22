@@ -1238,3 +1238,7 @@ pinned_playlist = Playlist
 pinned_folder = Cartella
 interface_lyrics_size = Dimensione del testo
 interface_lyrics_size_description = Quanto è grande il testo nel lettore.
+sleep_timer_off = Disattivato
+sleep_timer_minutes = { $count } minuti
+sleep_timer_end_of_track = Fine del brano
+sleep_timer_left = Si ferma tra { $minutes } min

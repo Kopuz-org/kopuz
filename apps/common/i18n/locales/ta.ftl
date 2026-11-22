@@ -1247,3 +1247,7 @@ pinned_playlist = பிளேலிஸ்ட்
 pinned_folder = கோப்புறை
 interface_lyrics_size = பாடல் வரிகளின் அளவு
 interface_lyrics_size_description = பிளேயரில் பாடல் வரிகள் எவ்வளவு பெரிதாகக் காட்டப்படும்.
+sleep_timer_off = அணை
+sleep_timer_minutes = { $count } நிமிடங்கள்
+sleep_timer_end_of_track = பாடல் முடிவில்
+sleep_timer_left = { $minutes } நிமிடத்தில் நிற்கும்
