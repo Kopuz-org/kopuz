@@ -2,9 +2,10 @@
 
 use std::rc::Rc;
 
+use api::ArtworkRef;
 use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{ActiveTheme as _, Icon, h_flex};
+use gpui_kit::component::{ActiveTheme as _, Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, ClickEvent, Div, ElementId, InteractiveElement as _, IntoElement,
@@ -13,12 +14,19 @@ use gpui_kit::{
 };
 use store::Target;
 
+use crate::cover::Cover;
 use crate::reorder::ReorderDropZones;
 use crate::{focus, icons, menus, motion, skin, style};
 
 const WASH: u64 = 2;
 
 const GLYPH: gpui_kit::Pixels = gpui_kit::px(14.);
+
+const COVER: gpui_kit::Pixels = gpui_kit::px(32.);
+
+pub fn tall_row() -> gpui_kit::Pixels {
+    COVER + gpui_kit::px(12.)
+}
 
 type Wire = Box<dyn FnOnce(Stateful<Div>) -> Stateful<Div>>;
 type Click = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
@@ -38,6 +46,8 @@ pub struct NavListRow {
     wires: Vec<Wire>,
     zones: Option<ReorderDropZones>,
     collapsed: bool,
+    cover: Option<(Option<ArtworkRef>, bool)>,
+    subtitle: Option<SharedString>,
 }
 
 impl NavListRow {
@@ -59,12 +69,24 @@ impl NavListRow {
             wires: Vec::new(),
             zones: None,
             collapsed: false,
+            cover: None,
+            subtitle: None,
         }
     }
 
     /// Only the glyph, centred, with the name moved into a tooltip: the row as an icon rail draws it.
     pub fn collapsed(mut self, collapsed: bool) -> Self {
         self.collapsed = collapsed;
+        self
+    }
+
+    pub fn cover(mut self, artwork: Option<ArtworkRef>, round: bool) -> Self {
+        self.cover = Some((artwork, round));
+        self
+    }
+
+    pub fn subtitle(mut self, subtitle: impl Into<SharedString>) -> Self {
+        self.subtitle = Some(subtitle.into());
         self
     }
 
@@ -160,7 +182,10 @@ impl RenderOnce for NavListRow {
             )))
             .relative()
             .w_full()
-            .h(style::list_row())
+            .h(match self.cover.is_some() {
+                true => tall_row(),
+                false => style::list_row(),
+            })
             .px_2()
             .gap_2()
             // Material's navigation items are full pills.
@@ -187,9 +212,33 @@ impl RenderOnce for NavListRow {
                 row.justify_center()
                     .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
             })
-            .child(Icon::default().path(self.glyph).size(GLYPH).flex_shrink_0())
+            .map(|row| match self.cover {
+                Some((artwork, round)) => row.child(
+                    Cover::new(artwork.as_ref())
+                        .size(COVER)
+                        .rounded(match round {
+                            true => COVER / 2.,
+                            false => gpui_kit::px(6.),
+                        })
+                        .placeholder(self.glyph),
+                ),
+                None => row.child(Icon::default().path(self.glyph).size(GLYPH).flex_shrink_0()),
+            })
             .when(!collapsed, |row| {
-                row.child(div().flex_1().min_w_0().truncate().text_sm().child(label))
+                let subtitle = self.subtitle.map(|subtitle| {
+                    div()
+                        .truncate()
+                        .text_xs()
+                        .text_color(style::white(style::TEXT_SUBTLE, cx))
+                        .child(subtitle)
+                });
+                row.child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .child(div().truncate().text_sm().child(label))
+                        .children(subtitle),
+                )
             })
             .children(self.detail.filter(|_| !collapsed).map(|detail| {
                 div()

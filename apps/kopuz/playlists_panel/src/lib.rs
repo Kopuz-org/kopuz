@@ -16,7 +16,11 @@ use gpui_kit::{
     ParentElement as _, Pixels, Render, SharedString, Styled, Subscription,
     UniformListScrollHandle, Window, div, px, uniform_list,
 };
-use store::{LayoutModel, Navigator, PlaylistsModel, Route, Target};
+use std::collections::{HashMap, HashSet};
+
+use api::ArtworkRef;
+use store::layout::{Pin, PinKind};
+use store::{LayoutModel, Link, Navigator, PlaylistsModel, Route, Target};
 
 use order::Entry;
 
@@ -55,6 +59,19 @@ struct RowDrag {
 }
 
 impl Render for RowDrag {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        components::DragChip::new(self.label.clone())
+    }
+}
+
+#[derive(Clone)]
+struct PinDrag {
+    kind: PinKind,
+    id: String,
+    label: SharedString,
+}
+
+impl Render for PinDrag {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         components::DragChip::new(self.label.clone())
     }
@@ -100,6 +117,9 @@ pub struct PlaylistsPanel {
     suppressed: bool,
     shown: bool,
     merged: bool,
+    pins: Vec<Pin>,
+    art: HashMap<(PinKind, String), ArtworkRef>,
+    asked: HashSet<(PinKind, String)>,
     scroll: UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -133,6 +153,9 @@ impl PlaylistsPanel {
             suppressed: shown && window.viewport_size().width < NARROW_WINDOW,
             shown,
             merged: false,
+            pins: Vec::new(),
+            art: HashMap::new(),
+            asked: HashSet::new(),
             scroll: UniformListScrollHandle::new(),
             _subscriptions: subscriptions,
         };
@@ -199,6 +222,125 @@ impl PlaylistsPanel {
             .collect();
         self.width = px(store::layout(cx).panel.width);
         self.roving.set_len(self.rows.len());
+        self.pins = store::layout(cx).panel.pins.clone();
+    }
+
+    fn artwork(&self, pin: &Pin, cx: &App) -> Option<ArtworkRef> {
+        match pin.kind {
+            PinKind::Playlist => PlaylistsModel::global(cx)
+                .read(cx)
+                .playlist(&pin.id)
+                .and_then(|playlist| playlist.artwork.clone()),
+            PinKind::Folder => None,
+            kind => self.art.get(&(kind, pin.id.clone())).cloned(),
+        }
+    }
+
+    fn fetch_art(&mut self, cx: &mut Context<Self>) {
+        let wanted: Vec<Pin> = self
+            .pins
+            .iter()
+            .filter(|pin| matches!(pin.kind, PinKind::Album | PinKind::Artist))
+            .filter(|pin| !self.asked.contains(&(pin.kind, pin.id.clone())))
+            .cloned()
+            .collect();
+        for pin in wanted {
+            self.asked.insert((pin.kind, pin.id.clone()));
+            let id = pin.id.clone();
+            let call = match pin.kind {
+                PinKind::Album => Link::global(cx).call(move |api| async move {
+                    Ok(api.album(id).await?.and_then(|album| album.artwork))
+                }),
+                _ => Link::global(cx)
+                    .call(move |api| async move { Ok(api.artist(id).await?.info.artwork) }),
+            };
+            cx.spawn(async move |this, cx| {
+                let artwork = match call.await {
+                    Ok(Some(artwork)) => artwork,
+                    Ok(None) => return,
+                    Err(error) => {
+                        tracing::debug!(%error, "no artwork for a pinned item");
+                        return;
+                    }
+                };
+                this.update(cx, |this, cx| {
+                    this.art.insert((pin.kind, pin.id.clone()), artwork);
+                    cx.notify();
+                })
+                .ok();
+            })
+            .detach();
+        }
+    }
+
+    fn pinned(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.pins.is_empty() {
+            return None;
+        }
+        let current = Navigator::global(cx).read(cx).current().clone();
+        let collapsed = self.collapsed();
+        let rows = self.pins.iter().enumerate().map(|(index, pin)| {
+            let route = pin.route();
+            let zones = ReorderDropZones::new(
+                ElementId::from(("pin-drop", index)),
+                components::tall_row(),
+                index,
+            )
+            .on_drop::<PinDrag>(|drag, at, _, cx| {
+                let (kind, id) = (drag.kind, drag.id.clone());
+                LayoutModel::edit(cx, move |layout| layout.panel.move_pin(kind, &id, at));
+            });
+            let (glyph, kind) = match pin.kind {
+                PinKind::Album => (icons::DISC, t("album")),
+                PinKind::Artist => (icons::MIC, t("artist")),
+                PinKind::Playlist => (icons::LIST, t("pinned_playlist")),
+                PinKind::Folder => (icons::FOLDER, t("pinned_folder")),
+            };
+            NavListRow::new(
+                "pinned-row",
+                SharedString::from(format!("{:?}-{}", pin.kind, pin.id)),
+                SharedString::from(pin.name.clone()),
+            )
+            .glyph(glyph)
+            .cover(self.artwork(pin, cx), pin.kind == PinKind::Artist)
+            .subtitle(kind)
+            .active(current == route)
+            .collapsed(collapsed)
+            .menu(pin.target())
+            .on_click(move |_, _, cx| Navigator::navigate(route.clone(), cx))
+            .drag(PinDrag {
+                kind: pin.kind,
+                id: pin.id.clone(),
+                label: SharedString::from(pin.name.clone()),
+            })
+            .drop_zones(zones)
+            .into_any_element()
+        });
+        Some(
+            v_flex()
+                .w_full()
+                .flex_shrink_0()
+                .when(!collapsed, |list| list.child(self.heading(t("pinned"), cx)))
+                .child(
+                    v_flex()
+                        .w_full()
+                        .when(!self.merged, |list| list.px_2())
+                        .py_1()
+                        .children(rows),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn heading(&self, label: SharedString, cx: &App) -> impl IntoElement {
+        div()
+            .px_2()
+            .pt_1()
+            .pb_1()
+            .text_xs()
+            .font_semibold()
+            .text_color(style::white(style::TEXT_SECONDARY, cx))
+            .child(label)
     }
 
     fn open(&self, index: usize, cx: &mut App) {
@@ -304,6 +446,8 @@ impl Render for PlaylistsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _timing = profile::render("playlists-panel");
         components::scroll::smooth_list("playlists-panel-scroll", &self.scroll, window, cx);
+        self.fetch_art(cx);
+        let pinned = self.pinned(cx);
         let count = self.rows.len();
         let collapsed = self.collapsed();
         let body = match count {
@@ -336,6 +480,7 @@ impl Render for PlaylistsPanel {
                 .border_t_1()
                 .border_color(style::white(style::BORDER_SOFT, cx))
                 .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.key(event, cx)))
+                .children(pinned)
                 .child(div().px_2().pt_1().pb_1().child(self.header(cx)))
                 .child(body);
         }
@@ -355,7 +500,7 @@ impl Render for PlaylistsPanel {
                 DockPanel::new("playlists-panel", edge)
                     .size(DockSize::Compact)
                     .when(!collapsed, |dock| dock.header(self.header(cx)))
-                    .body(v_flex().size_full().child(body))
+                    .body(v_flex().size_full().children(pinned).child(body))
                     .on_close(|_, cx| toggle(cx))
                     .resizable(self.width, RAIL_WIDTH, MAX_WIDTH, move |width, _, cx| {
                         panel.update(cx, |this, cx| this.on_resize(width, cx)).ok();

@@ -351,6 +351,7 @@ pub struct Panel {
     pub shown: bool,
     pub width: f32,
     pub pinned: Vec<String>,
+    pub pins: Vec<Pin>,
 }
 
 impl Default for Panel {
@@ -359,6 +360,97 @@ impl Default for Panel {
             shown: true,
             width: 260.,
             pinned: Vec::new(),
+            pins: Vec::new(),
+        }
+    }
+}
+
+impl Panel {
+    pub fn is_pinned(&self, kind: PinKind, id: &str) -> bool {
+        self.pins.iter().any(|pin| pin.kind == kind && pin.id == id)
+    }
+
+    pub fn toggle_pin(&mut self, pin: Pin) {
+        match self.is_pinned(pin.kind, &pin.id) {
+            true => self
+                .pins
+                .retain(|held| !(held.kind == pin.kind && held.id == pin.id)),
+            false => self.pins.push(pin),
+        }
+    }
+
+    pub fn move_pin(&mut self, kind: PinKind, id: &str, to: usize) {
+        let Some(from) = self
+            .pins
+            .iter()
+            .position(|pin| pin.kind == kind && pin.id == id)
+        else {
+            return;
+        };
+        let pin = self.pins.remove(from);
+        let to = if to > from { to - 1 } else { to };
+        self.pins.insert(to.min(self.pins.len()), pin);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PinKind {
+    Album,
+    Artist,
+    Playlist,
+    Folder,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pin {
+    pub kind: PinKind,
+    pub id: String,
+    pub name: String,
+}
+
+impl Pin {
+    pub fn of(target: &crate::Target) -> Option<Self> {
+        use crate::Target;
+        let (kind, id, name) = match target {
+            Target::Album { id, title } => (PinKind::Album, id.to_string(), title.to_string()),
+            Target::Artist { key, name } => (PinKind::Artist, key.clone(), name.to_string()),
+            Target::Playlist { id, name } => (PinKind::Playlist, id.to_string(), name.to_string()),
+            Target::Folder { id, name } => (PinKind::Folder, id.to_string(), name.to_string()),
+            _ => return None,
+        };
+        Some(Self { kind, id, name })
+    }
+
+    pub fn route(&self) -> crate::Route {
+        use crate::Route;
+        match self.kind {
+            PinKind::Album => Route::Album(self.id.clone().into()),
+            PinKind::Artist => Route::Artist(self.id.clone()),
+            PinKind::Playlist => Route::Playlist(self.id.clone().into()),
+            PinKind::Folder => Route::PlaylistFolder(self.id.clone().into()),
+        }
+    }
+
+    pub fn target(&self) -> crate::Target {
+        use crate::Target;
+        match self.kind {
+            PinKind::Album => Target::Album {
+                id: self.id.clone().into(),
+                title: self.name.clone().into(),
+            },
+            PinKind::Artist => Target::Artist {
+                key: self.id.clone(),
+                name: self.name.clone().into(),
+            },
+            PinKind::Playlist => Target::Playlist {
+                id: self.id.clone().into(),
+                name: self.name.clone().into(),
+            },
+            PinKind::Folder => Target::Folder {
+                id: self.id.clone().into(),
+                name: self.name.clone().into(),
+            },
         }
     }
 }
@@ -1227,6 +1319,39 @@ mod tests {
         let text = toml::to_string_pretty(&layout).expect("serialise");
         let back: Layout = toml::from_str(&text).expect("deserialise");
         assert_eq!(layout, back);
+    }
+
+    fn pin(kind: PinKind, id: &str) -> Pin {
+        Pin {
+            kind,
+            id: id.into(),
+            name: id.into(),
+        }
+    }
+
+    #[test]
+    fn pinning_twice_unpins() {
+        let mut panel = Panel::default();
+        panel.toggle_pin(pin(PinKind::Album, "a"));
+        panel.toggle_pin(pin(PinKind::Artist, "a"));
+        assert!(panel.is_pinned(PinKind::Album, "a"));
+        panel.toggle_pin(pin(PinKind::Album, "a"));
+        assert!(!panel.is_pinned(PinKind::Album, "a"));
+        assert!(panel.is_pinned(PinKind::Artist, "a"));
+    }
+
+    #[test]
+    fn a_pin_moves_to_the_gap_it_is_dropped_on() {
+        let mut panel = Panel::default();
+        for id in ["a", "b", "c"] {
+            panel.toggle_pin(pin(PinKind::Playlist, id));
+        }
+        panel.move_pin(PinKind::Playlist, "a", 3);
+        let ids: Vec<&str> = panel.pins.iter().map(|pin| pin.id.as_str()).collect();
+        assert_eq!(ids, ["b", "c", "a"]);
+        panel.move_pin(PinKind::Playlist, "a", 0);
+        let ids: Vec<&str> = panel.pins.iter().map(|pin| pin.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b", "c"]);
     }
 
     #[test]
