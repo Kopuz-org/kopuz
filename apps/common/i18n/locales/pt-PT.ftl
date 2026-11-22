@@ -1245,3 +1245,5 @@ unpin_from_sidebar = Desafixar da barra lateral
 pinned = Afixados
 pinned_playlist = Lista de reprodução
 pinned_folder = Pasta
+interface_lyrics_size = Tamanho da letra
+interface_lyrics_size_description = O tamanho da letra no leitor.

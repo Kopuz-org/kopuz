@@ -1255,3 +1255,5 @@ unpin_from_sidebar = Anulează fixarea din bara laterală
 pinned = Fixate
 pinned_playlist = Playlist
 pinned_folder = Dosar
+interface_lyrics_size = Dimensiunea versurilor
+interface_lyrics_size_description = Cât de mari apar versurile în player.

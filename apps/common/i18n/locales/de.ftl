@@ -1216,3 +1216,5 @@ unpin_from_sidebar = Von Seitenleiste lösen
 pinned = Angeheftet
 pinned_playlist = Playlist
 pinned_folder = Ordner
+interface_lyrics_size = Songtext-Größe
+interface_lyrics_size_description = Wie groß der Songtext im Player angezeigt wird.

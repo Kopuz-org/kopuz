@@ -1204,3 +1204,5 @@ unpin_from_sidebar = Kenar çubuğundan kaldır
 pinned = Sabitlenenler
 pinned_playlist = Çalma listesi
 pinned_folder = Klasör
+interface_lyrics_size = Şarkı sözü boyutu
+interface_lyrics_size_description = Şarkı sözlerinin oynatıcıda ne kadar büyük gösterileceği.

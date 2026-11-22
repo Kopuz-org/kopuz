@@ -1221,3 +1221,5 @@ unpin_from_sidebar = サイドバーからピン留めを外す
 pinned = ピン留め
 pinned_playlist = プレイリスト
 pinned_folder = フォルダ
+interface_lyrics_size = 歌詞のサイズ
+interface_lyrics_size_description = プレーヤーに表示される歌詞の大きさ。

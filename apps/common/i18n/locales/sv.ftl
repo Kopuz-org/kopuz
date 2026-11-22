@@ -1241,3 +1241,5 @@ unpin_from_sidebar = Lossa från sidofältet
 pinned = Fästa
 pinned_playlist = Spellista
 pinned_folder = Mapp
+interface_lyrics_size = Textstorlek för låttext
+interface_lyrics_size_description = Hur stor låttexten visas i spelaren.

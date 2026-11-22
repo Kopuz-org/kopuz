@@ -15,6 +15,7 @@ use gpui_kit::{
     App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, Pixels, Render, ScrollHandle, SharedString,
     StatefulInteractiveElement as _, Styled, Subscription, Task, Window, div, point, px, relative,
+    rems,
 };
 use store::{ConfigModel, PlayerModel, Playhead};
 
@@ -645,8 +646,10 @@ impl LineClock {
 impl Render for LineClock {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let time = lyric_time(cx);
+        let lyric_scale = store::layout(cx).sheet.lyrics.scale();
         let line = &self.line;
         let mut row = LyricLine::new(self.index, start_ms(line), line.text.clone())
+            .scale(lyric_scale)
             .reading(line.reading.clone())
             .ink(sung_ink(window, cx))
             .lit(true)
@@ -776,7 +779,7 @@ impl Render for LyricsView {
                 .scroller(cx)
                 .py_4()
                 .px_4()
-                .text_sm()
+                .text_size(rems(0.875 * store::layout(cx).sheet.lyrics.scale()))
                 .text_center()
                 .font_medium()
                 .line_height(relative(RELAXED))
@@ -787,7 +790,7 @@ impl Render for LyricsView {
                 .scroller(cx)
                 .py_4()
                 .px_4()
-                .text_sm()
+                .text_size(rems(0.875 * store::layout(cx).sheet.lyrics.scale()))
                 .text_center()
                 .font_medium()
                 .line_height(relative(RELAXED))
@@ -808,6 +811,7 @@ impl Render for LyricsView {
                 .into_any_element(),
             Lyrics::Synced { lines, .. } => {
                 let paired = lines.iter().any(|line| line.opposite);
+                let lyric_scale = store::layout(cx).sheet.lyrics.scale();
                 let height = self.scroll.bounds().size.height;
                 let shown = self.shown_lines();
                 self.shown = shown.clone();
@@ -827,6 +831,7 @@ impl Render for LyricsView {
                         depth(index, anchor, is_lit, strength, self.depth, shown.as_ref());
                     children.push(
                         LyricLine::new(index, start_ms(line), line.text.clone())
+                            .scale(lyric_scale)
                             .reading(line.reading.clone())
                             .ink(sung)
                             .lit(is_lit)

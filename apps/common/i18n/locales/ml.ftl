@@ -1245,3 +1245,5 @@ unpin_from_sidebar = സൈഡ്ബാറിൽ നിന്ന് അൺപി
 pinned = പിൻ ചെയ്തവ
 pinned_playlist = പ്ലേലിസ്റ്റ്
 pinned_folder = ഫോൾഡർ
+interface_lyrics_size = വരികളുടെ വലുപ്പം
+interface_lyrics_size_description = പ്ലേയറിൽ വരികൾ എത്ര വലുതായി കാണിക്കണം.

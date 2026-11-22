@@ -1263,3 +1263,5 @@ unpin_from_sidebar = Odepnij od paska bocznego
 pinned = Przypięte
 pinned_playlist = Playlista
 pinned_folder = Folder
+interface_lyrics_size = Rozmiar tekstu piosenki
+interface_lyrics_size_description = Jak duży jest tekst piosenki w odtwarzaczu.

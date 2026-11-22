@@ -1236,3 +1236,5 @@ unpin_from_sidebar = Rimuovi dalla barra laterale
 pinned = Fissati
 pinned_playlist = Playlist
 pinned_folder = Cartella
+interface_lyrics_size = Dimensione del testo
+interface_lyrics_size_description = Quanto è grande il testo nel lettore.

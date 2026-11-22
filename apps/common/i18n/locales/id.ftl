@@ -1209,3 +1209,5 @@ unpin_from_sidebar = Lepas sematan dari bilah samping
 pinned = Disematkan
 pinned_playlist = Daftar putar
 pinned_folder = Folder
+interface_lyrics_size = Ukuran lirik
+interface_lyrics_size_description = Seberapa besar lirik ditampilkan di pemutar.

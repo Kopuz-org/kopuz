@@ -1215,3 +1215,5 @@ unpin_from_sidebar = 从侧边栏取消固定
 pinned = 已固定
 pinned_playlist = 播放列表
 pinned_folder = 文件夹
+interface_lyrics_size = 歌词大小
+interface_lyrics_size_description = 播放器中歌词显示的大小。

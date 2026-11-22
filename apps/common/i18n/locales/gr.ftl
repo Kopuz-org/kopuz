@@ -1247,3 +1247,5 @@ unpin_from_sidebar = Ξεκαρφίτσωμα από την πλαϊνή μπά�
 pinned = Καρφιτσωμένα
 pinned_playlist = Λίστα αναπαραγωγής
 pinned_folder = Φάκελος
+interface_lyrics_size = Μέγεθος στίχων
+interface_lyrics_size_description = Πόσο μεγάλοι εμφανίζονται οι στίχοι στο πρόγραμμα αναπαραγωγής.

@@ -8,7 +8,8 @@ use gpui_kit::{
 };
 use store::LayoutModel;
 use store::layout::{
-    Backdrop, HeroSize, PlayerSize, QueueStyle, Section as Group, SheetTab, Side, TileSize,
+    Backdrop, HeroSize, LyricsSize, PlayerSize, QueueStyle, Section as Group, SheetTab, Side,
+    TileSize,
 };
 
 /// Contribute both sections; call once at startup, after `settings_interface::init`.
@@ -233,6 +234,23 @@ impl Render for SheetSettings {
                                 ],
                                 |value, cx| {
                                     LayoutModel::edit(cx, |layout| layout.sheet.queue = value)
+                                },
+                            ))
+                            .shown(cx),
+                    )
+                    .children(
+                        SettingRow::new(t("interface_lyrics_size"))
+                            .description(t("interface_lyrics_size_description"))
+                            .control(choice(
+                                "sheet-lyrics-size",
+                                &sheet.lyrics,
+                                vec![
+                                    (LyricsSize::Small, t("interface_player_cover_small")),
+                                    (LyricsSize::Normal, t("ui_normal")),
+                                    (LyricsSize::Large, t("interface_player_cover_large")),
+                                ],
+                                |value, cx| {
+                                    LayoutModel::edit(cx, |layout| layout.sheet.lyrics = value)
                                 },
                             ))
                             .shown(cx),

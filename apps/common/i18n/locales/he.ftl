@@ -1247,3 +1247,5 @@ unpin_from_sidebar = ביטול הצמדה מסרגל הצד
 pinned = מוצמדים
 pinned_playlist = רשימת השמעה
 pinned_folder = תיקייה
+interface_lyrics_size = גודל המילים
+interface_lyrics_size_description = כמה גדולות המילים מוצגות בנגן.
