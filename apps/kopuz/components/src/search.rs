@@ -197,7 +197,8 @@ impl RenderOnce for SearchTrigger {
         )
         .children(self.shortcut.map(|keys| {
             div()
-                .when(field, |slot| slot.min_w_0().overflow_hidden())
+                .flex_shrink_0()
+                .whitespace_nowrap()
                 .child(crate::keycap::Keycap::stroke(&keys))
         }))
         .when(focused, |trigger| {
