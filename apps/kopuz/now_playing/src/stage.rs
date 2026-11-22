@@ -41,10 +41,6 @@ fn open_stage(cx: &App) -> Option<AnyWindowHandle> {
         .then_some(handle)
 }
 
-pub fn has_other_display(cx: &App) -> bool {
-    cx.displays().len() > 1
-}
-
 pub fn toggle_stage(cx: &mut App) {
     if let Some(handle) = open_stage(cx) {
         cx.set_global(StageHandle(None));

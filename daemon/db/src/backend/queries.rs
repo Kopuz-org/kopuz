@@ -1670,10 +1670,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows.plays, 3);
-        assert_eq!(rows.tracks[0].0, "/b.flac");
-        assert_eq!(rows.tracks[0].3, 2);
-        assert_eq!(rows.artists[0], ("Ada".to_string(), 2));
-        assert_eq!(rows.days.iter().map(|(_, plays)| plays).sum::<u32>(), 3);
+        assert_eq!(rows.tracks[0].key, "/b.flac");
+        assert_eq!(rows.tracks[0].plays, 2);
+        assert_eq!(rows.artists[0].name, "Ada");
+        assert_eq!(rows.artists[0].plays, 2);
+        assert_eq!(rows.days.iter().map(|day| day.plays).sum::<u32>(), 3);
 
         let later = super::super::cfg_store::listening(&pool, &source, Some(i64::MAX))
             .await

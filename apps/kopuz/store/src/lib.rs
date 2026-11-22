@@ -18,7 +18,6 @@ mod freeze;
 mod invalidation;
 mod jobs;
 pub mod layout;
-mod m3u;
 mod nav;
 mod notices;
 mod opener;
@@ -27,6 +26,7 @@ pub mod palette;
 mod picture;
 mod player;
 mod playing;
+mod playlist_io;
 mod playlists;
 mod query;
 mod queue;
@@ -58,7 +58,6 @@ pub use invalidation::{Invalidation, TablesChanged};
 pub use jobs::{Finished, JobEvent, JobProgressed, JobsModel, kind_key, kind_label};
 pub use layout::{Layout, LayoutModel};
 pub use link::{Link, api};
-pub use m3u::{export as export_m3u, import as import_m3u, import_link as import_playlist_link};
 pub use nav::{Navigator, Route};
 pub use notices::{DAEMON_GONE, Notice, Notices, Record, Retracted, Undo};
 pub use opener::{
@@ -70,6 +69,10 @@ pub use palette::Swatches;
 pub use picture::{PictureError, Pictured, copy_picture, extension, file_name, save_picture};
 pub use player::{PlayerModel, Playhead};
 pub use playing::Playing;
+pub use playlist_io::{
+    export_m3u as export_playlist_m3u, import_file as import_playlist_file,
+    import_link as import_playlist_link,
+};
 pub use playlists::PlaylistsModel;
 pub use query::{FirstRead, Query};
 pub use queue::{QueueModel, QueueSummary};

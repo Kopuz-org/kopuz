@@ -703,7 +703,7 @@ static COMMANDS: &[Command] = &[
         run: |target, _, cx| {
             if let (Some(id), Target::Playlist { name, .. }) = (ops::playlist_id(&target), &target)
             {
-                store::export_m3u(name.to_string(), ops::playlist_keys(&id, cx), cx);
+                store::export_playlist_m3u(name.to_string(), ops::playlist_keys(&id, cx), cx);
             }
         },
         action: None,

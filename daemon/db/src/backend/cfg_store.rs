@@ -740,26 +740,35 @@ pub async fn listening(
         seconds: u64::try_from(seconds).unwrap_or(0),
         tracks: tracks
             .into_iter()
-            .map(|(key, title, artist, plays)| {
-                (
-                    key,
-                    title.unwrap_or_default(),
-                    artist.unwrap_or_default(),
-                    count(plays),
-                )
+            .map(|(key, title, artist, plays)| crate::TrackPlays {
+                key,
+                title: title.unwrap_or_default(),
+                artist: artist.unwrap_or_default(),
+                plays: count(plays),
             })
             .collect(),
         artists: artists
             .into_iter()
-            .map(|(name, plays)| (name, count(plays)))
+            .map(|(name, plays)| crate::NamePlays {
+                name,
+                detail: String::new(),
+                plays: count(plays),
+            })
             .collect(),
         albums: albums
             .into_iter()
-            .map(|(album, artist, plays)| (album, artist, count(plays)))
+            .map(|(name, detail, plays)| crate::NamePlays {
+                name,
+                detail,
+                plays: count(plays),
+            })
             .collect(),
         days: days
             .into_iter()
-            .map(|(day, plays)| (day, count(plays)))
+            .map(|(day, plays)| crate::DayPlays {
+                day,
+                plays: count(plays),
+            })
             .collect(),
     })
 }

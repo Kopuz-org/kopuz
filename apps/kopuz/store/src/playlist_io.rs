@@ -5,7 +5,7 @@ use gpui_kit::{App, PathPromptOptions};
 
 use crate::{JobsModel, Link, Notices, SourcesModel};
 
-pub fn import(cx: &mut App) {
+pub fn import_file(cx: &mut App) {
     let picked = cx.prompt_for_paths(PathPromptOptions {
         files: true,
         directories: false,
@@ -88,7 +88,7 @@ fn announce(result: Result<PlaylistImport, ApiError>, cx: &mut App) {
     }
 }
 
-pub fn export(name: String, keys: Vec<String>, cx: &mut App) {
+pub fn export_m3u(name: String, keys: Vec<String>, cx: &mut App) {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
