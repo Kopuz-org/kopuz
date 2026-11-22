@@ -180,6 +180,9 @@ impl QueueModel {
         if self.loop_mode == LoopMode::Track {
             return NextOutcome::Play(self.current);
         }
+        if self.shuffle && self.loop_mode == LoopMode::Queue && self.current + 1 >= queue_len {
+            self.start_new_round();
+        }
         let mut idx = self.current;
         for _ in 0..queue_len {
             if !Self::has_following_track(idx, queue_len, self.loop_mode) {
@@ -495,6 +498,39 @@ impl QueueModel {
         self.shuffle_order = order;
     }
 
+    /// A looping shuffle deals a fresh order each time round. The track playing
+    /// now opens it, so it is not heard again straight away, and the few that
+    /// closed the last round are kept out of the first slots of the next.
+    fn start_new_round(&mut self) {
+        use rand::seq::SliceRandom;
+        let len = self.shuffle_order.len();
+        let Some(&now) = self.shuffle_order.get(self.current) else {
+            return;
+        };
+        if len < 3 {
+            return;
+        }
+        let keep_apart = (len / 4).clamp(1, 3);
+        let recent: Vec<usize> = self.shuffle_order[len.saturating_sub(keep_apart + 1)..].to_vec();
+        let mut rest: Vec<usize> = self
+            .shuffle_order
+            .iter()
+            .copied()
+            .filter(|&index| index != now)
+            .collect();
+        rest.shuffle(&mut rand::rng());
+        for slot in 0..keep_apart.min(rest.len()) {
+            if recent.contains(&rest[slot])
+                && let Some(swap) = (keep_apart..rest.len()).find(|&at| !recent.contains(&rest[at]))
+            {
+                rest.swap(slot, swap);
+            }
+        }
+        self.shuffle_order = std::iter::once(now).chain(rest).collect();
+        self.current = 0;
+        self.history.clear();
+    }
+
     /// Position of a physical index inside the running permutation, or `None`
     /// when the permutation still doesn't cover it after repair.
     pub fn shuffle_position_of(&mut self, physical_idx: usize) -> Option<usize> {
@@ -763,6 +799,27 @@ mod tests {
         let mut m = QueueModel::default();
         m.replace((0..n).map(track).collect());
         m
+    }
+
+    #[test]
+    fn a_looping_shuffle_deals_a_new_round_without_an_early_repeat() {
+        let mut m = model(12);
+        m.set_shuffle(true);
+        m.set_loop_mode(LoopMode::Queue);
+        let first: Vec<usize> = m.shuffle_order().to_vec();
+        for _ in 0..11 {
+            assert!(matches!(m.advance_next(), NextOutcome::Play(_)));
+        }
+        let closing: Vec<usize> = first[first.len() - 4..].to_vec();
+        let NextOutcome::Play(next) = m.advance_next() else {
+            panic!("a looping queue keeps going");
+        };
+        let opener = m.physical_index_of(next).expect("in range");
+        assert_eq!(m.shuffle_order()[0], *first.last().expect("filled"));
+        assert!(!closing.contains(&opener));
+        let mut round: Vec<usize> = m.shuffle_order().to_vec();
+        round.sort_unstable();
+        assert_eq!(round, (0..12).collect::<Vec<_>>());
     }
 
     #[test]
