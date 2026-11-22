@@ -118,11 +118,9 @@ impl YouTubeClient {
     }
 }
 
-/// Read the WEB_REMIX version off music.youtube.com and send it from now on.
-/// A failure keeps whatever was sent before.
-pub async fn refresh_live_version() -> Result<&'static str, String> {
-    let page = super::innertube::http_client()
-        .get(format!("{ORIGIN_YOUTUBE_MUSIC}/"))
+async fn music_page(path: &str) -> Result<String, String> {
+    super::innertube::http_client()
+        .get(format!("{ORIGIN_YOUTUBE_MUSIC}{path}"))
         .header("User-Agent", USER_AGENT_WEB)
         // Outside the EU this is ignored; inside it, it skips the consent
         // interstitial, which carries no ytcfg.
@@ -130,12 +128,22 @@ pub async fn refresh_live_version() -> Result<&'static str, String> {
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
-        .map_err(|error| format!("music.youtube.com: {error}"))?
+        .map_err(|error| format!("music.youtube.com{path}: {error}"))?
         .text()
         .await
-        .map_err(|error| format!("music.youtube.com body: {error}"))?;
-    let found =
-        web_remix_version_in(&page).ok_or("music.youtube.com carried no WEB_REMIX version")?;
+        .map_err(|error| format!("music.youtube.com{path} body: {error}"))
+}
+
+/// Read the WEB_REMIX version off music.youtube.com and send it from now on.
+/// A failure keeps whatever was sent before.
+pub async fn refresh_live_version() -> Result<&'static str, String> {
+    let page = music_page("/").await?;
+    let found = match web_remix_version_in(&page) {
+        Some(found) => found.to_owned(),
+        None => sw_version_in(&music_page("/sw.js_data").await?)
+            .ok_or("music.youtube.com carried no WEB_REMIX version")?
+            .to_owned(),
+    };
     let mut live = LIVE_WEB_REMIX_VERSION
         .lock()
         .map_err(|_| "live version lock poisoned".to_string())?;
@@ -176,11 +184,23 @@ fn web_remix_version_in(page: &str) -> Option<&str> {
     const KEY: &str = "\"INNERTUBE_CLIENT_VERSION\":\"";
     let start = page.find(KEY)? + KEY.len();
     let version = &page[start..start + page[start..].find('"')?];
+    is_web_remix_version(version).then_some(version)
+}
+
+fn sw_version_in(data: &str) -> Option<&str> {
+    const KEY: &str = ",67,\"";
+    data.match_indices(KEY).find_map(|(at, _)| {
+        let start = at + KEY.len();
+        let version = &data[start..start + data[start..].find('"')?];
+        is_web_remix_version(version).then_some(version)
+    })
+}
+
+fn is_web_remix_version(version: &str) -> bool {
     let parts: Vec<&str> = version.split('.').collect();
-    let well_formed = matches!(parts.as_slice(), ["1", date, a, b]
+    matches!(parts.as_slice(), ["1", date, a, b]
         if date.len() == 8
-            && [*date, *a, *b].iter().all(|p| !p.is_empty() && p.bytes().all(|c| c.is_ascii_digit())));
-    well_formed.then_some(version)
+            && [*date, *a, *b].iter().all(|p| !p.is_empty() && p.bytes().all(|c| c.is_ascii_digit())))
 }
 
 #[cfg(test)]
@@ -204,6 +224,14 @@ mod tests {
             web_remix_version_in(r#""INNERTUBE_CLIENT_VERSION":"1.2026101x.15.00""#),
             None
         );
+    }
+
+    #[test]
+    fn the_version_is_read_from_the_service_worker_data() {
+        let data = r#")]}'
+[["yt.sw.adr",null,[[["en","US",null,"1.2.3.4",null,"Mozilla/5.0,gzip(gfe)",67,"1.20261117.06.00","Windows","10.0"]]]]]"#;
+        assert_eq!(sw_version_in(data), Some("1.20261117.06.00"));
+        assert_eq!(sw_version_in(r#"[1,67,"2.0",67,"x"]"#), None);
     }
 
     #[test]
