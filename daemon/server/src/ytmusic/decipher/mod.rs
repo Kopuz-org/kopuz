@@ -384,11 +384,7 @@ async fn fetch_player_js(video_id: &str) -> Result<(String, u64), String> {
     let raw = str_between(&watch, "\"jsUrl\":\"", "\"")
         .ok_or("no jsUrl in watch page")?
         .replace("\\/", "/");
-    let js_url = if raw.starts_with("http") {
-        raw
-    } else {
-        format!("https://www.youtube.com{raw}")
-    };
+    let js_url = pinned_player_url(&raw);
     let base_js = http
         .get(&js_url)
         .header("User-Agent", WEB_UA)
@@ -408,6 +404,16 @@ async fn fetch_player_js(video_id: &str) -> Result<(String, u64), String> {
         .and_then(|s| s.parse::<u64>().ok())
         .ok_or("no signatureTimestamp in base.js")?;
     Ok((base_js, sts))
+}
+
+fn pinned_player_url(raw: &str) -> String {
+    match str_between(raw, "/s/player/", "/") {
+        Some(id) if !id.is_empty() => {
+            format!("https://www.youtube.com/s/player/{id}/player_ias.vflset/en_US/base.js")
+        }
+        _ if raw.starts_with("http") => raw.to_string(),
+        _ => format!("https://www.youtube.com{raw}"),
+    }
 }
 
 fn str_between<'a>(haystack: &'a str, start: &str, end: &str) -> Option<&'a str> {
@@ -624,6 +630,25 @@ mod tests {
             Some("UNSCRAMBLED")
         );
         assert_eq!(lookup(&responses, "MISSING"), None);
+    }
+
+    #[test]
+    fn player_url_is_pinned_to_the_ias_variant() {
+        let pinned = "https://www.youtube.com/s/player/6b3d0364/player_ias.vflset/en_US/base.js";
+        assert_eq!(
+            pinned_player_url("/s/player/6b3d0364/player_es6_tcl.vflset/en_US/base.js"),
+            pinned
+        );
+        assert_eq!(
+            pinned_player_url(
+                "https://www.youtube.com/s/player/6b3d0364/player_es6.vflset/en_US/base.js"
+            ),
+            pinned
+        );
+        assert_eq!(
+            pinned_player_url("/yts/jsbin/base.js"),
+            "https://www.youtube.com/yts/jsbin/base.js"
+        );
     }
 
     #[test]
