@@ -12184,6 +12184,7 @@ dependencies = [
  "kopuz-i18n",
  "kopuz-utils",
  "link",
+ "serde_json",
  "store",
  "theme",
  "tracing",
