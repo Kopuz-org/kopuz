@@ -1249,3 +1249,7 @@ sleep_timer_end_of_track = Einde van nummer
 sleep_timer_left = Stopt over { $minutes } min
 export_m3u = Exporteren als M3U
 playlist_exported = { $count } nummers opgeslagen in het bestand.
+interface_notifications_track = Nu aan het spelen
+interface_notifications_track_description = Laat zien welk nummer begint als het nummer wisselt.
+interface_notifications_track_in_app = In de app
+interface_notifications_track_desktop = Bureaubladmelding

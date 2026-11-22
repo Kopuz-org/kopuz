@@ -1217,3 +1217,7 @@ sleep_timer_end_of_track = Pagtapos ng kanta
 sleep_timer_left = Hihinto sa loob ng { $minutes } min
 export_m3u = I-export bilang M3U
 playlist_exported = Na-save ang { $count } kanta sa file.
+interface_notifications_track = Tumutugtog ngayon
+interface_notifications_track_description = Ipakita kung anong kanta ang nagsimula kapag nagpalit ng track.
+interface_notifications_track_in_app = Sa app
+interface_notifications_track_desktop = Desktop notification

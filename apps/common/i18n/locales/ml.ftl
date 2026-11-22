@@ -1253,3 +1253,7 @@ sleep_timer_end_of_track = ട്രാക്കിന്റെ അവസാന�
 sleep_timer_left = { $minutes } മിനിറ്റിൽ നിർത്തും
 export_m3u = M3U ആയി എക്സ്പോർട്ട് ചെയ്യുക
 playlist_exported = { $count } പാട്ടുകൾ ഫയലിൽ സേവ് ചെയ്തു.
+interface_notifications_track = ഇപ്പോൾ പ്ലേ ചെയ്യുന്നത്
+interface_notifications_track_description = ട്രാക്ക് മാറുമ്പോൾ ഏത് പാട്ട് തുടങ്ങി എന്ന് കാണിക്കുക.
+interface_notifications_track_in_app = ആപ്പിനുള്ളിൽ
+interface_notifications_track_desktop = ഡെസ്ക്ടോപ്പ് അറിയിപ്പ്

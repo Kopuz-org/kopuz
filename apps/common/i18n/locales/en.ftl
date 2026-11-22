@@ -1252,3 +1252,7 @@ sleep_timer_end_of_track = End of track
 sleep_timer_left = Sleeping in { $minutes } min
 export_m3u = Export as M3U
 playlist_exported = Saved { $count } songs to the playlist file.
+interface_notifications_track = Now playing
+interface_notifications_track_description = Say which song started when the track changes.
+interface_notifications_track_in_app = In the app
+interface_notifications_track_desktop = Desktop notification

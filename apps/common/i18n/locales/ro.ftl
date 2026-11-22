@@ -1263,3 +1263,7 @@ sleep_timer_end_of_track = La finalul piesei
 sleep_timer_left = Se oprește în { $minutes } min
 export_m3u = Exportă ca M3U
 playlist_exported = { $count } piese salvate în fișier.
+interface_notifications_track = Se redă acum
+interface_notifications_track_description = Arată ce melodie a început la schimbarea piesei.
+interface_notifications_track_in_app = În aplicație
+interface_notifications_track_desktop = Notificare pe desktop

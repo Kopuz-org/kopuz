@@ -1254,3 +1254,7 @@ sleep_timer_end_of_track = Fim da faixa
 sleep_timer_left = Para em { $minutes } min
 export_m3u = Exportar como M3U
 playlist_exported = { $count } músicas salvas no arquivo.
+interface_notifications_track = Tocando agora
+interface_notifications_track_description = Mostra qual música começou quando a faixa muda.
+interface_notifications_track_in_app = No app
+interface_notifications_track_desktop = Notificação da área de trabalho

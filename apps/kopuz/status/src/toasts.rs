@@ -5,13 +5,16 @@ use std::time::Duration;
 
 use api::NoticeLevel;
 use components::format::{t, t_with};
+use components::icons;
+use gpui_kit::Entity;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{Sizable as _, WindowExt as _};
 use gpui_kit::{
     App, Context, ElementId, IntoElement, Render, SharedString, Subscription, Task, Window, div,
 };
-use store::{BatchFinished, DownloadsModel, Notice, Notices, Retracted, Undo};
+use store::layout::TrackToast;
+use store::{BatchFinished, DownloadsModel, Notice, Notices, PlayerModel, Retracted, Undo};
 
 /// How long an undo stays offered.
 const UNDO: Duration = Duration::from_secs(6);
@@ -19,8 +22,11 @@ const UNDO: Duration = Duration::from_secs(6);
 /// The type the toast ids are scoped by, so a message replaces its own earlier toast.
 struct Toast;
 
+struct NowPlaying;
+
 /// Turns notices into toasts, honouring `layout.notifications`. It draws nothing itself.
 pub struct Toasts {
+    track: Option<String>,
     _undos: HashMap<SharedString, Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -46,9 +52,42 @@ impl Toasts {
                 },
             ),
         ];
+        let player = PlayerModel::global(cx);
+        let track = player.read(cx).track().map(|track| track.key.clone());
+        let mut subscriptions = subscriptions;
+        subscriptions.push(cx.observe_in(&player, window, |this, player, window, cx| {
+            this.announce(&player, window, cx);
+        }));
         Self {
+            track,
             _undos: HashMap::new(),
             _subscriptions: subscriptions,
+        }
+    }
+
+    fn announce(
+        &mut self,
+        player: &Entity<PlayerModel>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(track) = player.read(cx).track().cloned() else {
+            self.track = None;
+            return;
+        };
+        if self.track.as_deref() == Some(track.key.as_str()) {
+            return;
+        }
+        self.track = Some(track.key.clone());
+        let toast = Notification::new()
+            .title(track.title.clone())
+            .message(track.artist.clone())
+            .icon(icons::icon(icons::MUSIC))
+            .id::<NowPlaying>();
+        match store::layout(cx).notifications.track_change {
+            TrackToast::Off => {}
+            TrackToast::InApp => window.push_notification(toast, cx),
+            TrackToast::Desktop => window.push_notification(toast.system(), cx),
         }
     }
 

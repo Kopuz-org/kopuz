@@ -1223,3 +1223,7 @@ sleep_timer_end_of_track = 本曲结束后
 sleep_timer_left = { $minutes } 分钟后停止
 export_m3u = 导出为 M3U
 playlist_exported = 已将 { $count } 首歌曲保存到文件。
+interface_notifications_track = 正在播放
+interface_notifications_track_description = 切换曲目时提示开始播放的歌曲。
+interface_notifications_track_in_app = 应用内
+interface_notifications_track_desktop = 桌面通知

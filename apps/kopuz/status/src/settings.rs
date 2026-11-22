@@ -2,13 +2,13 @@
 
 use api::JobKind;
 use components::format::t;
-use components::settings::{section, toggle_row};
+use components::settings::{SettingRow, choice, section, toggle_row};
 use gpui_kit::component::v_flex;
 use gpui_kit::{
     App, AppContext as _, Context, IntoElement, ParentElement as _, Render, Styled, Window,
 };
 use store::LayoutModel;
-use store::layout::Section as Group;
+use store::layout::{Section as Group, TrackToast};
 
 /// The kinds a person can silence one at a time.
 const KINDS: &[JobKind] = &[
@@ -78,6 +78,28 @@ impl Render for NotificationSettings {
                         )
                         .description(t("interface_notifications_errors_description"))
                         .shown(cx),
+                    )
+                    .children(
+                        SettingRow::new(t("interface_notifications_track"))
+                            .description(t("interface_notifications_track_description"))
+                            .control(choice(
+                                "notifications-track",
+                                &notifications.track_change,
+                                vec![
+                                    (TrackToast::Off, t("disabled")),
+                                    (TrackToast::InApp, t("interface_notifications_track_in_app")),
+                                    (
+                                        TrackToast::Desktop,
+                                        t("interface_notifications_track_desktop"),
+                                    ),
+                                ],
+                                |value, cx| {
+                                    LayoutModel::edit(cx, |layout| {
+                                        layout.notifications.track_change = value
+                                    })
+                                },
+                            ))
+                            .shown(cx),
                     )
                     .children(jobs.into_iter().flatten()),
             )

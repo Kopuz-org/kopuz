@@ -1261,3 +1261,7 @@ sleep_timer_end_of_track = نهاية المقطع
 sleep_timer_left = يتوقف بعد { $minutes } د
 export_m3u = تصدير بصيغة M3U
 playlist_exported = حُفظت { $count } أغنية في الملف.
+interface_notifications_track = قيد التشغيل
+interface_notifications_track_description = إظهار الأغنية التي بدأت عند تغيّر المقطع.
+interface_notifications_track_in_app = داخل التطبيق
+interface_notifications_track_desktop = إشعار سطح المكتب

@@ -1212,3 +1212,7 @@ sleep_timer_end_of_track = Parça bitince
 sleep_timer_left = { $minutes } dk sonra duracak
 export_m3u = M3U olarak dışa aktar
 playlist_exported = { $count } şarkı çalma listesi dosyasına kaydedildi.
+interface_notifications_track = Şimdi çalan
+interface_notifications_track_description = Parça değişince hangi şarkının başladığını göster.
+interface_notifications_track_in_app = Uygulama içinde
+interface_notifications_track_desktop = Masaüstü bildirimi

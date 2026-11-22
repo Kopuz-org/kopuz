@@ -1255,3 +1255,7 @@ sleep_timer_end_of_track = סוף השיר
 sleep_timer_left = עצירה בעוד { $minutes } דק׳
 export_m3u = ייצוא כ-M3U
 playlist_exported = { $count } שירים נשמרו בקובץ.
+interface_notifications_track = מתנגן עכשיו
+interface_notifications_track_description = הצגת השיר שהתחיל כשהרצועה מתחלפת.
+interface_notifications_track_in_app = בתוך האפליקציה
+interface_notifications_track_desktop = התראת שולחן עבודה
