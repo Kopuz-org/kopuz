@@ -50,6 +50,7 @@ pub static ROWS: &[Entry] = &[
     entry("interface_accent", "interface"),
     entry("interface_ambient", "interface"),
     entry("interface_scale", "interface"),
+    entry("interface_page_width", "interface"),
     entry("interface_font", "interface"),
     entry("palette_history", "interface"),
     entry("palette_recents", "interface"),

@@ -903,6 +903,17 @@ impl Palette {
 pub struct Interface {
     pub scale: f32,
     pub font: Option<String>,
+    pub page_width: PageWidth,
+}
+
+/// How wide a page may grow before it stops stretching and centres.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PageWidth {
+    #[default]
+    Standard,
+    Wide,
+    Full,
 }
 
 impl Default for Interface {
@@ -910,6 +921,7 @@ impl Default for Interface {
         Self {
             scale: 1.,
             font: None,
+            page_width: PageWidth::Standard,
         }
     }
 }

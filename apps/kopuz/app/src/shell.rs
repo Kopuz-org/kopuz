@@ -629,7 +629,7 @@ impl Render for Shell {
                                 .relative()
                                 // A disconnect dims the page and banners over it rather than
                                 // replacing the window, so what was on screen stays on screen.
-                                .child(topbar::content_frame().h_full().child(page))
+                                .child(topbar::content_frame(cx).h_full().child(page))
                                 .child(self.overlays.clone())
                                 .child(self.debug_overlay.clone()),
                         )
