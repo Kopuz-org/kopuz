@@ -426,7 +426,7 @@ impl AlbumDetail {
             .action(
                 DetailActions::new("album", self.keys.clone())
                     .offline(self.offline)
-                    .shuffle(commands::set_shuffle)
+                    .shuffle_play(commands::shuffle_play)
                     .play(commands::play_all)
                     .extra(select_all)
                     .when_some(rip, |actions, rip| actions.extra(rip))
@@ -477,7 +477,7 @@ impl AlbumDetail {
                     .download(commands::set_offline)
                     .artist(view.artist_key.clone())
                     .play(commands::play_all)
-                    .shuffle(commands::set_shuffle)
+                    .shuffle_play(commands::shuffle_play)
                     .share(move |_, _, cx| {
                         actions::share_album(browse_id.clone(), first_key.clone(), cx)
                     }),

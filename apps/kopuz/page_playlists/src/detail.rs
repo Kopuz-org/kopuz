@@ -279,6 +279,7 @@ impl Render for PlaylistDetail {
                 DetailActions::new("playlist", self.keys.clone())
                     .offline(self.offline)
                     .play(commands::play_all)
+                    .shuffle_play(commands::shuffle_play)
                     .radio(move |_, _, cx| actions::start_playlist_radio(radio_id.clone(), cx))
                     .download(commands::set_offline)
                     .delete(cx.listener(move |this, _, window, cx| {
