@@ -1257,3 +1257,4 @@ interface_notifications_track_description = Say which song started when the trac
 interface_notifications_track_in_app = In the app
 interface_notifications_track_desktop = Desktop notification
 player_on_other_display = Player on the other display
+import_playlist_link = Import a Spotify playlist link

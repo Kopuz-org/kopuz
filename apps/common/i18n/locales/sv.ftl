@@ -1254,3 +1254,4 @@ interface_notifications_track_description = Visa vilken låt som börjar när sp
 interface_notifications_track_in_app = I appen
 interface_notifications_track_desktop = Skrivbordsnotis
 player_on_other_display = Spelaren på den andra skärmen
+import_playlist_link = Importera länk till Spotify-spellista

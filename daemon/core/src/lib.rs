@@ -31,6 +31,7 @@ pub mod os_media;
 pub mod ownership;
 pub mod persistence;
 mod playback;
+pub mod playlist_import;
 pub mod playlists;
 pub mod plugins;
 pub mod prefs;

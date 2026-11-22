@@ -1228,3 +1228,4 @@ interface_notifications_track_description = Számváltáskor megmutatja, melyik 
 interface_notifications_track_in_app = Az alkalmazásban
 interface_notifications_track_desktop = Asztali értesítés
 player_on_other_display = Lejátszó a másik kijelzőn
+import_playlist_link = Spotify-lejátszási lista linkjének importálása

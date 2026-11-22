@@ -1266,3 +1266,4 @@ interface_notifications_track_description = إظهار الأغنية التي �
 interface_notifications_track_in_app = داخل التطبيق
 interface_notifications_track_desktop = إشعار سطح المكتب
 player_on_other_display = المشغّل على الشاشة الأخرى
+import_playlist_link = استيراد رابط قائمة تشغيل Spotify

@@ -1258,3 +1258,4 @@ interface_notifications_track_description = பாடல் மாறும்�
 interface_notifications_track_in_app = செயலியில்
 interface_notifications_track_desktop = டெஸ்க்டாப் அறிவிப்பு
 player_on_other_display = மற்ற திரையில் பிளேயர்
+import_playlist_link = Spotify பிளேலிஸ்ட் இணைப்பை இறக்குமதி செய்

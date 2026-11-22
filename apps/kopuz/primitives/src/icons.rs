@@ -28,6 +28,7 @@ pub const DOWNLOAD: &str = "icons/download.svg";
 pub const SETTINGS: &str = "icons/settings.svg";
 pub const PLUS: &str = "icons/plus.svg";
 pub const IMPORT: &str = "icons/import.svg";
+pub const LINK: &str = "icons/link.svg";
 pub const EXPORT: &str = "icons/file-up.svg";
 pub const TRASH: &str = "icons/trash.svg";
 pub const MORE: &str = "icons/ellipsis.svg";

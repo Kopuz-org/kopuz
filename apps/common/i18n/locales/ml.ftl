@@ -1258,3 +1258,4 @@ interface_notifications_track_description = ട്രാക്ക് മാറ�
 interface_notifications_track_in_app = ആപ്പിനുള്ളിൽ
 interface_notifications_track_desktop = ഡെസ്ക്ടോപ്പ് അറിയിപ്പ്
 player_on_other_display = മറ്റ് ഡിസ്പ്ലേയിൽ പ്ലേയർ
+import_playlist_link = Spotify പ്ലേലിസ്റ്റ് ലിങ്ക് ഇംപോർട്ട് ചെയ്യുക

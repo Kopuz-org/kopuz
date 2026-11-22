@@ -1229,3 +1229,4 @@ interface_notifications_track_description = Zeigt beim Titelwechsel, welcher Son
 interface_notifications_track_in_app = In der App
 interface_notifications_track_desktop = Desktop-Benachrichtigung
 player_on_other_display = Player auf dem anderen Bildschirm
+import_playlist_link = Spotify-Playlist-Link importieren

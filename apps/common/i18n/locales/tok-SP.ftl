@@ -1241,3 +1241,4 @@ interface_notifications_track_description = kalama sin li open la o toki e nimi 
 interface_notifications_track_in_app = lon ilo
 interface_notifications_track_desktop = toki lon sitelen supa
 player_on_other_display = ilo kalama lon sitelen ante
+import_playlist_link = o kama jo e linja pi kulupu kalama Spotify

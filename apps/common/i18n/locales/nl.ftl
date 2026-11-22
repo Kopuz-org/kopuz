@@ -1254,3 +1254,4 @@ interface_notifications_track_description = Laat zien welk nummer begint als het
 interface_notifications_track_in_app = In de app
 interface_notifications_track_desktop = Bureaubladmelding
 player_on_other_display = Speler op het andere scherm
+import_playlist_link = Spotify-afspeellijstlink importeren

@@ -1249,3 +1249,4 @@ interface_notifications_track_description = Mostra quale brano è partito quando
 interface_notifications_track_in_app = Nell'app
 interface_notifications_track_desktop = Notifica del desktop
 player_on_other_display = Lettore sull'altro schermo
+import_playlist_link = Importa link di playlist Spotify

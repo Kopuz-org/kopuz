@@ -71,6 +71,7 @@ service Kopuz {
   rpc GetPlaylists(GetPlaylistsRequest) returns (PlaylistCatalog);
   rpc CreatePlaylist(CreatePlaylistRequest) returns (PlaylistId);
   rpc ImportPlaylist(ImportPlaylistRequest) returns (PlaylistImport);
+  rpc ImportExternalPlaylist(ImportExternalPlaylistRequest) returns (PlaylistImport);
   rpc RenamePlaylist(RenamePlaylistRequest) returns (Unit);
   rpc DeletePlaylist(PlaylistId) returns (Unit);
   rpc AddPlaylistTracks(AddPlaylistTracksRequest) returns (Unit);
@@ -1620,6 +1621,19 @@ message PlaylistFolderId {
 message CreatePlaylistRequest {
   string name = 1;
   repeated string keys = 2;
+}
+
+message ImportExternalPlaylistRequest {
+  oneof source {
+    // A public Spotify playlist or album link.
+    string link = 1;
+    CsvPlaylist csv = 2;
+  }
+}
+
+message CsvPlaylist {
+  string name = 1;
+  string text = 2;
 }
 
 message ImportPlaylistRequest {
