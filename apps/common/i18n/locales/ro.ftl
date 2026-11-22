@@ -1267,3 +1267,4 @@ interface_notifications_track = Se redă acum
 interface_notifications_track_description = Arată ce melodie a început la schimbarea piesei.
 interface_notifications_track_in_app = În aplicație
 interface_notifications_track_desktop = Notificare pe desktop
+player_on_other_display = Player pe celălalt ecran

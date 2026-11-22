@@ -622,6 +622,13 @@ impl RenderOnce for TransportOverflow {
                             ))
                     },
                 )
+                .when(cx.displays().len() > 1, |menu| {
+                    menu.item(
+                        PopupMenuItem::new(t("player_on_other_display"))
+                            .icon(icons::icon(icons::EXPAND))
+                            .on_click(|_, _, cx| store::toggle_stage(cx)),
+                    )
+                })
                 .item(
                     PopupMenuItem::new(t("playback_speed"))
                         .icon(icons::icon(GAUGE))

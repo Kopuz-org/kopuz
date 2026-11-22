@@ -1227,3 +1227,4 @@ interface_notifications_track = Most szól
 interface_notifications_track_description = Számváltáskor megmutatja, melyik dal indult.
 interface_notifications_track_in_app = Az alkalmazásban
 interface_notifications_track_desktop = Asztali értesítés
+player_on_other_display = Lejátszó a másik kijelzőn

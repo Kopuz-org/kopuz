@@ -92,7 +92,7 @@ impl NowPlaying {
         let layout = store::layout(cx).sheet.clone();
         let track = self.track(cx);
         let artwork = track.as_ref().and_then(|track| track.artwork.clone());
-        let open = Chrome::global(cx).read(cx).is_sheet_open();
+        let open = self.detached || Chrome::global(cx).read(cx).is_sheet_open();
         // It grows in over the slower span and folds away over the quicker one.
         let shown = self.sheet_fade.sample(
             open,

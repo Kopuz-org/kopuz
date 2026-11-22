@@ -1221,3 +1221,4 @@ interface_notifications_track = Tumutugtog ngayon
 interface_notifications_track_description = Ipakita kung anong kanta ang nagsimula kapag nagpalit ng track.
 interface_notifications_track_in_app = Sa app
 interface_notifications_track_desktop = Desktop notification
+player_on_other_display = Player sa kabilang screen

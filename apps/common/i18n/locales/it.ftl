@@ -1248,3 +1248,4 @@ interface_notifications_track = In riproduzione
 interface_notifications_track_description = Mostra quale brano è partito quando cambia traccia.
 interface_notifications_track_in_app = Nell'app
 interface_notifications_track_desktop = Notifica del desktop
+player_on_other_display = Lettore sull'altro schermo

@@ -1259,3 +1259,4 @@ interface_notifications_track = Παίζει τώρα
 interface_notifications_track_description = Δείχνει ποιο τραγούδι ξεκίνησε όταν αλλάζει το κομμάτι.
 interface_notifications_track_in_app = Μέσα στην εφαρμογή
 interface_notifications_track_desktop = Ειδοποίηση επιφάνειας εργασίας
+player_on_other_display = Πρόγραμμα αναπαραγωγής στην άλλη οθόνη

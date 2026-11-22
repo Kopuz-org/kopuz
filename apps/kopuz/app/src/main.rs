@@ -197,6 +197,7 @@ fn main() -> anyhow::Result<()> {
         palette::register_settings(cx);
         now_playing::register_settings(cx);
         store::register_mini_player(now_playing::toggle_mini, cx);
+        store::register_stage(now_playing::toggle_stage, cx);
         status::register_settings(cx);
         status::register_url_download(cx);
         page_playlists::register(cx);

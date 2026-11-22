@@ -1257,3 +1257,4 @@ interface_notifications_track = இப்போது இசைப்பது
 interface_notifications_track_description = பாடல் மாறும்போது எந்தப் பாடல் தொடங்கியது எனக் காட்டு.
 interface_notifications_track_in_app = செயலியில்
 interface_notifications_track_desktop = டெஸ்க்டாப் அறிவிப்பு
+player_on_other_display = மற்ற திரையில் பிளேயர்

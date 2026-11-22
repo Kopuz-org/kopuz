@@ -127,6 +127,20 @@ type Toggle = std::rc::Rc<dyn Fn(&mut App)>;
 #[derive(Default)]
 struct MiniPlayer(Option<Toggle>);
 
+struct Stage(Option<Toggle>);
+
+impl gpui_kit::Global for Stage {}
+
+pub fn register_stage(toggle: impl Fn(&mut App) + 'static, cx: &mut App) {
+    cx.set_global(Stage(Some(std::rc::Rc::new(toggle))));
+}
+
+pub fn toggle_stage(cx: &mut App) {
+    if let Some(toggle) = cx.try_global::<Stage>().and_then(|held| held.0.clone()) {
+        toggle(cx);
+    }
+}
+
 impl gpui_kit::Global for MiniPlayer {}
 
 /// Register the mini player's toggle; call once at startup.

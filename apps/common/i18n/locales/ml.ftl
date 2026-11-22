@@ -1257,3 +1257,4 @@ interface_notifications_track = ഇപ്പോൾ പ്ലേ ചെയ്യ�
 interface_notifications_track_description = ട്രാക്ക് മാറുമ്പോൾ ഏത് പാട്ട് തുടങ്ങി എന്ന് കാണിക്കുക.
 interface_notifications_track_in_app = ആപ്പിനുള്ളിൽ
 interface_notifications_track_desktop = ഡെസ്ക്ടോപ്പ് അറിയിപ്പ്
+player_on_other_display = മറ്റ് ഡിസ്പ്ലേയിൽ പ്ലേയർ

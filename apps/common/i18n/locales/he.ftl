@@ -1259,3 +1259,4 @@ interface_notifications_track = מתנגן עכשיו
 interface_notifications_track_description = הצגת השיר שהתחיל כשהרצועה מתחלפת.
 interface_notifications_track_in_app = בתוך האפליקציה
 interface_notifications_track_desktop = התראת שולחן עבודה
+player_on_other_display = הנגן במסך השני

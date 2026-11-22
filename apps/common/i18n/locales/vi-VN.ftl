@@ -1221,3 +1221,4 @@ interface_notifications_track = Đang phát
 interface_notifications_track_description = Báo bài nào bắt đầu khi đổi bài.
 interface_notifications_track_in_app = Trong ứng dụng
 interface_notifications_track_desktop = Thông báo trên màn hình
+player_on_other_display = Trình phát trên màn hình kia

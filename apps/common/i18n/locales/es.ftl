@@ -1260,3 +1260,4 @@ interface_notifications_track = Reproduciendo ahora
 interface_notifications_track_description = Avisa qué canción empezó al cambiar de pista.
 interface_notifications_track_in_app = En la app
 interface_notifications_track_desktop = Notificación del escritorio
+player_on_other_display = Reproductor en la otra pantalla

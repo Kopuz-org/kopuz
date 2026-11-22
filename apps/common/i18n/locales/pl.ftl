@@ -1275,3 +1275,4 @@ interface_notifications_track = Teraz odtwarzane
 interface_notifications_track_description = Pokazuje, jaki utwór się zaczął po zmianie.
 interface_notifications_track_in_app = W aplikacji
 interface_notifications_track_desktop = Powiadomienie systemowe
+player_on_other_display = Odtwarzacz na drugim ekranie

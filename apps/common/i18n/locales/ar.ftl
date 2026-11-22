@@ -1265,3 +1265,4 @@ interface_notifications_track = قيد التشغيل
 interface_notifications_track_description = إظهار الأغنية التي بدأت عند تغيّر المقطع.
 interface_notifications_track_in_app = داخل التطبيق
 interface_notifications_track_desktop = إشعار سطح المكتب
+player_on_other_display = المشغّل على الشاشة الأخرى
