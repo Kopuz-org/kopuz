@@ -521,25 +521,25 @@ pub struct Sheet {
     pub backdrop: Backdrop,
     pub cover: HeroSize,
     pub queue: QueueStyle,
-    pub lyrics: LyricsSize,
+    pub lyrics: LyricsScale,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LyricsSize {
-    Small,
-    #[default]
-    Normal,
-    Large,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct LyricsScale(pub u16);
+
+impl Default for LyricsScale {
+    fn default() -> Self {
+        Self(100)
+    }
 }
 
-impl LyricsSize {
+impl LyricsScale {
+    pub const MIN: u16 = 80;
+    pub const MAX: u16 = 300;
+
     pub fn scale(self) -> f32 {
-        match self {
-            Self::Small => 0.8,
-            Self::Normal => 1.,
-            Self::Large => 1.25,
-        }
+        f32::from(self.0.clamp(Self::MIN, Self::MAX)) / 100.
     }
 }
 

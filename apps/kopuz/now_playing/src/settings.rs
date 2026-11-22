@@ -1,14 +1,18 @@
 //! Settings → Interface: what the bar keeps in reach, and how the sheet is dressed.
 
 use components::format::t;
-use components::settings::{SettingRow, choice, section, toggle_row};
+use components::settings::{
+    SettingRow, SliderRow, choice, on_slider_change, section, slider_state, toggle_row,
+};
+use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::v_flex;
 use gpui_kit::{
-    App, AppContext as _, Context, IntoElement, ParentElement as _, Render, Styled, Window,
+    App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
+    Styled, Subscription, Window,
 };
 use store::LayoutModel;
 use store::layout::{
-    Backdrop, HeroSize, LyricsSize, PlayerSize, QueueStyle, Section as Group, SheetTab, Side,
+    Backdrop, HeroSize, LyricsScale, PlayerSize, QueueStyle, Section as Group, SheetTab, Side,
     TileSize,
 };
 
@@ -174,11 +178,31 @@ impl Render for PlayerSettings {
     }
 }
 
-struct SheetSettings;
+struct SheetSettings {
+    lyrics: Entity<SliderState>,
+    _subscriptions: Vec<Subscription>,
+}
 
 impl SheetSettings {
-    fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
-        Self
+    fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
+        let held = store::layout(cx).sheet.lyrics.0;
+        let lyrics = cx.new(|_| {
+            slider_state(
+                f32::from(LyricsScale::MIN),
+                f32::from(LyricsScale::MAX),
+                10.,
+                f32::from(held),
+            )
+        });
+        let moved = on_slider_change(&lyrics, cx, |value, cx| {
+            let percent =
+                value.clamp(f32::from(LyricsScale::MIN), f32::from(LyricsScale::MAX)) as u16;
+            LayoutModel::edit(cx, move |layout| layout.sheet.lyrics = LyricsScale(percent));
+        });
+        Self {
+            lyrics,
+            _subscriptions: vec![moved],
+        }
     }
 }
 
@@ -241,18 +265,11 @@ impl Render for SheetSettings {
                     .children(
                         SettingRow::new(t("interface_lyrics_size"))
                             .description(t("interface_lyrics_size_description"))
-                            .control(choice(
-                                "sheet-lyrics-size",
-                                &sheet.lyrics,
-                                vec![
-                                    (LyricsSize::Small, t("interface_player_cover_small")),
-                                    (LyricsSize::Normal, t("ui_normal")),
-                                    (LyricsSize::Large, t("interface_player_cover_large")),
-                                ],
-                                |value, cx| {
-                                    LayoutModel::edit(cx, |layout| layout.sheet.lyrics = value)
-                                },
-                            ))
+                            .control(
+                                SliderRow::new(&self.lyrics).readout(|value| {
+                                    SharedString::from(format!("{}%", value as i32))
+                                }),
+                            )
                             .shown(cx),
                     )
                     .children(
