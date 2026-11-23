@@ -18,11 +18,13 @@ use components::{Heading, SectionHeading, icons, style};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Anchor, AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _,
     Pixels, Render, SharedString, Styled, Subscription, Window, div, px,
 };
-use store::{DownloadsModel, ItemState, JobsModel, Navigator, Notices};
+use store::layout::NavPosition;
+use store::{DownloadsModel, ItemState, JobsModel, LayoutModel, Navigator, Notices};
 
 pub use banner::ConnectionBanner;
 pub use loader::Loader;
@@ -81,6 +83,7 @@ impl StatusCluster {
             cx.observe(&downloads, |this, _, cx| this.recount(cx)),
             cx.observe(&notices, |this, _, cx| this.recount(cx)),
             cx.observe(&navigator, |this, _, cx| this.honour_intent(cx)),
+            cx.observe(&LayoutModel::global(cx), |_, _, cx| cx.notify()),
             // A dialog over an open popover reads as two layers of chrome: the popover stands down.
             cx.subscribe(&list, |this, _, _: &downloads::Dismiss, cx| {
                 this.set_open(None, cx)
@@ -190,8 +193,14 @@ impl StatusCluster {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let open = self.open == Some(which);
+        let side = components::skin::nav_position(store::layout(cx).nav.position);
         Popover::new(id)
-            .anchor(Anchor::TopRight)
+            .map(|popover| match side {
+                NavPosition::Top => popover
+                    .anchor(Anchor::TopRight)
+                    .mt(style::chrome().button + px(6.)),
+                NavPosition::Left => popover.anchor(Anchor::BottomLeft),
+            })
             .p_0()
             .w(POPOVER_WIDTH)
             .rounded(style::radius_lg())
@@ -200,7 +209,12 @@ impl StatusCluster {
             .overflow_hidden()
             .open(open)
             .on_open_change(cx.listener(move |this, open: &bool, _, cx| {
-                this.set_open(open.then_some(which), cx);
+                let next = match open {
+                    true => Some(which),
+                    false if this.open == Some(which) => None,
+                    false => this.open,
+                };
+                this.set_open(next, cx);
             }))
             .trigger(self.trigger(id, glyph, tip, cx))
             .content(move |_, _, _| div().w_full().child(body.clone()))
