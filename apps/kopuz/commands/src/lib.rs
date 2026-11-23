@@ -153,7 +153,7 @@ fn item(command: &'static Command, target: &Target, cx: &App) -> PopupMenuItem {
         // Taking something off disk should not look like the item above it.
         .danger(command.danger)
         .on_click(move |_, window, cx| command.perform(target.clone(), window, cx))
-        .into()
+        .build(cx)
 }
 
 /// An icon-only button's tooltip: what it does, and the key that does it without the pointer.
