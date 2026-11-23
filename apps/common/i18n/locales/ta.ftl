@@ -430,6 +430,7 @@ made_for_you = உங்களுக்காக உருவாக்கப்�
 recently_added = சமீபத்தில் சேர்க்கப்பட்டது
 customize_home = முகப்பைத் தனிப்பயனாக்கு
 customize_sidebar = பக்கப்பட்டியைத் தனிப்பயனாக்கு…
+interface_sidebar = பக்கப்பட்டி
 done_editing = முடிந்தது
 reset_home = மீட்டமை
 hide_section = மறை

@@ -1,4 +1,4 @@
-//! Settings → Interface → Navigation: where the bar sits, what it holds, and where the app opens.
+//! Settings → Interface → Navigation and Sidebar: where the bar sits and where the app opens, then what the sidebar holds.
 
 use components::format::t;
 use components::settings::{SettingRow, choice, order_row, section, toggle_row};
@@ -18,6 +18,14 @@ pub fn register(cx: &mut App) {
         |window, cx| cx.new(|cx| Navigation::new(window, cx)).into(),
         cx,
     );
+    settings_interface::register(
+        "sidebar",
+        "interface_sidebar",
+        1,
+        None,
+        |window, cx| cx.new(|cx| Sidebar::new(window, cx)).into(),
+        cx,
+    );
 }
 
 struct Navigation;
@@ -30,13 +38,26 @@ impl Navigation {
     }
 }
 
-impl Render for Navigation {
+struct Sidebar;
+
+impl Sidebar {
+    fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
+        cx.observe(&LayoutModel::global(cx), |_, _, cx| cx.notify())
+            .detach();
+        Self
+    }
+}
+
+impl Render for Sidebar {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let nav = &store::layout(cx).nav;
-        let position = nav.position;
-        let start = nav.start.clone();
+        let layout = store::layout(cx);
+        let (pins, playlists) = (layout.panel.show_pins, layout.panel.show_playlists);
+        let nav = &layout.nav;
+        // A skin that sections the navigation fixes its entries, so only the strip's can be picked.
+        let strip = components::skin::arrangement().nav == components::skin::Nav::Strip;
         let rows = DESTINATIONS
             .iter()
+            .filter(|_| strip)
             .filter_map(|name| {
                 order_row(
                     "nav",
@@ -49,6 +70,36 @@ impl Render for Navigation {
                 .shown(cx)
             })
             .collect::<Vec<_>>();
+        v_flex().w_full().child(
+            section(t("interface_sidebar"))
+                .children(rows)
+                .children(
+                    toggle_row(
+                        "interface-panel-show-pins",
+                        t("interface_panel_show_pins"),
+                        pins,
+                        |on, cx| LayoutModel::edit(cx, |layout| layout.panel.show_pins = on),
+                    )
+                    .shown(cx),
+                )
+                .children(
+                    toggle_row(
+                        "interface-panel-show-playlists",
+                        t("interface_panel_show_playlists"),
+                        playlists,
+                        |on, cx| LayoutModel::edit(cx, |layout| layout.panel.show_playlists = on),
+                    )
+                    .shown(cx),
+                ),
+        )
+    }
+}
+
+impl Render for Navigation {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let nav = &store::layout(cx).nav;
+        let position = nav.position;
+        let start = nav.start.clone();
         v_flex()
             .w_full()
             .child(
@@ -110,8 +161,7 @@ impl Render for Navigation {
                                 },
                             ))
                             .shown(cx),
-                    )
-                    .children(rows),
+                    ),
             )
             .into_any_element()
     }

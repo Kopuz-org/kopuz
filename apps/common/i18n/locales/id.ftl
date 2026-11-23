@@ -394,6 +394,7 @@ made_for_you = Dibuat Untuk Anda
 recently_added = Baru saja Ditambahkan
 customize_home = Kustomisasikan Beranda
 customize_sidebar = Kustomisasikan bilah sisi…
+interface_sidebar = Bilah sisi
 done_editing = Selesai
 reset_home = Reset
 hide_section = Sembunyikan

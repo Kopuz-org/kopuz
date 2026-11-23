@@ -125,26 +125,6 @@ impl Render for PanelSettings {
                         .shown(cx),
                     )
                     .children(
-                        toggle_row(
-                            "interface-panel-show-pins",
-                            t("interface_panel_show_pins"),
-                            panel.show_pins,
-                            |on, cx| LayoutModel::edit(cx, |layout| layout.panel.show_pins = on),
-                        )
-                        .shown(cx),
-                    )
-                    .children(
-                        toggle_row(
-                            "interface-panel-show-playlists",
-                            t("interface_panel_show_playlists"),
-                            panel.show_playlists,
-                            |on, cx| {
-                                LayoutModel::edit(cx, |layout| layout.panel.show_playlists = on)
-                            },
-                        )
-                        .shown(cx),
-                    )
-                    .children(
                         SettingRow::new(t("interface_panel_side"))
                             .description(t("interface_panel_side_description"))
                             .control(choice(

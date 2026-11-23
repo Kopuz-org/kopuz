@@ -467,6 +467,7 @@ made_for_you = صُنع من أجلك
 recently_added = أُضيف مؤخراً
 customize_home = تخصيص الرئيسية
 customize_sidebar = تخصيص الشريط الجانبي…
+interface_sidebar = الشريط الجانبي
 done_editing = تم
 reset_home = إعادة تعيين
 hide_section = إخفاء

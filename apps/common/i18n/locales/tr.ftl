@@ -429,6 +429,7 @@ made_for_you = Sana özel
 recently_added = Son eklenenler
 customize_home = Ana sayfayı özelleştir
 customize_sidebar = Kenar çubuğunu özelleştir…
+interface_sidebar = Kenar çubuğu
 done_editing = Tamam
 reset_home = Sıfırla
 hide_section = Gizle

@@ -426,6 +426,7 @@ made_for_you = Gjort för dig
 recently_added = Nyligen tillagt
 customize_home = Anpassa startsidan
 customize_sidebar = Anpassa sidofältet…
+interface_sidebar = Sidofält
 done_editing = Klar
 reset_home = Återställ
 hide_section = Dölj

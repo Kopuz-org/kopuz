@@ -460,6 +460,7 @@ made_for_you = Feito para você
 recently_added = Adicionado recentemente
 customize_home = Personalizar início
 customize_sidebar = Personalizar barra lateral…
+interface_sidebar = Barra lateral
 done_editing = Concluído
 reset_home = Redefinir
 hide_section = Ocultar
