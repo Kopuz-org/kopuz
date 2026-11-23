@@ -6,7 +6,7 @@ mod general;
 
 use std::rc::Rc;
 
-use components::format::t;
+use components::format::{t, t_with};
 use components::{EmptyState, icons, style};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
@@ -142,11 +142,26 @@ fn reset_row(title: &'static str, group: Group, cx: &App) -> impl IntoElement {
         Button::new(SharedString::from(format!("reset-{title}")))
             .ghost()
             .small()
-            .label(t("reset_home"))
+            .label(t_with(
+                "reset_section",
+                &[("section", t(title).to_string().into())],
+            ))
             .icon(icons::icon(icons::REFRESH))
             .text_color(style::white(style::TEXT_SECONDARY, cx))
-            .on_click(move |_, _, cx| {
-                store::LayoutModel::global(cx).update(cx, |this, cx| this.reset(group, cx));
+            .on_click(move |_, window, cx| {
+                components::dialogs::confirm(
+                    components::dialogs::ConfirmKind::Reset,
+                    t("reset_home"),
+                    t_with(
+                        "reset_section_confirm",
+                        &[("section", t(title).to_string().into())],
+                    ),
+                    move |_, cx| {
+                        store::LayoutModel::global(cx).update(cx, |this, cx| this.reset(group, cx));
+                    },
+                    window,
+                    cx,
+                );
             }),
     )
 }
