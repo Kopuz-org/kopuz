@@ -3,12 +3,13 @@
 use api::ArtistInfoView;
 use components::format::t;
 use components::{
-    Badge, BadgeTone, Chip, ChipSize, ChipTone, Cover, Heading, SectionHeading, style,
+    Badge, BadgeTone, Chip, ChipSize, ChipTone, Cover, Heading, SectionHeading, sound_profile,
+    style,
 };
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, Context, IntoElement, ParentElement as _, SharedString, Styled as _, div, px,
+    AnyElement, App, Context, IntoElement, ParentElement as _, SharedString, Styled as _, div, px,
 };
 use store::{Navigator, Route};
 
@@ -23,12 +24,16 @@ const CLAMP_FITS_CHARS: usize = 320;
 const PICTURE: gpui_kit::Pixels = px(96.);
 
 impl ArtistDetail {
-    /// `None` while the source has nothing to say, or has no artist info at all.
+    /// What the source says of the artist, with what AudioMuse-AI hears above the source's similar artists; `None` when neither has anything.
     pub(super) fn about(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !capabilities(cx).artist_info {
-            return None;
-        }
-        let info = self.info.read(cx).value()?.clone()?;
+        let sound = self.sound_like(cx);
+        let info = match capabilities(cx).artist_info {
+            true => self.info.read(cx).value().cloned().flatten(),
+            false => None,
+        };
+        let Some(info) = info else {
+            return sound;
+        };
         let body = self.biography(&info, cx);
         Some(
             v_flex()
@@ -36,7 +41,50 @@ impl ArtistDetail {
                 .gap_4()
                 .child(SectionHeading::new(t("artist_about")).heading(Heading::Group))
                 .child(body)
+                .children(sound)
                 .children(similar_artists(&info))
+                .into_any_element(),
+        )
+    }
+
+    /// The artist's tags and moods over the library artists that sound like them; nothing while loading or empty.
+    fn sound_like(&self, cx: &App) -> Option<AnyElement> {
+        if !self.sound_on {
+            return None;
+        }
+        let sound = self.sound.read(cx).value()?;
+        let profile = sound_profile(sound);
+        let chips: Vec<Chip> = sound
+            .similar_artists
+            .iter()
+            .filter_map(|artist| {
+                let key = artist.key.clone()?;
+                Some(
+                    Chip::new(SharedString::from(format!("sound-{key}")))
+                        .label(SharedString::from(artist.name.clone()))
+                        .size(ChipSize::Medium)
+                        .on_click(move |_, _, cx| {
+                            Navigator::navigate(Route::Artist(key.clone()), cx)
+                        }),
+                )
+            })
+            .collect();
+        if profile.is_none() && chips.is_empty() {
+            return None;
+        }
+        let artists = (!chips.is_empty()).then(|| {
+            v_flex()
+                .w_full()
+                .gap_2()
+                .child(SectionHeading::new(t("sounds_like")).heading(Heading::Group))
+                .child(h_flex().w_full().flex_wrap().gap_2().children(chips))
+        });
+        Some(
+            v_flex()
+                .w_full()
+                .gap_4()
+                .children(profile)
+                .children(artists)
                 .into_any_element(),
         )
     }

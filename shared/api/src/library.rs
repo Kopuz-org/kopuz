@@ -313,6 +313,19 @@ pub struct ArtistInfoView {
     pub link: Option<String>,
 }
 
+/// What an album or an artist sounds like, from the AudioMuse-AI analysis; every list is empty without it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SoundView {
+    /// Albums of the library that sound alike, closest first; empty for an artist.
+    pub similar_albums: Vec<AlbumInfo>,
+    /// Artists of the library that sound alike, closest first; empty for an album.
+    pub similar_artists: Vec<SimilarArtist>,
+    /// Genre and style tags, strongest first.
+    pub tags: Vec<String>,
+    /// The few moods that stand out (`danceable`, `aggressive`, `happy`, `party`, `relaxed`, `sad`).
+    pub moods: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ArtistPage {
     pub artists: Vec<ArtistInfo>,

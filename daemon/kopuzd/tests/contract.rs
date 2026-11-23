@@ -2172,6 +2172,14 @@ async fn artists_are_keyed_by_identity_on_both_transports() {
             pair.wire.artist_info(ada.key.clone()).await.expect("wire"),
             "a source without artist info answers none the same way over the wire"
         );
+        assert_eq!(
+            pair.local
+                .artist_sound(ada.key.clone())
+                .await
+                .expect("local"),
+            pair.wire.artist_sound(ada.key.clone()).await.expect("wire"),
+            "without AudioMuse-AI the sound is empty the same way over the wire"
+        );
     }
     let linked = adas
         .iter()
@@ -2294,6 +2302,17 @@ async fn library_reads_agree_across_transports() {
             .await
             .expect("local"),
         pair.wire.album("no-such-album".into()).await.expect("wire"),
+    );
+
+    assert_eq!(
+        pair.local
+            .album_sound("no-such-album".into())
+            .await
+            .expect("local"),
+        pair.wire
+            .album_sound("no-such-album".into())
+            .await
+            .expect("wire"),
     );
 
     let local_tracks = pair

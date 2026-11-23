@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use server::audiomuse::{AudioMuse, AudioMuseError};
+use server::audiomuse::{AudioMuse, AudioMuseError, SimilarArtist};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 const TOKEN: &str = "test-token";
@@ -177,5 +177,106 @@ async fn a_live_instance_answers_every_call() {
             .expect("describe")
             .is_empty()
     );
-    assert!(!client.fingerprint(5).await.expect("fingerprint").is_empty());
+    let mix = client.fingerprint(5).await.expect("fingerprint");
+    assert!(!mix.is_empty());
+
+    let seed = &mix[0];
+    assert!(
+        !client
+            .similar_tracks(seed, 5)
+            .await
+            .expect("similar tracks")
+            .is_empty()
+    );
+    let score = client
+        .score(seed)
+        .await
+        .expect("score")
+        .expect("an analysed song");
+    assert!(!score.tags.is_empty() && !score.moods.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sound_calls_send_their_query_and_an_unanalysed_song_is_empty() {
+    let mut known = routes();
+    known.insert(
+        "/api/similar_tracks",
+        (
+            200,
+            r#"[{"item_id":"b","distance":0.1},{"item_id":"c","distance":0.4}]"#.to_string(),
+        ),
+    );
+    known.insert(
+        "/api/similar_artists",
+        (
+            200,
+            r#"[{"artist":"Boris","artist_id":"ar-2","divergence":0.2,"track_count":3}]"#
+                .to_string(),
+        ),
+    );
+    known.insert(
+        "/external/get_score",
+        (
+            200,
+            r#"{"item_id":"a","mood_vector":"metal:0.6","other_features":"sad:0.5"}"#.to_string(),
+        ),
+    );
+    let fake = FakeServer::start(known).await;
+    let client = AudioMuse::new(&fake.url, TOKEN).expect("client");
+
+    assert_eq!(
+        client.similar_tracks("a b", 20).await.expect("tracks"),
+        [("b".to_string(), 0.1), ("c".to_string(), 0.4)]
+    );
+    assert_eq!(
+        client.similar_artists("ar-1", 20).await.expect("artists"),
+        [SimilarArtist {
+            id: "ar-2".into(),
+            name: "Boris".into(),
+            divergence: 0.2,
+            tracks: Some(3),
+        }]
+    );
+    let score = client.score("a").await.expect("score").expect("analysed");
+    assert_eq!(score.tags, [("metal".to_string(), 0.6)]);
+    assert_eq!(score.moods, [("sad".to_string(), 0.5)]);
+
+    let lines: Vec<String> = fake
+        .requests()
+        .iter()
+        .map(|request| request.lines().next().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "GET /api/similar_tracks?item_id=a+b&n=20 HTTP/1.1",
+            "GET /api/similar_artists?artist_id=ar-1&n=20 HTTP/1.1",
+            "GET /external/get_score?id=a HTTP/1.1",
+        ]
+    );
+
+    let none = FakeServer::start(HashMap::new()).await;
+    let client = AudioMuse::new(&none.url, TOKEN).expect("client");
+    assert_eq!(client.score("a").await.expect("404"), None);
+    assert!(client.similar_tracks("a", 5).await.expect("404").is_empty());
+    assert!(
+        client
+            .similar_artists("a", 5)
+            .await
+            .expect("404")
+            .is_empty()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sound_answer_of_another_shape_is_malformed() {
+    let mut odd = routes();
+    odd.insert("/external/get_score", (200, "<html></html>".to_string()));
+    let fake = FakeServer::start(odd).await;
+    let client = AudioMuse::new(&fake.url, TOKEN).expect("client");
+
+    assert!(matches!(
+        client.score("a").await,
+        Err(AudioMuseError::Malformed)
+    ));
 }

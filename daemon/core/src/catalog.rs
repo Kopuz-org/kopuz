@@ -67,6 +67,7 @@ pub struct CatalogService {
     for_you: ForYouMixes,
     discover: DiscoverPicks,
     credentials: OnceLock<crate::CredentialStore>,
+    sounds: Mutex<audiomuse::sound::SoundCache>,
 }
 
 #[derive(Default)]
@@ -85,6 +86,7 @@ impl CatalogService {
             for_you: Mutex::default(),
             discover: Mutex::default(),
             credentials: OnceLock::new(),
+            sounds: Mutex::default(),
         })
     }
 
