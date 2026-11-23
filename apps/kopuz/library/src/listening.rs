@@ -4,8 +4,8 @@ use components::style;
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, Context, InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
-    StatefulInteractiveElement as _, Styled, Task, Window, div, px,
+    App, Context, IntoElement, ParentElement as _, Render, SharedString, Styled, Task, Window, div,
+    px,
 };
 use store::Link;
 
@@ -57,28 +57,23 @@ impl ListeningPanel {
         }));
     }
 
+    /// The span picker, a segmented control so the arrows and Tab reach it like any other.
     fn ranges(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        h_flex()
-            .gap_1()
-            .children(RANGES.iter().map(|(days, label)| {
+        let panel = cx.entity().downgrade();
+        components::Segmented::new("listening-range")
+            .segments(
+                RANGES
+                    .iter()
+                    .map(|(_, label)| components::Segment::new(*label).label(t(label))),
+            )
+            .selected(RANGES.iter().position(|(days, _)| *days == self.days))
+            .on_select(move |index, _, cx| {
+                let Some((days, _)) = RANGES.get(*index) else {
+                    return;
+                };
                 let days = *days;
-                let on = self.days == days;
-                div()
-                    .id(SharedString::from(format!("listening-range-{label}")))
-                    .px_3()
-                    .py_1()
-                    .rounded_full()
-                    .cursor_pointer()
-                    .text_xs()
-                    .map(|chip| match on {
-                        true => chip
-                            .bg(style::white(style::HOVER, cx))
-                            .text_color(cx.theme().foreground),
-                        false => chip.text_color(style::slate_400(cx)),
-                    })
-                    .on_click(cx.listener(move |this, _, _, cx| this.pick(days, cx)))
-                    .child(t(label))
-            }))
+                panel.update(cx, |this, cx| this.pick(days, cx)).ok();
+            })
     }
 
     fn chart(stats: &ListeningStats, days: Option<u32>, cx: &App) -> impl IntoElement + use<> {
