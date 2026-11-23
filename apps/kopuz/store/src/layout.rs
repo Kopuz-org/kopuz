@@ -583,7 +583,7 @@ impl HeroSize {
             Self::Small => 320.,
             Self::Medium => 420.,
             Self::Large => 540.,
-            Self::ExtraLarge => 680.,
+            Self::ExtraLarge => 960.,
         }
     }
 
@@ -592,7 +592,7 @@ impl HeroSize {
         match self {
             Self::Small | Self::Medium => 0.5,
             Self::Large => 0.58,
-            Self::ExtraLarge => 0.66,
+            Self::ExtraLarge => 0.72,
         }
     }
 }
