@@ -67,7 +67,8 @@ pub use prefs::{
     MAX_PREF_TOTAL_BYTES, MAX_PREF_VALUE_BYTES, PrefEntry,
 };
 pub use queue::{
-    QueueContext, QueueEdit, QueueItem, QueueMode, QueueSnapshot, QueueWindow, SetQueueRequest,
+    MixBasis, QueueContext, QueueEdit, QueueItem, QueueMode, QueueSnapshot, QueueWindow,
+    SetQueueRequest,
 };
 pub use radio::{RadioOrigin, RadioStationInfo, RadioStreamInfo};
 pub use schema::{
@@ -133,6 +134,8 @@ pub struct DaemonStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandAck {
     pub rev: u64,
+    /// For a queue built from a radio or mix: how the source picked its songs.
+    pub basis: Option<MixBasis>,
 }
 
 pub type EventStream = futures_util::stream::BoxStream<'static, ApiEvent>;

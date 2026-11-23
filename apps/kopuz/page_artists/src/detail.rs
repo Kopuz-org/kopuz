@@ -441,6 +441,7 @@ impl ArtistDetail {
         let capabilities = capabilities(cx);
         let artwork = self.artwork(cx);
         let artist = self.key.clone();
+        let radio_key = self.key.clone();
         let name = self.name(cx);
         let picture = Picture::new(artwork.as_ref(), Pictured::Artist(name.clone()));
         let menu = menus::menu_for(Target::Artist {
@@ -469,6 +470,9 @@ impl ArtistDetail {
                     .offline(self.offline)
                     .shuffle_play(commands::shuffle_play)
                     .play(commands::play_all)
+                    .artist_radio(move |_, _, cx| {
+                        actions::start_artist_radio(radio_key.clone(), cx)
+                    })
                     .download(commands::set_offline),
             )
             .into_any_element()

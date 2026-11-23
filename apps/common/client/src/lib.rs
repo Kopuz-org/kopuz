@@ -197,6 +197,7 @@ impl api::PlayerApi for GrpcApi {
         .map_err(wire_error)?;
         Ok(CommandAck {
             rev: response.get_ref().rev,
+            basis: None,
         })
     }
 
@@ -226,6 +227,7 @@ impl api::PlayerApi for GrpcApi {
             .map_err(wire_error)?;
         Ok(CommandAck {
             rev: ack.get_ref().rev,
+            basis: convert::mix_basis_from_proto(ack.get_ref().basis),
         })
     }
 
@@ -237,6 +239,7 @@ impl api::PlayerApi for GrpcApi {
             .map_err(wire_error)?;
         Ok(CommandAck {
             rev: ack.get_ref().rev,
+            basis: None,
         })
     }
 

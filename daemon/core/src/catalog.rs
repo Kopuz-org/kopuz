@@ -12,7 +12,7 @@ use api::{
     DiscoverRows, ForYou, ForYouUnavailable, ShelfLayout, Table,
 };
 use rand::seq::SliceRandom;
-use server::source::RadioPage;
+use server::source::{MixSeed, RadioPage};
 use server::ytmusic::discover::{
     BrowsePage, DiscoverHome, DiscoverItem, DiscoverShelf, ItemActions, LinkKind, PageHeader,
 };
@@ -30,6 +30,9 @@ mod artist_info;
 const MAX_REMEMBERED_TILES: usize = 4096;
 
 /// How many liked tracks seed the "For you" mix.
+/// Songs a sonic path steps through, both ends included.
+const SONIC_PATH_LEN: u32 = 25;
+
 const FOR_YOU_SEEDS: usize = 5;
 /// How many songs from the top of each seed's radio join it.
 const FOR_YOU_PER_RADIO: usize = 3;
@@ -766,13 +769,56 @@ impl CatalogService {
 
     pub async fn playlist_radio(&self, id: &str) -> Result<RadioPage, ApiError> {
         let source = self.source()?;
-        let mut page = source
+        let page = source
             .start_playlist_radio(id)
             .await
             .map_err(source_error)?;
+        Ok(self.listed_page(&*source, page))
+    }
+
+    pub async fn album_radio(&self, id: &str) -> Result<RadioPage, ApiError> {
+        self.mix(MixSeed::Album, &[id.to_string()]).await
+    }
+
+    pub async fn artist_radio(&self, artist: &str) -> Result<RadioPage, ApiError> {
+        let row = self.library.artist_row(artist).await?;
+        let source_id = row
+            .source_id
+            .ok_or_else(|| ApiError::not_found("the source does not know that artist"))?;
+        self.mix(MixSeed::Artist, &[source_id]).await
+    }
+
+    pub async fn mix_radio(&self, keys: &[String]) -> Result<RadioPage, ApiError> {
+        self.mix(MixSeed::Tracks, keys).await
+    }
+
+    pub async fn sonic_path(&self, from_key: &str, to_key: &str) -> Result<RadioPage, ApiError> {
+        let source = self.source()?;
+        let page = source
+            .sonic_path(from_key, to_key, SONIC_PATH_LEN)
+            .await
+            .map_err(source_error)?;
+        self.mix_page(&*source, page)
+    }
+
+    async fn mix(&self, seed: MixSeed, refs: &[String]) -> Result<RadioPage, ApiError> {
+        let source = self.source()?;
+        let page = source.start_mix(seed, refs).await.map_err(source_error)?;
+        self.mix_page(&*source, page)
+    }
+
+    /// A mix that found nothing is an error: an empty page would replace the queue with nothing.
+    fn mix_page(&self, source: &dyn MediaSource, page: RadioPage) -> Result<RadioPage, ApiError> {
+        if page.tracks.is_empty() {
+            return Err(ApiError::not_found("nothing to build a mix from"));
+        }
+        Ok(self.listed_page(source, page))
+    }
+
+    fn listed_page(&self, source: &dyn MediaSource, mut page: RadioPage) -> RadioPage {
         crate::wire::listed_by(source.source(), &mut page.tracks);
         self.library.register_transient(&page.tracks);
-        Ok(page)
+        page
     }
 
     pub async fn more_radio(&self, cursor: &str) -> Result<RadioPage, ApiError> {
@@ -1058,6 +1104,10 @@ pub trait CatalogQueue: Send + Sync {
     async fn track(&self, key: &str) -> Result<Option<reader::Track>, ApiError>;
     async fn track_radio(&self, key: &str) -> Result<RadioPage, ApiError>;
     async fn playlist_radio(&self, id: &str) -> Result<RadioPage, ApiError>;
+    async fn album_radio(&self, id: &str) -> Result<RadioPage, ApiError>;
+    async fn artist_radio(&self, artist: &str) -> Result<RadioPage, ApiError>;
+    async fn mix_radio(&self, keys: &[String]) -> Result<RadioPage, ApiError>;
+    async fn sonic_path(&self, from_key: &str, to_key: &str) -> Result<RadioPage, ApiError>;
     async fn more_radio(&self, cursor: &str) -> Result<RadioPage, ApiError>;
 }
 
@@ -1081,6 +1131,22 @@ impl CatalogQueue for CatalogService {
 
     async fn playlist_radio(&self, id: &str) -> Result<RadioPage, ApiError> {
         CatalogService::playlist_radio(self, id).await
+    }
+
+    async fn album_radio(&self, id: &str) -> Result<RadioPage, ApiError> {
+        CatalogService::album_radio(self, id).await
+    }
+
+    async fn artist_radio(&self, artist: &str) -> Result<RadioPage, ApiError> {
+        CatalogService::artist_radio(self, artist).await
+    }
+
+    async fn mix_radio(&self, keys: &[String]) -> Result<RadioPage, ApiError> {
+        CatalogService::mix_radio(self, keys).await
+    }
+
+    async fn sonic_path(&self, from_key: &str, to_key: &str) -> Result<RadioPage, ApiError> {
+        CatalogService::sonic_path(self, from_key, to_key).await
     }
 
     async fn more_radio(&self, cursor: &str) -> Result<RadioPage, ApiError> {

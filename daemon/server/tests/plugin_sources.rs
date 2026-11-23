@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use config::{MusicServer, MusicService};
 use db::Source;
-use server::source::{self, AuthOutcome, PlaylistOps, SourceError};
+use server::source::{self, AuthOutcome, MixBasis, MixSeed, PlaylistOps, SourceError};
 use server::sources::Sources;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -392,6 +392,162 @@ async fn a_sync_reports_the_servers_play_stats() {
             .any(|r| r.starts_with("/rest/getAlbum.view"))
     );
 }
+#[tokio::test(flavor = "multi_thread")]
+async fn an_album_mix_follows_the_sonic_neighbours_of_its_songs() {
+    let song = |id: &str| serde_json::json!({ "id": id, "title": id });
+    let mut routes = mix_routes(true);
+    routes.insert(
+        "/rest/getSonicSimilarTracks.view",
+        subsonic_ok(serde_json::json!({
+            "sonicMatch": [
+                { "entry": song("s-1"), "similarity": 0.9 },
+                { "entry": song("s-9"), "similarity": 0.8 }
+            ]
+        })),
+    );
+    let server = FakeServer::start(routes).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, &server.url);
+    let src = source::resolve(db, &sources, &active);
+
+    let caps = src.capabilities();
+    assert!(caps.radio.album && caps.radio.artist && caps.radio.tracks);
+    let page = src
+        .start_mix(MixSeed::Album, &["al-1".to_string()])
+        .await
+        .expect("a mix");
+
+    assert_eq!(
+        keys_of(&page),
+        ["s-9"],
+        "the album's own songs are left out"
+    );
+    assert_eq!(page.basis, Some(MixBasis::Sonic));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_artist_mix_reads_the_artists_albums() {
+    let song = |id: &str| serde_json::json!({ "id": id, "title": id });
+    let mut routes = mix_routes(true);
+    routes.insert(
+        "/rest/getArtist.view",
+        subsonic_ok(serde_json::json!({
+            "artist": { "id": "ar-1", "album": [{ "id": "al-1", "name": "First" }] }
+        })),
+    );
+    routes.insert(
+        "/rest/getSonicSimilarTracks.view",
+        subsonic_ok(serde_json::json!({
+            "sonicMatch": [{ "entry": song("s-9"), "similarity": 0.8 }]
+        })),
+    );
+    let server = FakeServer::start(routes).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, &server.url);
+    let src = source::resolve(db, &sources, &active);
+
+    let page = src
+        .start_mix(MixSeed::Artist, &["ar-1".to_string()])
+        .await
+        .expect("a mix");
+
+    assert_eq!(keys_of(&page), ["s-9"]);
+    assert_eq!(page.basis, Some(MixBasis::Sonic));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_sonic_lookup_falls_back_to_tags_and_says_so() {
+    let song = |id: &str| serde_json::json!({ "id": id, "title": id });
+    let mut routes = mix_routes(true);
+    routes.insert(
+        "/rest/getSimilarSongs.view",
+        subsonic_ok(serde_json::json!({
+            "similarSongs": { "song": [song("s-7"), song("s-1")] }
+        })),
+    );
+    let server = FakeServer::start(routes).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, &server.url);
+    let src = source::resolve(db, &sources, &active);
+
+    let page = src
+        .start_mix(MixSeed::Tracks, &["s-1".to_string()])
+        .await
+        .expect("a mix");
+
+    assert_eq!(keys_of(&page), ["s-7"], "the seed is left out");
+    assert_eq!(page.basis, Some(MixBasis::Metadata));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_without_sonic_similarity_gives_no_basis() {
+    let song = |id: &str| serde_json::json!({ "id": id, "title": id });
+    let mut routes = mix_routes(false);
+    routes.insert(
+        "/rest/getSimilarSongs.view",
+        subsonic_ok(serde_json::json!({ "similarSongs": { "song": [song("s-7")] } })),
+    );
+    let server = FakeServer::start(routes).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, &server.url);
+    let src = source::resolve(db, &sources, &active);
+
+    let page = src
+        .start_mix(MixSeed::Tracks, &["s-1".to_string()])
+        .await
+        .expect("a mix");
+
+    assert_eq!(keys_of(&page), ["s-7"]);
+    assert_eq!(page.basis, None);
+    let radio = src.start_radio("s-1").await.expect("a radio");
+    assert_eq!(radio.basis, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sonic_path_asks_for_both_ends_and_a_count() {
+    let song = |id: &str| serde_json::json!({ "id": id, "title": id });
+    let mut routes = mix_routes(true);
+    routes.insert(
+        "/rest/findSonicPath.view",
+        subsonic_ok(serde_json::json!({
+            "sonicMatch": [
+                { "entry": song("s-1"), "similarity": 1.0 },
+                { "entry": song("s-5"), "similarity": 0.8 },
+                { "entry": song("s-2"), "similarity": 1.0 }
+            ]
+        })),
+    );
+    let server = FakeServer::start(routes).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, &server.url);
+    let src = source::resolve(db, &sources, &active);
+
+    assert!(src.capabilities().sonic_path);
+    let page = src.sonic_path("s-1", "s-2", 25).await.expect("a path");
+
+    assert_eq!(keys_of(&page), ["s-1", "s-5", "s-2"]);
+    assert_eq!(page.basis, Some(MixBasis::Sonic));
+    let requests = server.requests();
+    let asked = requests
+        .iter()
+        .find(|r| r.starts_with("/rest/findSonicPath.view"))
+        .expect("asked");
+    for param in ["startSongId=s-1", "endSongId=s-2", "count=25"] {
+        assert!(asked.contains(param), "{param} in {asked}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sonic_path_needs_the_extension() {
+    let server = FakeServer::start(mix_routes(false)).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, &server.url);
+    let src = source::resolve(db, &sources, &active);
+
+    let err = src.sonic_path("s-1", "s-2", 25).await.unwrap_err();
+    assert!(matches!(err, SourceError::Unsupported(_)), "{err:?}");
+}
+
 #[test]
 fn every_built_in_service_has_a_plugin() {
     let registry = server::plugins::registry();
@@ -568,4 +724,25 @@ async fn playlist_radio_plays_what_sounds_like_the_playlist() {
         .filter(|r| r.starts_with("/rest/getSonicSimilarTracks.view"))
         .count();
     assert_eq!(asked, 2, "one sonic lookup per seed");
+}
+
+fn mix_routes(extension: bool) -> HashMap<&'static str, (u16, String)> {
+    let mut routes = subsonic_library();
+    let advertised = if extension {
+        serde_json::json!([{ "name": "sonicSimilarity", "versions": [1] }])
+    } else {
+        serde_json::json!([])
+    };
+    routes.insert(
+        "/rest/getOpenSubsonicExtensions.view",
+        subsonic_ok(serde_json::json!({ "openSubsonicExtensions": advertised })),
+    );
+    routes
+}
+
+fn keys_of(page: &source::RadioPage) -> Vec<String> {
+    page.tracks
+        .iter()
+        .map(|t| t.id.key().into_owned())
+        .collect()
 }

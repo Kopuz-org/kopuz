@@ -9,19 +9,22 @@ mod stats;
 
 use std::collections::HashSet;
 
-use client::{SubsonicClient, SubsonicPlaylist, SubsonicSong};
+use client::{Similar, SubsonicClient, SubsonicPlaylist, SubsonicSong};
 use kopuz_plugin_sdk::{
     Album, ArtistCredit, ArtistInfo, ArtistListing, AuthOutcome, AuthSession, Connection,
-    LibrarySnapshot, PlaylistEntry, PlaylistMeta, RadioStation, RemotePlayQueue, Result, Source,
-    SourceError, StreamInfo, StreamQuality, Track, TrackPage, cover,
+    LibrarySnapshot, MixBasis, MixSeed, PlaylistEntry, PlaylistMeta, RadioStation, RemotePlayQueue,
+    Result, Source, SourceError, StreamInfo, StreamQuality, Track, TrackPage, cover,
 };
 
 /// How many neighbours a radio start asks for.
 const SIMILAR_SONGS_COUNT: usize = 50;
 
-/// How many playlist songs seed a playlist radio. Each is one similarity
+/// How many songs seed a playlist radio or mix. Each is one similarity
 /// lookup, and the metadata fallback can take seconds per lookup.
-const PLAYLIST_RADIO_SEEDS: usize = 3;
+const MIX_SEEDS: usize = 3;
+
+/// How many of an artist's albums an artist mix reads songs from, spread over the discography.
+const ARTIST_MIX_ALBUMS: usize = 5;
 
 /// Albums per `getAlbumList2` page during a sync.
 const ALBUM_PAGE: usize = 250;
@@ -144,7 +147,7 @@ fn spread<T>(items: &[T], count: usize) -> Vec<&T> {
         .collect()
 }
 
-/// Each seed's neighbours interleaved by rank, without the playlist's own songs and without repeats.
+/// Each seed's neighbours interleaved by rank, without the seed songs and without repeats.
 fn blend(
     playlist: &HashSet<String>,
     lists: Vec<Vec<SubsonicSong>>,
@@ -166,6 +169,15 @@ fn blend(
     }
     blended.truncate(limit);
     blended
+}
+
+/// The strongest basis of several lookups: sonic if any was, else metadata if any was, else none.
+fn strongest(bases: impl IntoIterator<Item = Option<MixBasis>>) -> Option<MixBasis> {
+    let bases: Vec<MixBasis> = bases.into_iter().flatten().collect();
+    if bases.contains(&MixBasis::Sonic) {
+        return Some(MixBasis::Sonic);
+    }
+    bases.first().copied()
 }
 
 /// Plain text of a Last.fm biography: its "Read more" anchor goes with its label, other tags only lose their markup.
@@ -203,6 +215,68 @@ fn plain_biography(html: &str) -> String {
 }
 
 impl Subsonic {
+    /// Songs like the seeds', blended by rank and without the seeds themselves.
+    fn mix_of(&self, ids: &[String]) -> TrackPage {
+        let excluded: HashSet<String> = ids.iter().cloned().collect();
+        let per_seed = SIMILAR_SONGS_COUNT.div_ceil(MIX_SEEDS);
+
+        let mut bases = Vec::new();
+        let mut lists = Vec::new();
+        for seed in spread(ids, MIX_SEEDS) {
+            match self.client.get_similar_songs(seed, per_seed) {
+                Ok(similar) => {
+                    bases.push(similar.basis);
+                    lists.push(similar.songs);
+                }
+                Err(e) => kopuz_plugin_sdk::debug!("mix seed {seed} failed: {e}"),
+            }
+        }
+
+        TrackPage {
+            tracks: blend(&excluded, lists, SIMILAR_SONGS_COUNT)
+                .into_iter()
+                .map(|song| self.track(song))
+                .collect(),
+            next: None,
+            basis: strongest(bases),
+        }
+    }
+
+    /// The songs of each album, which a mix seeds from; an album that cannot be read is skipped.
+    fn album_song_ids(&self, album_refs: &[String]) -> Vec<String> {
+        album_refs
+            .iter()
+            .flat_map(|stored| {
+                let id = album_item_id(stored);
+                self.client.get_album_songs(id).unwrap_or_else(|e| {
+                    kopuz_plugin_sdk::debug!("mix album {id} failed: {e}");
+                    Vec::new()
+                })
+            })
+            .map(|song| song.id)
+            .collect()
+    }
+
+    /// Songs from a few of each artist's albums, spread over the discography.
+    fn artist_song_ids(&self, artist_ids: &[String]) -> Vec<String> {
+        let mut ids = Vec::new();
+        for artist_id in artist_ids {
+            let albums = match self.client.get_artist_albums(artist_id) {
+                Ok(albums) => albums,
+                Err(e) => {
+                    kopuz_plugin_sdk::debug!("mix artist {artist_id} failed: {e}");
+                    continue;
+                }
+            };
+            let album_refs: Vec<String> = spread(&albums, ARTIST_MIX_ALBUMS)
+                .into_iter()
+                .map(|album| album.id.clone())
+                .collect();
+            ids.extend(self.album_song_ids(&album_refs));
+        }
+        ids
+    }
+
     fn track(&self, song: SubsonicSong) -> Track {
         song_to_track(&self.service, song, None)
     }
@@ -449,9 +523,10 @@ impl Source for Subsonic {
     /// user off the track they started from. A seed the server cannot look up
     /// is not fatal: the neighbours still make a queue.
     fn start_radio(&self, seed_ref: &str) -> Result<TrackPage> {
-        let similar: Vec<_> = self
+        let Similar { songs, basis } = self
             .client
-            .get_similar_songs(seed_ref, SIMILAR_SONGS_COUNT)?
+            .get_similar_songs(seed_ref, SIMILAR_SONGS_COUNT)?;
+        let similar: Vec<_> = songs
             .into_iter()
             .filter(|song| song.id != seed_ref)
             .collect();
@@ -466,41 +541,48 @@ impl Source for Subsonic {
             kopuz_plugin_sdk::debug!("radio seed {seed_ref} lookup failed: {e}");
             None
         });
-        Ok(TrackPage::last(
-            seed.into_iter()
+        Ok(TrackPage {
+            tracks: seed
+                .into_iter()
                 .chain(similar)
                 .map(|song| self.track(song))
                 .collect(),
-        ))
+            next: None,
+            basis,
+        })
     }
 
     /// Songs like the playlist's, by the same similarity track radio uses
     /// (AudioMuse-AI's analysis where the server has it). A seed whose lookup
     /// fails is skipped; the others still make a mix.
     fn start_playlist_radio(&self, playlist_ref: &str) -> Result<TrackPage> {
-        let entries = self.client.get_playlist_entries(playlist_ref)?;
-        let playlist: HashSet<String> = entries.iter().map(|song| song.id.clone()).collect();
-
-        let per_seed = SIMILAR_SONGS_COUNT.div_ceil(PLAYLIST_RADIO_SEEDS);
-        let lists = spread(&entries, PLAYLIST_RADIO_SEEDS)
+        let ids: Vec<String> = self
+            .client
+            .get_playlist_entries(playlist_ref)?
             .into_iter()
-            .filter_map(
-                |seed| match self.client.get_similar_songs(&seed.id, per_seed) {
-                    Ok(songs) => Some(songs),
-                    Err(e) => {
-                        kopuz_plugin_sdk::debug!("playlist radio seed {} failed: {e}", seed.id);
-                        None
-                    }
-                },
-            )
+            .map(|song| song.id)
             .collect();
+        Ok(self.mix_of(&ids))
+    }
 
-        Ok(TrackPage::last(
-            blend(&playlist, lists, SIMILAR_SONGS_COUNT)
-                .into_iter()
-                .map(|song| self.track(song))
-                .collect(),
-        ))
+    fn start_mix(&self, seed: MixSeed, refs: &[String]) -> Result<TrackPage> {
+        let ids = match seed {
+            MixSeed::Tracks => refs.to_vec(),
+            MixSeed::Album => self.album_song_ids(refs),
+            MixSeed::Artist => self.artist_song_ids(refs),
+        };
+        Ok(self.mix_of(&ids))
+    }
+
+    fn sonic_path(&self, from_id: &str, to_id: &str, count: u32) -> Result<TrackPage> {
+        let songs = self
+            .client
+            .find_sonic_path(from_id, to_id, count as usize)?;
+        Ok(TrackPage {
+            tracks: songs.into_iter().map(|song| self.track(song)).collect(),
+            next: None,
+            basis: Some(MixBasis::Sonic),
+        })
     }
 
     fn save_play_queue(
@@ -566,6 +648,33 @@ mod tests {
             "coverArt": "al-1_5f3a",
         }))
         .expect("valid Subsonic song")
+    }
+
+    #[test]
+    fn a_mix_is_sonic_if_any_seed_was_else_metadata_else_none() {
+        let (sonic, meta) = (Some(MixBasis::Sonic), Some(MixBasis::Metadata));
+        assert_eq!(strongest([meta, sonic, None]), sonic);
+        assert_eq!(strongest([None, meta]), meta);
+        assert_eq!(strongest([None, None]), None);
+        assert_eq!(strongest([]), None);
+    }
+
+    #[test]
+    fn seeds_spread_over_the_whole_list() {
+        let items: Vec<u32> = (0..10).collect();
+        assert_eq!(spread(&items, 3), [&0, &3, &6]);
+        assert_eq!(spread(&items[..2], 3), [&0, &1]);
+    }
+
+    #[test]
+    fn a_blend_leaves_out_its_seeds_and_repeats() {
+        let seeds: HashSet<String> = ["a".to_string()].into();
+        let lists = vec![
+            vec![song("a", None), song("b", None), song("c", None)],
+            vec![song("b", None), song("d", None)],
+        ];
+        let ids: Vec<String> = blend(&seeds, lists, 10).into_iter().map(|s| s.id).collect();
+        assert_eq!(ids, ["b", "d", "c"]);
     }
 
     #[test]

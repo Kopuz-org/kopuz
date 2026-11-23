@@ -32,7 +32,10 @@ impl Session {
         if queue_changed && matches!(self.intent, PlaybackIntent::Committed { .. }) {
             self.prefetch_next();
         }
-        CommandAck { rev: self.rev }
+        CommandAck {
+            rev: self.rev,
+            basis: None,
+        }
     }
 
     pub(super) fn album_context_for_token(&self, token: u64) -> bool {

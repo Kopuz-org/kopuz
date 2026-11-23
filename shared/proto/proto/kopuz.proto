@@ -93,7 +93,7 @@ service Kopuz {
   rpc GetDownloads(GetDownloadsRequest) returns (DownloadList);
   rpc GetConfig(GetConfigRequest) returns (ConfigView);
 
-  rpc SetQueue(SetQueueRequest) returns (MutationResult);
+  rpc SetQueue(SetQueueRequest) returns (SetQueueResult);
   rpc EditQueue(QueueEditRequest) returns (MutationResult);
   rpc GetExternalDevices(ExternalDevicesRequest) returns (ExternalDeviceList);
   rpc GetOutputDevices(GetOutputDevicesRequest) returns (OutputDeviceList);
@@ -256,6 +256,18 @@ message SetVersion {
 message MutationResult {
   // State revision containing the mutation's effect.
   uint64 rev = 1;
+}
+
+// How a radio or mix found its songs; unspecified for a queue that is neither.
+enum MixBasis {
+  MIX_BASIS_UNSPECIFIED = 0;
+  MIX_BASIS_SONIC = 1;
+  MIX_BASIS_METADATA = 2;
+}
+
+message SetQueueResult {
+  uint64 rev = 1;
+  MixBasis basis = 2;
 }
 
 // ---------------- events ----------------
@@ -552,6 +564,15 @@ message QueueContext {
     Key track_radio = 8;
     Id playlist_radio = 9;
     string artist_key = 10;
+    // The source's mix seeded by an album, an artist, or several tracks.
+    Id album_radio = 11;
+    Key artist_radio = 12;
+    TrackKeys mix_radio = 13;
+    SonicPath sonic_path = 14;
+  }
+  message SonicPath {
+    string from = 1;
+    string to = 2;
   }
   message TrackKeys {
     repeated string keys = 1;
