@@ -251,6 +251,7 @@ impl MediaSource for NextcloudSource {
             albums: out_albums,
             tracks: out_tracks,
             artists: Vec::new(),
+            track_stats: Vec::new(),
         })
     }
 

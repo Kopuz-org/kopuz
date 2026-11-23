@@ -144,6 +144,7 @@ async fn the_subsonic_plugin_syncs_a_library_through_the_facade() {
     assert!(caps.sync && caps.downloads && caps.play_queue);
     assert!(caps.radio.track && !caps.radio.playlist);
     assert_eq!(caps.playlists, PlaylistOps::Reorder);
+    assert!(caps.ratings);
 
     assert_eq!(src.validate().await, AuthOutcome::Valid);
 
@@ -319,6 +320,78 @@ async fn a_playlist_delete_lands_on_the_server() {
     assert!(deletes[0].contains("id=pl-1"), "{}", deletes[0]);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_custom_server_reports_ratings_too() {
+    let server = FakeServer::start(subsonic_library()).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Custom, &server.url);
+
+    assert!(
+        source::resolve(db, &sources, &active)
+            .capabilities()
+            .ratings
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rating_lands_on_the_server() {
+    let mut routes = subsonic_library();
+    routes.insert("/rest/setRating.view", subsonic_ok(serde_json::json!({})));
+    let server = FakeServer::start(routes).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, &server.url);
+    let src = source::resolve(db, &sources, &active);
+
+    src.set_rating("s-1", 4).await.expect("rated");
+    src.set_rating("s-1", 0).await.expect("cleared");
+
+    let ratings: Vec<String> = server
+        .requests()
+        .into_iter()
+        .filter(|r| r.starts_with("/rest/setRating.view"))
+        .collect();
+    assert_eq!(ratings.len(), 2, "requests: {:?}", server.requests());
+    assert!(ratings[0].contains("id=s-1") && ratings[0].contains("rating=4"));
+    assert!(ratings[1].contains("rating=0"), "{}", ratings[1]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sync_reports_the_servers_play_stats() {
+    let mut routes = subsonic_library();
+    routes.insert(
+        "/rest/getAlbum.view",
+        subsonic_ok(serde_json::json!({
+            "album": { "song": [{
+                "id": "s-1", "title": "One", "playCount": 3,
+                "played": "2026-11-20T18:04:11.123Z", "userRating": 5
+            }] }
+        })),
+    );
+    let server = FakeServer::start(routes).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, &server.url);
+    let src = source::resolve(db, &sources, &active);
+
+    let library = src.fetch_library().await.expect("library");
+
+    assert_eq!(library.tracks.len(), 1);
+    assert_eq!(library.tracks[0].id.uid(), "subsonic:s-1");
+    assert_eq!(
+        library.track_stats,
+        [db::ServerTrackStats {
+            track_key: "s-1".into(),
+            play_count: Some(3),
+            last_played_at: Some(1_795_197_851),
+            rating: Some(5),
+        }]
+    );
+    assert!(
+        server
+            .requests()
+            .iter()
+            .any(|r| r.starts_with("/rest/getAlbum.view"))
+    );
+}
 #[test]
 fn every_built_in_service_has_a_plugin() {
     let registry = server::plugins::registry();

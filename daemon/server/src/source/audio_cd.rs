@@ -185,5 +185,6 @@ pub(super) fn snapshot(disc: crate::audio_cd::Disc) -> LibrarySnapshot {
         }],
         tracks,
         artists: Vec::new(),
+        track_stats: Vec::new(),
     }
 }
