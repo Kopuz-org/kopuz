@@ -75,8 +75,10 @@ impl BatchDialog {
         self.saving = true;
         self.failure = None;
         cx.notify();
+        let total = patches.len();
         self._save = Some(cx.spawn_in(window, async move |this, cx| {
             let mut failure = None;
+            let mut saved = 0;
             for patch in patches {
                 let Ok(call) = this.update(cx, |_, cx| {
                     Link::global(cx)
@@ -84,9 +86,12 @@ impl BatchDialog {
                 }) else {
                     return;
                 };
-                if let Err(error) = call.await {
-                    failure = Some(error);
-                    break;
+                match call.await {
+                    Ok(_) => saved += 1,
+                    Err(error) => {
+                        failure = Some(error);
+                        break;
+                    }
                 }
             }
             this.update_in(cx, |this, window, cx| {
@@ -94,7 +99,17 @@ impl BatchDialog {
                 match failure {
                     // A write that failed partway leaves the rest untouched, so the box stays open.
                     Some(error) => {
-                        let reason = store::human(&error);
+                        let reason = match saved {
+                            0 => store::human(&error),
+                            _ => t_with(
+                                "metadata_batch_partial",
+                                &[
+                                    ("saved", saved.into()),
+                                    ("total", total.into()),
+                                    ("error", store::human(&error).to_string().into()),
+                                ],
+                            ),
+                        };
                         this.failure = Some(reason.clone());
                         Notices::push(Notice::failure(&error, reason), cx);
                         cx.notify();

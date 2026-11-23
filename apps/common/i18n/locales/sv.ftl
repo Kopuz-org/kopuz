@@ -740,6 +740,7 @@ waiting_for_browser = Waiting for your browser…
 signed_in = Signed in
 metadata_number_invalid = Enter a number, or leave it empty to clear the tag.
 metadata_batch_keep = Leave unchanged
+metadata_batch_partial = Saved { $saved } of { $total } tracks, then: { $error }
 metadata_batch_count =
     { $count ->
         [one] Editing { $count } track
