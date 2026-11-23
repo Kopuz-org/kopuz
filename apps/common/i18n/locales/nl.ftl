@@ -1266,3 +1266,7 @@ listening_top_albums = Topalbums
 interface_panel_show_pins = Vastgezette items tonen
 interface_panel_show_playlists = Afspeellijsten tonen
 interface_panel_no_pins = Nog niets vastgezet. Klik met rechts op een album, artiest of afspeellijst en kies Vastzetten in zijbalk.
+interface_nav_controls_up_top = Bediening bovenaan
+interface_nav_controls_up_top_description = Zet terug, vooruit, zoeken en de statusknoppen in een smalle balk bovenaan en houd de zijbalk voor plekken.
+toggle_sidebar = Zijbalk tonen of verbergen
+listening_nothing_yet = Nog niets afgespeeld in deze periode. Afspeelbeurten tellen vanaf deze versie.

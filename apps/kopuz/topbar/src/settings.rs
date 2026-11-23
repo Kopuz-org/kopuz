@@ -1,7 +1,7 @@
 //! Settings → Interface → Navigation: where the bar sits, what it holds, and where the app opens.
 
 use components::format::t;
-use components::settings::{SettingRow, choice, order_row, section};
+use components::settings::{SettingRow, choice, order_row, section, toggle_row};
 use gpui_kit::component::v_flex;
 use gpui_kit::{
     App, AppContext as _, Context, IntoElement, ParentElement as _, Render, Styled, Window,
@@ -73,6 +73,25 @@ impl Render for Navigation {
                                         },
                                     ))
                                     .shown(cx)
+                            })
+                            .flatten(),
+                    )
+                    .children(
+                        (position == NavPosition::Left
+                            && components::skin::arrangement().nav == components::skin::Nav::Strip)
+                            .then(|| {
+                                toggle_row(
+                                    "interface-nav-controls-up-top",
+                                    t("interface_nav_controls_up_top"),
+                                    nav.controls_up_top,
+                                    |on, cx| {
+                                        LayoutModel::edit(cx, |layout| {
+                                            layout.nav.controls_up_top = on
+                                        })
+                                    },
+                                )
+                                .description(t("interface_nav_controls_up_top_description"))
+                                .shown(cx)
                             })
                             .flatten(),
                     )

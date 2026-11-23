@@ -206,6 +206,8 @@ pub struct Nav {
     pub order: Vec<String>,
     pub hidden: Vec<String>,
     pub start: String,
+    pub controls_up_top: bool,
+    pub rail_hidden: bool,
 }
 
 impl Default for Nav {
@@ -219,6 +221,8 @@ impl Default for Nav {
                 .map(|name| name.to_string())
                 .collect(),
             start: "home".into(),
+            controls_up_top: false,
+            rail_hidden: false,
         }
     }
 }

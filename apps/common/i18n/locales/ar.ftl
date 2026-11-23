@@ -1278,3 +1278,7 @@ listening_top_albums = أكثر الألبومات استماعًا
 interface_panel_show_pins = إظهار العناصر المثبّتة
 interface_panel_show_playlists = إظهار قوائم التشغيل
 interface_panel_no_pins = لا شيء مثبّت بعد. انقر بزر الفأرة الأيمن على ألبوم أو فنان أو قائمة واختر تثبيت في الشريط الجانبي.
+interface_nav_controls_up_top = عناصر التحكم في الأعلى
+interface_nav_controls_up_top_description = ضع الرجوع والتقدم والبحث وأزرار الحالة في شريط رفيع في الأعلى، واترك الشريط الجانبي للأماكن.
+toggle_sidebar = إظهار الشريط الجانبي أو إخفاؤه
+listening_nothing_yet = لم يُشغَّل شيء في هذه الفترة بعد. تُحسب مرات التشغيل من هذا الإصدار.

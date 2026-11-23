@@ -1270,3 +1270,7 @@ listening_top_albums = Álbuns mais ouvidos
 interface_panel_show_pins = Mostrar afixados
 interface_panel_show_playlists = Mostrar listas
 interface_panel_no_pins = Nada afixado. Clique com o botão direito num álbum, artista ou lista e escolha Afixar na barra lateral.
+interface_nav_controls_up_top = Controlos no topo
+interface_nav_controls_up_top_description = Coloque recuar, avançar, pesquisa e os botões de estado numa barra fina no topo e deixe a barra lateral para os locais.
+toggle_sidebar = Mostrar ou ocultar a barra lateral
+listening_nothing_yet = Nada tocado neste período. As reproduções contam a partir desta versão.

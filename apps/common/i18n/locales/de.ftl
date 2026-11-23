@@ -1241,3 +1241,7 @@ listening_top_albums = Top-Alben
 interface_panel_show_pins = Angeheftetes anzeigen
 interface_panel_show_playlists = Playlists anzeigen
 interface_panel_no_pins = Noch nichts angeheftet. Rechtsklick auf ein Album, einen Künstler oder eine Playlist und An Seitenleiste anheften wählen.
+interface_nav_controls_up_top = Steuerung oben
+interface_nav_controls_up_top_description = Zurück, Vor, Suche und Statusknöpfe in eine schmale Leiste oben legen und die Seitenleiste für Orte nutzen.
+toggle_sidebar = Seitenleiste ein- oder ausblenden
+listening_nothing_yet = In diesem Zeitraum wurde noch nichts gespielt. Wiedergaben zählen ab dieser Version.

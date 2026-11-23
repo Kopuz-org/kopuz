@@ -179,13 +179,23 @@ impl Render for ListeningPanel {
                 .when(!stats.days.is_empty(), |body| {
                     body.child(Self::chart(stats, cx))
                 })
-                .child(
-                    h_flex()
-                        .flex_wrap()
-                        .gap_6()
-                        .child(Self::top(t("listening_top_artists"), &stats.artists, cx))
-                        .child(Self::top(t("listening_top_albums"), &stats.albums, cx)),
-                )
+                .when(stats.plays == 0, |body| {
+                    body.child(
+                        div()
+                            .text_sm()
+                            .text_color(style::slate_400(cx))
+                            .child(t("listening_nothing_yet")),
+                    )
+                })
+                .when(stats.plays > 0, |body| {
+                    body.child(
+                        h_flex()
+                            .flex_wrap()
+                            .gap_6()
+                            .child(Self::top(t("listening_top_artists"), &stats.artists, cx))
+                            .child(Self::top(t("listening_top_albums"), &stats.albums, cx)),
+                    )
+                })
         });
         v_flex()
             .w_full()
