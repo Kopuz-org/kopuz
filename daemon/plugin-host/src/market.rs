@@ -315,7 +315,7 @@ mod tests {
         id = "bandcamp"
         name = "Bandcamp"
         version = "0.2.0"
-        api = "0.1"
+        api = "0.2"
 
         [permissions]
         network = ["*.bandcamp.com"]
@@ -330,7 +330,7 @@ mod tests {
             id: "bandcamp".into(),
             name: "Bandcamp".into(),
             version: "0.2.0".into(),
-            api: "0.1".into(),
+            api: "0.2".into(),
             description: String::new(),
             author: "someone".into(),
             homepage: None,
@@ -353,7 +353,7 @@ mod tests {
 
     #[test]
     fn an_index_reads_its_listings_and_refuses_another_format() {
-        let json = br#"{"schema":1,"plugins":[{"id":"bandcamp","name":"Bandcamp","version":"0.2.0","api":"0.1",
+        let json = br#"{"schema":1,"plugins":[{"id":"bandcamp","name":"Bandcamp","version":"0.2.0","api":"0.2",
             "manifest":{"url":"https://x/m","sha256":"00"},"component":{"url":"https://x/c","sha256":"11"}}]}"#;
         let index = Index::parse(json).expect("valid index");
         assert_eq!(index.listing("bandcamp").unwrap().version, "0.2.0");

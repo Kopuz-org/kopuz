@@ -12,10 +12,10 @@ use plugin_host::manifest;
 use plugin_host::{PluginError, Session, wit};
 
 use super::{
-    AlbumType, ArtistView, AuthOutcome, Capabilities, Check, CheckOutcome, CheckStep,
-    FavoritesPage, FavoritesSync, LibraryActions, LibrarySnapshot, MediaSource, PlaylistMeta,
-    PlaylistOps, PlaylistPage, RadioPage, RadioSeeds, RemotePlayQueue, SourceError, StorageQuota,
-    StreamInfo, mirror_added, mirror_created,
+    AlbumType, ArtistInfo, ArtistView, AuthOutcome, Capabilities, Check, CheckOutcome, CheckStep,
+    FavoritesPage, FavoritesSync, LibraryActions, LibrarySnapshot, MediaSource, MixBasis, MixSeed,
+    PlaylistMeta, PlaylistOps, PlaylistPage, RadioPage, RadioSeeds, RadioStation, RemotePlayQueue,
+    SourceError, StorageQuota, StreamInfo, mirror_added, mirror_created,
 };
 
 pub(super) struct PluginSource {
@@ -106,6 +106,10 @@ impl PluginSource {
         RadioPage {
             tracks: self.tracks(page.tracks),
             more: page.next,
+            basis: page.basis.map(|basis| match basis {
+                wit::MixBasis::Sonic => MixBasis::Sonic,
+                wit::MixBasis::Metadata => MixBasis::Metadata,
+            }),
         }
     }
 
@@ -280,6 +284,9 @@ pub(crate) fn capabilities(declared: &manifest::Capabilities) -> Capabilities {
             track: seeds(manifest::RadioSeed::Track),
             playlist: seeds(manifest::RadioSeed::Playlist),
             search: seeds(manifest::RadioSeed::Search),
+            album: seeds(manifest::RadioSeed::Album),
+            artist: seeds(manifest::RadioSeed::Artist),
+            tracks: seeds(manifest::RadioSeed::Tracks),
         },
         play_queue: declared.play_queue,
         playlists: match declared.playlists {
@@ -301,6 +308,10 @@ pub(crate) fn capabilities(declared: &manifest::Capabilities) -> Capabilities {
         explicit_flags: declared.explicit_flags,
         watch_history: declared.watch_history,
         complete_play_history: declared.complete_play_history,
+        ratings: declared.ratings,
+        artist_info: declared.artist_info,
+        radio_stations: declared.radio_stations,
+        sonic_path: declared.sonic_path,
         library_actions: LibraryActions {
             rate: action(manifest::LibraryAction::Rate),
             follow: action(manifest::LibraryAction::Follow),
@@ -422,9 +433,6 @@ impl MediaSource for PluginSource {
     ) -> Result<Option<Box<dyn symphonia::core::io::MediaSource>>, SourceError> {
         let plugin = self.session.plugin();
         let reads_folders = plugin.manifest().permissions.reads_folders();
-        if !reads_folders && !plugin.manifest().may_encrypt_streams() {
-            return Ok(None);
-        }
         let stream = answer(
             self.session
                 .resolve_stream(item_id, wit::StreamQuality::High)
@@ -560,6 +568,54 @@ impl MediaSource for PluginSource {
     async fn more_radio(&self, cursor: &str) -> Result<RadioPage, SourceError> {
         let page = answer(self.session.more_radio(cursor).await)?;
         Ok(self.radio_page(page))
+    }
+
+    async fn set_rating(&self, item_id: &str, stars: u8) -> Result<(), SourceError> {
+        answer(self.session.set_rating(item_id, stars).await)
+    }
+
+    async fn start_mix(&self, seed: MixSeed, refs: &[String]) -> Result<RadioPage, SourceError> {
+        let seed = match seed {
+            MixSeed::Album => wit::MixSeed::Album,
+            MixSeed::Artist => wit::MixSeed::Artist,
+            MixSeed::Tracks => wit::MixSeed::Tracks,
+        };
+        let page = answer(self.session.start_mix(seed, refs).await)?;
+        Ok(self.radio_page(page))
+    }
+
+    async fn sonic_path(
+        &self,
+        from_id: &str,
+        to_id: &str,
+        count: u32,
+    ) -> Result<RadioPage, SourceError> {
+        let page = answer(self.session.sonic_path(from_id, to_id, count).await)?;
+        Ok(self.radio_page(page))
+    }
+
+    async fn fetch_artist_info(&self, artist_id: &str) -> Result<Option<ArtistInfo>, SourceError> {
+        let info = answer(self.session.fetch_artist_info(artist_id).await)?;
+        let artwork = self.artwork();
+        Ok(info.map(|info| ArtistInfo {
+            biography: info.biography,
+            image: artwork.cover(info.image),
+            similar: info.similar.into_iter().map(credit_from).collect(),
+            link: info.link,
+        }))
+    }
+
+    async fn fetch_radio_stations(&self) -> Result<Vec<RadioStation>, SourceError> {
+        let stations = answer(self.session.fetch_radio_stations().await)?;
+        Ok(stations
+            .into_iter()
+            .map(|station| RadioStation {
+                id: station.id,
+                name: station.name,
+                stream_url: station.stream_url,
+                homepage: station.homepage,
+            })
+            .collect())
     }
 
     async fn save_play_queue(
@@ -910,6 +966,9 @@ mod tests {
                     album_peak: None,
                 },
                 explicit: false,
+                play_count: None,
+                last_played: None,
+                rating: None,
             },
             24,
         );
