@@ -111,14 +111,18 @@ fn build(
         .min_w(POPOVER_WIDTH)
         .label(SharedString::from(format!("{}  {count}", t("sources"))))
         .item(
-            PopupMenuItem::element(move |_, cx| {
+            PopupMenuItem::element(move |window, cx| {
                 v_flex()
                     .id("source-rows")
                     .w_full()
                     .max_h(ROWS_HEIGHT)
                     .gap_0p5()
                     .overflow_y_scroll()
-                    .children(sources.iter().map(|source| row(source, owner.clone(), cx)))
+                    .children(
+                        sources
+                            .iter()
+                            .map(|source| row(source, owner.clone(), window, cx)),
+                    )
             })
             .disabled(true),
         );
@@ -137,7 +141,15 @@ fn build(
 }
 
 /// One source; it answers its own click, since the list it sits in is a single inert menu item.
-fn row(source: &SourceInfo, owner: WeakEntity<PopupMenu>, cx: &App) -> Stateful<Div> {
+fn row(
+    source: &SourceInfo,
+    owner: WeakEntity<PopupMenu>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Stateful<Div> {
+    // The menu's own arrows skip this inert item, so each row is a tab stop that Enter switches to.
+    let focus = components::focus::handle(format!("source-row-focus-{}", source.id), window, cx);
+    let focused = focus.is_focused(window);
     let accent = source_mark::accent(Some(&source.service), cx);
     let active = source.active;
     let id = source.id.clone();
@@ -151,8 +163,10 @@ fn row(source: &SourceInfo, owner: WeakEntity<PopupMenu>, cx: &App) -> Stateful<
     let muted = style::white(style::TEXT_SUBTLE, cx);
     let cut_off = SourcesModel::global(cx).read(cx).cut_off(source);
     let hover = style::white(style::HOVER, cx);
-    h_flex()
+    let keyed = (id.clone(), owner.clone());
+    let row = h_flex()
         .id(SharedString::from(format!("source-row-{}", source.id)))
+        .when(focused, |row| row.bg(hover))
         .w_full()
         .px_2()
         .py_1()
@@ -204,7 +218,12 @@ fn row(source: &SourceInfo, owner: WeakEntity<PopupMenu>, cx: &App) -> Stateful<
             SourcesModel::global(cx)
                 .update(cx, |sources, cx| sources.switch(id.clone(), window, cx));
             owner.update(cx, |_, cx| cx.emit(DismissEvent)).ok();
-        })
+        });
+    components::focus::stop(row, &focus, move |window, cx| {
+        let (id, owner) = &keyed;
+        SourcesModel::global(cx).update(cx, |sources, cx| sources.switch(id.clone(), window, cx));
+        owner.update(cx, |_, cx| cx.emit(DismissEvent)).ok();
+    })
 }
 
 /// The trigger tile: glyph, name, status dot and chevron, on the Button the menu hangs off.
