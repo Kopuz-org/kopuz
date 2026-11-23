@@ -1215,3 +1215,5 @@ sleep_timer_off = Naka-off
 sleep_timer_minutes = { $count } minuto
 sleep_timer_end_of_track = Pagtapos ng kanta
 sleep_timer_left = Hihinto sa loob ng { $minutes } min
+export_m3u = I-export bilang M3U
+playlist_exported = Na-save ang { $count } kanta sa file.

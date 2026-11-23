@@ -1215,3 +1215,5 @@ sleep_timer_off = Tắt
 sleep_timer_minutes = { $count } phút
 sleep_timer_end_of_track = Hết bài
 sleep_timer_left = Dừng sau { $minutes } phút
+export_m3u = Xuất dạng M3U
+playlist_exported = Đã lưu { $count } bài vào tệp.

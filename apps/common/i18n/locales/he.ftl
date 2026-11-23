@@ -1253,3 +1253,5 @@ sleep_timer_off = כבוי
 sleep_timer_minutes = { $count } דקות
 sleep_timer_end_of_track = סוף השיר
 sleep_timer_left = עצירה בעוד { $minutes } דק׳
+export_m3u = ייצוא כ-M3U
+playlist_exported = { $count } שירים נשמרו בקובץ.

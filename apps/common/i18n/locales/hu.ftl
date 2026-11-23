@@ -1221,3 +1221,5 @@ sleep_timer_off = Ki
 sleep_timer_minutes = { $count } perc
 sleep_timer_end_of_track = A szám végén
 sleep_timer_left = { $minutes } perc múlva leáll
+export_m3u = Exportálás M3U-ként
+playlist_exported = { $count } dal mentve a fájlba.

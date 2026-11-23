@@ -1261,3 +1261,5 @@ sleep_timer_off = Oprit
 sleep_timer_minutes = { $count } minute
 sleep_timer_end_of_track = La finalul piesei
 sleep_timer_left = Se oprește în { $minutes } min
+export_m3u = Exportă ca M3U
+playlist_exported = { $count } piese salvate în fișier.

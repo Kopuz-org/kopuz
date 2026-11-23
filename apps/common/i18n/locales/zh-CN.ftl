@@ -1221,3 +1221,5 @@ sleep_timer_off = 关闭
 sleep_timer_minutes = { $count } 分钟
 sleep_timer_end_of_track = 本曲结束后
 sleep_timer_left = { $minutes } 分钟后停止
+export_m3u = 导出为 M3U
+playlist_exported = 已将 { $count } 首歌曲保存到文件。

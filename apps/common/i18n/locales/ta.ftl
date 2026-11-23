@@ -1251,3 +1251,5 @@ sleep_timer_off = அணை
 sleep_timer_minutes = { $count } நிமிடங்கள்
 sleep_timer_end_of_track = பாடல் முடிவில்
 sleep_timer_left = { $minutes } நிமிடத்தில் நிற்கும்
+export_m3u = M3U ஆக ஏற்றுமதி செய்
+playlist_exported = { $count } பாடல்கள் கோப்பில் சேமிக்கப்பட்டன.

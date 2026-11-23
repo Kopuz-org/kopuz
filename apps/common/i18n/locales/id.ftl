@@ -1215,3 +1215,5 @@ sleep_timer_off = Mati
 sleep_timer_minutes = { $count } menit
 sleep_timer_end_of_track = Akhir lagu
 sleep_timer_left = Berhenti dalam { $minutes } mnt
+export_m3u = Ekspor sebagai M3U
+playlist_exported = { $count } lagu disimpan ke berkas.

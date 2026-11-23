@@ -1210,3 +1210,5 @@ sleep_timer_off = Kapalı
 sleep_timer_minutes = { $count } dakika
 sleep_timer_end_of_track = Parça bitince
 sleep_timer_left = { $minutes } dk sonra duracak
+export_m3u = M3U olarak dışa aktar
+playlist_exported = { $count } şarkı çalma listesi dosyasına kaydedildi.

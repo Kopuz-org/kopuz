@@ -1221,3 +1221,5 @@ sleep_timer_off = ala
 sleep_timer_minutes = tenpo lili { $count }
 sleep_timer_end_of_track = pini kalama
 sleep_timer_left = tenpo lili { $minutes } la ona li pini
+export_m3u = o pana tawa lipu M3U
+playlist_exported = kalama { $count } li lon lipu.

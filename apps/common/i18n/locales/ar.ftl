@@ -1259,3 +1259,5 @@ sleep_timer_off = إيقاف
 sleep_timer_minutes = { $count } دقيقة
 sleep_timer_end_of_track = نهاية المقطع
 sleep_timer_left = يتوقف بعد { $minutes } د
+export_m3u = تصدير بصيغة M3U
+playlist_exported = حُفظت { $count } أغنية في الملف.

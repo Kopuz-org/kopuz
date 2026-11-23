@@ -688,6 +688,27 @@ static COMMANDS: &[Command] = &[
         action: None,
     },
     Command {
+        id: "playlist.export_m3u",
+        labels: &["export_m3u"],
+        label: |_, _| t("export_m3u"),
+        icon: Some(icons::EXPORT),
+        group: Group::Library,
+        section: Section::Act,
+        keys: NO_KEYS,
+        danger: false,
+        applies: PLAYLIST,
+        available: |target, cx| {
+            ops::playlist_id(target).is_some_and(|id| !ops::playlist_keys(&id, cx).is_empty())
+        },
+        run: |target, _, cx| {
+            if let (Some(id), Target::Playlist { name, .. }) = (ops::playlist_id(&target), &target)
+            {
+                store::export_m3u(name.to_string(), ops::playlist_keys(&id, cx), cx);
+            }
+        },
+        action: None,
+    },
+    Command {
         id: "playlist.move_to_folder",
         labels: &["move_to_folder"],
         label: |_, _| t("move_to_folder"),

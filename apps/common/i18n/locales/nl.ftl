@@ -1247,3 +1247,5 @@ sleep_timer_off = Uit
 sleep_timer_minutes = { $count } minuten
 sleep_timer_end_of_track = Einde van nummer
 sleep_timer_left = Stopt over { $minutes } min
+export_m3u = Exporteren als M3U
+playlist_exported = { $count } nummers opgeslagen in het bestand.

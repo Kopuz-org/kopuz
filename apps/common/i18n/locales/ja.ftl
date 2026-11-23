@@ -1227,3 +1227,5 @@ sleep_timer_off = オフ
 sleep_timer_minutes = { $count } 分
 sleep_timer_end_of_track = 曲の終わり
 sleep_timer_left = あと { $minutes } 分で停止
+export_m3u = M3U として書き出す
+playlist_exported = { $count } 曲をファイルに保存しました。

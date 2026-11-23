@@ -99,6 +99,11 @@ impl Library {
             );
         }
         buttons.push(
+            IconButton::new("library-import-playlist", icons::IMPORT)
+                .tooltip(t("import_playlist"))
+                .on_click(|_, _, cx| store::import_m3u(cx)),
+        );
+        buttons.push(
             IconButton::new("library-add-playlist", icons::PLUS)
                 .tooltip(t("add_playlist"))
                 .on_click(|_, window, cx| open_add_playlist(window, cx)),
