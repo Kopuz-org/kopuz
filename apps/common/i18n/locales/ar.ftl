@@ -1253,3 +1253,5 @@ unpin_from_sidebar = إلغاء التثبيت من الشريط الجانبي
 pinned = المثبّتة
 pinned_playlist = قائمة تشغيل
 pinned_folder = مجلد
+interface_lyrics_size = حجم كلمات الأغنية
+interface_lyrics_size_description = حجم كلمات الأغنية في المشغّل.

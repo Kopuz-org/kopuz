@@ -1215,3 +1215,5 @@ unpin_from_sidebar = Leválasztás az oldalsávról
 pinned = Rögzítve
 pinned_playlist = Lejátszási lista
 pinned_folder = Mappa
+interface_lyrics_size = Dalszöveg mérete
+interface_lyrics_size_description = Mekkora a dalszöveg a lejátszóban.

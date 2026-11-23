@@ -1215,3 +1215,5 @@ unpin_from_sidebar = o awen ala lon poka
 pinned = ijo awen
 pinned_playlist = kulupu kalama
 pinned_folder = poki
+interface_lyrics_size = suli pi nimi kalama
+interface_lyrics_size_description = nimi kalama li suli seme lon ilo kalama.

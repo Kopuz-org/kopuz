@@ -66,6 +66,7 @@ pub struct LyricLine {
     opacity: f32,
     blur: Pixels,
     ink: Hsla,
+    scale: f32,
     seek: Option<Seek>,
 }
 
@@ -85,11 +86,17 @@ impl LyricLine {
             opacity: 1.,
             blur: px(0.),
             ink: Hsla::default(),
+            scale: 1.,
             seek: None,
         }
     }
 
     /// The colour of the line being sung; the others take the theme's text colour.
+    pub fn scale(mut self, scale: f32) -> Self {
+        self.scale = scale;
+        self
+    }
+
     pub fn ink(mut self, ink: Hsla) -> Self {
         self.ink = ink;
         self
@@ -175,6 +182,7 @@ impl RenderOnce for LyricLine {
         let hover = rest.alpha(DIM_HOVER * tint);
         let blur = Some(self.blur).filter(|radius| !lit && *radius > px(0.));
         let group = SharedString::from(format!("lyric-{}", self.index));
+        let scale = self.scale;
 
         let body = div()
             .id(("lyric", self.index))
@@ -186,14 +194,16 @@ impl RenderOnce for LyricLine {
             .text_color(base)
             .when(background, |row| {
                 row.pl_4()
-                    .text_sm()
+                    .text_size(rems(0.875 * scale))
                     .font_medium()
                     .line_height(relative(SNUG))
             })
             .when(!background, |row| row.font_semibold())
             // The `scale(1.12)` the lit Dioxus line grows by is a transform GPUI has not; a size step stands in.
-            .when(!background && lit, |row| row.text_xl())
-            .when(!background && !lit, |row| row.text_lg())
+            .when(!background && lit, |row| row.text_size(rems(1.25 * scale)))
+            .when(!background && !lit, |row| {
+                row.text_size(rems(1.125 * scale))
+            })
             .when(opposite, |row| row.text_right().italic().ml_auto())
             .when(!opposite && paired, |row| row.text_left())
             .when(!opposite && !paired, |row| row.text_center().mx_auto())
@@ -207,7 +217,7 @@ impl RenderOnce for LyricLine {
         let reading = self.reading.map(|reading| {
             let ink = base.alpha(base.a * READING_ALPHA);
             let line = div()
-                .text_sm()
+                .text_size(rems(0.875 * scale))
                 .font_medium()
                 .line_height(relative(SNUG))
                 .text_color(ink);

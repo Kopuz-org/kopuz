@@ -521,6 +521,26 @@ pub struct Sheet {
     pub backdrop: Backdrop,
     pub cover: HeroSize,
     pub queue: QueueStyle,
+    pub lyrics: LyricsSize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LyricsSize {
+    Small,
+    #[default]
+    Normal,
+    Large,
+}
+
+impl LyricsSize {
+    pub fn scale(self) -> f32 {
+        match self {
+            Self::Small => 0.8,
+            Self::Normal => 1.,
+            Self::Large => 1.25,
+        }
+    }
 }
 
 /// How the queue lists its rows, in the sheet and the docked column alike.

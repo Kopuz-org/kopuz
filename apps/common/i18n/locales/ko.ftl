@@ -1215,3 +1215,5 @@ unpin_from_sidebar = 사이드바에서 고정 해제
 pinned = 고정됨
 pinned_playlist = 재생목록
 pinned_folder = 폴더
+interface_lyrics_size = 가사 크기
+interface_lyrics_size_description = 플레이어에 표시되는 가사의 크기.

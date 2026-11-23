@@ -1248,3 +1248,5 @@ unpin_from_sidebar = Retirer de la barre latérale
 pinned = Épinglés
 pinned_playlist = Playlist
 pinned_folder = Dossier
+interface_lyrics_size = Taille des paroles
+interface_lyrics_size_description = La taille des paroles dans le lecteur.

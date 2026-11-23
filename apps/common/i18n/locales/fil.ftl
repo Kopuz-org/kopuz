@@ -1209,3 +1209,5 @@ unpin_from_sidebar = Alisin sa pagkaka-pin sa sidebar
 pinned = Naka-pin
 pinned_playlist = Playlist
 pinned_folder = Folder
+interface_lyrics_size = Laki ng lyrics
+interface_lyrics_size_description = Kung gaano kalaki ipinapakita ang lyrics sa player.

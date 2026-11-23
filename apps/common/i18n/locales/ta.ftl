@@ -1245,3 +1245,5 @@ unpin_from_sidebar = பக்கப்பட்டியிலிருந்�
 pinned = பொருத்தியவை
 pinned_playlist = பிளேலிஸ்ட்
 pinned_folder = கோப்புறை
+interface_lyrics_size = பாடல் வரிகளின் அளவு
+interface_lyrics_size_description = பிளேயரில் பாடல் வரிகள் எவ்வளவு பெரிதாகக் காட்டப்படும்.

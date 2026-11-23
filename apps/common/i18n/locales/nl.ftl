@@ -1241,3 +1241,5 @@ unpin_from_sidebar = Losmaken uit zijbalk
 pinned = Vastgezet
 pinned_playlist = Afspeellijst
 pinned_folder = Map
+interface_lyrics_size = Grootte van songteksten
+interface_lyrics_size_description = Hoe groot de songtekst in de speler wordt getoond.

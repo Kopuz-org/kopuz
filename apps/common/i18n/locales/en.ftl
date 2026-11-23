@@ -1244,3 +1244,5 @@ unpin_from_sidebar = Unpin from sidebar
 pinned = Pinned
 pinned_playlist = Playlist
 pinned_folder = Folder
+interface_lyrics_size = Lyrics size
+interface_lyrics_size_description = How big the lyrics are drawn in the player.

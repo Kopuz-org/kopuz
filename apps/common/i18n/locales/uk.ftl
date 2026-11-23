@@ -1263,3 +1263,5 @@ unpin_from_sidebar = Відкріпити з бічної панелі
 pinned = Закріплене
 pinned_playlist = Плейлист
 pinned_folder = Тека
+interface_lyrics_size = Розмір тексту пісні
+interface_lyrics_size_description = Наскільки великим показується текст пісні в плеєрі.
