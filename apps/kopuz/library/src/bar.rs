@@ -640,7 +640,16 @@ impl Library {
         let label = t("library_whole_selection");
         let resolve = self.resolve_selection(cx);
         self._resolve = Some(cx.spawn_in(window, async move |this, cx| {
-            let keys = resolve.await;
+            let keys = match resolve.await {
+                Ok(keys) => keys,
+                // Said out loud, or the verb pressed would just do nothing.
+                Err(error) => {
+                    tracing::warn!(%error, "could not resolve the selection");
+                    this.update(cx, |_, cx| store::Notices::failed(&error, cx))
+                        .ok();
+                    return;
+                }
+            };
             if keys.is_empty() {
                 return;
             }
@@ -657,7 +666,7 @@ impl Library {
     fn resolve_selection(
         &self,
         cx: &mut Context<Self>,
-    ) -> impl std::future::Future<Output = Vec<SharedString>> + use<> {
+    ) -> impl std::future::Future<Output = Result<Vec<SharedString>, api::ApiError>> + use<> {
         let filter = self.filters().track_filter(self.sort());
         let picked: Vec<String> = self.selection.picked().to_vec();
         let facet = self.filters().facet;
@@ -683,13 +692,8 @@ impl Library {
             async move { gather(api, facet, filter, picked, playlists).await }
         });
         async move {
-            match call.await {
-                Ok(keys) => keys.into_iter().map(SharedString::from).collect(),
-                Err(error) => {
-                    tracing::debug!(%error, "could not resolve the selection");
-                    Vec::new()
-                }
-            }
+            call.await
+                .map(|keys| keys.into_iter().map(SharedString::from).collect())
         }
     }
 }
