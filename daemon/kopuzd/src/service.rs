@@ -96,6 +96,7 @@ impl KopuzGrpc {
         self.0.updater.as_ref()
     }
 
+    #[allow(clippy::result_large_err)]
     async fn player_mutation(
         &self,
         command: api::PlayerCommand,

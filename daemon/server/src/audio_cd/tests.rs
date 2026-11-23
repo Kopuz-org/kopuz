@@ -11,7 +11,7 @@ impl SectorReader for Sectors {
         if self.fail_at == Some(lsn) {
             return Err(io::Error::other("disc removed"));
         }
-        for bytes in output.chunks_exact_mut(2) {
+        for bytes in output.as_chunks_mut::<2>().0 {
             bytes.copy_from_slice(&(lsn as i16).to_le_bytes());
         }
         Ok(())
@@ -71,11 +71,13 @@ fn audio_cd_wav_contains_exact_track_samples_and_no_following_track() {
     assert_eq!(&wav[24..28], &44100u32.to_le_bytes());
     assert_eq!(&wav[40..44], &(3 * SECTOR_BYTES as u32).to_le_bytes());
     assert_eq!(stream.reader.reads, [150, 151, 152]);
-    for (index, sector) in wav[44..].chunks_exact(SECTOR_BYTES).enumerate() {
+    for (index, sector) in wav[44..].as_chunks::<SECTOR_BYTES>().0.iter().enumerate() {
         assert!(
             sector
-                .chunks_exact(2)
-                .all(|sample| sample == (150i16 + index as i16).to_le_bytes())
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .all(|sample| *sample == (150i16 + index as i16).to_le_bytes())
         );
     }
     assert_eq!(stream.byte_len(), Some(wav.len() as u64));

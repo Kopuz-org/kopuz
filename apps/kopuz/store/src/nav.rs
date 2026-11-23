@@ -189,11 +189,10 @@ impl Route {
             "downloader" => Route::Downloader,
             "settings" => Route::Settings { section: None },
             // `settings/appearance` opens straight onto one category.
-            other => match other.strip_prefix("settings/") {
-                Some(section) => Route::Settings {
-                    section: Some(SharedString::from(section.to_string())),
-                },
-                None => return None,
+            other => Route::Settings {
+                section: Some(SharedString::from(
+                    other.strip_prefix("settings/")?.to_string(),
+                )),
             },
         })
     }
