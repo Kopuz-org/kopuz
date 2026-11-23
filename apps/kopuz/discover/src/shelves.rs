@@ -315,9 +315,8 @@ impl Shelves {
                     Ok(detail) => detail,
                     Err(error) => {
                         this.update(cx, |this, cx| {
-                            if started {
-                                Notices::push(Notice::failure(&error, catalog_failure(&error)), cx);
-                            } else {
+                            Notices::push(Notice::failure(&error, catalog_failure(&error)), cx);
+                            if !started {
                                 this.now_playing = None;
                             }
                             this.pending = None;
@@ -361,6 +360,7 @@ impl Shelves {
                 this.pending = None;
                 if !started {
                     this.now_playing = None;
+                    Notices::info(t("no_tracks_found"), cx);
                 }
                 cx.notify();
             })
