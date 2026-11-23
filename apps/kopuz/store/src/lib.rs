@@ -4,6 +4,7 @@ pub mod actions;
 pub mod ambient;
 mod artwork;
 mod artwork_edit;
+mod audiomuse;
 mod backdrop;
 mod catalog_cache;
 mod catalog_marks;
@@ -45,6 +46,7 @@ use gpui_kit::{App, AppContext as _, Entity, Global};
 
 pub use artwork::{Arrival, ArtworkBytes, ArtworkKey, Residents, artwork_source};
 pub use artwork_edit::{content_type_for, pick_and_upload, pick_image, remove_artwork};
+pub use audiomuse::AudioMuseModel;
 pub use backdrop::{blurred_backdrop, resolve_backdrop};
 pub use catalog_cache::{Cached, CatalogCache, Ticket};
 pub use catalog_marks::CatalogMarks;
@@ -176,4 +178,5 @@ pub fn init(cx: &mut App) {
     register(cx, UpdateModel::new);
     register(cx, plugin_actions::PluginActions::new);
     register(cx, SonicPathStart::new);
+    register(cx, AudioMuseModel::new);
 }

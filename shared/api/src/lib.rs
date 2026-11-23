@@ -76,11 +76,11 @@ pub use schema::{
     encode_directories, spec_value, toggle_of, value_of,
 };
 pub use sources::{
-    AlbumPresentation, ArtistPresentation, BrowserProfile, BrowserSession, CheckOutcome, CheckStep,
-    ConnectKind, ConnectionCheck, CredentialProvision, DraftCheck, DraftProbe, FavoritesSyncMode,
-    FolderProbe, IntegrationInfo, PageEntry, PlaylistCapability, SearchFilter, ServerProbe,
-    ServiceInfo, ServiceRef, SignInKind, SourceAccount, SourceCapabilities, SourceDraft,
-    SourceFolderEntry, SourceInfo, SourceLoginRequest,
+    AUDIOMUSE_INTEGRATION, AlbumPresentation, ArtistPresentation, BrowserProfile, BrowserSession,
+    CheckOutcome, CheckStep, ConnectKind, ConnectionCheck, CredentialProvision, DraftCheck,
+    DraftProbe, FavoritesSyncMode, FolderProbe, IntegrationInfo, PageEntry, PlaylistCapability,
+    SearchFilter, ServerProbe, ServiceInfo, ServiceRef, SignInKind, SourceAccount,
+    SourceCapabilities, SourceDraft, SourceFolderEntry, SourceInfo, SourceLoginRequest,
 };
 
 pub use updates::{AvailableUpdate, UpdateStatus};

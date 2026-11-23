@@ -1309,6 +1309,7 @@ impl api::SourceApi for LocalApi {
         if plugin {
             self.session.invalidate(api::Table::Plugins);
         }
+        self.session.invalidate(api::Table::Servers);
         Ok(info)
     }
 
@@ -1318,6 +1319,7 @@ impl api::SourceApi for LocalApi {
         if plugin {
             self.session.invalidate(api::Table::Plugins);
         }
+        self.session.invalidate(api::Table::Servers);
         Ok(())
     }
 

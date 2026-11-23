@@ -122,7 +122,10 @@ pub(super) fn encode(context: &QueueContext) -> Option<String> {
             stream_id: stream_id.clone(),
         },
         QueueContext::TrackRadio { key } => Stored::TrackRadio { key: key.clone() },
-        QueueContext::MixRadio { .. } | QueueContext::SonicPath { .. } => return None,
+        QueueContext::MixRadio { .. }
+        | QueueContext::SonicPath { .. }
+        | QueueContext::Described { .. }
+        | QueueContext::Fingerprint => return None,
         QueueContext::PlaylistRadio { id } => Stored::PlaylistRadio { id: id.clone() },
         QueueContext::AlbumRadio { id } => Stored::AlbumRadio { id: id.clone() },
         QueueContext::ArtistRadio { artist } => Stored::ArtistRadio {
@@ -244,8 +247,14 @@ mod tests {
             from: "a".into(),
             to: "b".into(),
         };
+        let described = QueueContext::Described {
+            query: "calm".into(),
+        };
+        let fingerprint = QueueContext::Fingerprint;
         assert_eq!((encode(&mix), encode(&path)), (None, None));
+        assert_eq!((encode(&described), encode(&fingerprint)), (None, None));
         assert!(!mix.names_container() && !path.names_container());
+        assert!(!described.names_container() && !fingerprint.names_container());
     }
 
     #[test]

@@ -569,7 +569,11 @@ message QueueContext {
     Key artist_radio = 12;
     TrackKeys mix_radio = 13;
     SonicPath sonic_path = 14;
+    // AudioMuse-AI's text search, and its picks from the listening profile.
+    string described = 15;
+    Fingerprint fingerprint = 16;
   }
+  message Fingerprint {}
   message SonicPath {
     string from = 1;
     string to = 2;

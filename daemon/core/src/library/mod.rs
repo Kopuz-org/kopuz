@@ -878,7 +878,9 @@ impl QueueMaterializer for LibraryService {
             | QueueContext::AlbumRadio { .. }
             | QueueContext::ArtistRadio { .. }
             | QueueContext::MixRadio { .. }
-            | QueueContext::SonicPath { .. } => Ok(self.materialize_queue(context).await?.tracks),
+            | QueueContext::SonicPath { .. }
+            | QueueContext::Described { .. }
+            | QueueContext::Fingerprint => Ok(self.materialize_queue(context).await?.tracks),
         }
     }
 
@@ -894,6 +896,10 @@ impl QueueMaterializer for LibraryService {
             QueueContext::SonicPath { from, to } => {
                 self.catalog_service()?.sonic_path(from, to).await
             }
+            QueueContext::Described { query } => {
+                self.catalog_service()?.described_radio(query).await
+            }
+            QueueContext::Fingerprint => self.catalog_service()?.fingerprint_radio().await,
             _ => Ok(RadioPage::last(self.materialize(context).await?)),
         }
     }
@@ -1516,6 +1522,14 @@ mod tests {
 
         async fn sonic_path(&self, _from: &str, _to: &str) -> Result<RadioPage, ApiError> {
             Err(ApiError::unsupported("sonic path"))
+        }
+
+        async fn described_radio(&self, _query: &str) -> Result<RadioPage, ApiError> {
+            Err(ApiError::unsupported("described radio"))
+        }
+
+        async fn fingerprint_radio(&self) -> Result<RadioPage, ApiError> {
+            Err(ApiError::unsupported("fingerprint radio"))
         }
 
         async fn more_radio(&self, _cursor: &str) -> Result<RadioPage, ApiError> {
