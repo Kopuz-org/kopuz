@@ -638,6 +638,7 @@ sort_field_genre = kule
 sort_field_album = kulupu pi kalama sama
 sort_field_duration = tenpo
 sort_field_date_added = tenpo kama
+sort_field_last_played = kute lon tenpo pini
 sort_field_name = nimi
 sort_field_tracks = kalama musi
 sort_field_albums = kulupu pi kalama sama

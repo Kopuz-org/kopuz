@@ -625,6 +625,7 @@ sort_field_genre = Műfaj
 sort_field_album = Album
 sort_field_duration = Időtartam
 sort_field_date_added = Hozzáadás dátuma
+sort_field_last_played = Utoljára lejátszva
 sort_field_name = Név
 sort_field_tracks = Dalok
 sort_field_albums = Albumok

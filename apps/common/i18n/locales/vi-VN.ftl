@@ -619,6 +619,7 @@ sort_field_genre = Thể loại
 sort_field_album = Album
 sort_field_duration = Thời lượng
 sort_field_date_added = Ngày thêm
+sort_field_last_played = Phát gần nhất
 sort_field_name = Tên
 sort_field_tracks = Bài hát
 sort_field_albums = Album

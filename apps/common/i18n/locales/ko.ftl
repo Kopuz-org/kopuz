@@ -625,6 +625,7 @@ sort_field_genre = 장르
 sort_field_album = 앨범
 sort_field_duration = 재생 시간
 sort_field_date_added = 추가된 날짜
+sort_field_last_played = 마지막 재생
 sort_field_name = 이름
 sort_field_tracks = 트랙
 sort_field_albums = 앨범

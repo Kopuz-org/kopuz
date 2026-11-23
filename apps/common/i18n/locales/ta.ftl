@@ -655,6 +655,7 @@ sort_field_genre = வகை
 sort_field_album = ஆல்பம்
 sort_field_duration = கால அளவு
 sort_field_date_added = சேர்க்கப்பட்ட தேதி
+sort_field_last_played = கடைசியாக இயக்கியது
 sort_field_name = பெயர்
 sort_field_tracks = தடங்கள்
 sort_field_albums = ஆல்பங்கள்

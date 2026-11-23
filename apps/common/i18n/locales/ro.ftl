@@ -665,6 +665,7 @@ sort_field_genre = Gen
 sort_field_album = Album
 sort_field_duration = Durată
 sort_field_date_added = Data adăugării
+sort_field_last_played = Ultima redare
 sort_field_name = Nume
 sort_field_tracks = Piese
 sort_field_albums = Albume

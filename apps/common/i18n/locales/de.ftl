@@ -633,6 +633,7 @@ sort_field_genre = Genre
 sort_field_album = Album
 sort_field_duration = Dauer
 sort_field_date_added = Hinzugefügt am
+sort_field_last_played = Zuletzt gespielt
 sort_field_name = Name
 sort_field_tracks = Titel
 sort_field_albums = Alben

@@ -625,6 +625,7 @@ sort_field_genre = Tür
 sort_field_album = Albüm
 sort_field_duration = Süre
 sort_field_date_added = Eklenme tarihi
+sort_field_last_played = Son çalınan
 sort_field_name = Ad
 sort_field_tracks = Parçalar
 sort_field_albums = Albümler

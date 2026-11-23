@@ -127,6 +127,8 @@ pub enum AlbumSortField {
     /// When the album's newest track was added.
     RecentlyAdded,
     TrackCount,
+    /// When one of the album's tracks was last played, here or on its server.
+    LastPlayed,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

@@ -657,6 +657,7 @@ sort_field_genre = ז’אנר
 sort_field_album = אלבום
 sort_field_duration = משך
 sort_field_date_added = תאריך הוספה
+sort_field_last_played = הושמע לאחרונה
 sort_field_name = שם
 sort_field_tracks = שירים
 sort_field_albums = אלבומים

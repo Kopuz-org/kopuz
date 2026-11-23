@@ -944,6 +944,22 @@ pub async fn albums_page(
     } else {
         ""
     };
+    // An album was played when any of its tracks was, here or on the server.
+    let played = query
+        .sort
+        .iter()
+        .any(|sort| sort.field == config::AlbumSortField::LastPlayed);
+    let played_join = if played {
+        format!(
+            "LEFT JOIN (SELECT t.source_album_id, MAX(pc.last_played_at) AS at \
+                          FROM tracks t JOIN {PLAY_COUNTS} pc \
+                            ON pc.source = t.source AND pc.track_key = t.track_key \
+                         WHERE t.source = ?1 GROUP BY t.source_album_id) lp \
+               ON lp.source_album_id = al.source_album_id"
+        )
+    } else {
+        String::new()
+    };
     let mut order: Vec<String> = Vec::new();
     for sort in &query.sort {
         let dir = direction(sort.direction);
@@ -957,6 +973,7 @@ pub async fn albums_page(
                 order.push(format!("COALESCE(tc.last_pk, 0) {dir}"));
             }
             config::AlbumSortField::TrackCount => order.push(format!("COALESCE(tc.n, 0) {dir}")),
+            config::AlbumSortField::LastPlayed => order.push(format!("COALESCE(lp.at, 0) {dir}")),
         }
     }
     order.push("al.artist COLLATE LOCALE ASC".into());
@@ -966,7 +983,7 @@ pub async fn albums_page(
     let sql = format!(
         "SELECT al.source_album_id, al.title, al.artist, al.genre, al.year, al.cover_path, \
                 al.manual_cover, ar.key AS artist_key, ar.source_artist_id AS artist_source_id \
-           {from} {tracks_join} WHERE al.source = ?1{} \
+           {from} {tracks_join} {played_join} WHERE al.source = ?1{} \
           ORDER BY {} LIMIT ?{limit_n} OFFSET ?{offset_n}",
         c.sql,
         order.join(", "),

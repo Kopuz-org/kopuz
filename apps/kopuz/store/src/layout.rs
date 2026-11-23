@@ -626,6 +626,7 @@ pub fn album_sort_field(id: &str) -> Option<AlbumSortField> {
         "genre" => AlbumSortField::Genre,
         "added" => AlbumSortField::RecentlyAdded,
         "tracks" => AlbumSortField::TrackCount,
+        "played" => AlbumSortField::LastPlayed,
         _ => return None,
     })
 }
@@ -638,6 +639,7 @@ fn album_sort_id(field: AlbumSortField) -> &'static str {
         AlbumSortField::Genre => "genre",
         AlbumSortField::RecentlyAdded => "added",
         AlbumSortField::TrackCount => "tracks",
+        AlbumSortField::LastPlayed => "played",
     }
 }
 

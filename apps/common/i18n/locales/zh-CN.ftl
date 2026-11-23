@@ -625,6 +625,7 @@ sort_field_genre = 流派
 sort_field_album = 专辑
 sort_field_duration = 时长
 sort_field_date_added = 添加日期
+sort_field_last_played = 上次播放
 sort_field_name = 名称
 sort_field_tracks = 曲目
 sort_field_albums = 专辑

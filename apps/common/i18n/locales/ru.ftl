@@ -674,6 +674,7 @@ sort_field_genre = Жанр
 sort_field_album = Альбом
 sort_field_duration = Длительность
 sort_field_date_added = Дата добавления
+sort_field_last_played = Последнее воспроизведение
 sort_field_name = Имя
 sort_field_tracks = Треки
 sort_field_albums = Альбомы

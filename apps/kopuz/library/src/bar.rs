@@ -507,6 +507,7 @@ impl Library {
                 ("title", "sort_field_title"),
                 ("artist", "sort_field_artist"),
                 ("year", "sort_field_year"),
+                ("played", "sort_field_last_played"),
             ],
         };
         // The listing holds one criterion; the shared control edits a stack, so it is a stack of one.
