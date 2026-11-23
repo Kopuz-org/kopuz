@@ -25,7 +25,7 @@ const INSET: Pixels = px(8.);
 /// How the strip draws its tabs and the bar under the chosen one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Bar {
-    /// The navigation's rounded tabs, with a rounded bar in the text colour beside or under them.
+    /// The navigation's rounded tabs: washed when chosen down the side, a rounded bar under them along the top.
     #[default]
     Pill,
     /// Flat tabs over a 2px rule in the accent that sits on the strip's own border.
@@ -37,7 +37,6 @@ pub enum Bar {
 impl Bar {
     fn thickness(self, along: Along) -> Pixels {
         match (self, along) {
-            (Bar::Pill, Along::Column) => px(3.),
             (Bar::Sidebar, _) => px(0.),
             _ => px(2.),
         }
@@ -199,7 +198,6 @@ impl TabStrip {
             Bar::Pill | Bar::Sidebar => style::radius_lg(),
             Bar::Rule => style::radius_md(),
         };
-        let thickness = self.bar.thickness(self.along);
         let select = self.select.clone();
         // The tab carries no padding of its own: an absolute probe measures against the content box.
         let frame: Div = div().flex().relative().flex_none().bg(wash).text_color(ink);
@@ -250,20 +248,6 @@ impl TabStrip {
                         row.child(div().flex_1().min_w_0().truncate().child(label))
                     }),
             )
-            // Inside the tab's own edge and centred on it, so the bar lines up whatever the row's height.
-            .when(vertical && active && self.bar == Bar::Pill, |frame| {
-                frame.child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .top_0()
-                        .bottom_0()
-                        .w(thickness)
-                        .flex()
-                        .items_center()
-                        .child(div().w(thickness).h(px(20.)).rounded_full().bg(ink)),
-                )
-            })
             .when(tab.ringed, |frame| frame.child(focus::ring(radius, cx)))
             .into_any_element()
     }
