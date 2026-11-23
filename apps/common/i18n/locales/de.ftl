@@ -1258,3 +1258,6 @@ interface_page_width_description = Wie breit Seiten in einem großen Fenster wer
 interface_page_width_standard = Standard
 interface_page_width_wide = Breit
 interface_page_width_full = Volle Breite
+similar_artists = Ähnliche Künstler
+interface_similar_artists = Ähnliche Künstler auf Künstlerseiten
+interface_similar_artists_description = MusicBrainz und ListenBrainz fragen, wen Hörer zusammen mit einem Künstler hören. Der Name des Künstlers wird dorthin gesendet.

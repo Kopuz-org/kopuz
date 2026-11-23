@@ -48,6 +48,7 @@ service Kopuz {
   rpc GetArtists(ArtistsRequest) returns (ArtistPage);
   rpc GetArtistTracks(ArtistTracksRequest) returns (TrackPage);
   rpc GetArtist(ArtistRequest) returns (ArtistDetail);
+  rpc GetSimilarArtists(SimilarArtistsRequest) returns (SimilarArtists);
   rpc GetArtistSampleTracks(Page) returns (TrackPage);
   rpc GetGenres(GetGenresRequest) returns (GenreList);
   rpc GetTopGenre(GetTopGenreRequest) returns (TopGenreResponse);
@@ -2772,4 +2773,18 @@ message ListeningStats {
   repeated Ranked artists = 4;
   repeated Ranked albums = 5;
   repeated DayPlays days = 6;
+}
+
+message SimilarArtistsRequest {
+  string name = 1;
+}
+
+message SimilarArtist {
+  string name = 1;
+  // Set when the library has this artist.
+  optional string key = 2;
+}
+
+message SimilarArtists {
+  repeated SimilarArtist artists = 1;
 }

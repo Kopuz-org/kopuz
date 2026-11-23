@@ -1306,3 +1306,6 @@ interface_page_width_description = Насколько страницы раст�
 interface_page_width_standard = Обычная
 interface_page_width_wide = Широкая
 interface_page_width_full = Во всю ширину
+similar_artists = Похожие исполнители
+interface_similar_artists = Похожие исполнители на страницах исполнителей
+interface_similar_artists_description = Спрашивать MusicBrainz и ListenBrainz, кого слушают вместе с исполнителем. Имя исполнителя отправляется им.

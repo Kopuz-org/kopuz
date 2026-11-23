@@ -904,6 +904,7 @@ pub struct Interface {
     pub scale: f32,
     pub font: Option<String>,
     pub page_width: PageWidth,
+    pub similar_artists: bool,
 }
 
 /// How wide a page may grow before it stops stretching and centres.
@@ -922,6 +923,7 @@ impl Default for Interface {
             scale: 1.,
             font: None,
             page_width: PageWidth::Standard,
+            similar_artists: false,
         }
     }
 }

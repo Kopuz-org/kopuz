@@ -43,36 +43,104 @@ pub async fn search_recording_id(artist: &str, title: &str) -> Option<String> {
         utf8_percent_encode(&recording_query(artist, title), NON_ALPHANUMERIC)
     );
 
-    let client = utils::http::builder()
-        .connect_timeout(Duration::from_secs(5))
-        .timeout(Duration::from_secs(15))
-        .build()
-        .ok()?;
-    let res = client
-        .get(&url)
-        .header(
-            "User-Agent",
-            concat!(
-                "Kopuz/",
-                env!("CARGO_PKG_VERSION"),
-                " (https://github.com/owlenz/kopuz)"
-            ),
-        )
-        .header("Accept", "application/json")
-        .send()
-        .await
-        .ok()?;
-
-    if !res.status().is_success() {
-        return None;
-    }
-
-    let body = res.text().await.ok()?;
-    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+    let json = get_json(&url).await.ok()?;
     json.get("recordings")?
         .as_array()?
         .first()?
         .get("id")?
         .as_str()
         .map(|s| s.to_string())
+}
+
+const USER_AGENT: &str = concat!(
+    "Kopuz/",
+    env!("CARGO_PKG_VERSION"),
+    " (https://github.com/owlenz/kopuz)"
+);
+
+/// ListenBrainz's session-based model, the one its own "similar artists" pages use.
+const SIMILAR_ALGORITHM: &str =
+    "session_based_days_7500_session_300_contribution_5_threshold_10_limit_100_filter_True_skip_30";
+
+async fn get_json(url: &str) -> Result<serde_json::Value, String> {
+    let client = utils::http::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let response = client
+        .get(url)
+        .header("User-Agent", USER_AGENT)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("{url} answered {}", response.status()));
+    }
+    response.json().await.map_err(|error| error.to_string())
+}
+
+/// The MusicBrainz id of the artist best matching `name`, when the match is a confident one.
+async fn artist_id(name: &str) -> Result<Option<String>, String> {
+    let query = format!("artist:\"{}\"", escape_lucene(name.trim()));
+    let url = format!(
+        "https://musicbrainz.org/ws/2/artist/?query={}&fmt=json&limit=1",
+        utf8_percent_encode(&query, NON_ALPHANUMERIC)
+    );
+    let json = get_json(&url).await?;
+    Ok(json
+        .get("artists")
+        .and_then(|artists| artists.as_array()?.first().cloned())
+        .filter(|artist| artist.get("score").and_then(|score| score.as_u64()) >= Some(90))
+        .and_then(|artist| artist.get("id")?.as_str().map(str::to_string)))
+}
+
+/// Up to `limit` artists ListenBrainz listeners play alongside `name`, closest first.
+pub async fn similar_artists(name: &str, limit: usize) -> Result<Vec<String>, String> {
+    let Some(id) = artist_id(name).await? else {
+        return Ok(Vec::new());
+    };
+    let url = format!(
+        "https://labs.api.listenbrainz.org/similar-artists/json?artist_mbids={id}&algorithm={SIMILAR_ALGORITHM}"
+    );
+    let json = get_json(&url).await?;
+    Ok(similar_names(&json, limit))
+}
+
+fn similar_names(json: &serde_json::Value, limit: usize) -> Vec<String> {
+    json.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|artist| artist.get("name")?.as_str())
+        .map(str::to_string)
+        .take(limit)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn similar_artists_are_read_in_order_up_to_the_limit() {
+        let json = serde_json::json!([
+            {"artist_mbid": "a", "name": "Nirvana", "score": 8788},
+            {"artist_mbid": "b", "name": "System of a Down", "score": 7783},
+            {"artist_mbid": "c", "score": 7000},
+            {"artist_mbid": "d", "name": "Red Hot Chili Peppers", "score": 7752}
+        ]);
+        assert_eq!(similar_names(&json, 2), ["Nirvana", "System of a Down"]);
+        assert_eq!(
+            similar_names(&serde_json::json!({}), 5),
+            Vec::<String>::new()
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "asks MusicBrainz and ListenBrainz; run by hand"]
+    async fn live_similar_artists() {
+        let found = similar_artists("Metallica", 5).await.expect("answer");
+        assert_eq!(found.len(), 5, "{found:?}");
+    }
 }

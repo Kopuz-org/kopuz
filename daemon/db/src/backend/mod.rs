@@ -237,6 +237,13 @@ impl ReadStore for Native {
         cfg_store::recently_played(&self.pool(), source, limit).await
     }
 
+    async fn artist_keys_by_name(
+        &self,
+        source: &crate::Source,
+    ) -> Result<std::collections::HashMap<String, String>, DbError> {
+        queries::artist_keys_by_name(&self.pool(), source).await
+    }
+
     async fn listening(
         &self,
         source: &crate::Source,

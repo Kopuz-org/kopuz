@@ -1251,3 +1251,6 @@ interface_page_width_description = Seberapa lebar halaman di jendela besar sebel
 interface_page_width_standard = Standar
 interface_page_width_wide = Lebar
 interface_page_width_full = Lebar penuh
+similar_artists = Artis serupa
+interface_similar_artists = Artis serupa di halaman artis
+interface_similar_artists_description = Tanya MusicBrainz dan ListenBrainz siapa yang didengar pendengar bersama seorang artis. Nama artis dikirim ke mereka.

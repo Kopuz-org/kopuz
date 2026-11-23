@@ -1,7 +1,7 @@
 //! The knobs that belong to no single package: motion, accent and how big everything is drawn.
 
 use components::format::t;
-use components::settings::{SettingRow, choice, nearest, section, select_width};
+use components::settings::{SettingRow, choice, nearest, section, select_width, toggle_row};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::v_flex;
 use gpui_kit::{
@@ -72,6 +72,7 @@ impl Render for General {
         let ambient = layout.ambient;
         let scale = layout.interface.scale;
         let page_width = layout.interface.page_width;
+        let similar_artists = layout.interface.similar_artists;
         v_flex()
             .w_full()
             .child(
@@ -159,6 +160,20 @@ impl Render for General {
                                 },
                             ))
                             .shown(cx),
+                    )
+                    .children(
+                        toggle_row(
+                            "interface-similar-artists",
+                            t("interface_similar_artists"),
+                            similar_artists,
+                            |on, cx| {
+                                LayoutModel::edit(cx, |layout| {
+                                    layout.interface.similar_artists = on
+                                })
+                            },
+                        )
+                        .description(t("interface_similar_artists_description"))
+                        .shown(cx),
                     )
                     .children(
                         SettingRow::new(t("interface_font"))

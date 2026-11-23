@@ -1257,3 +1257,6 @@ interface_page_width_description = lipu li ken suli seme lon lupa suli.
 interface_page_width_standard = sama
 interface_page_width_wide = suli
 interface_page_width_full = suli ale
+similar_artists = jan kalama sama
+interface_similar_artists = jan kalama sama lon lipu jan
+interface_similar_artists_description = o toki tawa MusicBrainz en ListenBrainz. nimi jan li tawa ona.

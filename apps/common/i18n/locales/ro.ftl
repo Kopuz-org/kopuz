@@ -1297,3 +1297,6 @@ interface_page_width_description = Cât de late se fac paginile într-o fereastr
 interface_page_width_standard = Standard
 interface_page_width_wide = Lată
 interface_page_width_full = Lățime completă
+similar_artists = Artiști similari
+interface_similar_artists = Artiști similari pe paginile artiștilor
+interface_similar_artists_description = Întreabă MusicBrainz și ListenBrainz pe cine ascultă oamenii alături de un artist. Numele artistului le este trimis.

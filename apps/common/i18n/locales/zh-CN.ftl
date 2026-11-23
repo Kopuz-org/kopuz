@@ -1257,3 +1257,6 @@ interface_page_width_description = 大窗口中页面在居中前最多能有多
 interface_page_width_standard = 标准
 interface_page_width_wide = 宽
 interface_page_width_full = 全宽
+similar_artists = 相似艺人
+interface_similar_artists = 在艺人页显示相似艺人
+interface_similar_artists_description = 向 MusicBrainz 和 ListenBrainz 查询听众常一起听的艺人。会把艺人名称发送给它们。

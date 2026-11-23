@@ -1257,3 +1257,6 @@ interface_page_width_description = Mennyire szélesednek az oldalak nagy ablakba
 interface_page_width_standard = Normál
 interface_page_width_wide = Széles
 interface_page_width_full = Teljes szélesség
+similar_artists = Hasonló előadók
+interface_similar_artists = Hasonló előadók az előadóoldalakon
+interface_similar_artists_description = A MusicBrainz és a ListenBrainz megkérdezése, kit hallgatnak egy előadó mellett. Az előadó neve elküldésre kerül.

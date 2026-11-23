@@ -1246,3 +1246,6 @@ interface_page_width_description = Büyük pencerede sayfaların durup ortalanma
 interface_page_width_standard = Standart
 interface_page_width_wide = Geniş
 interface_page_width_full = Tam genişlik
+similar_artists = Benzer sanatçılar
+interface_similar_artists = Sanatçı sayfalarında benzer sanatçılar
+interface_similar_artists_description = Dinleyicilerin bir sanatçıyla birlikte kimi dinlediğini MusicBrainz ve ListenBrainz'e sor. Sanatçının adı onlara gönderilir.

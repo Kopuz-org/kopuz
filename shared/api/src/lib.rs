@@ -45,8 +45,8 @@ pub use library::{
     AlbumInfo, AlbumPage, AlbumQuery, ArtistCredit, ArtistDetail, ArtistInfo, ArtistPage,
     ArtistQuery, DEFAULT_PAGE_LIMIT, DayPlays, ListeningStats, LyricChunkView, LyricLineView,
     LyricsView, Page, Ranked, RankedTrack, SearchRequest, SearchResults, SearchSuggestion,
-    StatsView, TrackCounterpart, TrackFilter, TrackInfo, TrackPage, TrackSort, TrackVersion,
-    total_duration_secs,
+    SimilarArtist, StatsView, TrackCounterpart, TrackFilter, TrackInfo, TrackPage, TrackSort,
+    TrackVersion, total_duration_secs,
 };
 pub use mutations::{ArtworkChange, ArtworkUpload, TrackMetadataPatch};
 pub use player::{
@@ -238,6 +238,9 @@ pub trait LibraryApi: Send + Sync {
 
     /// One artist's name, photo, count and billed albums.
     async fn artist(&self, artist: String) -> Result<ArtistDetail, ApiError>;
+
+    /// Artists ListenBrainz listeners play alongside `name`, asking MusicBrainz and ListenBrainz.
+    async fn similar_artists(&self, name: String) -> Result<Vec<SimilarArtist>, ApiError>;
 
     /// One track per artist, for the artist grid's tiles.
     async fn artist_sample_tracks(&self, page: Page) -> Result<TrackPage, ApiError>;

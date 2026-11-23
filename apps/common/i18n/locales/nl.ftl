@@ -1283,3 +1283,6 @@ interface_page_width_description = Hoe breed pagina's worden in een groot venste
 interface_page_width_standard = Standaard
 interface_page_width_wide = Breed
 interface_page_width_full = Volle breedte
+similar_artists = Vergelijkbare artiesten
+interface_similar_artists = Vergelijkbare artiesten op artiestpagina's
+interface_similar_artists_description = Vraag MusicBrainz en ListenBrainz wie luisteraars naast een artiest afspelen. De naam van de artiest wordt naar hen gestuurd.

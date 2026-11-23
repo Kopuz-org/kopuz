@@ -769,6 +769,10 @@ impl api::LibraryApi for LocalApi {
         }
     }
 
+    async fn similar_artists(&self, name: String) -> Result<Vec<api::SimilarArtist>, ApiError> {
+        self.library()?.similar_artists(&name).await
+    }
+
     async fn listening_stats(&self, days: Option<u32>) -> Result<api::ListeningStats, ApiError> {
         self.library()?.listening_stats(days).await
     }

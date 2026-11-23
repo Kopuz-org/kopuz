@@ -759,6 +759,23 @@ impl api::LibraryApi for GrpcApi {
         Ok(convert::lyrics_from_proto(lyrics.get_ref()))
     }
 
+    async fn similar_artists(&self, name: String) -> Result<Vec<api::SimilarArtist>, ApiError> {
+        let answer = self
+            .client()
+            .get_similar_artists(Request::new(proto::SimilarArtistsRequest { name }))
+            .await
+            .map_err(wire_error)?
+            .into_inner();
+        Ok(answer
+            .artists
+            .into_iter()
+            .map(|artist| api::SimilarArtist {
+                name: artist.name,
+                key: artist.key,
+            })
+            .collect())
+    }
+
     async fn listening_stats(&self, days: Option<u32>) -> Result<api::ListeningStats, ApiError> {
         let stats = self
             .client()

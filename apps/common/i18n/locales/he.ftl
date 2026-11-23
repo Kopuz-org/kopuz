@@ -1289,3 +1289,6 @@ interface_page_width_description = עד כמה עמודים מתרחבים בח�
 interface_page_width_standard = רגיל
 interface_page_width_wide = רחב
 interface_page_width_full = רוחב מלא
+similar_artists = אמנים דומים
+interface_similar_artists = אמנים דומים בדפי אמנים
+interface_similar_artists_description = שאלת MusicBrainz ו-ListenBrainz את מי מאזינים לצד אמן. שם האמן נשלח אליהם.

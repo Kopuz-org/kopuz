@@ -1287,3 +1287,6 @@ interface_page_width_description = വലിയ വിൻഡോയിൽ പേ�
 interface_page_width_standard = സാധാരണ
 interface_page_width_wide = വീതിയുള്ള
 interface_page_width_full = പൂർണ്ണ വീതി
+similar_artists = സമാന കലാകാരന്മാർ
+interface_similar_artists = കലാകാരന്റെ പേജിൽ സമാന കലാകാരന്മാർ
+interface_similar_artists_description = ഒരു കലാകാരനൊപ്പം ശ്രോതാക്കൾ കേൾക്കുന്നവരെ MusicBrainz, ListenBrainz-നോട് ചോദിക്കുക. കലാകാരന്റെ പേര് അവർക്ക് അയയ്ക്കും.

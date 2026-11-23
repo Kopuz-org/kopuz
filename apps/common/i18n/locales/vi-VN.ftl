@@ -1251,3 +1251,6 @@ interface_page_width_description = Trang rộng ra bao nhiêu trên cửa sổ l
 interface_page_width_standard = Chuẩn
 interface_page_width_wide = Rộng
 interface_page_width_full = Toàn bộ
+similar_artists = Nghệ sĩ tương tự
+interface_similar_artists = Nghệ sĩ tương tự trên trang nghệ sĩ
+interface_similar_artists_description = Hỏi MusicBrainz và ListenBrainz người nghe thường nghe ai cùng một nghệ sĩ. Tên nghệ sĩ sẽ được gửi đi.

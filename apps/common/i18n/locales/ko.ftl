@@ -1257,3 +1257,6 @@ interface_page_width_description = 큰 창에서 페이지가 가운데 정렬�
 interface_page_width_standard = 표준
 interface_page_width_wide = 넓게
 interface_page_width_full = 전체 너비
+similar_artists = 비슷한 아티스트
+interface_similar_artists = 아티스트 페이지에 비슷한 아티스트 표시
+interface_similar_artists_description = MusicBrainz와 ListenBrainz에 함께 듣는 아티스트를 묻습니다. 아티스트 이름이 전송됩니다.

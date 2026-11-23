@@ -1251,3 +1251,6 @@ interface_page_width_description = Gaano kalapad ang mga pahina sa malaking wind
 interface_page_width_standard = Karaniwan
 interface_page_width_wide = Malapad
 interface_page_width_full = Buong lapad
+similar_artists = Mga katulad na artist
+interface_similar_artists = Mga katulad na artist sa mga pahina ng artist
+interface_similar_artists_description = Itanong sa MusicBrainz at ListenBrainz kung sino ang pinakikinggan kasama ng isang artist. Ipinapadala sa kanila ang pangalan ng artist.
