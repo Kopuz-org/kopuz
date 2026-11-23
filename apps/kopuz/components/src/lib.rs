@@ -117,7 +117,7 @@ pub use link::{Link, Tone, heading_link};
 pub use lyric_line::LyricLine;
 pub use menu_button::{MenuButton, MenuVariant};
 pub use menus::{Menu, MenuItem, Picture, Spot, WithContextMenu, menu_item, pictured};
-pub use nav_row::NavListRow;
+pub use nav_row::{NavListRow, tall_row};
 pub use page::page;
 pub use panel::{DirtyDot, Panel};
 pub use pick_list::{PickItem, PickList, QuickCreate};

@@ -4,7 +4,8 @@ use api::{PlaylistCapability, Rating};
 use components::format::t;
 use components::icons;
 use gpui_kit::App;
-use store::{Kind, Navigator, Route, Target, actions};
+use store::layout::Pin;
+use store::{Kind, LayoutModel, Navigator, Route, Target, actions};
 
 use crate::catalog;
 use crate::ops;
@@ -16,6 +17,7 @@ const ALBUM: &[Kind] = &[Kind::Album];
 const ARTIST: &[Kind] = &[Kind::Artist];
 const PLAYLIST: &[Kind] = &[Kind::Playlist];
 const FOLDER: &[Kind] = &[Kind::Folder];
+const PINNABLE: &[Kind] = &[Kind::Album, Kind::Artist, Kind::Playlist, Kind::Folder];
 const QUEUE_ITEM: &[Kind] = &[Kind::QueueItem];
 const NOTHING: &[Kind] = &[Kind::None];
 const CATALOG: &[Kind] = &[Kind::Catalog, Kind::Tracks];
@@ -27,6 +29,10 @@ const LIST: &str = "TrackList";
 
 fn yes(_: &Target, _: &App) -> bool {
     true
+}
+
+fn pinned(target: &Target, cx: &App) -> bool {
+    Pin::of(target).is_some_and(|pin| store::layout(cx).panel.is_pinned(pin.kind, &pin.id))
 }
 
 fn has_tracks(target: &Target, _: &App) -> bool {
@@ -603,6 +609,27 @@ static COMMANDS: &[Command] = &[
         run: |target, _, cx| {
             if let Target::Artist { key, .. } = &target {
                 ops::with_artist_keys(key.clone(), cx, actions::append);
+            }
+        },
+        action: None,
+    },
+    Command {
+        id: "sidebar.pin",
+        labels: &["pin_to_sidebar", "unpin_from_sidebar"],
+        label: |target, cx| match pinned(target, cx) {
+            true => t("unpin_from_sidebar"),
+            false => t("pin_to_sidebar"),
+        },
+        icon: Some(icons::BOOKMARK),
+        group: Group::Library,
+        section: Section::Act,
+        keys: NO_KEYS,
+        danger: false,
+        applies: PINNABLE,
+        available: |target, _| Pin::of(target).is_some(),
+        run: |target, _, cx| {
+            if let Some(pin) = Pin::of(&target) {
+                LayoutModel::edit(cx, move |layout| layout.panel.toggle_pin(pin));
             }
         },
         action: None,
