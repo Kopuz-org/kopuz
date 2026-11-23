@@ -13,6 +13,8 @@ use reader::Album;
 
 use super::{LibraryService, album_query, artist_query, db_error, db_page, offline_filter};
 
+const SIMILAR_LIMIT: usize = 15;
+
 /// Paging a fully materialized list. The database returns whole collections
 /// for these (they are small next to the track table), so the window is
 /// applied here rather than pushed into SQL.
@@ -231,6 +233,26 @@ impl LibraryService {
     /// The library row a key names in the source being read.
     pub(crate) async fn artist_row(&self, artist: &str) -> Result<db::ArtistRow, ApiError> {
         crate::artist_row::require(&self.db, &self.query_source(), artist).await
+    }
+
+    pub async fn similar_artists(&self, name: &str) -> Result<Vec<api::SimilarArtist>, ApiError> {
+        let names = server::musicbrainz::similar_artists(name, SIMILAR_LIMIT)
+            .await
+            .map_err(|error| ApiError::new(api::ErrorCode::SourceUnreachable, error))?;
+        let keys = self
+            .db
+            .artist_keys_by_name(&self.query_source())
+            .await
+            .map_err(db_error)?;
+        Ok(names
+            .into_iter()
+            .map(|name| api::SimilarArtist {
+                key: keys
+                    .get(&utils::artist::normalize_artist_key(&name))
+                    .cloned(),
+                name,
+            })
+            .collect())
     }
 
     /// One artist's header; its albums list through `albums` by artist key.

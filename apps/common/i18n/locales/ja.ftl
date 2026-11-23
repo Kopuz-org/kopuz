@@ -1263,3 +1263,6 @@ interface_page_width_description = 大きなウィンドウでページが中央
 interface_page_width_standard = 標準
 interface_page_width_wide = ワイド
 interface_page_width_full = 全幅
+similar_artists = 似たアーティスト
+interface_similar_artists = アーティストページに似たアーティストを表示
+interface_similar_artists_description = MusicBrainz と ListenBrainz に、一緒に聴かれているアーティストを問い合わせます。アーティスト名が送信されます。

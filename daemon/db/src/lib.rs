@@ -369,6 +369,12 @@ pub trait ReadStore: Send + Sync {
         since: Option<i64>,
     ) -> Result<ListeningRows, DbError>;
 
+    /// Every artist key of this source, by folded name.
+    async fn artist_keys_by_name(
+        &self,
+        source: &Source,
+    ) -> Result<std::collections::HashMap<String, String>, DbError>;
+
     /// One representative (first-inserted) track per artist, artist A→Z — for
     /// artist tiles that need a cover without pulling the whole source.
     async fn artist_sample_tracks(

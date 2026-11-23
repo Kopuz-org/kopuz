@@ -1295,3 +1295,6 @@ interface_page_width_description = إلى أي حد تتسع الصفحات في
 interface_page_width_standard = قياسي
 interface_page_width_wide = عريض
 interface_page_width_full = كامل العرض
+similar_artists = فنانون مشابهون
+interface_similar_artists = فنانون مشابهون في صفحات الفنانين
+interface_similar_artists_description = اسأل MusicBrainz وListenBrainz عمّن يستمع إليه الناس مع فنان ما. يُرسل اسم الفنان إليهما.

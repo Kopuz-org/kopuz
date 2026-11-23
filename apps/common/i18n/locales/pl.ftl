@@ -1305,3 +1305,6 @@ interface_page_width_description = Jak szeroko strony rosną w dużym oknie, zan
 interface_page_width_standard = Standardowa
 interface_page_width_wide = Szeroka
 interface_page_width_full = Pełna szerokość
+similar_artists = Podobni wykonawcy
+interface_similar_artists = Podobni wykonawcy na stronach wykonawców
+interface_similar_artists_description = Pytaj MusicBrainz i ListenBrainz, kogo słuchacze słuchają razem z wykonawcą. Nazwa wykonawcy jest do nich wysyłana.

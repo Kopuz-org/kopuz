@@ -1287,3 +1287,6 @@ interface_page_width_description = பெரிய சாளரத்தில�
 interface_page_width_standard = நிலையான
 interface_page_width_wide = அகலமான
 interface_page_width_full = முழு அகலம்
+similar_artists = ஒத்த கலைஞர்கள்
+interface_similar_artists = கலைஞர் பக்கங்களில் ஒத்த கலைஞர்கள்
+interface_similar_artists_description = ஒரு கலைஞருடன் கேட்பவர்கள் யாரைக் கேட்கிறார்கள் என MusicBrainz, ListenBrainz-இடம் கேள். கலைஞரின் பெயர் அனுப்பப்படும்.

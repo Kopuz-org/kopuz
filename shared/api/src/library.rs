@@ -217,6 +217,13 @@ pub struct StatsView {
     pub listen_counts: std::collections::HashMap<String, u64>,
 }
 
+/// An artist listeners play alongside another; `key` is set when the library has them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SimilarArtist {
+    pub name: String,
+    pub key: Option<String>,
+}
+
 /// What was played over a span: totals, the most played, and plays per day.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ListeningStats {

@@ -1287,3 +1287,6 @@ interface_page_width_description = Quanto as páginas crescem numa janela grande
 interface_page_width_standard = Padrão
 interface_page_width_wide = Larga
 interface_page_width_full = Largura total
+similar_artists = Artistas semelhantes
+interface_similar_artists = Artistas semelhantes nas páginas de artista
+interface_similar_artists_description = Pergunta ao MusicBrainz e ao ListenBrainz quem os ouvintes ouvem com um artista. O nome do artista é-lhes enviado.

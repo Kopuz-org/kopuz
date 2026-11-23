@@ -981,6 +981,27 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::Unit {}))
     }
 
+    async fn get_similar_artists(
+        &self,
+        request: Request<proto::SimilarArtistsRequest>,
+    ) -> Result<Response<proto::SimilarArtists>, Status> {
+        let artists = self
+            .0
+            .api
+            .similar_artists(request.into_inner().name)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::SimilarArtists {
+            artists: artists
+                .into_iter()
+                .map(|artist| proto::SimilarArtist {
+                    name: artist.name,
+                    key: artist.key,
+                })
+                .collect(),
+        }))
+    }
+
     async fn get_listening_stats(
         &self,
         request: Request<proto::ListeningStatsRequest>,

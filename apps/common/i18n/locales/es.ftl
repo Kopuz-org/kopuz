@@ -1290,3 +1290,6 @@ interface_page_width_description = Cuánto se ensanchan las páginas en una vent
 interface_page_width_standard = Estándar
 interface_page_width_wide = Ancho
 interface_page_width_full = Ancho completo
+similar_artists = Artistas similares
+interface_similar_artists = Artistas similares en las páginas de artista
+interface_similar_artists_description = Pregunta a MusicBrainz y ListenBrainz qué escuchan los oyentes junto a un artista. Se les envía el nombre del artista.

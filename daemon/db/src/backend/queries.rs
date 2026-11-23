@@ -723,6 +723,19 @@ pub async fn unlinked_artist_keys(
     Ok(rows.into_iter().map(|r| (r.name_key, r.key)).collect())
 }
 
+/// Every artist key of `source`, by folded name.
+pub async fn artist_keys_by_name(
+    pool: &SqlitePool,
+    source: &Source,
+) -> Result<std::collections::HashMap<String, String>, DbError> {
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT name_key, key FROM artists WHERE source = ?1")
+            .bind(source.as_str())
+            .fetch_all(pool)
+            .await?;
+    Ok(rows.into_iter().collect())
+}
+
 /// One artist of `source` by its key, counted as [`artists`] counts it.
 pub async fn artist(
     pool: &SqlitePool,

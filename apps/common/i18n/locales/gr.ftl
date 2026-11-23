@@ -1289,3 +1289,6 @@ interface_page_width_description = Πόσο φαρδιές γίνονται οι
 interface_page_width_standard = Κανονικό
 interface_page_width_wide = Φαρδύ
 interface_page_width_full = Πλήρες πλάτος
+similar_artists = Παρόμοιοι καλλιτέχνες
+interface_similar_artists = Παρόμοιοι καλλιτέχνες στις σελίδες καλλιτεχνών
+interface_similar_artists_description = Ερώτηση στο MusicBrainz και ListenBrainz για το τι ακούνε οι ακροατές μαζί με έναν καλλιτέχνη. Το όνομα του καλλιτέχνη στέλνεται σε αυτά.

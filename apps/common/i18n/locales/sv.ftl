@@ -1283,3 +1283,6 @@ interface_page_width_description = Hur breda sidor blir i ett stort fönster inn
 interface_page_width_standard = Standard
 interface_page_width_wide = Bred
 interface_page_width_full = Full bredd
+similar_artists = Liknande artister
+interface_similar_artists = Liknande artister på artistsidor
+interface_similar_artists_description = Fråga MusicBrainz och ListenBrainz vilka lyssnare spelar tillsammans med en artist. Artistens namn skickas till dem.
