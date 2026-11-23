@@ -700,6 +700,7 @@ impl Render for Shell {
                         .update(cx, |overlay, cx| overlay.toggle(cx));
                 }),
             )
+            .on_scroll_wheel(|event, _, _| components::scroll::saw_wheel(event))
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .children(match compact {
