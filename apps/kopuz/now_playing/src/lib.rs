@@ -29,7 +29,7 @@ pub use bar::{bar_height, utility_metrics};
 pub use lyrics_view::LyricsView;
 pub use queue_view::QueueView;
 pub use settings::register as register_settings;
-pub use stage::{has_other_display, toggle_stage};
+pub use stage::toggle_stage;
 pub use window::{MiniWindow, close_mini, is_open as mini_is_open, open_mini, toggle_mini};
 
 use seek::{Layout, PlayheadClock, SeekRow};

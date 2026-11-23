@@ -142,6 +142,7 @@ impl PlaylistsPanel {
                     this.suppressed = false;
                 }
                 this.reread(cx);
+                this.fetch_art(cx);
                 cx.notify();
             }),
         ];
@@ -161,6 +162,7 @@ impl PlaylistsPanel {
             _subscriptions: subscriptions,
         };
         this.reread(cx);
+        this.fetch_art(cx);
         this
     }
 
@@ -447,7 +449,6 @@ impl Render for PlaylistsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _timing = profile::render("playlists-panel");
         components::scroll::smooth_list("playlists-panel-scroll", &self.scroll, window, cx);
-        self.fetch_art(cx);
         let pinned = self.pinned(cx);
         let count = self.rows.len();
         let collapsed = self.collapsed();

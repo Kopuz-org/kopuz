@@ -449,35 +449,22 @@ impl LibraryService {
             tracks: rows
                 .tracks
                 .into_iter()
-                .map(|(key, title, artist, plays)| api::RankedTrack {
-                    key,
-                    title,
-                    artist,
-                    plays,
+                .map(|track| api::RankedTrack {
+                    key: track.key,
+                    title: track.title,
+                    artist: track.artist,
+                    plays: track.plays,
                 })
                 .collect(),
-            artists: rows
-                .artists
-                .into_iter()
-                .map(|(name, plays)| api::Ranked {
-                    name,
-                    detail: String::new(),
-                    plays,
-                })
-                .collect(),
-            albums: rows
-                .albums
-                .into_iter()
-                .map(|(name, detail, plays)| api::Ranked {
-                    name,
-                    detail,
-                    plays,
-                })
-                .collect(),
+            artists: rows.artists.into_iter().map(ranked).collect(),
+            albums: rows.albums.into_iter().map(ranked).collect(),
             days: rows
                 .days
                 .into_iter()
-                .map(|(day, plays)| api::DayPlays { day, plays })
+                .map(|day| api::DayPlays {
+                    day: day.day,
+                    plays: day.plays,
+                })
                 .collect(),
         })
     }
@@ -836,6 +823,14 @@ fn youtube_music_lyrics_auth(
         cookies,
         account: server.account.clone(),
     })
+}
+
+fn ranked(row: db::NamePlays) -> api::Ranked {
+    api::Ranked {
+        name: row.name,
+        detail: row.detail,
+        plays: row.plays,
+    }
 }
 
 #[cfg(test)]

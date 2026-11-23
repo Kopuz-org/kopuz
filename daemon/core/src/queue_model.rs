@@ -498,9 +498,7 @@ impl QueueModel {
         self.shuffle_order = order;
     }
 
-    /// A looping shuffle deals a fresh order each time round. The track playing
-    /// now opens it, so it is not heard again straight away, and the few that
-    /// closed the last round are kept out of the first slots of the next.
+    /// The playing track opens the new round, and the last round's closers stay out of its first slots.
     fn start_new_round(&mut self) {
         use rand::seq::SliceRandom;
         let len = self.shuffle_order.len();

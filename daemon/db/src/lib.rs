@@ -243,13 +243,33 @@ pub struct CachedTrackRow {
 pub struct ListeningRows {
     pub plays: u32,
     pub seconds: u64,
-    /// Key, title, artist, plays.
-    pub tracks: Vec<(String, String, String, u32)>,
-    pub artists: Vec<(String, u32)>,
-    /// Album, artist, plays.
-    pub albums: Vec<(String, String, u32)>,
-    /// Days since the epoch, plays.
-    pub days: Vec<(i64, u32)>,
+    pub tracks: Vec<TrackPlays>,
+    pub artists: Vec<NamePlays>,
+    pub albums: Vec<NamePlays>,
+    pub days: Vec<DayPlays>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TrackPlays {
+    pub key: String,
+    pub title: String,
+    pub artist: String,
+    pub plays: u32,
+}
+
+/// An artist, or an album with its artist as the detail.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NamePlays {
+    pub name: String,
+    pub detail: String,
+    pub plays: u32,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DayPlays {
+    /// Days since the unix epoch, UTC.
+    pub day: i64,
+    pub plays: u32,
 }
 
 /// One track's play count, and when it was last played.

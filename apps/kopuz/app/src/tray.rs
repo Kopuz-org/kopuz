@@ -47,7 +47,7 @@ struct Menu {
 }
 
 impl Menu {
-    fn current(cx: &mut App) -> Self {
+    fn current(cx: &App) -> Self {
         let lyric = current_lyric(cx);
         let player = PlayerModel::global(cx).read(cx);
         let track = player.track().map(|track| match track.artist.is_empty() {
@@ -174,7 +174,7 @@ struct TrayLyrics {
 
 impl Global for TrayLyrics {}
 
-fn current_lyric(cx: &mut App) -> Option<String> {
+fn current_lyric(cx: &App) -> Option<String> {
     if !store::layout(cx).player.tray_lyrics {
         return None;
     }
@@ -183,7 +183,6 @@ fn current_lyric(cx: &mut App) -> Option<String> {
     let position = player.position_ms();
     let held = cx.try_global::<TrayLyrics>()?;
     if held.key != key {
-        fetch_lyrics(key, cx);
         return None;
     }
     held.lines
@@ -192,6 +191,20 @@ fn current_lyric(cx: &mut App) -> Option<String> {
         .find(|(start, _)| *start <= position)
         .map(|(_, text)| text.clone())
         .filter(|text| !text.trim().is_empty())
+}
+
+fn follow_lyrics(cx: &mut App) {
+    if !store::layout(cx).player.tray_lyrics {
+        return;
+    }
+    let key = PlayerModel::global(cx)
+        .read(cx)
+        .track()
+        .map(|track| track.key.clone());
+    let known = cx.try_global::<TrayLyrics>().map(|held| held.key.clone());
+    if known.as_ref() != Some(&key) {
+        fetch_lyrics(key, cx);
+    }
 }
 
 fn fetch_lyrics(key: Option<String>, cx: &mut App) {
@@ -234,6 +247,7 @@ fn fetch_lyrics(key: Option<String>, cx: &mut App) {
 
 /// Put the icon up or take it down as the setting says, and redraw its menu when what it shows changes.
 fn sync(cx: &mut App) {
+    follow_lyrics(cx);
     let wanted = ConfigModel::global(cx)
         .read(cx)
         .config()
