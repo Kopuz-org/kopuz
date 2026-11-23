@@ -208,10 +208,33 @@ impl TopBar {
             && skin::arrangement().nav == Nav::Strip
     }
 
+    fn source_switcher(&self, collapsed: bool, cx: &App) -> Option<AnyElement> {
+        let shown = ConfigModel::global(cx)
+            .read(cx)
+            .config()
+            .ui
+            .show_source_toggle;
+        shown.then(|| {
+            let sources = SourcesModel::global(cx).read(cx).sources().to_vec();
+            let status = SourcesModel::global(cx).read(cx).active_status();
+            div()
+                .when(!collapsed, |slot| slot.w_full())
+                .child(
+                    SourceSwitcher::new(sources, status)
+                        .collapsed(collapsed)
+                        .bare(true),
+                )
+                .into_any_element()
+        })
+    }
+
     pub fn render_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let history = self.history(cx);
         let search = self.search(cx);
         let rail_shown = !store::layout(cx).nav.rail_hidden;
+        let switcher = (!rail_shown)
+            .then(|| self.source_switcher(true, cx))
+            .flatten();
         let side = store::Chrome::global(cx).read(cx).panel().is_some();
         let settings = chrome_button("controls-settings", icons::SETTINGS, cx)
             .tooltip(commands::tooltip("app.settings", t("settings"), cx))
@@ -259,6 +282,7 @@ impl TopBar {
             .child(div().w(px(260.)).flex_shrink_1().min_w_0().child(search))
             .children(self.activity.clone())
             .children(offline::indicator(true, cx))
+            .children(switcher)
             .child(settings)
             .child(
                 chrome_button("controls-side-panel", icons::PANEL_RIGHT, cx)
@@ -509,8 +533,9 @@ impl Render for TopBar {
                 })
                 .child(strip)
                 .child(self.rail_room())
-                .when(!self.controls_on_top(), |rail| {
-                    rail.child(v_flex().w_full().gap_1().child(cluster))
+                .map(|rail| match self.controls_on_top() {
+                    true => rail.children(self.source_switcher(false, cx)),
+                    false => rail.child(v_flex().w_full().gap_1().child(cluster)),
                 })
                 .into_any_element(),
         }
