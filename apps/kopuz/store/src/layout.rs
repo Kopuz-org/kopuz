@@ -357,6 +357,7 @@ pub struct Panel {
     pub pins: Vec<Pin>,
     pub show_pins: bool,
     pub show_playlists: bool,
+    pub playlist_covers: bool,
     pub side: Side,
 }
 
@@ -369,6 +370,7 @@ impl Default for Panel {
             pins: Vec::new(),
             show_pins: true,
             show_playlists: true,
+            playlist_covers: false,
             side: Side::Left,
         }
     }

@@ -1268,6 +1268,7 @@ listening_top_artists = Toppartister
 listening_top_albums = Toppalbum
 interface_panel_show_pins = Visa fästa
 interface_panel_show_playlists = Visa spellistor
+interface_panel_playlist_covers = Visa spellistornas omslag
 interface_panel_no_pins = Inget fäst än. Högerklicka på ett album, en artist eller en spellista och välj Fäst i sidofältet.
 interface_nav_controls_up_top = Kontroller längst upp
 interface_nav_controls_up_top_description = Lägg bakåt, framåt, sök och statusknapparna i en smal list överst och håll sidofältet för platser.

@@ -1242,6 +1242,7 @@ listening_top_artists = Legtöbbet hallgatott előadók
 listening_top_albums = Legtöbbet hallgatott albumok
 interface_panel_show_pins = Rögzítettek megjelenítése
 interface_panel_show_playlists = Lejátszási listák megjelenítése
+interface_panel_playlist_covers = Lejátszási listák borítóinak megjelenítése
 interface_panel_no_pins = Még nincs rögzítve semmi. Kattints jobb gombbal egy albumra, előadóra vagy listára, és válaszd a Rögzítés az oldalsávra lehetőséget.
 interface_nav_controls_up_top = Vezérlők felül
 interface_nav_controls_up_top_description = A vissza, előre, keresés és állapot gombok egy vékony felső sávba kerülnek, az oldalsáv a helyeké marad.

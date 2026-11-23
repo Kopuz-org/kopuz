@@ -1272,6 +1272,7 @@ listening_top_artists = മുൻനിര കലാകാരന്മാർ
 listening_top_albums = മുൻനിര ആൽബങ്ങൾ
 interface_panel_show_pins = പിൻ ചെയ്തവ കാണിക്കുക
 interface_panel_show_playlists = പ്ലേലിസ്റ്റുകൾ കാണിക്കുക
+interface_panel_playlist_covers = പ്ലേലിസ്റ്റ് കവറുകൾ കാണിക്കുക
 interface_panel_no_pins = ഇതുവരെ ഒന്നും പിൻ ചെയ്തിട്ടില്ല. ഒരു ആൽബത്തിലോ കലാകാരനിലോ പ്ലേലിസ്റ്റിലോ റൈറ്റ് ക്ലിക്ക് ചെയ്ത് സൈഡ്ബാറിൽ പിൻ ചെയ്യുക തിരഞ്ഞെടുക്കുക.
 interface_nav_controls_up_top = നിയന്ത്രണങ്ങൾ മുകളിൽ
 interface_nav_controls_up_top_description = പിന്നോട്ട്, മുന്നോട്ട്, തിരയൽ, സ്റ്റാറ്റസ് ബട്ടണുകൾ മുകളിലെ നേർത്ത ബാറിൽ, സൈഡ്ബാർ സ്ഥലങ്ങൾക്ക് മാത്രം.

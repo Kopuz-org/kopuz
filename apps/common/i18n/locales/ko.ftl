@@ -1242,6 +1242,7 @@ listening_top_artists = 많이 들은 아티스트
 listening_top_albums = 많이 들은 앨범
 interface_panel_show_pins = 고정 항목 표시
 interface_panel_show_playlists = 재생목록 표시
+interface_panel_playlist_covers = 재생목록 커버 표시
 interface_panel_no_pins = 아직 고정된 항목이 없습니다. 앨범, 아티스트 또는 재생목록을 오른쪽 클릭하고 사이드바에 고정을 선택하세요.
 interface_nav_controls_up_top = 컨트롤을 위쪽에
 interface_nav_controls_up_top_description = 뒤로, 앞으로, 검색, 상태 버튼을 위쪽의 얇은 막대에 두고 사이드바는 이동용으로만 씁니다.

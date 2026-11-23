@@ -1274,6 +1274,7 @@ listening_top_artists = Κορυφαίοι καλλιτέχνες
 listening_top_albums = Κορυφαία άλμπουμ
 interface_panel_show_pins = Εμφάνιση καρφιτσωμένων
 interface_panel_show_playlists = Εμφάνιση λιστών
+interface_panel_playlist_covers = Εμφάνιση εξωφύλλων λιστών
 interface_panel_no_pins = Δεν υπάρχει τίποτα καρφιτσωμένο. Κάντε δεξί κλικ σε άλμπουμ, καλλιτέχνη ή λίστα και επιλέξτε Καρφίτσωμα στην πλαϊνή μπάρα.
 interface_nav_controls_up_top = Χειριστήρια επάνω
 interface_nav_controls_up_top_description = Πίσω, εμπρός, αναζήτηση και κουμπιά κατάστασης σε λεπτή μπάρα επάνω, η πλαϊνή μπάρα μένει για τις σελίδες.

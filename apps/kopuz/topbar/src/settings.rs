@@ -52,6 +52,7 @@ impl Render for Sidebar {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let layout = store::layout(cx);
         let (pins, playlists) = (layout.panel.show_pins, layout.panel.show_playlists);
+        let covers = layout.panel.playlist_covers;
         let nav = &layout.nav;
         let strip = components::skin::arrangement().nav == components::skin::Nav::Strip;
         let rows = DESTINATIONS
@@ -87,6 +88,15 @@ impl Render for Sidebar {
                         t("interface_panel_show_playlists"),
                         playlists,
                         |on, cx| LayoutModel::edit(cx, |layout| layout.panel.show_playlists = on),
+                    )
+                    .shown(cx),
+                )
+                .children(
+                    toggle_row(
+                        "interface-panel-playlist-covers",
+                        t("interface_panel_playlist_covers"),
+                        covers,
+                        |on, cx| LayoutModel::edit(cx, |layout| layout.panel.playlist_covers = on),
                     )
                     .shown(cx),
                 ),

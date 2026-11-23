@@ -84,6 +84,7 @@ struct Row {
     name: SharedString,
     folder: bool,
     detail: SharedString,
+    artwork: Option<ArtworkRef>,
 }
 
 impl Row {
@@ -214,12 +215,19 @@ impl PlaylistsPanel {
                         name: f.name.clone().into(),
                         folder: true,
                         detail: SharedString::from(f.playlist_ids.len().to_string()),
+                        // A folder wears its first playlist's cover, as the Playlists page draws it.
+                        artwork: f
+                            .playlist_ids
+                            .first()
+                            .and_then(|id| model.playlist(id))
+                            .and_then(|p| p.artwork.clone()),
                     }),
                 false => model.playlist(&entry.id).map(|p| Row {
                     id: p.id.clone().into(),
                     name: p.name.clone().into(),
                     folder: false,
                     detail: SharedString::from(p.track_keys.len().to_string()),
+                    artwork: p.artwork.clone(),
                 }),
             })
             .collect();
@@ -386,9 +394,13 @@ impl PlaylistsPanel {
         let id = row.id.to_string();
         let route = row.route();
         let panel = cx.entity().downgrade();
+        let covers = store::layout(cx).panel.playlist_covers;
         let zones = ReorderDropZones::new(
             ElementId::from(("panel-drop", index)),
-            style::list_row(),
+            match covers {
+                true => components::tall_row(),
+                false => style::list_row(),
+            },
             index,
         )
         .on_drop::<RowDrag>(move |drag, at, _, cx| {
@@ -400,6 +412,7 @@ impl PlaylistsPanel {
                 true => icons::FOLDER,
                 false => icons::LIST,
             })
+            .when(covers, |item| item.cover(row.artwork.clone(), false))
             .detail(row.detail.clone())
             .active(current == route)
             .collapsed(self.collapsed())
