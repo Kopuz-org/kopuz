@@ -10,6 +10,7 @@ mod queue_view;
 mod seek;
 mod settings;
 mod sheet;
+mod stage;
 mod swap;
 mod transport;
 mod video;
@@ -28,6 +29,7 @@ pub use bar::{bar_height, utility_metrics};
 pub use lyrics_view::LyricsView;
 pub use queue_view::QueueView;
 pub use settings::register as register_settings;
+pub use stage::{has_other_display, toggle_stage};
 pub use window::{MiniWindow, close_mini, is_open as mini_is_open, open_mini, toggle_mini};
 
 use seek::{Layout, PlayheadClock, SeekRow};
@@ -85,6 +87,7 @@ pub struct NowPlaying {
     swap: swap::TrackSwap,
     /// The sheet's own fade, so it can fold away before the shell takes it down.
     sheet_fade: components::motion::Fade,
+    detached: bool,
     /// The tab body drawn last and the one it is crossfading from.
     tab_drawn: Option<SheetTab>,
     tab_leaving: Option<SheetTab>,
@@ -120,6 +123,12 @@ impl NowPlaying {
     /// The sheet that grows out of the bar, over the page.
     pub fn sheet(window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::new(Presentation::Sheet, window, cx)
+    }
+
+    pub fn detached_sheet(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let mut this = Self::new(Presentation::Sheet, window, cx);
+        this.detached = true;
+        this
     }
 
     /// The docked queue-and-lyrics column beside the content.
@@ -197,6 +206,7 @@ impl NowPlaying {
             root: None,
             hero: None,
             sheet_fade: components::motion::Fade::hidden(),
+            detached: false,
             tab_drawn: None,
             tab_leaving: None,
             tab_fade: components::motion::Fade::shown(),

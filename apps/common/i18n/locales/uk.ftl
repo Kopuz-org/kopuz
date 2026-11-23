@@ -1275,3 +1275,4 @@ interface_notifications_track = Зараз грає
 interface_notifications_track_description = Показувати, яка пісня почалася при зміні треку.
 interface_notifications_track_in_app = У застосунку
 interface_notifications_track_desktop = Сповіщення робочого столу
+player_on_other_display = Плеєр на іншому екрані

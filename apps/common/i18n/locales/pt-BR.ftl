@@ -1258,3 +1258,4 @@ interface_notifications_track = Tocando agora
 interface_notifications_track_description = Mostra qual música começou quando a faixa muda.
 interface_notifications_track_in_app = No app
 interface_notifications_track_desktop = Notificação da área de trabalho
+player_on_other_display = Player na outra tela

@@ -1227,3 +1227,4 @@ interface_notifications_track = 지금 재생 중
 interface_notifications_track_description = 트랙이 바뀌면 어떤 곡이 시작됐는지 알려줍니다.
 interface_notifications_track_in_app = 앱 안에서
 interface_notifications_track_desktop = 데스크톱 알림
+player_on_other_display = 다른 화면에 플레이어 표시

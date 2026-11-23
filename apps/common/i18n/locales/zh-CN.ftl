@@ -1227,3 +1227,4 @@ interface_notifications_track = 正在播放
 interface_notifications_track_description = 切换曲目时提示开始播放的歌曲。
 interface_notifications_track_in_app = 应用内
 interface_notifications_track_desktop = 桌面通知
+player_on_other_display = 在另一块屏幕上显示播放器

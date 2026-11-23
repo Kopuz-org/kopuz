@@ -45,7 +45,9 @@ pub use artwork_edit::{content_type_for, pick_and_upload, pick_image, remove_art
 pub use backdrop::{blurred_backdrop, resolve_backdrop};
 pub use catalog_cache::{Cached, CatalogCache, Ticket};
 pub use catalog_marks::CatalogMarks;
-pub use chrome::{Chrome, SidePanel, register_mini_player, toggle_mini_player};
+pub use chrome::{
+    Chrome, SidePanel, register_mini_player, register_stage, toggle_mini_player, toggle_stage,
+};
 pub use config::{ConfigModel, lock_cause};
 pub use debounce::Debounce;
 pub use downloads::{BatchFinished, DownloadItem, DownloadsModel, ItemState, Offline};

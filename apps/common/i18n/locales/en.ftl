@@ -1256,3 +1256,4 @@ interface_notifications_track = Now playing
 interface_notifications_track_description = Say which song started when the track changes.
 interface_notifications_track_in_app = In the app
 interface_notifications_track_desktop = Desktop notification
+player_on_other_display = Player on the other display
