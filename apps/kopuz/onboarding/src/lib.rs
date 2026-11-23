@@ -541,7 +541,7 @@ impl Render for FirstRun {
                 false => frame,
             },
             Step::Connect if self.added.is_some() => frame.next(
-                t("continue"),
+                t("retry_now"),
                 self.connection_blocked(cx).is_none(),
                 cx.listener(|this: &mut Self, _, _, cx| this.retry(cx)),
             ),
