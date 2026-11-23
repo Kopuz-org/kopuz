@@ -527,6 +527,7 @@ radio_registries_empty = レジストリが設定されていません
 offline_downloads = オフラインダウンロード
 download_quality = ダウンロード品質
 saving = 保存中...
+discover_more_failed = Couldn't load more results
 discover_more_loading = さらに読み込み中…
 discover_failed = 発見を読み込めません: { $error }
 discover_show_all = すべて表示

@@ -553,6 +553,7 @@ radio_registries_empty = Δεν έχουν ρυθμιστεί μητρώα
 offline_downloads = Λήψεις εκτός σύνδεσης
 download_quality = Ποιότητα λήψης
 saving = Αποθήκευση...
+discover_more_failed = Couldn't load more results
 discover_more_loading = Φόρτωση περισσότερων…
 discover_failed = Αδυναμία φόρτωσης Ανακάλυψης: { $error }
 discover_show_all = Εμφάνιση όλων

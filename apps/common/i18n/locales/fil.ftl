@@ -331,6 +331,7 @@ yt_syncing_progress = Nagsi-sync — { $count } na track ang na-load na
 yt_synced_total = { $count } na nilikhang kanta ang na-sync
 refresh = I-refresh
 discover = Diskubre
+discover_more_failed = Couldn't load more results
 discover_more_loading = Nilo-load pa…
 discover_failed = Hindi ma-load ang Discover: { $error }
 discover_show_all = Ipakita lahat

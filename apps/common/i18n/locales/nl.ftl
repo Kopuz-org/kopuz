@@ -363,6 +363,7 @@ yt_synced_total =
     }
 refresh = Vernieuwen
 discover = Ontdekken
+discover_more_failed = Couldn't load more results
 discover_more_loading = Meer laden…
 discover_failed = Kan Ontdekken niet laden: { $error }
 discover_show_all = Alles tonen

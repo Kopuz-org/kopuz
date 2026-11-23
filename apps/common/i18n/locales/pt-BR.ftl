@@ -552,6 +552,7 @@ radio_registries_empty = Nenhum registro configurado
 offline_downloads = Downloads Offline
 download_quality = Qualidade do Download
 saving = Salvando...
+discover_more_failed = Couldn't load more results
 discover_more_loading = Carregando mais…
 discover_failed = Não foi possível carregar Descobrir: { $error }
 discover_show_all = Mostrar tudo

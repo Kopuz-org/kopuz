@@ -534,6 +534,7 @@ radio_registries_empty = lipu ijo ala li lon
 offline_downloads = ijo tawa ilo
 download_quality = pona pi ijo tawa ilo
 saving = awen...
+discover_more_failed = Couldn't load more results
 discover_more_loading = mi alasa e ijo sin…
 discover_failed = pakala — mi ken ala alasa: { $error }
 discover_show_all = lukin e ale

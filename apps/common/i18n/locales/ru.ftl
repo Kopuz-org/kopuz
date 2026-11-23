@@ -570,6 +570,7 @@ radio_registries_empty = Реестры не настроены
 offline_downloads = Офлайн-загрузки
 download_quality = Качество загрузки
 saving = Сохранение...
+discover_more_failed = Couldn't load more results
 discover_more_loading = Загрузка…
 discover_failed = Не удалось загрузить раздел Открытий: { $error }
 discover_show_all = Показать все

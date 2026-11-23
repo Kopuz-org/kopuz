@@ -331,6 +331,7 @@ yt_syncing_progress = Menyinkronkan — { $count } trek yang telah dimuat sejauh
 yt_synced_total = { $count } sukai trek yang disinkronkan
 refresh = Segarkan
 discover = Discover
+discover_more_failed = Couldn't load more results
 discover_more_loading = Muat lainnya…
 discover_failed = Tidak dapat memuat Discover: { $error }
 discover_show_all = Tampilkan semua

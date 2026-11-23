@@ -54,6 +54,8 @@ pub struct CatalogPage {
     shelves: Entity<Shelves>,
     loading: bool,
     paging: Option<Paging>,
+    /// The cursor that just failed and where it pointed, kept so the reader can ask for it again.
+    stalled: Option<(Paging, String)>,
     error: Option<SharedString>,
     // Bumped per load; a slow answer for one chip must not land after the user moved to another.
     generation: u64,
@@ -98,6 +100,7 @@ impl CatalogPage {
             shelves,
             loading: false,
             paging: None,
+            stalled: None,
             error: None,
             generation: 0,
             reveal: motion::Fade::hidden(),
@@ -119,6 +122,7 @@ impl CatalogPage {
         let generation = self.generation;
         self.error = None;
         self.paging = None;
+        self.stalled = None;
         self._more = None;
         // A page seen this session draws at once; a stale one is fetched again behind it.
         let cached = CatalogCache::get(&self.showing, cx);
@@ -279,6 +283,7 @@ impl CatalogPage {
             continuation: Some(token.clone()),
             ..CatalogDetailRequest::page(self.showing.clone())
         };
+        let asked = token.clone();
         let call = Link::global(cx).call(move |api| async move {
             match feed {
                 true => api.catalog(Some(token)).await.map(feed_detail),
@@ -304,8 +309,10 @@ impl CatalogPage {
                     }
                     Err(error) => {
                         tracing::warn!(%error, "catalog page continuation failed");
-                        // Stop asking: a failed cursor fails again on every scroll.
+                        // Stop asking on scroll: a failed cursor fails again every time. The
+                        // reader can still ask once more.
                         this.forget_cursor(paging);
+                        this.stalled = Some((paging, asked));
                     }
                 }
                 cx.notify();
@@ -501,6 +508,19 @@ impl Render for CatalogPage {
                     components::Loading::new()
                         .label(t("discover_more_loading"))
                         .compact(),
+                )
+            })
+            .when(self.stalled.is_some() && self.paging.is_none(), |page| {
+                page.child(
+                    EmptyState::failed(
+                        t("discover_more_failed"),
+                        cx.listener(|this, _, _, cx| {
+                            if let Some((paging, token)) = this.stalled.take() {
+                                this.load_more(paging, token, cx);
+                            }
+                        }),
+                    )
+                    .compact(),
                 )
             });
         if self.embedded {

@@ -363,6 +363,7 @@ yt_synced_total =
     }
 refresh = Uppdatera
 discover = Upptäck
+discover_more_failed = Couldn't load more results
 discover_more_loading = Ladda mer...
 discover_failed = Kunde inte läsa in Upptäck: { $error }
 discover_show_all = Visa allt

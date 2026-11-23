@@ -331,6 +331,7 @@ yt_syncing_progress = Đang đồng bộ — đã tải { $count } bài
 yt_synced_total = Đã đồng bộ { $count } bài đã thích
 refresh = Làm mới
 discover = Khám phá
+discover_more_failed = Couldn't load more results
 discover_more_loading = Đang tải thêm...
 discover_failed = Không thể tải Khám phá: { $error }
 discover_show_all = Hiển thị tất cả

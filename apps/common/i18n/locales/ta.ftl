@@ -367,6 +367,7 @@ yt_synced_total =
     }
 refresh = புதுப்பி
 discover = கண்டறி
+discover_more_failed = Couldn't load more results
 discover_more_loading = மேலும் ஏற்றுகிறது…
 discover_failed = கண்டறிதலை ஏற்ற முடியவில்லை: { $error }
 discover_show_all = அனைத்தையும் காட்டு

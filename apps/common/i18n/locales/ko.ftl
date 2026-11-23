@@ -521,6 +521,7 @@ radio_registries_empty = 구성된 레지스트리가 없습니다
 offline_downloads = 오프라인 다운로드
 download_quality = 다운로드 품질
 saving = 저장 중...
+discover_more_failed = Couldn't load more results
 discover_more_loading = 더 불러오는 중…
 discover_failed = 탐색을 불러올 수 없음: { $error }
 discover_show_all = 모두 보기

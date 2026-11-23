@@ -553,6 +553,7 @@ radio_registries_empty = לא הוגדרו רשומות
 offline_downloads = הורדות לא מקוונות
 download_quality = איכות הורדה
 saving = שומר...
+discover_more_failed = Couldn't load more results
 discover_more_loading = טוען עוד…
 discover_failed = לא ניתן לטעון את גילוי: { $error }
 discover_show_all = הצג הכל

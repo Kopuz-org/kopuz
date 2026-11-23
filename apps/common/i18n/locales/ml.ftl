@@ -367,6 +367,7 @@ yt_synced_total =
     }
 refresh = പുതുക്കുക
 discover = കണ്ടെത്തുക
+discover_more_failed = Couldn't load more results
 discover_more_loading = കൂടുതൽ ലോഡ് ചെയ്യുന്നു…
 discover_failed = കണ്ടെത്തുക ലോഡ് ചെയ്യാൻ കഴിഞ്ഞില്ല: { $error }
 discover_show_all = എല്ലാം കാണിക്കുക

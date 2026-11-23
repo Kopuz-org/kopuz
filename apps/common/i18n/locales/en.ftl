@@ -389,6 +389,7 @@ yt_synced_total =
     }
 refresh = Refresh
 discover = Discover
+discover_more_failed = Couldn't load more results
 discover_more_loading = Loading more…
 discover_failed = Couldn't load Discover: { $error }
 discover_show_all = Show all

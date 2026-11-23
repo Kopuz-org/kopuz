@@ -521,6 +521,7 @@ radio_registries_empty = Yapılandırılmış kayıt defteri yok
 offline_downloads = Çevrimdışı İndirmeler
 download_quality = İndirme Kalitesi
 saving = Kaydediliyor...
+discover_more_failed = Couldn't load more results
 discover_more_loading = Daha fazlası yükleniyor…
 discover_failed = Keşfet yüklenemedi: { $error }
 discover_show_all = Tümünü gör

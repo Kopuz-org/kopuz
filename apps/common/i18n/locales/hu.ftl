@@ -521,6 +521,7 @@ radio_registries_empty = Nincsenek nyilvántartások konfigurálva
 offline_downloads = Offline letöltések
 download_quality = Letöltés minősége
 saving = Mentés...
+discover_more_failed = Couldn't load more results
 discover_more_loading = További betöltése…
 discover_failed = Nem sikerült betölteni a Felfedezést: { $error }
 discover_show_all = Összes megjelenítése
