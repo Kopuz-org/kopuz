@@ -1104,6 +1104,7 @@ error_browser_profile_signed_out = Bu tarayıcı profili servise giriş yapmamı
 error_browser_profile_no_token = Servis bu profil için token göstermedi. Token'ı kendiniz yapıştırın.
 error_integration_unreachable = Servise ulaşılamadı. Bağlantınızı kontrol edin.
 error_credential_rejected = Servis bu token'ı kabul etmiyor. Kendi token'ınızı yapıştırın.
+error_integration_failed = Servis bir hatayla yanıt verdi. Daha sonra tekrar deneyin.
 error_default_source_undeletable = Varsayılan klasör kaynağı silinemez.
 error_empty_source_folder = Kaynak klasörü boş bırakılamaz.
 error_code_invalid_input = Kabul edilmedi: { $detail }

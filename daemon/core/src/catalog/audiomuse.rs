@@ -22,8 +22,11 @@ fn audiomuse_error(error: AudioMuseError) -> ApiError {
             ApiError::new(ErrorCode::SourceUnreachable, error.to_string())
                 .because(ErrorReason::IntegrationUnreachable)
         }
-        AudioMuseError::BadUrl | AudioMuseError::Status(_) | AudioMuseError::Malformed => {
-            ApiError::internal(error.to_string())
+        AudioMuseError::BadUrl => {
+            ApiError::invalid_input(error.to_string()).because(ErrorReason::InvalidServerUrl)
+        }
+        AudioMuseError::Status(_) | AudioMuseError::Malformed => {
+            ApiError::internal(error.to_string()).because(ErrorReason::IntegrationFailed)
         }
     }
 }
@@ -94,6 +97,19 @@ async fn in_library(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_audiomuse_failure_has_a_reason_to_say_it_in_the_viewers_language() {
+        for error in [
+            AudioMuseError::Rejected,
+            AudioMuseError::Unreachable,
+            AudioMuseError::BadUrl,
+            AudioMuseError::Status(500),
+            AudioMuseError::Malformed,
+        ] {
+            assert!(audiomuse_error(error).reason.is_some());
+        }
+    }
 
     fn track(key: &str) -> reader::Track {
         reader::Track {

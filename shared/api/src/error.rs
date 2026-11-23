@@ -85,6 +85,8 @@ pub enum ErrorReason {
     IntegrationUnreachable,
     /// The service does not accept the credential it was given.
     CredentialRejected,
+    /// The service answered with an error, or with something that could not be read.
+    IntegrationFailed,
     /// The built-in folder source is always there.
     DefaultSourceUndeletable,
     /// A source folder was left blank.
@@ -110,7 +112,7 @@ pub enum ErrorReason {
 }
 
 impl ErrorReason {
-    pub const ALL: [ErrorReason; 24] = [
+    pub const ALL: [ErrorReason; 25] = [
         Self::SettingLocked,
         Self::ConnectNotOffered,
         Self::ApiKeyMissing,
@@ -135,6 +137,7 @@ impl ErrorReason {
         Self::NetworkDown,
         Self::OfflineMode,
         Self::BrowserOpen,
+        Self::IntegrationFailed,
     ];
 
     /// The i18n key every frontend says this reason with, so they all phrase it alike.
@@ -164,6 +167,7 @@ impl ErrorReason {
             Self::InvalidServerUrl => "invalid_server_url",
             Self::NetworkDown => "error_network_down",
             Self::OfflineMode => "error_offline_mode",
+            Self::IntegrationFailed => "error_integration_failed",
         }
     }
 }
