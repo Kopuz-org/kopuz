@@ -263,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn the_youtube_rows_never_show_on_a_local_library() {
+    fn the_youtube_rows_never_show_on_a_library_without_pages() {
         let planned = plan(&local(), &rows(0, 1, 1), &[]);
         assert!(
             !planned

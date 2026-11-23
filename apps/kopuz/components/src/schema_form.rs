@@ -502,7 +502,7 @@ mod tests {
             kind: FieldKind::Directories,
             required: false,
             value: Some(encode_directories(&held)),
-            config_key: Some("local_sources".into()),
+            config_key: Some("music_folders".into()),
             show_when: None,
         }
     }
