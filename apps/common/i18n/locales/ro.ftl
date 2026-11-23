@@ -1257,3 +1257,7 @@ pinned_playlist = Playlist
 pinned_folder = Dosar
 interface_lyrics_size = Dimensiunea versurilor
 interface_lyrics_size_description = Cât de mari apar versurile în player.
+sleep_timer_off = Oprit
+sleep_timer_minutes = { $count } minute
+sleep_timer_end_of_track = La finalul piesei
+sleep_timer_left = Se oprește în { $minutes } min

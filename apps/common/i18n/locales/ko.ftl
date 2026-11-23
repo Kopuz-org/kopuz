@@ -1217,3 +1217,7 @@ pinned_playlist = 재생목록
 pinned_folder = 폴더
 interface_lyrics_size = 가사 크기
 interface_lyrics_size_description = 플레이어에 표시되는 가사의 크기.
+sleep_timer_off = 끄기
+sleep_timer_minutes = { $count }분
+sleep_timer_end_of_track = 트랙이 끝나면
+sleep_timer_left = { $minutes }분 후 정지

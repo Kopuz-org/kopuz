@@ -1243,3 +1243,7 @@ pinned_playlist = Afspeellijst
 pinned_folder = Map
 interface_lyrics_size = Grootte van songteksten
 interface_lyrics_size_description = Hoe groot de songtekst in de speler wordt getoond.
+sleep_timer_off = Uit
+sleep_timer_minutes = { $count } minuten
+sleep_timer_end_of_track = Einde van nummer
+sleep_timer_left = Stopt over { $minutes } min

@@ -1217,3 +1217,7 @@ pinned_playlist = Lejátszási lista
 pinned_folder = Mappa
 interface_lyrics_size = Dalszöveg mérete
 interface_lyrics_size_description = Mekkora a dalszöveg a lejátszóban.
+sleep_timer_off = Ki
+sleep_timer_minutes = { $count } perc
+sleep_timer_end_of_track = A szám végén
+sleep_timer_left = { $minutes } perc múlva leáll

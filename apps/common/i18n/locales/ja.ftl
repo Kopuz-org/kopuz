@@ -1223,3 +1223,7 @@ pinned_playlist = プレイリスト
 pinned_folder = フォルダ
 interface_lyrics_size = 歌詞のサイズ
 interface_lyrics_size_description = プレーヤーに表示される歌詞の大きさ。
+sleep_timer_off = オフ
+sleep_timer_minutes = { $count } 分
+sleep_timer_end_of_track = 曲の終わり
+sleep_timer_left = あと { $minutes } 分で停止

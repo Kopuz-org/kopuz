@@ -1250,3 +1250,7 @@ pinned_playlist = Playlist
 pinned_folder = Dossier
 interface_lyrics_size = Taille des paroles
 interface_lyrics_size_description = La taille des paroles dans le lecteur.
+sleep_timer_off = Désactivé
+sleep_timer_minutes = { $count } minutes
+sleep_timer_end_of_track = Fin du titre
+sleep_timer_left = Arrêt dans { $minutes } min

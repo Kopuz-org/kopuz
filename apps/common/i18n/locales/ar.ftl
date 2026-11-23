@@ -1255,3 +1255,7 @@ pinned_playlist = قائمة تشغيل
 pinned_folder = مجلد
 interface_lyrics_size = حجم كلمات الأغنية
 interface_lyrics_size_description = حجم كلمات الأغنية في المشغّل.
+sleep_timer_off = إيقاف
+sleep_timer_minutes = { $count } دقيقة
+sleep_timer_end_of_track = نهاية المقطع
+sleep_timer_left = يتوقف بعد { $minutes } د

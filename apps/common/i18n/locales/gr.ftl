@@ -1249,3 +1249,7 @@ pinned_playlist = Λίστα αναπαραγωγής
 pinned_folder = Φάκελος
 interface_lyrics_size = Μέγεθος στίχων
 interface_lyrics_size_description = Πόσο μεγάλοι εμφανίζονται οι στίχοι στο πρόγραμμα αναπαραγωγής.
+sleep_timer_off = Ανενεργό
+sleep_timer_minutes = { $count } λεπτά
+sleep_timer_end_of_track = Τέλος κομματιού
+sleep_timer_left = Διακοπή σε { $minutes } λεπτά

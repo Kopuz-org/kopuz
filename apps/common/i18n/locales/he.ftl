@@ -1249,3 +1249,7 @@ pinned_playlist = רשימת השמעה
 pinned_folder = תיקייה
 interface_lyrics_size = גודל המילים
 interface_lyrics_size_description = כמה גדולות המילים מוצגות בנגן.
+sleep_timer_off = כבוי
+sleep_timer_minutes = { $count } דקות
+sleep_timer_end_of_track = סוף השיר
+sleep_timer_left = עצירה בעוד { $minutes } דק׳

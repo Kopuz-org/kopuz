@@ -1247,3 +1247,7 @@ pinned_playlist = Lista de reprodução
 pinned_folder = Pasta
 interface_lyrics_size = Tamanho da letra
 interface_lyrics_size_description = O tamanho da letra no leitor.
+sleep_timer_off = Desligado
+sleep_timer_minutes = { $count } minutos
+sleep_timer_end_of_track = Fim da faixa
+sleep_timer_left = Para dentro de { $minutes } min

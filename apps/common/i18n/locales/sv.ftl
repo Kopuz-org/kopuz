@@ -1243,3 +1243,7 @@ pinned_playlist = Spellista
 pinned_folder = Mapp
 interface_lyrics_size = Textstorlek för låttext
 interface_lyrics_size_description = Hur stor låttexten visas i spelaren.
+sleep_timer_off = Av
+sleep_timer_minutes = { $count } minuter
+sleep_timer_end_of_track = Slutet av låten
+sleep_timer_left = Stannar om { $minutes } min

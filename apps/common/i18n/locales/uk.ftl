@@ -1265,3 +1265,7 @@ pinned_playlist = Плейлист
 pinned_folder = Тека
 interface_lyrics_size = Розмір тексту пісні
 interface_lyrics_size_description = Наскільки великим показується текст пісні в плеєрі.
+sleep_timer_off = Вимк.
+sleep_timer_minutes = { $count } хв
+sleep_timer_end_of_track = Кінець треку
+sleep_timer_left = Зупинка через { $minutes } хв

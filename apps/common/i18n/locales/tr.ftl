@@ -1206,3 +1206,7 @@ pinned_playlist = Çalma listesi
 pinned_folder = Klasör
 interface_lyrics_size = Şarkı sözü boyutu
 interface_lyrics_size_description = Şarkı sözlerinin oynatıcıda ne kadar büyük gösterileceği.
+sleep_timer_off = Kapalı
+sleep_timer_minutes = { $count } dakika
+sleep_timer_end_of_track = Parça bitince
+sleep_timer_left = { $minutes } dk sonra duracak

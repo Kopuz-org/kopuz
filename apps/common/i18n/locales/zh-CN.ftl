@@ -1217,3 +1217,7 @@ pinned_playlist = 播放列表
 pinned_folder = 文件夹
 interface_lyrics_size = 歌词大小
 interface_lyrics_size_description = 播放器中歌词显示的大小。
+sleep_timer_off = 关闭
+sleep_timer_minutes = { $count } 分钟
+sleep_timer_end_of_track = 本曲结束后
+sleep_timer_left = { $minutes } 分钟后停止

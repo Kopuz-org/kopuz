@@ -1250,3 +1250,7 @@ pinned_playlist = Lista de reproducción
 pinned_folder = Carpeta
 interface_lyrics_size = Tamaño de la letra
 interface_lyrics_size_description = Qué tan grande se muestra la letra en el reproductor.
+sleep_timer_off = Desactivado
+sleep_timer_minutes = { $count } minutos
+sleep_timer_end_of_track = Al terminar la canción
+sleep_timer_left = Se detiene en { $minutes } min
