@@ -695,6 +695,17 @@ impl api::LibraryApi for GrpcApi {
         Ok(())
     }
 
+    async fn set_star_rating(&self, key: String, stars: u8) -> Result<(), ApiError> {
+        self.client()
+            .set_star_rating(Request::new(proto::StarRatingRequest {
+                key,
+                stars: u32::from(stars),
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
     async fn dont_recommend(&self, key: String) -> Result<(), ApiError> {
         self.client()
             .dont_recommend(Request::new(proto::DontRecommendRequest { key }))

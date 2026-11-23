@@ -1,7 +1,7 @@
 //! The list. Order here is the order a menu draws and the order the palette falls back to.
 
 use api::{PlaylistCapability, Rating};
-use components::format::t;
+use components::format::{t, t_with};
 use components::icons;
 use gpui_kit::App;
 use store::layout::Pin;
@@ -45,6 +45,30 @@ fn one_track(target: &Target, _: &App) -> bool {
 
 fn many_tracks(target: &Target, cx: &App) -> bool {
     ops::track_keys(target).len() > 1 && ops::caps(cx).edit_tags
+}
+
+fn can_rate(target: &Target, cx: &App) -> bool {
+    has_tracks(target, cx) && ops::caps(cx).ratings
+}
+
+/// One "Rate N stars" entry; a menu has no submenu, so each count is its own item.
+macro_rules! rate_command {
+    ($id:literal, $stars:literal) => {
+        Command {
+            id: $id,
+            labels: &["rate_stars"],
+            label: |_, _| t_with("rate_stars", &[("count", $stars.into())]),
+            icon: None,
+            group: Group::Library,
+            section: Section::Act,
+            keys: NO_KEYS,
+            danger: false,
+            applies: TRACKS,
+            available: can_rate,
+            run: |target, _, cx| ops::rate(&target, $stars, cx),
+            action: None,
+        }
+    };
 }
 
 pub fn all() -> &'static [Command] {
@@ -146,6 +170,25 @@ static COMMANDS: &[Command] = &[
         available: has_tracks,
         run: |target, _, cx| ops::toggle_favorite(&target, cx),
         action: Some(|| Box::new(components::track_list::FavoriteSelection)),
+    },
+    rate_command!("track.rate_1", 1),
+    rate_command!("track.rate_2", 2),
+    rate_command!("track.rate_3", 3),
+    rate_command!("track.rate_4", 4),
+    rate_command!("track.rate_5", 5),
+    Command {
+        id: "track.rate_clear",
+        labels: &["clear_rating"],
+        label: |_, _| t("clear_rating"),
+        icon: None,
+        group: Group::Library,
+        section: Section::Act,
+        keys: NO_KEYS,
+        danger: false,
+        applies: TRACKS,
+        available: can_rate,
+        run: |target, _, cx| ops::rate(&target, 0, cx),
+        action: None,
     },
     Command {
         id: "track.radio",

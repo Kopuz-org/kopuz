@@ -72,6 +72,14 @@ pub const SPECS: &[Spec] = &[
         required: false,
     },
     Spec {
+        id: "rating",
+        label_key: "library_column_rating",
+        grow: 0.,
+        base: 88.,
+        align_end: false,
+        required: false,
+    },
+    Spec {
         id: "format",
         label_key: "library_column_format",
         grow: 0.,

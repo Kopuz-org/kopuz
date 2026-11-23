@@ -977,6 +977,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = மதிப்பீடு
+rate_stars =
+    { $count ->
+        [one] { $count } நட்சத்திரம் மதிப்பிடுங்கள்
+       *[other] { $count } நட்சத்திரம் மதிப்பிடுங்கள்
+    }
+clear_rating = மதிப்பீட்டை அழி
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.

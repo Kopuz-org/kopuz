@@ -947,6 +947,12 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = nanpa pona
+rate_stars =
+    { $count ->
+       *[other] o pana e mun { $count }
+    }
+clear_rating = o weka e nanpa pona
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
