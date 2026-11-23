@@ -293,7 +293,9 @@ impl Render for CatalogArtist {
                     .pt_6()
                     .pb_10()
                     .gap_8()
-                    .child(PageHeader::new(self.name()))
+                    .when(banner.is_none(), |page| {
+                        page.child(PageHeader::new(self.name()))
+                    })
                     .when(self.loading, |page| page.child(Loading::new()))
                     .when_some(self.error.clone(), |page, message| {
                         page.child(EmptyState::failed(
