@@ -615,6 +615,11 @@ impl SettingRow {
         self
     }
 
+    pub fn lock_cause(mut self, cause: Option<SharedString>) -> Self {
+        self.lock_cause = cause;
+        self
+    }
+
     /// Tie the row to a config key: locked, citing the layer, when one pins it; ticked once its write lands.
     pub fn bind(mut self, key: &str, cx: &App) -> Self {
         let (cause, saved) = cx
