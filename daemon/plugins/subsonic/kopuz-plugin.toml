@@ -1,7 +1,7 @@
 id = "subsonic"
 name = "Subsonic"
 version = "0.1.0"
-api = "0.1"
+api = "0.2"
 description = "Subsonic, OpenSubsonic and Navidrome servers, and any server speaking their API."
 
 [permissions]

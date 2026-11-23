@@ -3598,6 +3598,7 @@ impl QueueMaterializer for RadioLibrary {
             QueueContext::TrackRadio { key } => Ok(RadioPage {
                 tracks: radio_tracks(&[key, "r1", "r2", "r3", "r4", "r5"]),
                 more: Some("p1".into()),
+                basis: None,
             }),
             other => Ok(RadioPage::last(self.materialize(other).await?)),
         }
@@ -3615,10 +3616,12 @@ impl QueueMaterializer for RadioLibrary {
             "p1" => RadioPage {
                 tracks: radio_tracks(&["r6", "r3", "r7", "r8", "r9", "r10"]),
                 more: Some("p2".into()),
+                basis: None,
             },
             "p2" => RadioPage {
                 tracks: radio_tracks(&["r11", "r12", "r13"]),
                 more: Some("p1".into()),
+                basis: None,
             },
             _ => RadioPage::default(),
         })
@@ -4434,6 +4437,10 @@ impl server::source::MediaSource for RadioSource {
             explicit_flags: true,
             watch_history: false,
             complete_play_history: false,
+            ratings: false,
+            artist_info: false,
+            radio_stations: false,
+            sonic_path: false,
             accounts: false,
             music_videos: false,
             library_actions: server::source::LibraryActions::NONE,

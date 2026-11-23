@@ -1024,6 +1024,17 @@ message SourceCapabilities {
   bool rip_audio = 34;
   // The playlist holding the account's favorites; a playlist radio of it is the favorites radio.
   optional string favorites_playlist = 35;
+  // The account can rate tracks and albums.
+  bool ratings = 36;
+  bool artist_info = 37;
+  // It lists internet radio stations.
+  bool radio_stations = 38;
+  // It finds songs leading from one track to another.
+  bool sonic_path = 39;
+  bool album_radio = 40;
+  bool artist_radio = 41;
+  // A mix of several tracks.
+  bool mix_radio = 42;
 }
 
 message SearchFilter {
