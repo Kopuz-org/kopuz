@@ -451,10 +451,12 @@ impl FirstRun {
             Ok(())
         });
         cx.spawn(async move |_, cx| {
-            if let Err(error) = call.await {
-                tracing::warn!(%error, "could not take the guide's source away again");
-            }
+            let result = call.await;
             cx.update(|cx| {
+                if let Err(error) = &result {
+                    tracing::warn!(%error, "could not take the guide's source away again");
+                    store::Notices::failed(error, cx);
+                }
                 SourcesModel::global(cx).update(cx, |sources, cx| sources.refetch(cx));
                 ConfigModel::global(cx).update(cx, |config, cx| config.reload(cx));
             });
