@@ -203,7 +203,6 @@ impl MenuItem {
 }
 
 impl MenuItem {
-    /// The popup entry; a danger glyph sits in the menu's own icon column, so it lines up with the rest.
     pub fn build(self, cx: &App) -> PopupMenuItem {
         let MenuItem {
             label,

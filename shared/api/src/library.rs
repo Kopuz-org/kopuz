@@ -217,14 +217,12 @@ pub struct StatsView {
     pub listen_counts: std::collections::HashMap<String, u64>,
 }
 
-/// An artist listeners play alongside another; `key` is set when the library has them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SimilarArtist {
     pub name: String,
     pub key: Option<String>,
 }
 
-/// What was played over a span: totals, the most played, and plays per day.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ListeningStats {
     pub plays: u32,
@@ -243,7 +241,6 @@ pub struct RankedTrack {
     pub plays: u32,
 }
 
-/// An artist (no detail) or an album (its artist as the detail).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Ranked {
     pub name: String,
@@ -253,7 +250,6 @@ pub struct Ranked {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DayPlays {
-    /// Days since the unix epoch, UTC.
     pub day: i64,
     pub plays: u32,
 }

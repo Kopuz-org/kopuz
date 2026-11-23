@@ -1,5 +1,3 @@
-//! Listening over a span: totals, plays per day, and who and what came up most.
-
 use api::{ListeningStats, Ranked};
 use components::format::{t, t_with};
 use components::style;
@@ -210,7 +208,6 @@ fn total(text: SharedString, cx: &App) -> impl IntoElement {
         .child(text)
 }
 
-/// The most bars the chart draws; a longer span folds several days into each.
 const MAX_BARS: i64 = 60;
 
 fn today() -> i64 {
@@ -220,7 +217,6 @@ fn today() -> i64 {
     (since.as_secs() / 86_400) as i64
 }
 
-/// Plays per bar across the whole span, quiet days included, so the chart reads as time.
 fn bars(stats: &ListeningStats, days: Option<u32>, today: i64) -> Vec<u32> {
     let first = match days {
         Some(days) => today - i64::from(days) + 1,
@@ -241,7 +237,6 @@ fn bars(stats: &ListeningStats, days: Option<u32>, today: i64) -> Vec<u32> {
     bars
 }
 
-/// Under an hour in minutes, past it in hours.
 fn time(seconds: u64) -> SharedString {
     match seconds < 3600 {
         true => t_with("listening_minutes", &[("count", (seconds / 60).into())]),

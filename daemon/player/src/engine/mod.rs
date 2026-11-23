@@ -153,7 +153,6 @@ pub enum Command {
         pause_device: bool,
     },
     SetVolume(f32),
-    /// 0.5 to 2.0; the pitch moves with it.
     SetSpeed(f32),
     SetChannelMode(ChannelMode),
     SetEqualizer(EqualizerSettings),

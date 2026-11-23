@@ -324,7 +324,6 @@ impl Render for CatalogArtist {
     }
 }
 
-/// The artist's top songs, from its first shelf of nothing but tracks, for the banner's Play.
 fn top_songs(detail: &CatalogDetail) -> Vec<String> {
     detail
         .shelves
@@ -342,7 +341,6 @@ fn top_songs(detail: &CatalogDetail) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The source's biography, given room of its own at the foot of the page rather than clipped in the banner.
 fn about(text: String, cx: &App) -> AnyElement {
     v_flex()
         .w_full()

@@ -81,7 +81,6 @@ impl Motion {
     }
 }
 
-/// Which side of the content a panel sits on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Side {
@@ -910,7 +909,6 @@ pub struct Interface {
     pub queue_side: Side,
 }
 
-/// How wide a page may grow before it stops stretching and centres.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PageWidth {

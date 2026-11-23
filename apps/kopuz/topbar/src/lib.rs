@@ -59,7 +59,6 @@ const CHROME_GLYPH: Pixels = px(15.);
 const RAIL_TRAFFIC_LIGHTS: Pixels = px(28.);
 // `bg-black/40` and `border-white/5`: the chrome's own scrim, as the rail wore it.
 const SCRIM: f32 = 0.40;
-/// The palette field centred in the slim control bar, and the source switcher at its end.
 const SEARCH_IN_BAR: Pixels = px(360.);
 const SWITCHER_IN_BAR: Pixels = px(168.);
 /// `h-10`: the sectioned sidebar's own room for the window buttons.
@@ -685,7 +684,6 @@ impl TopBar {
     }
 }
 
-/// Right-click on the destinations: show or hide each one, and the playlists column's parts, in place.
 fn customize_menu(mut menu: PopupMenu, destinations: bool, cx: &App) -> PopupMenu {
     let layout = store::layout(cx);
     if destinations {

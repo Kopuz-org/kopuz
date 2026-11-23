@@ -587,7 +587,6 @@ impl Render for Shell {
                 )
                 .into_any_element()
         });
-        // The column opens out and fades in together, its contents laid out at full width throughout.
         let queue_column = (dock > 0.).then(|| {
             card(div())
                 .flex_shrink_0()

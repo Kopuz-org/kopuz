@@ -239,7 +239,6 @@ pub trait LibraryApi: Send + Sync {
     /// One artist's name, photo, count and billed albums.
     async fn artist(&self, artist: String) -> Result<ArtistDetail, ApiError>;
 
-    /// Artists ListenBrainz listeners play alongside `name`, asking MusicBrainz and ListenBrainz.
     async fn similar_artists(&self, name: String) -> Result<Vec<SimilarArtist>, ApiError>;
 
     /// One track per artist, for the artist grid's tiles.
@@ -318,7 +317,6 @@ pub trait LibraryApi: Send + Sync {
 
     async fn stats(&self) -> Result<StatsView, ApiError>;
 
-    /// The active source's listening over the last `days` days, or ever.
     async fn listening_stats(&self, days: Option<u32>) -> Result<ListeningStats, ApiError>;
 
     async fn favorites(&self) -> Result<FavoritesView, ApiError>;
@@ -385,8 +383,6 @@ pub trait PlaylistApi: Send + Sync {
         base_dir: Option<String>,
     ) -> Result<PlaylistImport, ApiError>;
 
-    /// Create a playlist from a share link or a CSV export, finding each
-    /// song in the library or, on a source with a catalog, by searching it.
     async fn import_external_playlist(
         &self,
         source: ExternalPlaylist,

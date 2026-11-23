@@ -58,7 +58,6 @@ const USER_AGENT: &str = concat!(
     " (https://github.com/owlenz/kopuz)"
 );
 
-/// ListenBrainz's session-based model, the one its own "similar artists" pages use.
 const SIMILAR_ALGORITHM: &str =
     "session_based_days_7500_session_300_contribution_5_threshold_10_limit_100_filter_True_skip_30";
 
@@ -81,7 +80,6 @@ async fn get_json(url: &str) -> Result<serde_json::Value, String> {
     response.json().await.map_err(|error| error.to_string())
 }
 
-/// The MusicBrainz id of the artist best matching `name`, when the match is a confident one.
 async fn artist_id(name: &str) -> Result<Option<String>, String> {
     let query = format!("artist:\"{}\"", escape_lucene(name.trim()));
     let url = format!(
@@ -96,7 +94,6 @@ async fn artist_id(name: &str) -> Result<Option<String>, String> {
         .and_then(|artist| artist.get("id")?.as_str().map(str::to_string)))
 }
 
-/// Up to `limit` artists ListenBrainz listeners play alongside `name`, closest first.
 pub async fn similar_artists(name: &str, limit: usize) -> Result<Vec<String>, String> {
     let Some(id) = artist_id(name).await? else {
         return Ok(Vec::new());

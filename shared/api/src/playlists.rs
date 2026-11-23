@@ -1,9 +1,6 @@
-/// A playlist kept somewhere else, as a share link or an exported CSV.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExternalPlaylist {
-    /// A public Spotify playlist or album link.
     Link(String),
-    /// An Exportify or TuneMyMusic CSV export.
     Csv { name: String, text: String },
 }
 

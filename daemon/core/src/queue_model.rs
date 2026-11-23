@@ -498,7 +498,6 @@ impl QueueModel {
         self.shuffle_order = order;
     }
 
-    /// The playing track opens the new round, and the last round's closers stay out of its first slots.
     fn start_new_round(&mut self) {
         use rand::seq::SliceRandom;
         let len = self.shuffle_order.len();

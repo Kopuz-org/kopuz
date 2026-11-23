@@ -25,7 +25,6 @@ const INSET: Pixels = px(8.);
 /// How the strip draws its tabs and the bar under the chosen one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Bar {
-    /// The navigation's rounded tabs: washed when chosen down the side, a rounded bar under them along the top.
     #[default]
     Pill,
     /// Flat tabs over a 2px rule in the accent that sits on the strip's own border.
