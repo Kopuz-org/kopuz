@@ -9,7 +9,7 @@ use gpui_kit::{
     Styled, Subscription, Window,
 };
 use store::LayoutModel;
-use store::layout::{Accent, Ambient, Motion, Section as Group};
+use store::layout::{Accent, Ambient, Motion, PageWidth, Section as Group};
 
 /// The scale steps the size setting offers, inside `layout::SCALE_RANGE`.
 const STEPS: &[f32] = &[0.8, 0.9, 1.0, 1.1, 1.25, 1.4];
@@ -71,6 +71,7 @@ impl Render for General {
         let accent = layout.accent;
         let ambient = layout.ambient;
         let scale = layout.interface.scale;
+        let page_width = layout.interface.page_width;
         v_flex()
             .w_full()
             .child(
@@ -136,6 +137,25 @@ impl Render for General {
                                 STEPS.iter().map(|step| (*step, percent(*step))).collect(),
                                 |value, cx| {
                                     LayoutModel::edit(cx, |layout| layout.interface.scale = value)
+                                },
+                            ))
+                            .shown(cx),
+                    )
+                    .children(
+                        SettingRow::new(t("interface_page_width"))
+                            .description(t("interface_page_width_description"))
+                            .control(choice(
+                                "interface-page-width",
+                                &page_width,
+                                vec![
+                                    (PageWidth::Standard, t("interface_page_width_standard")),
+                                    (PageWidth::Wide, t("interface_page_width_wide")),
+                                    (PageWidth::Full, t("interface_page_width_full")),
+                                ],
+                                |value, cx| {
+                                    LayoutModel::edit(cx, |layout| {
+                                        layout.interface.page_width = value
+                                    })
                                 },
                             ))
                             .shown(cx),

@@ -50,8 +50,8 @@ fn compact_below(label_chars: impl IntoIterator<Item = usize>, source: bool) -> 
     };
     COMPACT_BELOW.max(px(tabs) + beside)
 }
-/// The width past which a table stops stretching and a grid starts centring.
-pub const CONTENT_MAX: Pixels = px(1400.);
+const STANDARD_WIDTH: Pixels = px(1400.);
+const WIDE_WIDTH: Pixels = px(1920.);
 
 const CHROME_GLYPH: Pixels = px(15.);
 /// Room above the rail's first row for macOS's window buttons, which sit over it.
@@ -65,8 +65,13 @@ const SECTION_INK: f32 = 0.25;
 const DIVIDER: f32 = 0.06;
 
 /// The frame a page draws inside, so a table stops stretching and a grid centres.
-pub fn content_frame() -> gpui_kit::Div {
-    div().w_full().max_w(CONTENT_MAX).mx_auto()
+pub fn content_frame(cx: &App) -> gpui_kit::Div {
+    let frame = div().w_full().mx_auto();
+    match store::layout(cx).interface.page_width {
+        store::layout::PageWidth::Standard => frame.max_w(STANDARD_WIDTH),
+        store::layout::PageWidth::Wide => frame.max_w(WIDE_WIDTH),
+        store::layout::PageWidth::Full => frame,
+    }
 }
 
 /// Mouse buttons 4 and 5, for the root of whatever window wants history on them.
