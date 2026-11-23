@@ -215,7 +215,10 @@ impl NowPlaying {
             .h_full()
             .w(relative(PANEL))
             .flex_shrink_0()
-            .border_l_1()
+            .map(|panel| match side {
+                Side::Right => panel.border_l_1(),
+                Side::Left => panel.border_r_1(),
+            })
             .border_color(style::white(style::BORDER_SOFT, cx))
             .bg(style::black(0.45, cx))
             .child(
