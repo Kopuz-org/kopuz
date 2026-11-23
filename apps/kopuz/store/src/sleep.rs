@@ -35,8 +35,11 @@ impl SleepTimer {
                     return;
                 }
                 let now = player.read(cx).track().map(|track| track.key.clone());
-                if now != this.track {
-                    this.fire(cx);
+                match (&this.track, now) {
+                    // Armed with nothing loaded: the first track to start is the one to finish.
+                    (None, now) => this.track = now,
+                    (Some(armed), Some(now)) if *armed == now => {}
+                    _ => this.fire(cx),
                 }
             }),
         }
