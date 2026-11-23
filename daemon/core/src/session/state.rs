@@ -126,6 +126,16 @@ impl Session {
             && self.player.can_resume()
     }
 
+    /// A smart crossfade fades in music, not the dead air a track may open with.
+    pub(super) fn leading_silence_for(&self, transition: Transition) -> LeadingSilence {
+        match transition {
+            Transition::Crossfade(_) if self.settings.playback.smart_crossfade => {
+                LeadingSilence::Trim
+            }
+            _ => LeadingSilence::Keep,
+        }
+    }
+
     pub(super) fn should_play_gapless(&self, next: Option<&reader::Track>) -> bool {
         (self.settings.playback.crossfade_seconds == 0 || self.joins_album(next))
             && self.phase == ApiPhase::Playing

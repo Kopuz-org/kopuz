@@ -11,7 +11,9 @@ use api::{
     PlayerCommand, PlayerState, PositionAnchor, QueueContext, QueueEdit, QueueItem, QueueMode,
     QueueSummary, QueueWindow, SetQueueRequest,
 };
-use player::engine::{Event as EngineEvent, Phase as EnginePhase, SourceFactory, Transition};
+use player::engine::{
+    Event as EngineEvent, LeadingSilence, Phase as EnginePhase, SourceFactory, Transition,
+};
 use player::player::{LoadArgs, NowPlayingMeta, Player, PlayerInitError};
 use reader::Track;
 use server::playback_ref::{PlaybackItemRef, ResolvedStreamRef};

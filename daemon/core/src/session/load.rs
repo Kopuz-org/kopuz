@@ -348,7 +348,7 @@ impl Session {
                 artwork: prepared.artwork,
             },
             transition: prepared.transition,
-            leading_silence: player::engine::LeadingSilence::Keep,
+            leading_silence: self.leading_silence_for(prepared.transition),
             start_at: prepared.start_at,
             album_context: self.album_context_for_token(prepared.token),
             service_replay_gain,
