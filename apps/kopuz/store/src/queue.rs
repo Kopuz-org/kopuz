@@ -154,14 +154,14 @@ impl QueueModel {
             self.resummarize();
             crate::notify(cx);
         }
-        edit(QueueEdit::JumpPhysical { index }, cx);
+        self.commit(QueueEdit::JumpPhysical { index }, cx);
     }
 
     pub fn jump(&mut self, index: u32, cx: &mut Context<Self>) {
         self.snapshot.position = Some(index);
         self.resummarize();
         crate::notify(cx);
-        edit(QueueEdit::Jump { index }, cx);
+        self.commit(QueueEdit::Jump { index }, cx);
     }
 
     /// Move a row, locally first; a daemon that refuses puts the queue back where it was.
@@ -170,19 +170,17 @@ impl QueueModel {
         if from >= count || to >= count || from == to {
             return;
         }
-        let before = self.snapshot.clone();
         let item = self.snapshot.items.remove(from as usize);
         self.snapshot.items.insert(to as usize, item);
         self.snapshot.position = self.snapshot.position.map(|at| reindex(at, from, to));
         self.resummarize();
         crate::notify(cx);
-        self.commit(QueueEdit::Move { from, to }, before, cx);
+        self.commit(QueueEdit::Move { from, to }, cx);
     }
 
     /// Drop a row, locally first; the removed track comes back so a caller can offer an undo.
     pub fn remove(&mut self, index: u32, cx: &mut Context<Self>) -> Option<TrackInfo> {
         let gone = self.snapshot.items.get(index as usize)?.clone();
-        let before = self.snapshot.clone();
         self.snapshot.items.remove(index as usize);
         self.snapshot.position = self.snapshot.position.and_then(|at| match at.cmp(&index) {
             std::cmp::Ordering::Greater => Some(at - 1),
@@ -193,7 +191,7 @@ impl QueueModel {
         });
         self.resummarize();
         crate::notify(cx);
-        self.commit(QueueEdit::Remove { index }, before, cx);
+        self.commit(QueueEdit::Remove { index }, cx);
         Some(gone)
     }
 
@@ -212,12 +210,11 @@ impl QueueModel {
         if self.upcoming().is_empty() {
             return;
         }
-        let before = self.snapshot.clone();
         let first = self.snapshot.position.map_or(0, |at| at as usize + 1);
         self.snapshot.items.truncate(first);
         self.resummarize();
         crate::notify(cx);
-        self.commit(QueueEdit::ClearUpcoming, before, cx);
+        self.commit(QueueEdit::ClearUpcoming, cx);
     }
 
     /// Replace everything after the current row with `keys`, in one daemon edit; empty clears it.
@@ -227,7 +224,6 @@ impl QueueModel {
             return;
         }
         // Rows not already held arrive with the daemon's snapshot; the ones held move now.
-        let before = self.snapshot.clone();
         let first = self.snapshot.position.map_or(0, |at| at as usize + 1);
         let held: Vec<TrackInfo> = self.snapshot.items.drain(first.min(self.len())..).collect();
         for key in &keys {
@@ -237,7 +233,7 @@ impl QueueModel {
         }
         self.resummarize();
         crate::notify(cx);
-        self.commit(QueueEdit::ReplaceUpcoming { keys }, before, cx);
+        self.commit(QueueEdit::ReplaceUpcoming { keys }, cx);
     }
 
     /// Randomise what plays after the current row; the daemon draws the order.
@@ -245,31 +241,19 @@ impl QueueModel {
         if self.upcoming().len() < 2 {
             return;
         }
-        let before = self.snapshot.clone();
-        self.commit(QueueEdit::ShuffleUpcoming, before, cx);
+        self.commit(QueueEdit::ShuffleUpcoming, cx);
     }
 
-    /// Send an edit the local snapshot has already taken, restoring it if the daemon refuses.
-    fn commit(&mut self, change: QueueEdit, before: QueueSnapshot, cx: &mut Context<Self>) {
-        let generation = self.generation;
+    /// Send an edit the local snapshot has already taken; a refusal reloads the daemon's queue,
+    /// since putting back the old snapshot would also undo any edit sent after this one.
+    fn commit(&mut self, change: QueueEdit, cx: &mut Context<Self>) {
         let call = Link::global(cx).call(move |api| async move { api.queue_edit(change).await });
         cx.spawn(async move |this, cx| {
             let Err(error) = call.await else { return };
-            this.update(cx, |this, cx| this.roll_back(generation, before, cx))
-                .ok();
+            this.update(cx, |this, cx| this.refetch(cx)).ok();
             cx.update(|cx| crate::Notices::failed(&error, cx));
         })
         .detach();
-    }
-
-    /// Put the snapshot back, unless a fresher one has landed since the edit went out.
-    fn roll_back(&mut self, generation: u64, before: QueueSnapshot, cx: &mut Context<Self>) {
-        if self.generation != generation {
-            return;
-        }
-        self.snapshot = before;
-        self.resummarize();
-        crate::notify(cx);
     }
 }
 
