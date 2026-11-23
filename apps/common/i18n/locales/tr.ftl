@@ -1105,6 +1105,7 @@ onboarding_privacy_title = Gizlilik
 onboarding_privacy_discord = Discord durumu, o an çaldığınız şarkıyı Discord profilinizde gösterir.
 onboarding_privacy_updates = Güncelleme denetimi, uygulama açılırken en yeni Kopuz sürümünü GitHub'a sorar.
 onboarding_privacy_watch_history = YouTube izleme geçmişi, burada çaldığınız şarkıları YouTube geçmişinize ekler ve önerilerinizi buna göre şekillendirir.
+onboarding_fill_failed = The library could not be filled. You can sync again from Settings, Sources.
 onboarding_ready_summary = { $tracks } parça, { $albums } albüm
 onboarding_start_listening = Dinlemeye başla
 onboarding_run_again = Kurulumu yeniden çalıştır

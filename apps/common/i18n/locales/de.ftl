@@ -1113,6 +1113,7 @@ onboarding_privacy_title = Datenschutz
 onboarding_privacy_discord = Der Discord-Status zeigt in deinem Discord-Profil, welchen Song du gerade hörst.
 onboarding_privacy_updates = Die Update-Suche fragt beim Start bei GitHub nach der neuesten Kopuz-Version.
 onboarding_privacy_watch_history = Der YouTube-Wiedergabeverlauf nimmt die Songs auf, die du hier hörst, und prägt so deine Empfehlungen.
+onboarding_fill_failed = The library could not be filled. You can sync again from Settings, Sources.
 onboarding_ready_summary =
     { $tracks } Titel, { $albums ->
         [one] { $albums } Album
