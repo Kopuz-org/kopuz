@@ -50,6 +50,8 @@ service Kopuz {
   rpc GetArtist(ArtistRequest) returns (ArtistDetail);
   rpc GetSimilarArtists(SimilarArtistsRequest) returns (SimilarArtists);
   rpc GetArtistInfo(ArtistRequest) returns (ArtistInfoResponse);
+  rpc GetAlbumSound(AlbumRef) returns (Sound);
+  rpc GetArtistSound(ArtistRequest) returns (Sound);
   rpc GetArtistSampleTracks(Page) returns (TrackPage);
   rpc GetGenres(GetGenresRequest) returns (GenreList);
   rpc GetTopGenre(GetTopGenreRequest) returns (TopGenreResponse);
@@ -830,6 +832,14 @@ message ArtistAbout {
 
 message ArtistInfoResponse {
   optional ArtistAbout about = 1;
+}
+
+// What an album or artist sounds like; every list is empty without AudioMuse-AI.
+message Sound {
+  repeated AlbumInfo similar_albums = 1;
+  repeated SimilarArtist similar_artists = 2;
+  repeated string tags = 3;
+  repeated string moods = 4;
 }
 
 message GetGenresRequest {}

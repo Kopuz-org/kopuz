@@ -376,6 +376,24 @@ impl api::LibraryApi for GrpcApi {
             .map(convert::artist_about_from_proto))
     }
 
+    async fn album_sound(&self, album: String) -> Result<api::SoundView, ApiError> {
+        let response = self
+            .client()
+            .get_album_sound(Request::new(proto::AlbumRef { id: album }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::sound_from_proto(response.get_ref()))
+    }
+
+    async fn artist_sound(&self, artist: String) -> Result<api::SoundView, ApiError> {
+        let response = self
+            .client()
+            .get_artist_sound(Request::new(proto::ArtistRequest { key: artist }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::sound_from_proto(response.get_ref()))
+    }
+
     async fn album(&self, id: String) -> Result<Option<api::AlbumInfo>, ApiError> {
         let album = self
             .client()

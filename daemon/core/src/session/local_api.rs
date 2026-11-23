@@ -673,6 +673,18 @@ impl api::LibraryApi for LocalApi {
             .await
     }
 
+    async fn album_sound(&self, album: String) -> Result<api::SoundView, ApiError> {
+        let album = &album;
+        self.recovering(|| async move { self.catalog()?.album_sound(album).await })
+            .await
+    }
+
+    async fn artist_sound(&self, artist: String) -> Result<api::SoundView, ApiError> {
+        let artist = &artist;
+        self.recovering(|| async move { self.catalog()?.artist_sound(artist).await })
+            .await
+    }
+
     async fn artist_sample_tracks(&self, page: Page) -> Result<api::TrackPage, ApiError> {
         self.library()?.artist_sample_tracks(page).await
     }

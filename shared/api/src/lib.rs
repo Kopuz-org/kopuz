@@ -45,8 +45,8 @@ pub use library::{
     AlbumInfo, AlbumPage, AlbumQuery, ArtistCredit, ArtistDetail, ArtistInfo, ArtistInfoView,
     ArtistPage, ArtistQuery, DEFAULT_PAGE_LIMIT, DayPlays, ListeningStats, LyricChunkView,
     LyricLineView, LyricsView, Page, Ranked, RankedTrack, SearchRequest, SearchResults,
-    SearchSuggestion, SimilarArtist, StatsView, TrackCounterpart, TrackFilter, TrackInfo,
-    TrackPage, TrackSort, TrackVersion, total_duration_secs,
+    SearchSuggestion, SimilarArtist, SoundView, StatsView, TrackCounterpart, TrackFilter,
+    TrackInfo, TrackPage, TrackSort, TrackVersion, total_duration_secs,
 };
 pub use mutations::{ArtworkChange, ArtworkUpload, TrackMetadataPatch};
 pub use player::{
@@ -249,6 +249,13 @@ pub trait LibraryApi: Send + Sync {
     /// What the active source says about an artist: biography, similar artists, a link. `None` when
     /// its capability [`SourceCapabilities::artist_info`] is off or it knows nothing of them.
     async fn artist_info(&self, artist: String) -> Result<Option<ArtistInfoView>, ApiError>;
+
+    /// Library albums and artists that sound like this album, and its sound profile; all empty
+    /// when AudioMuse-AI is not set up or has analysed none of its songs.
+    async fn album_sound(&self, album: String) -> Result<SoundView, ApiError>;
+
+    /// The same for an artist, by artist key.
+    async fn artist_sound(&self, artist: String) -> Result<SoundView, ApiError>;
 
     /// One track per artist, for the artist grid's tiles.
     async fn artist_sample_tracks(&self, page: Page) -> Result<TrackPage, ApiError>;

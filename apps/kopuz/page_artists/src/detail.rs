@@ -3,8 +3,8 @@
 use std::rc::Rc;
 
 use api::{
-    AlbumInfo, AlbumPage, ArtworkTarget, SimilarArtist, SourceCapabilities, Table, TrackInfo,
-    TrackPage,
+    AlbumInfo, AlbumPage, ArtworkTarget, SimilarArtist, SoundView, SourceCapabilities, Table,
+    TrackInfo, TrackPage,
 };
 use components::album_collection::available_fields;
 use components::format::{t, t_with, total_duration};
@@ -23,8 +23,8 @@ use gpui_kit::{
     SharedString, Styled as _, Subscription, Task, Window, div, rems,
 };
 use store::{
-    ConfigModel, DownloadsModel, LayoutModel, Navigator, Offline, Pictured, PlayerModel, Query,
-    Route, SourcesModel, Target, actions,
+    AudioMuseModel, ConfigModel, DownloadsModel, LayoutModel, Navigator, Offline, Pictured,
+    PlayerModel, Query, Route, SourcesModel, Target, actions,
 };
 
 use crate::controls::{self, ViewModeKey};
@@ -40,6 +40,9 @@ pub struct ArtistDetail {
     detail: Entity<Query<api::ArtistDetail>>,
     // What the source says of the artist; empty for a source without artist info.
     info: Entity<Query<Option<api::ArtistInfoView>>>,
+    // Held, asking nothing, until AudioMuse-AI is set up.
+    sound: Entity<Query<SoundView>>,
+    sound_on: bool,
     about_open: bool,
     list: Entity<TrackList>,
     column: Option<(Column, SortDirection)>,
@@ -94,6 +97,11 @@ impl ArtistDetail {
                 cx,
             )
         });
+        let sound = cx.new(|cx| Query::held(&[Table::Servers], SoundView::default(), cx));
+        let sound_on = AudioMuseModel::ready(cx);
+        if sound_on {
+            point_sound(&sound, key.clone(), cx);
+        }
         let asked = controls::criteria::<AlbumSortField>(cx);
         let billed = cx.new(|cx| {
             Query::new(
@@ -109,6 +117,10 @@ impl ArtistDetail {
             cx.observe(&billed, |this, _, cx| this.rebuild_albums(cx)),
             cx.observe(&detail, |this, _, cx| this.ask_similar(cx)),
             cx.observe(&info, |_, _, cx| cx.notify()),
+            cx.observe(&sound, |_, _, cx| cx.notify()),
+            cx.observe(&AudioMuseModel::global(cx), |this, _, cx| {
+                this.sync_sound(cx)
+            }),
             cx.observe(&LayoutModel::global(cx), |this, _, cx| {
                 this.reorder_albums(cx);
                 this.ask_similar(cx);
@@ -134,6 +146,8 @@ impl ArtistDetail {
             tracks,
             detail,
             info,
+            sound,
+            sound_on,
             about_open: false,
             list,
             column: None,
@@ -149,6 +163,21 @@ impl ArtistDetail {
             asked_similar: None,
             _similar: None,
             _subscriptions: subscriptions,
+        }
+    }
+
+    /// Ask for the artist's sound once AudioMuse-AI is set up, and stop when it is cleared.
+    fn sync_sound(&mut self, cx: &mut Context<Self>) {
+        let ready = AudioMuseModel::ready(cx);
+        if ready == self.sound_on {
+            return;
+        }
+        self.sound_on = ready;
+        match ready {
+            true => point_sound(&self.sound, self.key.clone(), cx),
+            false => self
+                .sound
+                .update(cx, |query, cx| query.hold(SoundView::default(), cx)),
         }
     }
 
@@ -622,4 +651,16 @@ fn delete_tracks(keys: Vec<String>, cx: &mut App) {
 fn capabilities(cx: &App) -> SourceCapabilities {
     let model = SourcesModel::global(cx);
     model.read(cx).capabilities()
+}
+
+fn point_sound(query: &Entity<Query<SoundView>>, artist: String, cx: &mut App) {
+    query.update(cx, |query, cx| {
+        query.set_fetch(
+            move |api| {
+                let artist = artist.clone();
+                async move { api.artist_sound(artist).await }
+            },
+            cx,
+        )
+    });
 }

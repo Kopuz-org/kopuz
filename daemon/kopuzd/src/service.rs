@@ -474,6 +474,24 @@ impl Kopuz for KopuzGrpc {
         }))
     }
 
+    async fn get_album_sound(
+        &self,
+        request: Request<proto::AlbumRef>,
+    ) -> Result<Response<proto::Sound>, Status> {
+        let album = request.get_ref().id.clone();
+        let sound = self.0.api.album_sound(album).await.map_err(failed)?;
+        Ok(Response::new(convert::sound_to_proto(&sound)))
+    }
+
+    async fn get_artist_sound(
+        &self,
+        request: Request<proto::ArtistRequest>,
+    ) -> Result<Response<proto::Sound>, Status> {
+        let artist = request.get_ref().key.clone();
+        let sound = self.0.api.artist_sound(artist).await.map_err(failed)?;
+        Ok(Response::new(convert::sound_to_proto(&sound)))
+    }
+
     async fn get_artist_sample_tracks(
         &self,
         request: Request<proto::Page>,

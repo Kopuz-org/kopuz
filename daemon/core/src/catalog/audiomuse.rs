@@ -6,6 +6,8 @@ use server::source::RadioPage;
 
 use super::{CatalogService, db_error};
 
+pub(super) mod sound;
+
 /// Songs a text search asks for.
 const DESCRIBE_LIMIT: usize = 50;
 /// Songs a listening-profile pick asks for.
@@ -31,14 +33,20 @@ impl CatalogService {
         let _ = self.credentials.set(credentials);
     }
 
+    /// The address and token held for AudioMuse-AI, `None` while either is unset.
+    fn audiomuse_login(&self) -> Option<(String, String)> {
+        let held = self.credentials.get()?.snapshot();
+        if held.audiomuse_url.trim().is_empty() || held.audiomuse_token.trim().is_empty() {
+            return None;
+        }
+        Some((held.audiomuse_url, held.audiomuse_token))
+    }
+
     fn audiomuse(&self) -> Result<AudioMuse, ApiError> {
-        let held = self.credentials.get().map(|store| store.snapshot());
-        let Some(held) = held.filter(|held| {
-            !held.audiomuse_url.trim().is_empty() && !held.audiomuse_token.trim().is_empty()
-        }) else {
+        let Some((url, token)) = self.audiomuse_login() else {
             return Err(ApiError::unsupported("AudioMuse-AI is not set up"));
         };
-        AudioMuse::new(&held.audiomuse_url, &held.audiomuse_token).map_err(audiomuse_error)
+        AudioMuse::new(&url, &token).map_err(audiomuse_error)
     }
 
     pub async fn described_radio(&self, query: &str) -> Result<RadioPage, ApiError> {

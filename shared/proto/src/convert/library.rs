@@ -495,6 +495,46 @@ pub fn artist_about_from_proto(value: &ArtistAbout) -> api::ArtistInfoView {
     }
 }
 
+pub fn sound_to_proto(value: &api::SoundView) -> Sound {
+    Sound {
+        similar_albums: value
+            .similar_albums
+            .iter()
+            .map(album_info_to_proto)
+            .collect(),
+        similar_artists: value
+            .similar_artists
+            .iter()
+            .map(|artist| SimilarArtist {
+                name: artist.name.clone(),
+                key: artist.key.clone(),
+            })
+            .collect(),
+        tags: value.tags.clone(),
+        moods: value.moods.clone(),
+    }
+}
+
+pub fn sound_from_proto(value: &Sound) -> api::SoundView {
+    api::SoundView {
+        similar_albums: value
+            .similar_albums
+            .iter()
+            .map(album_info_from_proto)
+            .collect(),
+        similar_artists: value
+            .similar_artists
+            .iter()
+            .map(|artist| api::SimilarArtist {
+                name: artist.name.clone(),
+                key: artist.key.clone(),
+            })
+            .collect(),
+        tags: value.tags.clone(),
+        moods: value.moods.clone(),
+    }
+}
+
 pub fn artist_page_to_proto(value: &api::ArtistPage) -> ArtistPage {
     ArtistPage {
         artists: value.artists.iter().map(artist_info_to_proto).collect(),
@@ -738,6 +778,30 @@ mod tests {
         assert_eq!(info, artist_about_from_proto(&artist_about_to_proto(&info)));
         let bare = api::ArtistInfoView::default();
         assert_eq!(bare, artist_about_from_proto(&artist_about_to_proto(&bare)));
+    }
+
+    #[test]
+    fn sound_round_trips() {
+        let sound = api::SoundView {
+            similar_albums: vec![api::AlbumInfo {
+                id: "al-1".into(),
+                title: "Low".into(),
+                artist: "Ada".into(),
+                genre: "Jazz".into(),
+                year: 1999,
+                artwork: None,
+                artist_key: Some("ar-1".into()),
+            }],
+            similar_artists: vec![api::SimilarArtist {
+                name: "Boris".into(),
+                key: Some("ar-2".into()),
+            }],
+            tags: vec!["metal".into(), "heavy metal".into()],
+            moods: vec!["aggressive".into()],
+        };
+        assert_eq!(sound, sound_from_proto(&sound_to_proto(&sound)));
+        let bare = api::SoundView::default();
+        assert_eq!(bare, sound_from_proto(&sound_to_proto(&bare)));
     }
 
     #[test]
