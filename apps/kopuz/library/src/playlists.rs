@@ -200,6 +200,8 @@ impl AddPlaylist {
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let name = self.name.read(cx).value().to_string();
         if name.trim().is_empty() {
+            self.error = Some(t("playlist_name_required"));
+            cx.notify();
             return;
         }
         // A source that cannot mutate playlists gets the friendly line, not a raw refusal.
