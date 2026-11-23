@@ -1,6 +1,6 @@
 //! The knobs that belong to no single package: motion, accent and how big everything is drawn.
 
-use components::format::t;
+use components::format::{t, t_with};
 use components::settings::{SettingRow, choice, nearest, section, select_width, toggle_row};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::v_flex;
@@ -27,6 +27,8 @@ pub fn register(cx: &mut App) {
 
 struct General {
     font: Entity<InputState>,
+    /// The typed family when the system has no such font, which draws in the theme's instead.
+    missing: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -38,10 +40,12 @@ impl General {
                 .placeholder(t("interface_font_placeholder"))
                 .default_value(held)
         });
-        let subscription = cx.subscribe(&font, |_, state, event: &InputEvent, cx| {
+        let missing = unknown_font(store::layout(cx).interface.font.as_deref(), cx);
+        let subscription = cx.subscribe(&font, |this: &mut Self, state, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Blur | InputEvent::PressEnter { .. }) {
                 let typed = state.read(cx).value().trim().to_string();
                 let family = (!typed.is_empty()).then_some(typed);
+                this.missing = unknown_font(family.as_deref(), cx);
                 LayoutModel::edit(cx, |layout| layout.interface.font = family);
             }
         });
@@ -59,6 +63,7 @@ impl General {
         );
         Self {
             font,
+            missing,
             _subscriptions: vec![subscription, layout_subscription],
         }
     }
@@ -177,13 +182,30 @@ impl Render for General {
                     )
                     .children(
                         SettingRow::new(t("interface_font"))
-                            .description(t("interface_font_description"))
+                            .description(match self.missing.clone() {
+                                Some(font) => t_with(
+                                    "interface_font_missing",
+                                    &[("font", font.to_string().into())],
+                                ),
+                                None => t("interface_font_description"),
+                            })
                             .control(Input::new(&self.font).w(select_width()))
                             .shown(cx),
                     ),
             )
             .into_any_element()
     }
+}
+
+/// `family`, when it names no font the system has.
+fn unknown_font(family: Option<&str>, cx: &gpui_kit::App) -> Option<SharedString> {
+    let family = family?;
+    let known = cx
+        .text_system()
+        .all_font_names()
+        .iter()
+        .any(|name| name.eq_ignore_ascii_case(family));
+    (!known).then(|| SharedString::from(family.to_string()))
 }
 
 fn percent(scale: f32) -> SharedString {

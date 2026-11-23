@@ -750,6 +750,7 @@ metadata_batch_count =
        *[other] Editing { $count } tracks
     }
 interface_font = Interface font
+interface_font_missing = { $font } is not installed here, so the theme's font is used.
 interface_font_description = The font family to draw the interface with.
 interface_font_placeholder = Theme default
 theme_description = The colour palette the whole app is drawn with.
