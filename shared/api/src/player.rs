@@ -73,7 +73,7 @@ pub struct FadingState {
     pub track: crate::TrackInfo,
 }
 
-/// Playback happening outside the engine (Spotify in a browser).
+/// Playback happening outside the engine, on a surface an integration owns.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ExternalPlayback {
     pub kind: String,

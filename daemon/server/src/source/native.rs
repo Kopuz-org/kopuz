@@ -1,9 +1,9 @@
 //! The official plugins that run in-process.
 //!
 //! These backends need what the sandbox does not give a component: V8 for
-//! YouTube's signatures and PoTokens, a Widevine CDM, a browser for Spotify's
-//! playback, raw sockets for SMB, the filesystem for folders and Nextcloud's
-//! cover cache. They register in the plugin registry like any other plugin,
+//! YouTube's signatures and PoTokens, a Widevine CDM, raw sockets for SMB and
+//! Spotify's access point, the filesystem for folders and Nextcloud's cover
+//! cache. They register in the plugin registry like any other plugin,
 //! with a manifest, and the registry dispatches to them; their code is kopuz's
 //! own. A component installed with one's id replaces it.
 
@@ -69,7 +69,7 @@ pub(crate) const PLUGINS: &[Native] = &[
         manifest: manifest!(
             "spotify",
             "Spotify",
-            "Spotify, played through its web player.",
+            "Spotify, streamed over its desktop client's protocol.",
             ["spotify"]
         ),
         open: |db, source, conn| Box::new(SpotifySource::new(db, source, conn)),

@@ -23,7 +23,7 @@ fn credential(service: MusicService, header: &str) -> Option<String> {
 #[cfg(target_os = "android")]
 pub async fn sign_in(
     service: MusicService,
-    client_id: String,
+    device_id: String,
 ) -> Result<(String, Option<String>), String> {
     static SIGNIN: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _lock = SIGNIN
@@ -39,13 +39,10 @@ pub async fn sign_in(
 
     if service == MusicService::Spotify {
         let auth = tokio::select! {
-            result = server::spotify::auth::authorize_with(client_id, player::systemint::login_open) => result?,
+            result = server::spotify::auth::authorize_with(device_id, player::systemint::login_open) => result?,
             error = wait_for_close() => return Err(error),
         };
-        return Ok((
-            server::spotify::auth::pack_token(&auth.access_token, &auth.refresh_token),
-            Some(auth.user_id),
-        ));
+        return Ok((auth.stored, Some(auth.username)));
     }
 
     let (sign_in_url, cookie_url) = match service {

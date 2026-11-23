@@ -42,6 +42,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 directories = { workspace = true }
 tempfile = { workspace = true }
+rustls = { workspace = true }
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 libc = { workspace = true }

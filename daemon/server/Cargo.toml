@@ -35,7 +35,6 @@ httpdate = { workspace = true }
 hex = { workspace = true }
 webbrowser = { workspace = true }
 tokio = { workspace = true, features = ["fs", "process", "rt", "sync", "net", "io-util"] }
-tokio-tungstenite = { workspace = true }
 futures-util = { workspace = true }
 reader = { workspace = true }
 db = { workspace = true }
@@ -60,6 +59,15 @@ tar = { workspace = true }
 pinyin = { workspace = true }
 any_ascii = { workspace = true }
 unicode-script = { workspace = true }
+# Spotify: the desktop client's own protocol, so audio streams and decrypts
+# here instead of in a browser. Pure Rust, so it builds for every target.
+librespot-core = { workspace = true }
+librespot-audio = { workspace = true }
+librespot-metadata = { workspace = true }
+librespot-protocol = { workspace = true }
+protobuf = { workspace = true }
+http = { workspace = true }
+bytes = { workspace = true }
 
 [build-dependencies]
 cc = "1"
@@ -74,7 +82,7 @@ libc = { workspace = true }
 [target.'cfg(not(any(target_os = "windows", target_os = "android")))'.dependencies]
 rookie = "0.5"
 
-# Desktop-only, so both are in one table. Headless JS for YouTube (no V8 on
+# Desktop-only, so all are in one table. Headless JS for YouTube (no V8 on
 # Android): deno_core runs the sig/n decipher solver and rustypipe-botguard
 # mints PoTokens, sharing one V8; versions (incl. the deno_core lock) live in
 # the workspace manifest. sqlx reads a Gecko sign-in profile's cookies.sqlite,
@@ -106,5 +114,6 @@ name = "duration_probe"
 path = "examples/duration_probe.rs"
 
 [dev-dependencies]
+rustls = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tempfile = { workspace = true }

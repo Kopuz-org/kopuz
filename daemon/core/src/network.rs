@@ -100,7 +100,7 @@ pub fn needs_internet(sources: &server::sources::Sources) -> bool {
     !is_local(&sources.active, url)
 }
 
-/// Whether the active source's songs go into the offline cache: across the internet, and played by the engine rather than an integration; never a folder library, an SMB share or a server on this network.
+/// Whether the active source's songs go into the offline cache: across the internet; never a folder library, an SMB share, a server on this network, or Spotify, whose audio is streamed and not kept.
 pub fn cacheable(sources: &server::sources::Sources) -> bool {
     let service = sources.server.as_ref().map(|server| server.service);
     needs_internet(sources)
@@ -221,7 +221,6 @@ mod tests {
             "http://local.example.com",
             "http://notlocal",
             "smb://nas.example.org/music",
-            "a-spotify-client-id",
             "",
         ] {
             assert!(!server(url), "{url} is not local");
@@ -259,11 +258,8 @@ mod tests {
             "on this network"
         );
         assert!(!cacheable(&active("smb://nas.example.org/music", Smb)));
-        assert!(
-            !cacheable(&active("a-spotify-client-id", Spotify)),
-            "an integration plays it"
-        );
-        assert!(needs_internet(&active("a-spotify-client-id", Spotify)));
+        assert!(!cacheable(&active("", Spotify)), "streamed, never kept");
+        assert!(needs_internet(&active("", Spotify)));
         assert!(!needs_internet(&server::sources::Sources::default()));
     }
 

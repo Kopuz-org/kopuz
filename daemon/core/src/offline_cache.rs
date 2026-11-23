@@ -689,7 +689,9 @@ fn whole_stream(
             });
         }
         ResolvedStreamRef::Direct(url) => url.to_string(),
-        ResolvedStreamRef::Pending(_) | ResolvedStreamRef::AppleMusicFmp4(_) => {
+        ResolvedStreamRef::Pending(_)
+        | ResolvedStreamRef::AppleMusicFmp4(_)
+        | ResolvedStreamRef::Spotify(_) => {
             return Err("this stream cannot be fetched whole".into());
         }
     };

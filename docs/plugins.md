@@ -18,8 +18,8 @@ Every source is a plugin, of one of three kinds:
   removed.
 - **Official native plugins** are YouTube Music, Apple Music, Spotify,
   Nextcloud, SMB and local folders. They need what the sandbox does not give
-  (V8 for YouTube's signatures and PoTokens, a Widevine CDM, a browser for
-  Spotify's playback, raw sockets, the filesystem), so their code is compiled
+  (V8 for YouTube's signatures and PoTokens, a Widevine CDM, raw sockets for
+  SMB and Spotify's access point, the filesystem), so their code is compiled
   into Kopuz and runs in-process. They register in the same plugin registry
   with a manifest, and a sandboxed plugin installed with one's id replaces it.
 - **Community plugins** live in their authors' repositories and are installed

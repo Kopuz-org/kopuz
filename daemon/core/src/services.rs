@@ -18,14 +18,11 @@ use config::{Browser, MusicService, SavedServer, Settings};
 
 /// The field keys a form and its answers agree on.
 pub const URL: &str = "url";
-pub const CLIENT_ID: &str = "client_id";
 pub const AUTH_METHOD: &str = "auth_method";
 pub const BROWSER: &str = "browser";
 pub const STOREFRONT: &str = "storefront";
 pub const LANGUAGE: &str = "language";
 pub const TOKEN: &str = "token";
-pub const PLAYBACK_BROWSER: &str = "playback_browser";
-pub const PREFER_ACTIVE_DEVICE: &str = "prefer_active_device";
 pub const DIRECTORIES: &str = "directories";
 
 /// Clippsly is one hosted service, so its address is not asked for.
@@ -508,15 +505,10 @@ pub fn add_fields(service: MusicService) -> Vec<FieldSpec> {
             },
             browser_field(None, Some(FieldValue::new(AUTH_METHOD, BY_BROWSER))),
         ],
-        MusicService::Spotify => vec![
-            FieldSpec {
-                required: true,
-                placeholder: Some(Text::literal("Spotify Client ID")),
-                help: Some(Text::key("spotify_client_id_help")),
-                ..text_field(CLIENT_ID, "spotify_client_id", FieldKind::Text)
-            },
-            browser_field(None, None),
-        ],
+        MusicService::Spotify => vec![FieldSpec {
+            help: Some(Text::key("spotify_help")),
+            ..note_field()
+        }],
         MusicService::Clippsly => vec![FieldSpec {
             help: Some(Text::key("clippsly_help")),
             ..note_field()
@@ -549,7 +541,7 @@ pub fn add_fields(service: MusicService) -> Vec<FieldSpec> {
 
 #[cfg(any(target_os = "android", test))]
 fn webview_fields(mut fields: Vec<FieldSpec>) -> Vec<FieldSpec> {
-    fields.retain(|field| field.key != BROWSER && field.key != PLAYBACK_BROWSER);
+    fields.retain(|field| field.key != BROWSER);
     for field in &mut fields {
         if field.key == AUTH_METHOD
             && let FieldKind::Radio { options } = &mut field.kind
@@ -568,7 +560,7 @@ fn webview_fields(mut fields: Vec<FieldSpec>) -> Vec<FieldSpec> {
 }
 
 /// The options a configured source has, with the values it currently holds.
-pub fn settings(server: &ServerView<'_>, config: &Settings) -> Vec<FieldSpec> {
+pub fn settings(server: &ServerView<'_>, _config: &Settings) -> Vec<FieldSpec> {
     let browser = server.browser.map(|browser| browser.id().to_string());
     let fields = match server.service {
         MusicService::YtMusic | MusicService::SoundCloud if !server.anonymous => {
@@ -599,44 +591,6 @@ pub fn settings(server: &ServerView<'_>, config: &Settings) -> Vec<FieldSpec> {
             },
             browser_field(browser.as_deref(), None),
         ],
-        MusicService::Spotify => {
-            let mut hosts = vec![ChoiceOption {
-                value: AUTOMATIC.to_string(),
-                label: Text::key("playback_browser_auto"),
-                ..Default::default()
-            }];
-            hosts.extend(options_for(Browser::CHROMIUM_FAMILY));
-            vec![
-                FieldSpec {
-                    value: Some(
-                        config
-                            .spotify
-                            .spotify_browser
-                            .clone()
-                            .unwrap_or_else(|| AUTOMATIC.to_string()),
-                    ),
-                    config_key: Some("spotify_browser".to_string()),
-                    ..text_field(
-                        PLAYBACK_BROWSER,
-                        "playback_browser",
-                        FieldKind::Choice {
-                            options: hosts,
-                            custom: false,
-                        },
-                    )
-                },
-                FieldSpec {
-                    value: Some(config.spotify.spotify_prefer_active_device.to_string()),
-                    config_key: Some("spotify_prefer_active_device".to_string()),
-                    help: Some(Text::key("prefer_active_device_help")),
-                    ..text_field(
-                        PREFER_ACTIVE_DEVICE,
-                        "prefer_active_device",
-                        FieldKind::Toggle,
-                    )
-                },
-            ]
-        }
         _ => Vec::new(),
     };
     #[cfg(target_os = "android")]
@@ -695,14 +649,6 @@ pub fn check(service: MusicService, draft: &SourceDraft) -> (SignInKind, Vec<For
     }
     let value = |key: &str| value_of(&draft.values, key).unwrap_or_default().trim();
     match service {
-        MusicService::Spotify => {
-            if value(CLIENT_ID).is_empty() {
-                problems.push(FormProblem::on(
-                    CLIENT_ID,
-                    ErrorReason::SpotifyClientIdRequired,
-                ));
-            }
-        }
         MusicService::AppleMusic => {
             if value(STOREFRONT).is_empty() {
                 problems.push(FormProblem::on(
@@ -719,7 +665,10 @@ pub fn check(service: MusicService, draft: &SourceDraft) -> (SignInKind, Vec<For
                 problems.push(FormProblem::on(TOKEN, ErrorReason::AppleMusicTokenRequired));
             }
         }
-        MusicService::YtMusic | MusicService::SoundCloud | MusicService::Clippsly => {}
+        MusicService::YtMusic
+        | MusicService::SoundCloud
+        | MusicService::Spotify
+        | MusicService::Clippsly => {}
         MusicService::AudioCd => {}
         MusicService::Plugin if reads_folders(service, draft) => {
             problems.extend(folder_problems(draft));
@@ -755,7 +704,8 @@ pub fn apply(service: MusicService, draft: &SourceDraft, saved: &mut SavedServer
     saved.name = draft.name.trim().to_string();
     saved.plugin_service = (service == MusicService::Plugin).then(|| draft.service.clone());
     saved.url = match service {
-        MusicService::Spotify => value(CLIENT_ID),
+        // Spotify has no address: the session finds its own access point.
+        MusicService::Spotify => String::new(),
         MusicService::Clippsly => CLIPPSLY_URL.to_string(),
         MusicService::Plugin => plugin_url(&draft.service).unwrap_or_else(|| {
             if reads_folders(service, draft) {
@@ -789,19 +739,9 @@ fn plugin_url(slug: &str) -> Option<String> {
 }
 
 /// Which settings keys belong to the config rather than the server row.
-pub fn config_keys(server: &SavedServer, values: &[FieldValue]) -> Vec<config::SettingKey> {
-    use config::{SettingKey, SpotifyKey};
-    if server.service != MusicService::Spotify {
-        return Vec::new();
-    }
-    let mut keys = Vec::new();
-    if value_of(values, PLAYBACK_BROWSER).is_some() {
-        keys.push(SettingKey::Spotify(SpotifyKey::SpotifyBrowser));
-    }
-    if value_of(values, PREFER_ACTIVE_DEVICE).is_some() {
-        keys.push(SettingKey::Spotify(SpotifyKey::SpotifyPreferActiveDevice));
-    }
-    keys
+/// None do today; the seam stays so a service option can live there again.
+pub fn config_keys(_server: &SavedServer, _values: &[FieldValue]) -> Vec<config::SettingKey> {
+    Vec::new()
 }
 
 /// Fold answered options into the stored row. An absent key is left alone.
@@ -822,16 +762,11 @@ pub fn apply_server_settings(values: &[FieldValue], saved: &mut SavedServer) {
 }
 
 /// The same for the answers that live in the settings rather than on the row.
-pub fn apply_config_settings(service: MusicService, values: &[FieldValue], config: &mut Settings) {
-    if service != MusicService::Spotify {
-        return;
-    }
-    if let Some(host) = value_of(values, PLAYBACK_BROWSER) {
-        config.spotify.spotify_browser = (host != AUTOMATIC).then(|| host.to_string());
-    }
-    if let Some(prefer) = value_of(values, PREFER_ACTIVE_DEVICE) {
-        config.spotify.spotify_prefer_active_device = prefer == "true";
-    }
+pub fn apply_config_settings(
+    _service: MusicService,
+    _values: &[FieldValue],
+    _config: &mut Settings,
+) {
 }
 
 /// What a refusal says when a draft is saved without being checked first. A
@@ -857,7 +792,6 @@ impl FormProblem {
             ErrorReason::SourceNameRequired => "a source needs a name",
             ErrorReason::SourceFolderRequired => "a folder source needs at least one folder",
             ErrorReason::EmptySourceFolder => "a source directory cannot be empty",
-            ErrorReason::SpotifyClientIdRequired => "a Spotify source needs a client id",
             ErrorReason::AppleMusicStorefrontRequired => "an Apple Music source needs a storefront",
             ErrorReason::AppleMusicTokenRequired => "an Apple Music token sign-in needs a token",
             ErrorReason::InvalidSmbUrl => "not an SMB address",
@@ -1276,16 +1210,10 @@ mod webview_tests {
             MusicService::Spotify,
         ] {
             let fields = webview_fields(add_fields(service));
-            assert!(
-                fields
-                    .iter()
-                    .all(|field| field.key != BROWSER && field.key != PLAYBACK_BROWSER)
-            );
-            if service != MusicService::Spotify {
-                assert!(fields.iter().all(|field| field.key != CLIENT_ID
-                    && field.key != "client_secret"
-                    && field.key != "developer_token"));
-            }
+            assert!(fields.iter().all(|field| field.key != BROWSER));
+            assert!(fields.iter().all(|field| field.key != "client_id"
+                && field.key != "client_secret"
+                && field.key != "developer_token"));
             for field in fields {
                 if let FieldKind::Radio { options } = field.kind {
                     for option in options {

@@ -7,7 +7,6 @@ lyrics_offset_ms = 2500
 lyrics_depth_blur_strength = 80
 ui_style = "Modern"
 titlebar_mode = "System"
-spotify_browser = "brave"
 discord_presence = false
 auto_fetch_covers = true
 cover_fetch_strategy = "LastFmFirst"

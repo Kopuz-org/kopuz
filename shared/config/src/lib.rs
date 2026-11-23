@@ -12,8 +12,7 @@ mod ui_prefs;
 pub use edit::{
     BackgroundEdit, BackgroundKey, CustomThemeOp, DownloadsEdit, DownloadsKey, IntegrationsEdit,
     IntegrationsKey, LibraryEdit, LibraryKey, LyricsEdit, LyricsKey, PlaybackEdit, PlaybackKey,
-    RadioRegistryOp, SettingKey, SettingsEdit, SpotifyEdit, SpotifyKey, SystemEdit, SystemKey,
-    UiEdit, UiKey, edit_samples,
+    RadioRegistryOp, SettingKey, SettingsEdit, SystemEdit, SystemKey, UiEdit, UiKey, edit_samples,
 };
 pub use source::{
     Browser, BrowserEngine, DEFAULT_LOCAL_ID, DEFAULT_LOCAL_NAME, JellyfinServer, MusicServer,
@@ -847,8 +846,6 @@ pub struct Settings {
     #[serde(flatten)]
     pub downloads: Downloads,
     #[serde(flatten)]
-    pub spotify: Spotify,
-    #[serde(flatten)]
     pub system: System,
 }
 
@@ -1190,28 +1187,6 @@ pub struct Downloads {
     #[serde(default, rename = "ytdlp_options")]
     #[garde(skip)]
     pub downloader_options: DownloaderOptions,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, garde::Validate)]
-#[serde(default)]
-pub struct Spotify {
-    /// Browser id hosting Spotify playback (`chrome`/`edge`/`brave`/`chromium`/`vivaldi`/`safari`); `None` picks the first available.
-    #[serde(default)]
-    #[garde(skip)]
-    pub spotify_browser: Option<String>,
-    /// Adopt a Connect device that is already playing (default) instead of starting on this app's own device.
-    #[serde(default = "default_true")]
-    #[garde(skip)]
-    pub spotify_prefer_active_device: bool,
-}
-
-impl Default for Spotify {
-    fn default() -> Self {
-        Self {
-            spotify_browser: None,
-            spotify_prefer_active_device: true,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, garde::Validate)]

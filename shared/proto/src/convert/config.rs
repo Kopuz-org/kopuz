@@ -401,7 +401,6 @@ pub fn config_to_proto(value: &config::Settings) -> Config {
         library,
         integrations,
         downloads,
-        spotify,
         system,
     } = value;
     Config {
@@ -475,8 +474,6 @@ pub fn config_to_proto(value: &config::Settings) -> Config {
         discord_presence_source: integrations.discord_presence_source,
         discord_presence_upload_cover: integrations.discord_presence_upload_cover,
         discord_presence_listen_button: integrations.discord_presence_listen_button,
-        spotify_browser: spotify.spotify_browser.clone(),
-        spotify_prefer_active_device: spotify.spotify_prefer_active_device,
         downloader_output_dir: downloads.downloader_output_dir.clone(),
         downloader_options: Some(downloader_options_to_proto(&downloads.downloader_options)),
     }
@@ -566,10 +563,6 @@ pub fn config_from_proto(value: &Config) -> config::Settings {
         downloads: config::Downloads {
             downloader_output_dir: value.downloader_output_dir.clone(),
             downloader_options: downloader_options_from_proto(value.downloader_options.as_ref()),
-        },
-        spotify: config::Spotify {
-            spotify_browser: value.spotify_browser.clone(),
-            spotify_prefer_active_device: value.spotify_prefer_active_device,
         },
         system: config::System {
             tracing_enabled: value.tracing_enabled,

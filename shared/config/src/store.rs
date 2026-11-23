@@ -1328,8 +1328,6 @@ mod tests {
                 directories: vec![],
             },
         ];
-        settings.spotify.spotify_browser = Some("brave".into());
-        settings.spotify.spotify_prefer_active_device = false;
         settings.ui.theme = "custom-one".into();
         settings.integrations.discord_presence = Some(false);
         settings.ui.language = "tr".into();

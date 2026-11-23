@@ -1,0 +1,960 @@
+use std::{
+    fmt::Write,
+    time::{Duration, SystemTime},
+};
+
+use crate::config::{OS, os_version};
+use crate::{
+    Error, FileId, SpotifyId, SpotifyUri,
+    apresolve::SocketAddress,
+    config::SessionConfig,
+    dealer::protocol::TransferOptions,
+    error::ErrorKind,
+    protocol::{
+        autoplay_context_request::AutoplayContextRequest,
+        clienttoken_http::{
+            ChallengeAnswer, ChallengeType, ClientTokenRequest, ClientTokenRequestType,
+            ClientTokenResponse, ClientTokenResponseType,
+        },
+        connect::PutStateRequest,
+        context::Context,
+        extended_metadata::BatchedEntityRequest,
+        extended_metadata::{BatchedExtensionResponse, EntityRequest, ExtensionQuery},
+        extension_kind::ExtensionKind,
+    },
+    token::Token,
+    util,
+    version::spotify_semantic_version,
+};
+use bytes::Bytes;
+use data_encoding::HEXUPPER_PERMISSIVE;
+use futures_util::future::IntoStream;
+use http::{Uri, header::HeaderValue};
+use hyper::{
+    HeaderMap, Method, Request,
+    header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, HeaderName, RANGE},
+};
+use hyper_util::client::legacy::ResponseFuture;
+use protobuf::{Enum, EnumOrUnknown, Message, MessageFull};
+use rand::RngCore;
+use serde::Serialize;
+use sysinfo::System;
+use thiserror::Error;
+
+component! {
+    SpClient : SpClientInner {
+        accesspoint: Option<SocketAddress> = None,
+        strategy: RequestStrategy = RequestStrategy::default(),
+        client_token: Option<Token> = None,
+    }
+}
+
+pub type SpClientResult = Result<Bytes, Error>;
+
+#[allow(clippy::declare_interior_mutable_const)]
+pub const CLIENT_TOKEN: HeaderName = HeaderName::from_static("client-token");
+#[allow(clippy::declare_interior_mutable_const)]
+const CONNECTION_ID: HeaderName = HeaderName::from_static("x-spotify-connection-id");
+
+const NO_METRICS_AND_SALT: RequestOptions = RequestOptions {
+    metrics: false,
+    salt: false,
+    base_url: None,
+};
+
+#[derive(Debug, Error)]
+pub enum SpClientError {
+    #[error("missing attribute {0}")]
+    Attribute(String),
+    #[error("expected data but received none")]
+    NoData,
+    #[error("expected an entry to exist in {0}")]
+    ExpectedEntry(&'static str),
+}
+
+impl From<SpClientError> for Error {
+    fn from(err: SpClientError) -> Self {
+        Self::failed_precondition(err)
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum RequestStrategy {
+    TryTimes(usize),
+    Infinitely,
+}
+
+impl Default for RequestStrategy {
+    fn default() -> Self {
+        RequestStrategy::TryTimes(10)
+    }
+}
+
+pub struct RequestOptions {
+    metrics: bool,
+    salt: bool,
+    base_url: Option<&'static str>,
+}
+
+impl Default for RequestOptions {
+    fn default() -> Self {
+        Self {
+            metrics: true,
+            salt: true,
+            base_url: None,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct TransferRequest {
+    pub transfer_options: TransferOptions,
+}
+
+impl SpClient {
+    pub fn set_strategy(&self, strategy: RequestStrategy) {
+        self.lock(|inner| inner.strategy = strategy)
+    }
+
+    pub async fn flush_accesspoint(&self) {
+        self.lock(|inner| inner.accesspoint = None)
+    }
+
+    pub async fn get_accesspoint(&self) -> Result<SocketAddress, Error> {
+        // Memoize the current access point.
+        let ap = self.lock(|inner| inner.accesspoint.clone());
+        let tuple = match ap {
+            Some(tuple) => tuple,
+            None => {
+                let tuple = self.session().apresolver().resolve("spclient").await?;
+                self.lock(|inner| inner.accesspoint = Some(tuple.clone()));
+                info!(
+                    "Resolved \"{}:{}\" as spclient access point",
+                    tuple.0, tuple.1
+                );
+                tuple
+            }
+        };
+        Ok(tuple)
+    }
+
+    pub async fn base_url(&self) -> Result<String, Error> {
+        let ap = self.get_accesspoint().await?;
+        Ok(format!("https://{}:{}", ap.0, ap.1))
+    }
+
+    async fn client_token_request<M: Message>(&self, message: &M) -> Result<Bytes, Error> {
+        let body = message.write_to_bytes()?;
+
+        let request = Request::builder()
+            .method(&Method::POST)
+            .uri("https://clienttoken.spotify.com/v1/clienttoken")
+            .header(ACCEPT, HeaderValue::from_static("application/x-protobuf"))
+            .body(body.into())?;
+
+        self.session().http_client().request_body(request).await
+    }
+
+    pub async fn client_token(&self) -> Result<String, Error> {
+        let client_token = self.lock(|inner| {
+            if let Some(token) = &inner.client_token {
+                if token.is_expired() {
+                    inner.client_token = None;
+                }
+            }
+            inner.client_token.clone()
+        });
+
+        if let Some(client_token) = client_token {
+            return Ok(client_token.access_token);
+        }
+
+        debug!("Client token unavailable or expired, requesting new token.");
+
+        let mut request = ClientTokenRequest::new();
+        request.request_type = ClientTokenRequestType::REQUEST_CLIENT_DATA_REQUEST.into();
+
+        let client_data = request.mut_client_data();
+
+        client_data.client_version = spotify_semantic_version();
+
+        // Current state of affairs: keymaster ID works on all tested platforms, but may be phased out,
+        // so it seems a good idea to mimick the real clients. `self.session().client_id()` returns the
+        // ID of the client that last connected, but requesting a client token with this ID only works
+        // on macOS and Windows. On Android and iOS we can send a platform-specific client ID and are
+        // then presented with a hash cash challenge. On Linux, we have to pass the old keymaster ID.
+        // We delegate most of this logic to `SessionConfig`.
+        let os = OS;
+        let client_id = match os {
+            "macos" | "windows" => self.session().client_id(),
+            os => SessionConfig::default_for_os(os).client_id,
+        };
+        client_data.client_id = client_id;
+
+        let connectivity_data = client_data.mut_connectivity_sdk_data();
+        connectivity_data.device_id = self.session().device_id().to_string();
+
+        let platform_data = connectivity_data
+            .platform_specific_data
+            .mut_or_insert_default();
+
+        let os_version = os_version();
+        let kernel_version = System::kernel_version().unwrap_or_else(|| String::from("0"));
+
+        match os {
+            "windows" => {
+                let os_version = os_version.parse::<f32>().unwrap_or(10.) as i32;
+                let kernel_version = kernel_version.parse::<i32>().unwrap_or(21370);
+
+                let (pe, image_file) = match std::env::consts::ARCH {
+                    "arm" => (448, 452),
+                    "aarch64" => (43620, 452),
+                    "x86_64" => (34404, 34404),
+                    _ => (332, 332), // x86
+                };
+
+                let windows_data = platform_data.mut_desktop_windows();
+                windows_data.os_version = os_version;
+                windows_data.os_build = kernel_version;
+                windows_data.platform_id = 2;
+                windows_data.unknown_value_6 = 9;
+                windows_data.image_file_machine = image_file;
+                windows_data.pe_machine = pe;
+                windows_data.unknown_value_10 = true;
+            }
+            "ios" => {
+                let ios_data = platform_data.mut_ios();
+                ios_data.user_interface_idiom = 0;
+                ios_data.target_iphone_simulator = false;
+                ios_data.hw_machine = "iPhone14,5".to_string();
+                ios_data.system_version = os_version;
+            }
+            "android" => {
+                let android_data = platform_data.mut_android();
+                android_data.android_version = os_version;
+                android_data.api_version = 31;
+                "Pixel".clone_into(&mut android_data.device_name);
+                "GF5KQ".clone_into(&mut android_data.model_str);
+                "Google".clone_into(&mut android_data.vendor);
+            }
+            "macos" => {
+                let macos_data = platform_data.mut_desktop_macos();
+                macos_data.system_version = os_version;
+                macos_data.hw_model = "iMac21,1".to_string();
+                macos_data.compiled_cpu_type = std::env::consts::ARCH.to_string();
+            }
+            _ => {
+                let linux_data = platform_data.mut_desktop_linux();
+                linux_data.system_name = "Linux".to_string();
+                linux_data.system_release = kernel_version;
+                linux_data.system_version = os_version;
+                linux_data.hardware = std::env::consts::ARCH.to_string();
+            }
+        }
+
+        let mut response = self.client_token_request(&request).await?;
+        let mut count = 0;
+        const MAX_TRIES: u8 = 3;
+
+        let token_response = loop {
+            count += 1;
+
+            let message = ClientTokenResponse::parse_from_bytes(&response)?;
+
+            match ClientTokenResponseType::from_i32(message.response_type.value()) {
+                // depending on the platform, you're either given a token immediately
+                // or are presented a hash cash challenge to solve first
+                Some(ClientTokenResponseType::RESPONSE_GRANTED_TOKEN_RESPONSE) => {
+                    debug!("Received a granted token");
+                    break message;
+                }
+                Some(ClientTokenResponseType::RESPONSE_CHALLENGES_RESPONSE) => {
+                    debug!("Received a hash cash challenge, solving...");
+
+                    let challenges = message.challenges().clone();
+                    let state = challenges.state;
+                    if let Some(challenge) = challenges.challenges.first() {
+                        let hash_cash_challenge = challenge.evaluate_hashcash_parameters();
+
+                        let ctx = vec![];
+                        let prefix = HEXUPPER_PERMISSIVE
+                            .decode(hash_cash_challenge.prefix.as_bytes())
+                            .map_err(|e| {
+                                Error::failed_precondition(format!(
+                                    "Unable to decode hash cash challenge: {e}"
+                                ))
+                            })?;
+                        let length = hash_cash_challenge.length;
+
+                        let mut suffix = [0u8; 0x10];
+                        let answer = util::solve_hash_cash(&ctx, &prefix, length, &mut suffix);
+
+                        match answer {
+                            Ok(_) => {
+                                // the suffix must be in uppercase
+                                let suffix = HEXUPPER_PERMISSIVE.encode(&suffix);
+
+                                let mut answer_message = ClientTokenRequest::new();
+                                answer_message.request_type =
+                                    ClientTokenRequestType::REQUEST_CHALLENGE_ANSWERS_REQUEST
+                                        .into();
+
+                                let challenge_answers = answer_message.mut_challenge_answers();
+
+                                let mut challenge_answer = ChallengeAnswer::new();
+                                challenge_answer.mut_hash_cash().suffix = suffix;
+                                challenge_answer.ChallengeType =
+                                    ChallengeType::CHALLENGE_HASH_CASH.into();
+
+                                challenge_answers.state = state.to_string();
+                                challenge_answers.answers.push(challenge_answer);
+
+                                trace!("Answering hash cash challenge");
+                                match self.client_token_request(&answer_message).await {
+                                    Ok(token) => {
+                                        response = token;
+                                        continue;
+                                    }
+                                    Err(e) => {
+                                        trace!("Answer not accepted {count}/{MAX_TRIES}: {e}");
+                                    }
+                                }
+                            }
+                            Err(e) => trace!(
+                                "Unable to solve hash cash challenge {count}/{MAX_TRIES}: {e}"
+                            ),
+                        }
+
+                        if count < MAX_TRIES {
+                            response = self.client_token_request(&request).await?;
+                        } else {
+                            return Err(Error::failed_precondition(format!(
+                                "Unable to solve any of {MAX_TRIES} hash cash challenges"
+                            )));
+                        }
+                    } else {
+                        return Err(Error::failed_precondition("No challenges found"));
+                    }
+                }
+
+                Some(unknown) => {
+                    return Err(Error::unimplemented(format!(
+                        "Unknown client token response type: {unknown:?}"
+                    )));
+                }
+                None => return Err(Error::failed_precondition("No client token response type")),
+            }
+        };
+
+        let granted_token = token_response.granted_token();
+        let access_token = granted_token.token.to_owned();
+
+        self.lock(|inner| {
+            let client_token = Token {
+                access_token: access_token.clone(),
+                expires_in: Duration::from_secs(
+                    granted_token
+                        .refresh_after_seconds
+                        .try_into()
+                        .unwrap_or(7200),
+                ),
+                token_type: "client-token".to_string(),
+                scopes: granted_token
+                    .domains
+                    .iter()
+                    .map(|d| d.domain.clone())
+                    .collect(),
+                timestamp: SystemTime::now(),
+            };
+
+            inner.client_token = Some(client_token);
+        });
+
+        trace!("Got client token: {granted_token:?}");
+
+        Ok(access_token)
+    }
+
+    pub async fn request_with_protobuf<M: Message + MessageFull>(
+        &self,
+        method: &Method,
+        endpoint: &str,
+        headers: Option<HeaderMap>,
+        message: &M,
+    ) -> SpClientResult {
+        self.request_with_protobuf_and_options(
+            method,
+            endpoint,
+            headers,
+            message,
+            &Default::default(),
+        )
+        .await
+    }
+
+    pub async fn request_with_protobuf_and_options<M: Message + MessageFull>(
+        &self,
+        method: &Method,
+        endpoint: &str,
+        headers: Option<HeaderMap>,
+        message: &M,
+        options: &RequestOptions,
+    ) -> SpClientResult {
+        let body = message.write_to_bytes()?;
+
+        let mut headers = headers.unwrap_or_default();
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/x-protobuf"),
+        );
+
+        self.request_with_options(method, endpoint, Some(headers), Some(&body), options)
+            .await
+    }
+
+    pub async fn request_as_json(
+        &self,
+        method: &Method,
+        endpoint: &str,
+        headers: Option<HeaderMap>,
+        body: Option<&str>,
+    ) -> SpClientResult {
+        let mut headers = headers.unwrap_or_default();
+        headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+
+        self.request(method, endpoint, Some(headers), body.map(|s| s.as_bytes()))
+            .await
+    }
+
+    pub async fn request(
+        &self,
+        method: &Method,
+        endpoint: &str,
+        headers: Option<HeaderMap>,
+        body: Option<&[u8]>,
+    ) -> SpClientResult {
+        self.request_with_options(method, endpoint, headers, body, &Default::default())
+            .await
+    }
+
+    pub async fn request_with_options(
+        &self,
+        method: &Method,
+        endpoint: &str,
+        headers: Option<HeaderMap>,
+        body: Option<&[u8]>,
+        options: &RequestOptions,
+    ) -> SpClientResult {
+        let mut tries: usize = 0;
+        let mut last_response;
+
+        let body = body.unwrap_or_default();
+
+        loop {
+            tries += 1;
+
+            // Reconnection logic: retrieve the endpoint every iteration, so we can try
+            // another access point when we are experiencing network issues (see below).
+            let mut url = match options.base_url {
+                Some(base_url) => base_url.to_string(),
+                None => self.base_url().await?,
+            };
+            url.push_str(endpoint);
+
+            // Add metrics. There is also an optional `partner` key with a value like
+            // `vodafone-uk` but we've yet to discover how we can find that value.
+            // For the sake of documentation you could also do "product=free" but
+            // we only support premium anyway.
+            if options.metrics && !url.contains("product=0") {
+                let _ = write!(
+                    url,
+                    "{}product=0&country={}",
+                    util::get_next_query_separator(&url),
+                    self.session().country()
+                );
+            }
+
+            // Defeat caches. Spotify-generated URLs already contain this.
+            if options.salt && !url.contains("salt=") {
+                let _ = write!(
+                    url,
+                    "{}salt={}",
+                    util::get_next_query_separator(&url),
+                    rand::rng().next_u32()
+                );
+            }
+
+            let mut request = Request::builder()
+                .method(method)
+                .uri(url)
+                .header(CONTENT_LENGTH, body.len())
+                .body(Bytes::copy_from_slice(body))?;
+
+            // Reconnection logic: keep getting (cached) tokens because they might have expired.
+            let token = self.session().login5().auth_token().await?;
+
+            let headers_mut = request.headers_mut();
+            if let Some(ref headers) = headers {
+                for (name, value) in headers {
+                    headers_mut.insert(name, value.clone());
+                }
+            }
+
+            headers_mut.insert(
+                AUTHORIZATION,
+                HeaderValue::from_str(&format!("{} {}", token.token_type, token.access_token,))?,
+            );
+
+            match self.client_token().await {
+                Ok(client_token) => {
+                    let _ = headers_mut.insert(CLIENT_TOKEN, HeaderValue::from_str(&client_token)?);
+                }
+                Err(e) => {
+                    // currently these endpoints seem to work fine without it
+                    warn!("Unable to get client token: {e} Trying to continue without...")
+                }
+            }
+
+            last_response = self.session().http_client().request_body(request).await;
+
+            if last_response.is_ok() {
+                return last_response;
+            }
+
+            // Break before the reconnection logic below, so that the current access point
+            // is retained when max_tries == 1. Leave it up to the caller when to flush.
+            if let RequestStrategy::TryTimes(max_tries) = self.lock(|inner| inner.strategy) {
+                if tries >= max_tries {
+                    break;
+                }
+            }
+
+            // Reconnection logic: drop the current access point if we are experiencing issues.
+            // This will cause the next call to base_url() to resolve a new one.
+            if let Err(ref network_error) = last_response {
+                match network_error.kind {
+                    ErrorKind::Unavailable | ErrorKind::DeadlineExceeded => {
+                        // Keep trying the current access point three times before dropping it.
+                        if tries % 3 == 0 {
+                            self.flush_accesspoint().await
+                        }
+                    }
+                    _ => break, // if we can't build the request now, then we won't ever
+                }
+            }
+
+            debug!("Error was: {last_response:?}");
+        }
+
+        last_response
+    }
+
+    pub async fn put_connect_state_request(&self, state: &PutStateRequest) -> SpClientResult {
+        let endpoint = format!("/connect-state/v1/devices/{}", self.session().device_id());
+
+        let mut headers = HeaderMap::new();
+        headers.insert(CONNECTION_ID, self.session().connection_id().parse()?);
+
+        self.request_with_protobuf(&Method::PUT, &endpoint, Some(headers), state)
+            .await
+    }
+
+    pub async fn delete_connect_state_request(&self) -> SpClientResult {
+        let endpoint = format!("/connect-state/v1/devices/{}", self.session().device_id());
+        self.request(&Method::DELETE, &endpoint, None, None).await
+    }
+
+    pub async fn put_connect_state_inactive(&self, notify: bool) -> SpClientResult {
+        let endpoint = format!(
+            "/connect-state/v1/devices/{}/inactive?notify={notify}",
+            self.session().device_id()
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert(CONNECTION_ID, self.session().connection_id().parse()?);
+
+        self.request(&Method::PUT, &endpoint, Some(headers), None)
+            .await
+    }
+
+    pub async fn get_extended_metadata(
+        &self,
+        request: BatchedEntityRequest,
+    ) -> Result<BatchedExtensionResponse, Error> {
+        let res = self
+            .request_with_protobuf(
+                &Method::POST,
+                "/extended-metadata/v0/extended-metadata",
+                None,
+                &request,
+            )
+            .await?;
+        Ok(BatchedExtensionResponse::parse_from_bytes(&res)?)
+    }
+
+    pub async fn get_metadata(&self, kind: ExtensionKind, id: &SpotifyUri) -> SpClientResult {
+        let req = BatchedEntityRequest {
+            entity_request: vec![EntityRequest {
+                entity_uri: id.to_uri()?,
+                query: vec![ExtensionQuery {
+                    extension_kind: EnumOrUnknown::new(kind),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let mut res = self.get_extended_metadata(req).await?;
+        let mut extended_metadata = res
+            .extended_metadata
+            .pop()
+            .ok_or(SpClientError::ExpectedEntry("extended_metadata"))?;
+
+        let mut data = extended_metadata
+            .extension_data
+            .pop()
+            .ok_or(SpClientError::ExpectedEntry("extension_data"))?;
+
+        match data.extension_data.take() {
+            None => Err(SpClientError::ExpectedEntry("data").into()),
+            Some(data) => Ok(Bytes::from(data.value)),
+        }
+    }
+
+    pub async fn get_track_metadata(&self, track_uri: &SpotifyUri) -> SpClientResult {
+        self.get_metadata(ExtensionKind::TRACK_V4, track_uri).await
+    }
+
+    pub async fn get_episode_metadata(&self, episode_uri: &SpotifyUri) -> SpClientResult {
+        self.get_metadata(ExtensionKind::EPISODE_V4, episode_uri)
+            .await
+    }
+
+    pub async fn get_album_metadata(&self, album_uri: &SpotifyUri) -> SpClientResult {
+        self.get_metadata(ExtensionKind::ALBUM_V4, album_uri).await
+    }
+
+    pub async fn get_artist_metadata(&self, artist_uri: &SpotifyUri) -> SpClientResult {
+        self.get_metadata(ExtensionKind::ARTIST_V4, artist_uri)
+            .await
+    }
+
+    pub async fn get_show_metadata(&self, show_uri: &SpotifyUri) -> SpClientResult {
+        self.get_metadata(ExtensionKind::SHOW_V4, show_uri).await
+    }
+
+    pub async fn get_lyrics(&self, track_id: &SpotifyId) -> SpClientResult {
+        let endpoint = format!("/color-lyrics/v2/track/{}", track_id.to_base62()?);
+
+        self.request_as_json(&Method::GET, &endpoint, None, None)
+            .await
+    }
+
+    pub async fn get_lyrics_for_image(
+        &self,
+        track_id: &SpotifyId,
+        image_id: &FileId,
+    ) -> SpClientResult {
+        let endpoint = format!(
+            "/color-lyrics/v2/track/{}/image/spotify:image:{}",
+            track_id.to_base62()?,
+            image_id
+        );
+
+        self.request_as_json(&Method::GET, &endpoint, None, None)
+            .await
+    }
+
+    pub async fn get_playlist(&self, playlist_id: &SpotifyId) -> SpClientResult {
+        let endpoint = format!("/playlist/v2/playlist/{}", playlist_id.to_base62()?);
+
+        self.request(&Method::GET, &endpoint, None, None).await
+    }
+
+    pub async fn get_user_profile(
+        &self,
+        username: &str,
+        playlist_limit: Option<u32>,
+        artist_limit: Option<u32>,
+    ) -> SpClientResult {
+        let mut endpoint = format!("/user-profile-view/v3/profile/{username}");
+
+        if playlist_limit.is_some() || artist_limit.is_some() {
+            let _ = write!(endpoint, "?");
+
+            if let Some(limit) = playlist_limit {
+                let _ = write!(endpoint, "playlist_limit={limit}");
+                if artist_limit.is_some() {
+                    let _ = write!(endpoint, "&");
+                }
+            }
+
+            if let Some(limit) = artist_limit {
+                let _ = write!(endpoint, "artist_limit={limit}");
+            }
+        }
+
+        self.request_as_json(&Method::GET, &endpoint, None, None)
+            .await
+    }
+
+    pub async fn get_user_followers(&self, username: &str) -> SpClientResult {
+        let endpoint = format!("/user-profile-view/v3/profile/{username}/followers");
+
+        self.request_as_json(&Method::GET, &endpoint, None, None)
+            .await
+    }
+
+    pub async fn get_user_following(&self, username: &str) -> SpClientResult {
+        let endpoint = format!("/user-profile-view/v3/profile/{username}/following");
+
+        self.request_as_json(&Method::GET, &endpoint, None, None)
+            .await
+    }
+
+    pub async fn get_radio_for_track(&self, track_uri: &SpotifyUri) -> SpClientResult {
+        let endpoint = format!(
+            "/inspiredby-mix/v2/seed_to_playlist/{}?response-format=json",
+            track_uri.to_uri()?
+        );
+
+        self.request_as_json(&Method::GET, &endpoint, None, None)
+            .await
+    }
+
+    // Known working scopes: stations, tracks
+    // For others see: https://gist.github.com/roderickvd/62df5b74d2179a12de6817a37bb474f9
+    //
+    // Seen-in-the-wild but unimplemented query parameters:
+    // - image_style=gradient_overlay
+    // - excludeClusters=true
+    // - language=en
+    // - count_tracks=0
+    // - market=from_token
+    pub async fn get_apollo_station(
+        &self,
+        scope: &str,
+        context_uri: &str,
+        count: Option<usize>,
+        previous_tracks: Vec<SpotifyId>,
+        autoplay: bool,
+    ) -> SpClientResult {
+        let mut endpoint = format!("/radio-apollo/v3/{scope}/{context_uri}?autoplay={autoplay}");
+
+        // Spotify has a default of 50
+        if let Some(count) = count {
+            let _ = write!(endpoint, "&count={count}");
+        }
+
+        let previous_track_str = previous_tracks
+            .iter()
+            .map(|track| track.to_base62())
+            .collect::<Result<Vec<_>, _>>()?
+            .join(",");
+        // better than checking `previous_tracks.len() > 0` because the `filter_map` could still return 0 items
+        if !previous_track_str.is_empty() {
+            let _ = write!(endpoint, "&prev_tracks={previous_track_str}");
+        }
+
+        self.request_as_json(&Method::GET, &endpoint, None, None)
+            .await
+    }
+
+    pub async fn get_next_page(&self, next_page_uri: &str) -> SpClientResult {
+        let endpoint = next_page_uri.trim_start_matches("hm:/");
+        self.request_as_json(&Method::GET, endpoint, None, None)
+            .await
+    }
+
+    // TODO: Seen-in-the-wild but unimplemented endpoints
+    // - /presence-view/v1/buddylist
+
+    pub async fn get_audio_storage(&self, file_id: &FileId) -> SpClientResult {
+        let endpoint = format!(
+            "/storage-resolve/files/audio/interactive/{}",
+            file_id.to_base16()?
+        );
+        self.request(&Method::GET, &endpoint, None, None).await
+    }
+
+    pub fn stream_from_cdn<U>(
+        &self,
+        cdn_url: U,
+        offset: usize,
+        length: usize,
+    ) -> Result<IntoStream<ResponseFuture>, Error>
+    where
+        U: TryInto<Uri>,
+        <U as TryInto<Uri>>::Error: Into<http::Error>,
+    {
+        let req = Request::builder()
+            .method(&Method::GET)
+            .uri(cdn_url)
+            .header(
+                RANGE,
+                HeaderValue::from_str(&format!("bytes={}-{}", offset, offset + length - 1))?,
+            )
+            .body(Bytes::new())?;
+
+        let stream = self.session().http_client().request_stream(req)?;
+
+        Ok(stream)
+    }
+
+    pub async fn request_url(&self, url: &str) -> SpClientResult {
+        let request = Request::builder()
+            .method(&Method::GET)
+            .uri(url)
+            .body(Bytes::new())?;
+
+        self.session().http_client().request_body(request).await
+    }
+
+    // Audio preview in 96 kbps MP3, unencrypted
+    pub async fn get_audio_preview(&self, preview_id: &FileId) -> SpClientResult {
+        const ATTRIBUTE: &str = "audio-preview-url-template";
+        let template = self
+            .session()
+            .get_user_attribute(ATTRIBUTE)
+            .ok_or_else(|| SpClientError::Attribute(ATTRIBUTE.to_string()))?;
+
+        let mut url = template.replace("{id}", &preview_id.to_base16()?);
+        let separator = match url.find('?') {
+            Some(_) => "&",
+            None => "?",
+        };
+        let _ = write!(url, "{}cid={}", separator, self.session().client_id());
+
+        self.request_url(&url).await
+    }
+
+    // The first 128 kB of a track, unencrypted
+    pub async fn get_head_file(&self, file_id: &FileId) -> SpClientResult {
+        const ATTRIBUTE: &str = "head-files-url";
+        let template = self
+            .session()
+            .get_user_attribute(ATTRIBUTE)
+            .ok_or_else(|| SpClientError::Attribute(ATTRIBUTE.to_string()))?;
+
+        let url = template.replace("{file_id}", &file_id.to_base16()?);
+
+        self.request_url(&url).await
+    }
+
+    pub async fn get_image(&self, image_id: &FileId) -> SpClientResult {
+        const ATTRIBUTE: &str = "image-url";
+        let template = self
+            .session()
+            .get_user_attribute(ATTRIBUTE)
+            .ok_or_else(|| SpClientError::Attribute(ATTRIBUTE.to_string()))?;
+        let url = template.replace("{file_id}", &image_id.to_base16()?);
+
+        self.request_url(&url).await
+    }
+
+    /// Request the context for an uri
+    ///
+    /// All [SpotifyId] uris are supported in addition to the following special uris:
+    /// - liked songs:
+    ///   - all: `spotify:user:<user_id>:collection`
+    ///   - of artist: `spotify:user:<user_id>:collection:artist:<artist_id>`
+    /// - search: `spotify:search:<search+query>` (whitespaces are replaced with `+`)
+    ///
+    /// ## Query params found in the wild:
+    /// - include_video=true
+    ///
+    /// ## Known results of uri types:
+    /// - uris of type `track`
+    ///   - returns a single page with a single track
+    ///   - when requesting a single track with a query in the request, the returned track uri
+    ///     **will** contain the query
+    /// - uris of type `artist`
+    ///   - returns 2 pages with tracks: 10 most popular tracks and latest/popular album
+    ///   - remaining pages are artist albums sorted by popularity (only provided as page_url)
+    /// - uris of type `search`
+    ///   - is massively influenced by the provided query
+    ///   - the query result shown by the search expects no query at all
+    ///   - uri looks like `spotify:search:never+gonna`
+    pub async fn get_context(&self, uri: &str) -> Result<Context, Error> {
+        let uri = format!("/context-resolve/v1/{uri}");
+
+        let res = self
+            .request_with_options(&Method::GET, &uri, None, None, &NO_METRICS_AND_SALT)
+            .await?;
+        let ctx_json = String::from_utf8(res.to_vec())?;
+        if ctx_json.is_empty() {
+            Err(SpClientError::NoData)?
+        }
+
+        let ctx = protobuf_json_mapping::parse_from_str::<Context>(&ctx_json);
+
+        if ctx.is_err() {
+            trace!("failed parsing context: {ctx_json}")
+        }
+
+        Ok(ctx?)
+    }
+
+    pub async fn get_autoplay_context(
+        &self,
+        context_request: &AutoplayContextRequest,
+    ) -> Result<Context, Error> {
+        let res = self
+            .request_with_protobuf_and_options(
+                &Method::POST,
+                "/context-resolve/v1/autoplay",
+                None,
+                context_request,
+                &NO_METRICS_AND_SALT,
+            )
+            .await?;
+
+        let ctx_json = String::from_utf8(res.to_vec())?;
+        if ctx_json.is_empty() {
+            Err(SpClientError::NoData)?
+        }
+
+        let ctx = protobuf_json_mapping::parse_from_str::<Context>(&ctx_json);
+
+        if ctx.is_err() {
+            trace!("failed parsing context: {ctx_json}")
+        }
+
+        Ok(ctx?)
+    }
+
+    pub async fn get_rootlist(&self, from: usize, length: Option<usize>) -> SpClientResult {
+        let length = length.unwrap_or(120);
+        let user = self.session().username();
+        let endpoint = format!(
+            "/playlist/v2/user/{user}/rootlist?decorate=revision,attributes,length,owner,capabilities,status_code&from={from}&length={length}"
+        );
+
+        self.request(&Method::GET, &endpoint, None, None).await
+    }
+
+    /// Triggers the transfers of the playback from one device to another
+    ///
+    /// Using the same `device_id` for `from_device_id` and `to_device_id`, initiates the transfer
+    /// from the currently active device.
+    pub async fn transfer(
+        &self,
+        from_device_id: &str,
+        to_device_id: &str,
+        transfer_request: Option<&TransferRequest>,
+    ) -> SpClientResult {
+        let body = transfer_request.map(serde_json::to_string).transpose()?;
+
+        let endpoint =
+            format!("/connect-state/v1/connect/transfer/from/{from_device_id}/to/{to_device_id}");
+        self.request_with_options(
+            &Method::POST,
+            &endpoint,
+            None,
+            body.as_deref().map(|s| s.as_bytes()),
+            &NO_METRICS_AND_SALT,
+        )
+        .await
+    }
+}
