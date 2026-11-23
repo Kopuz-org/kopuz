@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use anyhow::Context as _;
+use components::format::t;
 use gpui_kit::{App, Global, SharedString, Task};
 use store::{ConfigModel, Notices};
 
@@ -59,8 +60,8 @@ fn load(cx: &mut App) {
             match result {
                 Ok(family) => cx.global_mut::<CustomFont>().family = Some(family.into()),
                 Err(error) => {
-                    // TODO(i18n): add a custom-font loading error to the shared locale catalog.
-                    Notices::error(format!("Could not load the custom font: {error}"), cx);
+                    tracing::warn!(%error, "could not load the custom font");
+                    Notices::error(t("interface_font_load_failed"), cx);
                 }
             }
             super::apply::resolve(cx);

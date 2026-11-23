@@ -727,6 +727,7 @@ metadata_batch_count =
         [one] { $count } Titel wird bearbeitet
        *[other] { $count } Titel werden bearbeitet
     }
+interface_font_load_failed = Could not load the custom font. Check that the file is a readable OpenType or TrueType font.
 interface_font = Interface font
 interface_font_description = The font family to draw the interface with.
 interface_font_placeholder = Theme default
