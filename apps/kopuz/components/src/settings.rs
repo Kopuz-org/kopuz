@@ -49,6 +49,11 @@ pub fn nothing_matched(cx: &App) -> bool {
     SettingsFilter::global(cx).read(cx).nothing_matched()
 }
 
+/// Rows were drawn after `nothing_matched` was asked, so its answer may be out of date.
+pub fn is_misjudged(cx: &App) -> bool {
+    SettingsFilter::global(cx).read(cx).is_misjudged()
+}
+
 /// Content that is not a searchable row, so a filtered page leaves it out.
 pub fn when_unfiltered<E: IntoElement>(element: E, cx: &App) -> Option<E> {
     query(cx).is_none().then_some(element)

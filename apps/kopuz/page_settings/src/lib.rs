@@ -317,6 +317,15 @@ impl Render for Settings {
             ui.settings_layout == SettingsLayout::Cd && ui.ui_style != UiStyle::Material3
         };
         let empty = self.searching && components::settings::nothing_matched(cx);
+        // The sections note their rows as they draw, after this judgement; if they noted new ones,
+        // judge again next frame so a search that matched nothing says so without another keystroke.
+        if self.searching {
+            cx.on_next_frame(window, |_, _, cx| {
+                if components::settings::is_misjudged(cx) {
+                    cx.notify();
+                }
+            });
+        }
         let typed = SharedString::from(self.search.read(cx).value().to_string());
         // The scroller sits at the root, or beside the disc: a nested `flex_1 min_h_0` child of a column measured no height here.
         let page = v_flex()
