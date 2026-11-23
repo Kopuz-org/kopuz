@@ -365,16 +365,15 @@ impl RtState {
 
             let total = fade.total_frames.max(1) as f32;
             let step = 1.0 / total;
-            let mut fade_in_gain = fade.progress_frames.min(fade.total_frames) as f32 / total;
+            let mut progress = fade.progress_frames.min(fade.total_frames) as f32 / total;
             for frame_idx in 0..frames {
-                let gain = fade_in_gain.min(1.0);
-                let fade_out_gain = 1.0 - gain;
+                let (gain, fade_out_gain) = equal_power(progress);
                 for ch in 0..channels {
                     let index = frame_idx * channels + ch;
                     chunk[index] =
                         active_scratch[index] * gain + fading_scratch[index] * fade_out_gain;
                 }
-                fade_in_gain += step;
+                progress += step;
             }
 
             chunk[(frames * channels)..read]
@@ -524,6 +523,14 @@ fn apply_channel_mode_in_place(samples: &mut [f32], channels: usize, mode: Chann
     }
 }
 
+/// Incoming and outgoing gain at `progress` (0..=1) through a crossfade. Their powers sum
+/// to one, so two unrelated songs keep their loudness through the middle; a linear fade
+/// dips by 3 dB there (0.5 + 0.5 amplitude is half the power).
+fn equal_power(progress: f32) -> (f32, f32) {
+    let angle = progress.clamp(0.0, 1.0) * std::f32::consts::FRAC_PI_2;
+    (angle.sin(), angle.cos())
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -532,7 +539,9 @@ mod tests {
 
     use config::{ChannelMode, EqualizerSettings};
 
-    use super::{GainRamp, Retired, RtCmd, RtSession, RtState, apply_gain, soft_limit};
+    use super::{
+        GainRamp, Retired, RtCmd, RtSession, RtState, apply_gain, equal_power, soft_limit,
+    };
 
     #[test]
     fn gapless_switch_preserves_each_tracks_gain_ramp() {
@@ -668,5 +677,16 @@ mod tests {
     fn the_limiter_leaves_quiet_samples_alone() {
         assert_eq!(soft_limit(0.3), 0.3);
         assert_eq!(soft_limit(-0.9), -0.9);
+    }
+
+    #[test]
+    fn an_equal_power_fade_keeps_the_power_through_the_middle() {
+        for progress in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let (incoming, outgoing) = equal_power(progress);
+            assert!((incoming * incoming + outgoing * outgoing - 1.0).abs() < 1e-6);
+        }
+        assert_eq!(equal_power(0.0), (0.0, 1.0));
+        let (incoming, outgoing) = equal_power(1.0);
+        assert!((incoming - 1.0).abs() < 1e-6 && outgoing.abs() < 1e-6);
     }
 }
