@@ -1305,3 +1305,6 @@ interface_panel_side = Gilid
 interface_panel_side_description = Sa aling gilid ng pahina ang column ng playlist.
 interface_queue_side = Gilid ng column ng queue at lyrics
 interface_queue_side_description = Sa aling gilid magbubukas ang column ng queue at lyrics.
+artist_similar = Similar artists
+artist_info_link = Higit pa tungkol sa artist na ito
+radio_from_server = Mula sa iyong server

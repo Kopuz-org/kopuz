@@ -1344,3 +1344,6 @@ interface_panel_side = Lado
 interface_panel_side_description = En qué lado de la página va la columna de listas.
 interface_queue_side = Lado de la columna de cola y letra
 interface_queue_side_description = En qué lado de la página se abre la columna de cola y letra.
+artist_similar = Similar artists
+artist_info_link = Más sobre este artista
+radio_from_server = De tu servidor

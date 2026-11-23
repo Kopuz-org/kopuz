@@ -1362,3 +1362,6 @@ interface_panel_side = Сторона
 interface_panel_side_description = С какой стороны страницы стоит колонка плейлистов.
 interface_queue_side = Сторона колонки очереди и текста
 interface_queue_side_description = С какой стороны открывается колонка очереди и текста.
+artist_similar = Similar artists
+artist_info_link = Подробнее об этом исполнителе
+radio_from_server = С вашего сервера

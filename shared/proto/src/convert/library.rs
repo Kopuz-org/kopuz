@@ -463,6 +463,38 @@ pub fn artist_info_from_proto(value: &ArtistInfo) -> api::ArtistInfo {
     }
 }
 
+pub fn artist_about_to_proto(value: &api::ArtistInfoView) -> ArtistAbout {
+    ArtistAbout {
+        biography: value.biography.clone(),
+        image: value.image.as_ref().map(artwork_ref_to_proto),
+        similar: value
+            .similar
+            .iter()
+            .map(|artist| SimilarArtist {
+                name: artist.name.clone(),
+                key: artist.key.clone(),
+            })
+            .collect(),
+        link: value.link.clone(),
+    }
+}
+
+pub fn artist_about_from_proto(value: &ArtistAbout) -> api::ArtistInfoView {
+    api::ArtistInfoView {
+        biography: value.biography.clone(),
+        image: value.image.as_ref().and_then(artwork_ref_from_proto),
+        similar: value
+            .similar
+            .iter()
+            .map(|artist| api::SimilarArtist {
+                name: artist.name.clone(),
+                key: artist.key.clone(),
+            })
+            .collect(),
+        link: value.link.clone(),
+    }
+}
+
 pub fn artist_page_to_proto(value: &api::ArtistPage) -> ArtistPage {
     ArtistPage {
         artists: value.artists.iter().map(artist_info_to_proto).collect(),
@@ -681,6 +713,31 @@ mod tests {
             }),
         };
         assert_eq!(track, track_info_from_proto(&track_info_to_proto(&track)));
+    }
+
+    #[test]
+    fn artist_info_round_trips() {
+        let info = api::ArtistInfoView {
+            biography: Some("Plays jazz.".into()),
+            image: Some(api::ArtworkRef::new(
+                api::ArtworkTarget::Catalog("artist-info:ar-1".into()),
+                7,
+            )),
+            similar: vec![
+                api::SimilarArtist {
+                    name: "Boris".into(),
+                    key: Some("ar-2".into()),
+                },
+                api::SimilarArtist {
+                    name: "Nobody".into(),
+                    key: None,
+                },
+            ],
+            link: Some("https://www.last.fm/music/Ada".into()),
+        };
+        assert_eq!(info, artist_about_from_proto(&artist_about_to_proto(&info)));
+        let bare = api::ArtistInfoView::default();
+        assert_eq!(bare, artist_about_from_proto(&artist_about_to_proto(&bare)));
     }
 
     #[test]

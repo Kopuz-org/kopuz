@@ -11,9 +11,9 @@ use std::collections::HashSet;
 
 use client::{SubsonicClient, SubsonicPlaylist, SubsonicSong};
 use kopuz_plugin_sdk::{
-    Album, ArtistCredit, ArtistListing, AuthOutcome, AuthSession, Connection, LibrarySnapshot,
-    PlaylistEntry, PlaylistMeta, RemotePlayQueue, Result, Source, SourceError, StreamInfo,
-    StreamQuality, Track, TrackPage, cover,
+    Album, ArtistCredit, ArtistInfo, ArtistListing, AuthOutcome, AuthSession, Connection,
+    LibrarySnapshot, PlaylistEntry, PlaylistMeta, RadioStation, RemotePlayQueue, Result, Source,
+    SourceError, StreamInfo, StreamQuality, Track, TrackPage, cover,
 };
 
 /// How many neighbours a radio start asks for.
@@ -129,6 +129,40 @@ fn playlist_meta(service: &str, playlist: SubsonicPlaylist) -> PlaylistMeta {
         name: playlist.name,
         image_tag,
     }
+}
+
+/// Plain text of a Last.fm biography: its "Read more" anchor goes with its label, other tags only lose their markup.
+fn plain_biography(html: &str) -> String {
+    let mut text = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(open) = rest.find('<') {
+        text.push_str(&rest[..open]);
+        let Some(close) = rest[open..].find('>') else {
+            rest = "";
+            break;
+        };
+        let tag = &rest[open + 1..open + close];
+        rest = &rest[open + close + 1..];
+        if !tag.starts_with(['a', 'A'])
+            || tag.len() > 1 && !tag[1..].starts_with(char::is_whitespace)
+        {
+            continue;
+        }
+        // Skip the anchor's label up to its closing tag.
+        let lower = rest.to_ascii_lowercase();
+        rest = lower
+            .find("</a>")
+            .map_or("", |end| &rest[end + "</a>".len()..]);
+    }
+    text.push_str(rest);
+
+    text.replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .trim()
+        .to_string()
 }
 
 impl Subsonic {
@@ -325,6 +359,49 @@ impl Source for Subsonic {
         self.client.set_rating(item_id, stars)
     }
 
+    fn fetch_artist_info(&self, artist_id: &str) -> Result<Option<ArtistInfo>> {
+        let Some(info) = self.client.get_artist_info(artist_id)? else {
+            return Ok(None);
+        };
+        let biography = info
+            .biography
+            .as_deref()
+            .map(plain_biography)
+            .filter(|text| !text.is_empty());
+        if biography.is_none() {
+            return Ok(None);
+        }
+
+        let image = [info.large_image_url, info.medium_image_url]
+            .into_iter()
+            .flatten()
+            .find(|url| !url.is_empty());
+        Ok(Some(ArtistInfo {
+            biography,
+            image: image.as_deref().map(cover::url),
+            similar: info
+                .similar_artist
+                .into_iter()
+                .map(|artist| ArtistCredit::linked(artist.name, artist.id))
+                .collect(),
+            link: info.last_fm_url.filter(|url| !url.is_empty()),
+        }))
+    }
+
+    fn fetch_radio_stations(&self) -> Result<Vec<RadioStation>> {
+        Ok(self
+            .client
+            .get_radio_stations()?
+            .into_iter()
+            .map(|station| RadioStation {
+                id: station.id,
+                name: station.name,
+                stream_url: station.stream_url,
+                homepage: station.home_page_url.filter(|url| !url.is_empty()),
+            })
+            .collect())
+    }
+
     fn resolve_stream(&self, item_id: &str, _: StreamQuality) -> Result<StreamInfo> {
         Ok(StreamInfo::url(self.client.stream_url(item_id)?))
     }
@@ -411,6 +488,13 @@ mod tests {
             "coverArt": "al-1_5f3a",
         }))
         .expect("valid Subsonic song")
+    }
+
+    #[test]
+    fn a_biography_loses_its_markup_and_read_more_anchor() {
+        let html = "Ada &amp; Co play <b>jazz</b>. <a target=\"_blank\" href=\"https://www.last.fm/music/Ada\" rel=\"nofollow\">Read more on Last.fm</a>";
+        assert_eq!(plain_biography(html), "Ada & Co play jazz.");
+        assert_eq!(plain_biography("<abbr>x</abbr> 1 < 2"), "x 1");
     }
 
     #[test]

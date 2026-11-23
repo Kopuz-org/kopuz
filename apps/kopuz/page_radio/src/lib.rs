@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use api::{QueueContext, RadioStationInfo, Table};
+use api::{QueueContext, RadioOrigin, RadioStationInfo, Table};
 use components::Loading;
 use components::format::t;
 use components::{
@@ -76,7 +76,8 @@ impl Radio {
             cx.new(|cx| InputState::new(window, cx).placeholder(t("radio_search_stations")));
         let stations = cx.new(|cx| {
             Query::new(
-                &[Table::Stations],
+                // A source switch changes the "From your server" group.
+                &[Table::Stations, Table::Servers],
                 |api| async move { api.radio_stations().await },
                 cx,
             )
@@ -196,7 +197,7 @@ impl Radio {
             .child(heading.heading(Heading::Group))
     }
 
-    /// What the list shows, in order: the pinned stations, then the directory or its state.
+    /// What the list shows, in order: the pinned stations, the source's own, then the directory or its state.
     fn lines(&self, cx: &App) -> (Vec<SharedString>, Vec<Line>) {
         let query = self.query.trim().to_lowercase();
         let mut keys = Vec::new();
@@ -229,6 +230,28 @@ impl Radio {
             for (at, station) in pinned.into_iter().enumerate() {
                 keys.push(SharedString::from(format!("pinned-{}", station.id)));
                 lines.push(Line::Pinned(station, at == last));
+            }
+        }
+        let served: Vec<RadioStationInfo> = self
+            .stations
+            .read(cx)
+            .value()
+            .map(|stations| {
+                stations
+                    .iter()
+                    .filter(|station| station.origin == RadioOrigin::Source)
+                    .filter(|station| matches(station, &query))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !served.is_empty() {
+            keys.push(SharedString::new_static("from-server"));
+            lines.push(Line::ServerHeading);
+            let last = served.len() - 1;
+            for (at, station) in served.into_iter().enumerate() {
+                keys.push(SharedString::from(format!("server-{}", station.id)));
+                lines.push(Line::Server(station, at == last));
             }
         }
         keys.push(SharedString::new_static("directory"));
@@ -292,7 +315,10 @@ impl Radio {
             Line::SelectedHeading => {
                 Self::heading(SectionHeading::new(t("radio_selected"))).into_any_element()
             }
-            Line::Pinned(station, last) => {
+            Line::ServerHeading => {
+                Self::heading(SectionHeading::new(t("radio_from_server"))).into_any_element()
+            }
+            Line::Pinned(station, last) | Line::Server(station, last) => {
                 let list = self.list.clone();
                 let row = StationRow::new(&station)
                     .on_play(Self::player(&station))
@@ -376,6 +402,9 @@ enum Line {
     SelectedHeading,
     // The last pinned row carries the gap before the directory.
     Pinned(RadioStationInfo, bool),
+    ServerHeading,
+    // The last row of the group carries the gap before what follows, as the pinned one does.
+    Server(RadioStationInfo, bool),
     DirectoryHeading,
     Status(Status),
     /// The pinned stations could not be read; they are still pinned, so the section says so.

@@ -49,6 +49,7 @@ service Kopuz {
   rpc GetArtistTracks(ArtistTracksRequest) returns (TrackPage);
   rpc GetArtist(ArtistRequest) returns (ArtistDetail);
   rpc GetSimilarArtists(SimilarArtistsRequest) returns (SimilarArtists);
+  rpc GetArtistInfo(ArtistRequest) returns (ArtistInfoResponse);
   rpc GetArtistSampleTracks(Page) returns (TrackPage);
   rpc GetGenres(GetGenresRequest) returns (GenreList);
   rpc GetTopGenre(GetTopGenreRequest) returns (TopGenreResponse);
@@ -793,6 +794,17 @@ message ArtistTracksRequest {
 message ArtistDetail {
   ArtistInfo info = 1;
   reserved 2; // was the artist's albums, which GetAlbums lists by artist key
+}
+
+message ArtistAbout {
+  optional string biography = 1;
+  optional ArtworkRef image = 2;
+  repeated SimilarArtist similar = 3;
+  optional string link = 4;
+}
+
+message ArtistInfoResponse {
+  optional ArtistAbout about = 1;
 }
 
 message GetGenresRequest {}
@@ -1589,6 +1601,8 @@ message RadioStationInfo {
   bool pinned = 6;
   optional ArtworkRef artwork = 7;
   string icon = 8;
+  // Listed by the active source rather than a registry.
+  bool from_source = 9;
 }
 
 message GetRadioStationsRequest {}

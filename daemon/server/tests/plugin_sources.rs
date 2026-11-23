@@ -426,3 +426,94 @@ async fn a_failed_resolve_leaves_the_stream_to_the_ordinary_path() {
         opened.err()
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn artist_info_comes_back_as_plain_text_with_a_stored_image_ref() {
+    let mut routes = subsonic_library();
+    routes.insert(
+        "/rest/getArtistInfo2.view",
+        subsonic_ok(serde_json::json!({
+            "artistInfo2": {
+                "biography": "Jazz &amp; more. <a href=\"https://www.last.fm/music/Ada\">Read more on Last.fm</a>",
+                "lastFmUrl": "https://www.last.fm/music/Ada",
+                "largeImageUrl": "https://img.test/large.jpg",
+                "mediumImageUrl": "https://img.test/medium.jpg",
+                "similarArtist": [{ "id": "ar-2", "name": "Boris" }]
+            }
+        })),
+    );
+    let server = FakeServer::start(routes).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, &server.url);
+    let src = source::resolve(db, &sources, &active);
+
+    assert!(src.capabilities().artist_info);
+    let info = src
+        .fetch_artist_info("ar-1")
+        .await
+        .expect("answered")
+        .expect("has info");
+
+    assert_eq!(info.biography.as_deref(), Some("Jazz & more."));
+    assert_eq!(info.link.as_deref(), Some("https://www.last.fm/music/Ada"));
+    assert_eq!(info.similar.len(), 1);
+    assert_eq!(info.similar[0].name, "Boris");
+    assert_eq!(info.similar[0].id.as_deref(), Some("ar-2"));
+    assert_eq!(
+        info.image.as_deref(),
+        Some("directurl:https://img.test/large.jpg")
+    );
+
+    let asked = server
+        .requests()
+        .into_iter()
+        .find(|r| r.starts_with("/rest/getArtistInfo2.view"))
+        .expect("asked");
+    assert!(
+        asked.contains("id=ar-1") && asked.contains("count=20"),
+        "{asked}"
+    );
+    assert!(asked.contains("includeNotPresent=false"), "{asked}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_artist_without_a_biography_has_no_info() {
+    let mut routes = subsonic_library();
+    routes.insert(
+        "/rest/getArtistInfo2.view",
+        subsonic_ok(serde_json::json!({ "artistInfo2": { "biography": "" } })),
+    );
+    let server = FakeServer::start(routes).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, &server.url);
+    let src = source::resolve(db, &sources, &active);
+
+    assert_eq!(src.fetch_artist_info("ar-1").await.expect("answered"), None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_servers_internet_radio_stations_are_listed() {
+    let mut routes = subsonic_library();
+    routes.insert(
+        "/rest/getInternetRadioStations.view",
+        subsonic_ok(serde_json::json!({
+            "internetRadioStations": { "internetRadioStation": [
+                { "id": "r-1", "name": "Jazz FM", "streamUrl": "http://radio.test/jazz", "homePageUrl": "http://radio.test" },
+                { "id": "r-2", "name": "Bare", "streamUrl": "http://radio.test/bare" }
+            ] }
+        })),
+    );
+    let server = FakeServer::start(routes).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Custom, &server.url);
+    let src = source::resolve(db, &sources, &active);
+
+    assert!(src.capabilities().radio_stations);
+    let stations = src.fetch_radio_stations().await.expect("listed");
+
+    assert_eq!(stations.len(), 2);
+    assert_eq!(stations[0].id, "r-1");
+    assert_eq!(stations[0].stream_url, "http://radio.test/jazz");
+    assert_eq!(stations[0].homepage.as_deref(), Some("http://radio.test"));
+    assert_eq!(stations[1].homepage, None);
+}
