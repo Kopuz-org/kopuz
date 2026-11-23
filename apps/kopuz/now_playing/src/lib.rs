@@ -128,6 +128,9 @@ impl NowPlaying {
     pub fn detached_sheet(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut this = Self::new(Presentation::Sheet, window, cx);
         this.detached = true;
+        // No main sheet opens this one, so it starts open and stays open until its window goes.
+        this.sheet_focus.set_open(true, window, cx);
+        this.sync_video(cx);
         this
     }
 
@@ -167,7 +170,7 @@ impl NowPlaying {
             }),
             cx.observe_in(&Chrome::global(cx), window, |this, chrome, window, cx| {
                 if this.presentation == Presentation::Sheet {
-                    let open = chrome.read(cx).is_sheet_open();
+                    let open = this.detached || chrome.read(cx).is_sheet_open();
                     // Forgetting the landing makes the cover head for the bar now and fly out of it on every open.
                     if !open {
                         this.hero = None;

@@ -41,14 +41,22 @@ fn open_stage(cx: &App) -> Option<AnyWindowHandle> {
         .then_some(handle)
 }
 
+/// Take the player off the other display, if it is there.
+pub fn close_stage(cx: &mut App) {
+    let Some(handle) = open_stage(cx) else {
+        return;
+    };
+    cx.set_global(StageHandle(None));
+    cx.defer(move |cx| {
+        handle
+            .update(cx, |_, window, _| window.remove_window())
+            .ok();
+    });
+}
+
 pub fn toggle_stage(cx: &mut App) {
-    if let Some(handle) = open_stage(cx) {
-        cx.set_global(StageHandle(None));
-        cx.defer(move |cx| {
-            handle
-                .update(cx, |_, window, _| window.remove_window())
-                .ok();
-        });
+    if open_stage(cx).is_some() {
+        close_stage(cx);
         return;
     }
     let here = cx

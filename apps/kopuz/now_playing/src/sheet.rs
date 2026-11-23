@@ -246,7 +246,8 @@ impl NowPlaying {
         let hero = store::layout(cx).sheet.cover;
         let version = crate::video::current_version(cx);
         let video = self.video();
-        let open = Chrome::global(cx).read(cx).is_sheet_open();
+        let open = self.detached || Chrome::global(cx).read(cx).is_sheet_open();
+        let detached = self.detached;
 
         v_flex()
             .relative()
@@ -266,8 +267,10 @@ impl NowPlaying {
                         .tone(IconTone::Scrim)
                         // A tooltip re-shown during the fade-out outlives the button, so it is offered only while open.
                         .when(open, |button| button.tooltip(t("close")))
-                        .on_click(|_, _, cx| {
-                            Chrome::global(cx).update(cx, |chrome, cx| chrome.set_sheet(false, cx))
+                        .on_click(move |_, _, cx| match detached {
+                            true => crate::stage::close_stage(cx),
+                            false => Chrome::global(cx)
+                                .update(cx, |chrome, cx| chrome.set_sheet(false, cx)),
                         }),
                 ),
             )
@@ -350,11 +353,15 @@ impl NowPlaying {
             .gap_1()
             .child({
                 let origin = playing_from(cx);
+                let leave: fn(&mut Window, &mut App) = match self.detached {
+                    true => leave_stage,
+                    false => close_sheet,
+                };
                 let meta = |id: &'static str, track: &api::TrackInfo| {
                     NowPlayingMeta::new(id, track)
                         .layout(MetaLayout::Hero)
                         .origin(origin.clone())
-                        .on_before_navigate(close_sheet)
+                        .on_before_navigate(leave)
                 };
                 match swap.leaving.as_ref() {
                     Some(old) if swap.title < 1. => crate::meta::crossfade(
@@ -548,4 +555,9 @@ fn set_collapsed(collapsed: bool, cx: &mut App) {
 /// A link out of the sheet folds it away first, so the page it opens is not hidden behind it.
 fn close_sheet(_: &mut Window, cx: &mut App) {
     Chrome::global(cx).update(cx, |chrome, cx| chrome.set_sheet(false, cx));
+}
+
+/// The same from the other display: the page opens in the main window, so the stage steps aside.
+fn leave_stage(_: &mut Window, cx: &mut App) {
+    crate::stage::close_stage(cx);
 }
