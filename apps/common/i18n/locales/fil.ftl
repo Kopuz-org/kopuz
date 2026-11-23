@@ -619,6 +619,7 @@ sort_field_genre = Genre
 sort_field_album = Album
 sort_field_duration = Tagal
 sort_field_date_added = Petsa ng pagdagdag
+sort_field_last_played = Huling pinatugtog
 sort_field_name = Pangalan
 sort_field_tracks = Mga Track
 sort_field_albums = Mga Album

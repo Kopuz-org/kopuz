@@ -657,6 +657,7 @@ sort_field_genre = Είδος
 sort_field_album = Άλμπουμ
 sort_field_duration = Διάρκεια
 sort_field_date_added = Ημερομηνία προσθήκης
+sort_field_last_played = Τελευταία αναπαραγωγή
 sort_field_name = Όνομα
 sort_field_tracks = Κομμάτια
 sort_field_albums = Άλμπουμ

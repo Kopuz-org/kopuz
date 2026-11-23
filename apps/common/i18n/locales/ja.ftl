@@ -631,6 +631,7 @@ sort_field_genre = ジャンル
 sort_field_album = アルバム
 sort_field_duration = 再生時間
 sort_field_date_added = 追加日
+sort_field_last_played = 最後に再生
 sort_field_name = 名前
 sort_field_tracks = トラック
 sort_field_albums = アルバム

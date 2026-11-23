@@ -673,6 +673,7 @@ sort_field_genre = Gatunek
 sort_field_album = Album
 sort_field_duration = Czas trwania
 sort_field_date_added = Data dodania
+sort_field_last_played = Ostatnio odtwarzane
 sort_field_name = Nazwa
 sort_field_tracks = Ścieżki
 sort_field_albums = Albumy

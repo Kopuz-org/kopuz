@@ -658,6 +658,7 @@ sort_field_genre = Genre
 sort_field_album = Album
 sort_field_duration = Durée
 sort_field_date_added = Date d'ajout
+sort_field_last_played = Dernière écoute
 sort_field_name = Nom
 sort_field_tracks = Pistes
 sort_field_albums = Albums

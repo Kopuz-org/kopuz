@@ -651,6 +651,7 @@ sort_field_genre = Genre
 sort_field_album = Album
 sort_field_duration = Duur
 sort_field_date_added = Toegevoegd op
+sort_field_last_played = Laatst afgespeeld
 sort_field_name = Naam
 sort_field_tracks = Nummers
 sort_field_albums = Albums

@@ -651,6 +651,7 @@ sort_field_genre = Genre
 sort_field_album = Album
 sort_field_duration = Längd
 sort_field_date_added = Tillagt datum
+sort_field_last_played = Senast spelad
 sort_field_name = Namn
 sort_field_tracks = Låtar
 sort_field_albums = Album

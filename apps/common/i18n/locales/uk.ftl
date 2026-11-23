@@ -673,6 +673,7 @@ sort_field_genre = Жанр
 sort_field_album = Альбом
 sort_field_duration = Тривалість
 sort_field_date_added = Дата додавання
+sort_field_last_played = Востаннє відтворено
 sort_field_name = Ім'я
 sort_field_tracks = Треки
 sort_field_albums = Альбоми

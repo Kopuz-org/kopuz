@@ -663,6 +663,7 @@ sort_field_genre = التصنيف
 sort_field_album = الألبوم
 sort_field_duration = المدة
 sort_field_date_added = تاريخ الإضافة
+sort_field_last_played = آخر تشغيل
 sort_field_name = الاسم
 sort_field_tracks = المقاطع
 sort_field_albums = الألبومات

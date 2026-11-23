@@ -619,6 +619,7 @@ sort_field_genre = Genre
 sort_field_album = Album
 sort_field_duration = Durasi
 sort_field_date_added = Tanggal ditambahkan
+sort_field_last_played = Terakhir diputar
 sort_field_name = Nama
 sort_field_tracks = Trek
 sort_field_albums = Album
