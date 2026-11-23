@@ -5,7 +5,11 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui_kit::{App, ElementId, Pixels, ScrollHandle, UniformListScrollHandle, Window, point, px};
+use gpui_kit::base::motion::{Transition, transition};
+use gpui_kit::{
+    App, ElementId, Pixels, ScrollDelta, ScrollHandle, ScrollWheelEvent, UniformListScrollHandle,
+    Window, point, px,
+};
 
 use crate::motion;
 
@@ -15,6 +19,24 @@ pub const GLIDE: Duration = Duration::from_millis(140);
 
 /// How close the drawn offset has to be to the target before a row is allowed to settle on a tile.
 const SETTLED: Pixels = px(0.5);
+
+thread_local! {
+    /// Whether the last wheel event came from a touchpad, which already moves smoothly and only lags behind a tween.
+    static PRECISE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Note what kind of wheel moved last; the shell hands every wheel event here.
+pub fn saw_wheel(event: &ScrollWheelEvent) {
+    PRECISE.set(matches!(event.delta, ScrollDelta::Pixels(_)));
+}
+
+/// The tween toward `target`, or `target` itself for a touchpad, resetting the tween so a later wheel notch glides from here.
+fn follow(id: ElementId, target: Pixels, window: &mut Window, cx: &mut App) -> Pixels {
+    match PRECISE.get() {
+        true => transition(id, target, Transition::new(Duration::ZERO), window, cx),
+        false => motion::length(id, target, GLIDE, window, cx),
+    }
+}
 
 /// Where the wheel has put this scroller, and what was last drawn for it.
 #[derive(Default, Clone, Copy)]
@@ -49,7 +71,7 @@ pub fn smooth(id: impl Into<ElementId>, handle: &ScrollHandle, window: &mut Wind
     // Offsets run negative going down, and `max_offset` is a magnitude.
     target = target.clamp(-limit, px(0.));
 
-    let drawn = motion::length(id, target, GLIDE, window, cx);
+    let drawn = follow(id, target, window, cx);
     handle.set_offset(point(offset.x, drawn));
     record(state, target, drawn, cx);
 }
@@ -75,12 +97,12 @@ pub fn smooth_x(
         false => offset.x,
     };
     target = target.clamp(-limit, px(0.));
-    // Snapping mid-glide would fight the wheel, so the row only settles once it has caught up.
-    if step > px(0.) && (target - state.1.drawn).abs() < SETTLED {
+    // Snapping mid-glide would fight the wheel, and a touchpad never says when the fingers lift.
+    if step > px(0.) && !PRECISE.get() && (target - state.1.drawn).abs() < SETTLED {
         target = settle(target, step, limit);
     }
 
-    let drawn = motion::length(id, target, GLIDE, window, cx);
+    let drawn = follow(id, target, window, cx);
     handle.set_offset(point(drawn, offset.y));
     record(state, target, drawn, cx);
 }
