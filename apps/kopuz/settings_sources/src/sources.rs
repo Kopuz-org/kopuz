@@ -77,6 +77,8 @@ struct SourceOptions {
 #[derive(Default)]
 struct Browsing {
     open: bool,
+    /// The source the picker was opened for; only its card draws it, and only it gets the folder.
+    source: String,
     path: String,
     entries: Vec<SourceFolderEntry>,
     error: Option<SharedString>,
@@ -292,6 +294,7 @@ impl Sources {
 
     fn browse(&mut self, id: String, path: String, cx: &mut Context<Self>) {
         self.browser.open = true;
+        self.browser.source = id.clone();
         self.browser.path = path.clone();
         self.browser.loading = true;
         self.browser.error = None;
@@ -339,6 +342,7 @@ impl Sources {
     /// A remote folder tree's chosen folders, and the browser that adds to them.
     fn remote_folders(&self, source: &SourceInfo, cx: &mut Context<Self>) -> AnyElement {
         let id = source.id.clone();
+        let browsing = self.browser.open && self.browser.source == id;
         let chosen = folders::of(source);
         let path = if self.browser.path.is_empty() {
             "/".to_string()
@@ -359,7 +363,7 @@ impl Sources {
                     folders::write(id.clone(), kept, cx);
                 }
             })
-            .when(!self.browser.open, |list| {
+            .when(!browsing, |list| {
                 let id = id.clone();
                 list.on_add(cx.listener(move |this: &mut Self, _, _, cx| {
                     this.browse(id.clone(), "/".to_string(), cx)
@@ -374,7 +378,7 @@ impl Sources {
             .border_color(cx.theme().border)
             .child(ui::hint(t("remote_music_folders"), cx))
             .child(list)
-            .when(self.browser.open, |column| {
+            .when(browsing, |column| {
                 column.child(self.browser_panel(&id, &path, &chosen, cx))
             })
             .into_any_element()
