@@ -981,6 +981,7 @@ library_artist_tracks =
     }
 library_selected = { $count } selected
 library_whole_selection = Everything that matches
+settings_read_failed = Could not load this section
 library_read_failed = Could not read the library
 library_no_matches = Nothing matches those filters
 library_no_matches_detail = Take a chip off, or change what you typed.

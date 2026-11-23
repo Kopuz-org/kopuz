@@ -18,6 +18,8 @@ use crate::ui;
 
 pub struct Plugins {
     catalog: Option<PluginCatalog>,
+    /// Why the last read of the catalog failed, while there is no catalog to show.
+    failed: Option<SharedString>,
     /// The plugin an install or removal is running for; one at a time.
     busy: Option<String>,
     _fetch: Option<Task<()>>,
@@ -37,6 +39,7 @@ impl Plugins {
         );
         let mut this = Self {
             catalog: None,
+            failed: None,
             busy: None,
             _fetch: None,
             _subscription: subscription,
@@ -48,12 +51,18 @@ impl Plugins {
     fn refetch(&mut self, cx: &mut Context<Self>) {
         let call = Link::global(cx).call(|api| async move { api.plugins().await });
         self._fetch = Some(cx.spawn(async move |this, cx| {
-            let catalog = call
-                .await
-                .inspect_err(|error| tracing::warn!(%error, "reading the plugins failed"))
-                .ok();
+            let result = call.await;
             this.update(cx, |this, cx| {
-                this.catalog = catalog;
+                match result {
+                    Ok(catalog) => {
+                        this.catalog = Some(catalog);
+                        this.failed = None;
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "reading the plugins failed");
+                        this.failed = Some(store::human(&error));
+                    }
+                }
                 cx.notify();
             })
             .ok();
@@ -287,9 +296,18 @@ impl Render for Plugins {
         let (installed, available): (Vec<_>, Vec<_>) =
             catalog.plugins.iter().partition(|plugin| on_disk(plugin));
 
-        let mut card = ui::card(cx)
-            .child(ui::hint(t("plugins_description"), cx))
-            .child(SectionHeading::new(t("plugins_installed")).heading(Heading::Group));
+        let mut card = ui::card(cx).child(ui::hint(t("plugins_description"), cx));
+        if let Some(reason) = self.failed.clone().filter(|_| self.catalog.is_none()) {
+            let retry = cx.listener(|this, _, _, cx| this.refetch(cx));
+            return ui::section(t("plugins")).opaque().child(
+                card.child(
+                    EmptyState::failed(t("settings_read_failed"), retry)
+                        .detail(reason)
+                        .compact(),
+                ),
+            );
+        }
+        card = card.child(SectionHeading::new(t("plugins_installed")).heading(Heading::Group));
         for plugin in &installed {
             card = card.child(self.row(plugin, cx));
         }

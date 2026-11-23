@@ -332,8 +332,22 @@ impl Integrations {
 impl Render for Integrations {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let listed = self.listed(cx);
+        let failure = self
+            .query
+            .read(cx)
+            .error()
+            .filter(|_| listed.is_empty())
+            .map(store::human)
+            .map(|reason| {
+                let retry = cx.listener(|this, _, _, cx| {
+                    this.query.update(cx, |query, cx| query.refresh(cx));
+                });
+                components::EmptyState::failed(t("settings_read_failed"), retry)
+                    .detail(reason)
+                    .compact()
+            });
         ui::section(t("connectivity")).opaque().child(
-            ui::card(cx).children(
+            ui::card(cx).children(failure).children(
                 listed
                     .iter()
                     .map(|integration| self.integration(integration, cx).into_any_element()),

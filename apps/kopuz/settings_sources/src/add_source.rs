@@ -842,9 +842,24 @@ impl Render for AddSource {
         // A folder source is named after its folder, so asking for a name only gets in the way.
         let named = self.fill.is_none();
 
+        let failure = self
+            .services
+            .read(cx)
+            .error()
+            .map(store::human)
+            .map(|reason| {
+                let retry = cx.listener(|this, _, _, cx| {
+                    this.services.update(cx, |query, cx| query.refresh(cx));
+                });
+                components::EmptyState::failed(t("settings_read_failed"), retry)
+                    .detail(reason)
+                    .compact()
+            });
+
         v_flex()
             .w_full()
             .gap_3()
+            .children(failure)
             .when(blocked, |form| {
                 form.child(ui::host_access_warning(
                     "add-source-host-access",
