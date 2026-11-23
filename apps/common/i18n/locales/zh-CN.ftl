@@ -263,6 +263,7 @@ no_songs_here = 这里没有歌曲。
 syncing_with_server = 正在与服务器同步...
 yt_syncing_progress = 同步中 — 已加载 { $count } 首曲目
 yt_synced_total = 已同步 { $count } 首喜爱的曲目
+refreshing_everything = Reading everything again
 refresh = 刷新
 most_played_tracks = 你最常播放的曲目。
 no_more_songs = 队列中没有更多歌曲

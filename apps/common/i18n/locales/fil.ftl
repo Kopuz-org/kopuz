@@ -329,6 +329,7 @@ no_songs_here = Walang kanta dito.
 syncing_with_server = Nagsi-sync sa server...
 yt_syncing_progress = Nagsi-sync — { $count } na track ang na-load na
 yt_synced_total = { $count } na nilikhang kanta ang na-sync
+refreshing_everything = Reading everything again
 refresh = I-refresh
 discover = Diskubre
 discover_more_loading = Nilo-load pa…

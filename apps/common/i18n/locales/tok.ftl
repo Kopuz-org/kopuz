@@ -263,6 +263,7 @@ no_songs_here = kalama li lon ala ni
 syncing_with_server = mi toki tawa pana...
 yt_syncing_progress = mi pana e kalama musi { $count }
 yt_synced_total = kalama musi pona { $count } li lon
+refreshing_everything = Reading everything again
 refresh = sin
 most_played_tracks = kalama pi kute mute sina
 no_more_songs = kalama poka li pini

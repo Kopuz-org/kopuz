@@ -263,6 +263,7 @@ no_songs_here = Itt nincsenek dalok.
 syncing_with_server = Szinkronizálás a szerverrel...
 yt_syncing_progress = Szinkronizálás — { $count } szám betöltve eddig
 yt_synced_total = { $count } kedvelt szám szinkronizálva
+refreshing_everything = Reading everything again
 refresh = Frissítés
 most_played_tracks = A legtöbbet játszott dalaid.
 no_more_songs = Nincs több dal a sorban

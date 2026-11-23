@@ -328,6 +328,7 @@ yt_synced_total =
         [one] { $count } faixa com like sincronizada
        *[other] { $count } faixas com like sincronizadas
     }
+refreshing_everything = Reading everything again
 refresh = Atualizar
 most_played_tracks = As tuas faixas mais reproduzidas.
 no_more_songs = Não há mais músicas na fila

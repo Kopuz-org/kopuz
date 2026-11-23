@@ -361,6 +361,7 @@ yt_synced_total =
         [one] { $count } gillad låt synkad
        *[other] { $count } gillade låtar synkade
     }
+refreshing_everything = Reading everything again
 refresh = Uppdatera
 discover = Upptäck
 discover_more_loading = Ladda mer...

@@ -271,6 +271,7 @@ no_songs_here = Hier sind keine Songs
 syncing_with_server = Synchronisiere mit dem Server...
 yt_syncing_progress = Synchronisiere — { $count } Titel geladen
 yt_synced_total = { $count } Lieblingstitel synchronisiert
+refreshing_everything = Reading everything again
 refresh = Aktualisieren
 most_played_tracks = Deine meistgehörten Titel
 no_more_songs = Keine weiteren Songs in der Warteschlange

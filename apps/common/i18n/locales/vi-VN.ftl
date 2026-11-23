@@ -329,6 +329,7 @@ no_songs_here = Không có bài hát ở đây.
 syncing_with_server = Đang đồng bộ với máy chủ...
 yt_syncing_progress = Đang đồng bộ — đã tải { $count } bài
 yt_synced_total = Đã đồng bộ { $count } bài đã thích
+refreshing_everything = Reading everything again
 refresh = Làm mới
 discover = Khám phá
 discover_more_loading = Đang tải thêm...

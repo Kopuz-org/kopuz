@@ -365,6 +365,7 @@ yt_synced_total =
         [one] { $count } ഇഷ്ടപ്പെട്ട ട്രാക്ക് സമന്വയിപ്പിച്ചു
        *[other] { $count } ഇഷ്ടപ്പെട്ട ട്രാക്കുകൾ സമന്വയിപ്പിച്ചു
     }
+refreshing_everything = Reading everything again
 refresh = പുതുക്കുക
 discover = കണ്ടെത്തുക
 discover_more_loading = കൂടുതൽ ലോഡ് ചെയ്യുന്നു…

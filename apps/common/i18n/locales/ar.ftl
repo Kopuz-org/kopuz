@@ -295,6 +295,7 @@ yt_synced_total =
         [few] تمت مزامنة { $count } مقاطع مفضلة
        *[other] تمت مزامنة { $count } مقطع مفضل
     }
+refreshing_everything = Reading everything again
 refresh = تحديث
 most_played_tracks = أكثر مقاطعك تشغيلاً.
 no_more_songs = لا توجد أغانٍ أخرى في قائمة الانتظار

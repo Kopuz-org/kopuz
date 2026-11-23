@@ -365,6 +365,7 @@ yt_synced_total =
         [one] { $count } விரும்பிய தடம் ஒத்திசைக்கப்பட்டது
        *[other] { $count } விரும்பிய தடங்கள் ஒத்திசைக்கப்பட்டன
     }
+refreshing_everything = Reading everything again
 refresh = புதுப்பி
 discover = கண்டறி
 discover_more_loading = மேலும் ஏற்றுகிறது…

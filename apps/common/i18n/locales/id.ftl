@@ -329,6 +329,7 @@ no_songs_here = Tidak ada lagu disini.
 syncing_with_server = Menyinkronkan dengan peladen...
 yt_syncing_progress = Menyinkronkan — { $count } trek yang telah dimuat sejauh ini
 yt_synced_total = { $count } sukai trek yang disinkronkan
+refreshing_everything = Reading everything again
 refresh = Segarkan
 discover = Discover
 discover_more_loading = Muat lainnya…

@@ -295,6 +295,7 @@ yt_synced_total =
         [one] רצועה מועדפת אחת סונכרנה
        *[other] { $count } רצועות מועדפות סונכרנו
     }
+refreshing_everything = Reading everything again
 refresh = רענן
 most_played_tracks = השירים שהאזנת להם הכי הרבה
 no_more_songs = אין עוד שירים בתור

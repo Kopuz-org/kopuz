@@ -263,6 +263,7 @@ no_songs_here = ここには曲がありません。
 syncing_with_server = サーバーと同期中...
 yt_syncing_progress = 同期中 — これまでに { $count } 曲を読み込みました
 yt_synced_total = お気に入りの { $count } 曲を同期しました
+refreshing_everything = Reading everything again
 refresh = 更新
 most_played_tracks = 最も再生されたトラック。
 no_more_songs = キューにこれ以上の曲はありません

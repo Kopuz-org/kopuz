@@ -263,6 +263,7 @@ no_songs_here = 여기에 곡이 없습니다.
 syncing_with_server = 서버와 동기화 중...
 yt_syncing_progress = 동기화 중 — 지금까지 { $count }개의 트랙을 불러왔습니다
 yt_synced_total = { $count }개의 좋아하는 트랙이 동기화됨
+refreshing_everything = Reading everything again
 refresh = 새로고침
 most_played_tracks = 가장 많이 들은 트랙입니다.
 no_more_songs = 대기열에 더 이상 곡이 없습니다

@@ -295,6 +295,7 @@ yt_synced_total =
         [one] Συγχρονίστηκε { $count } αγαπημένο κομμάτι
        *[other] Συγχρονίστηκαν { $count } αγαπημένα κομμάτια
     }
+refreshing_everything = Reading everything again
 refresh = Ανανέωση
 most_played_tracks = Τα πιο πολυπαιγμένα κομμάτια σας.
 no_more_songs = Δεν υπάρχουν άλλα τραγούδια στην ουρά

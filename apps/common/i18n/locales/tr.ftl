@@ -263,6 +263,7 @@ no_songs_here = Burada şarkı yok.
 syncing_with_server = Sunucuyla senkronize ediliyor...
 yt_syncing_progress = Senkronize ediliyor — şu ana kadar { $count } parça yüklendi
 yt_synced_total = { $count } beğenilen parça senkronize edildi
+refreshing_everything = Reading everything again
 refresh = Yenile
 most_played_tracks = En çok dinlenen parçalarınız.
 no_more_songs = Kuyrukta daha fazla şarkı yok

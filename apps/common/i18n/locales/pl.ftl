@@ -311,6 +311,7 @@ yt_synced_total =
         [many] Zsynchronizowano { $count } polubionych utworów
        *[other] Zsynchronizowano { $count } polubionego utworu
     }
+refreshing_everything = Reading everything again
 refresh = Odśwież
 most_played_tracks = Twoje najczęściej odtwarzane utwory...
 no_more_songs = Brak kolejnych utworów w kolejce.

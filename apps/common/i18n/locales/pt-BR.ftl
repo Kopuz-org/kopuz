@@ -328,6 +328,7 @@ yt_synced_total =
         [one] { $count } faixa curtida sincronizada
        *[other] { $count } faixas curtidas sincronizadas
     }
+refreshing_everything = Reading everything again
 refresh = Atualizar
 most_played_tracks = Suas faixas mais reproduzidas.
 no_more_songs = Não há mais músicas na fila

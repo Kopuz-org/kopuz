@@ -303,6 +303,7 @@ yt_synced_total =
         [few] { $count } piese preferate sincronizate
        *[other] { $count } de piese preferate sincronizate
     }
+refreshing_everything = Reading everything again
 refresh = Reîmprospătează
 most_played_tracks = Cele mai ascultate piese.
 no_more_songs = Nu mai sunt piese în coadă

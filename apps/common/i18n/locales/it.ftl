@@ -357,6 +357,7 @@ yt_synced_total =
         [one] { $count } traccia preferita sincronizzata
        *[other] { $count } tracce preferite sincronizzate
     }
+refreshing_everything = Reading everything again
 refresh = Aggiorna
 most_played_tracks = Le tue tracce più riprodotte.
 no_more_songs = Nessuna canzone rimasta in coda 
