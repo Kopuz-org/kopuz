@@ -479,3 +479,26 @@ async fn a_servers_internet_radio_stations_are_listed() {
     assert_eq!(stations[0].homepage.as_deref(), Some("http://radio.test"));
     assert_eq!(stations[1].homepage, None);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_playlist_delete_lands_on_the_server() {
+    let mut routes = subsonic_library();
+    routes.insert(
+        "/rest/deletePlaylist.view",
+        subsonic_ok(serde_json::json!({})),
+    );
+    let server = FakeServer::start(routes).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, &server.url);
+    let src = source::resolve(db.clone(), &sources, &active);
+
+    src.delete_remote_playlist("pl-1").await.expect("deleted");
+
+    let deletes: Vec<String> = server
+        .requests()
+        .into_iter()
+        .filter(|r| r.starts_with("/rest/deletePlaylist.view"))
+        .collect();
+    assert_eq!(deletes.len(), 1, "requests: {:?}", server.requests());
+    assert!(deletes[0].contains("id=pl-1"), "{}", deletes[0]);
+}
