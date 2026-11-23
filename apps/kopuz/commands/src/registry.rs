@@ -1102,23 +1102,6 @@ static COMMANDS: &[Command] = &[
         action: None,
     },
     Command {
-        id: "view.filter",
-        labels: &["filter_view"],
-        label: |_, _| t("filter_view"),
-        icon: Some(icons::SEARCH),
-        group: Group::View,
-        section: Section::Hidden,
-        keys: &[Binding {
-            keystroke: "/",
-            context: SHELL,
-        }],
-        danger: false,
-        applies: NOTHING,
-        available: yes,
-        run: |_, _, _| tracing::warn!("no view owns a filter field yet"),
-        action: None,
-    },
-    Command {
         id: "nav.back",
         labels: &["go_back"],
         label: |_, _| t("go_back"),
