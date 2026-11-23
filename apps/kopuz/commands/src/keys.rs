@@ -188,10 +188,17 @@ pub fn context_for(id: &str) -> Option<&'static str> {
 /// The command `keystroke` would take over from inside `id`'s own context, overrides included.
 pub fn conflict(id: &str, keystroke: &str, cx: &App) -> Option<&'static crate::Command> {
     let context = context_for(id)?;
+    let overrides = &store::layout(cx).shortcuts;
     all().iter().find(|held| {
         held.id != id
             && context_for(held.id) == Some(context)
-            && keystroke_for(held.id, cx).as_deref() == Some(keystroke)
+            && match overrides.get(held.id) {
+                Some(custom) => custom == keystroke,
+                None => held
+                    .keys
+                    .iter()
+                    .any(|binding| binding.keystroke == keystroke),
+            }
     })
 }
 
