@@ -1308,3 +1308,7 @@ interface_page_width_full = Pełna szerokość
 similar_artists = Podobni wykonawcy
 interface_similar_artists = Podobni wykonawcy na stronach wykonawców
 interface_similar_artists_description = Pytaj MusicBrainz i ListenBrainz, kogo słuchacze słuchają razem z wykonawcą. Nazwa wykonawcy jest do nich wysyłana.
+interface_panel_side = Strona
+interface_panel_side_description = Po której stronie strony jest kolumna playlist.
+interface_queue_side = Strona kolumny kolejki i tekstu
+interface_queue_side_description = Po której stronie otwiera się kolumna kolejki i tekstu.

@@ -1290,3 +1290,7 @@ interface_page_width_full = முழு அகலம்
 similar_artists = ஒத்த கலைஞர்கள்
 interface_similar_artists = கலைஞர் பக்கங்களில் ஒத்த கலைஞர்கள்
 interface_similar_artists_description = ஒரு கலைஞருடன் கேட்பவர்கள் யாரைக் கேட்கிறார்கள் என MusicBrainz, ListenBrainz-இடம் கேள். கலைஞரின் பெயர் அனுப்பப்படும்.
+interface_panel_side = பக்கம்
+interface_panel_side_description = பிளேலிஸ்ட் நெடுவரிசை பக்கத்தின் எந்தப் பக்கம்.
+interface_queue_side = வரிசை, வரிகள் நெடுவரிசையின் பக்கம்
+interface_queue_side_description = வரிசையும் வரிகளும் எந்தப் பக்கம் திறக்கும்.

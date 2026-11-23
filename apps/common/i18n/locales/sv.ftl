@@ -1286,3 +1286,7 @@ interface_page_width_full = Full bredd
 similar_artists = Liknande artister
 interface_similar_artists = Liknande artister på artistsidor
 interface_similar_artists_description = Fråga MusicBrainz och ListenBrainz vilka lyssnare spelar tillsammans med en artist. Artistens namn skickas till dem.
+interface_panel_side = Sida
+interface_panel_side_description = Vilken sida av sidan spellistkolumnen sitter på.
+interface_queue_side = Sida för kö- och låttextkolumnen
+interface_queue_side_description = Vilken sida den dockade kö- och låttextkolumnen öppnas på.

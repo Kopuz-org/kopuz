@@ -1260,3 +1260,7 @@ interface_page_width_full = Teljes szélesség
 similar_artists = Hasonló előadók
 interface_similar_artists = Hasonló előadók az előadóoldalakon
 interface_similar_artists_description = A MusicBrainz és a ListenBrainz megkérdezése, kit hallgatnak egy előadó mellett. Az előadó neve elküldésre kerül.
+interface_panel_side = Oldal
+interface_panel_side_description = Az oldal melyik szélén van a lejátszási listák oszlopa.
+interface_queue_side = A sor és dalszöveg oszlop oldala
+interface_queue_side_description = Melyik oldalon nyílik a dokkolt sor és dalszöveg oszlop.

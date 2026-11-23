@@ -1286,3 +1286,7 @@ interface_page_width_full = Volle breedte
 similar_artists = Vergelijkbare artiesten
 interface_similar_artists = Vergelijkbare artiesten op artiestpagina's
 interface_similar_artists_description = Vraag MusicBrainz en ListenBrainz wie luisteraars naast een artiest afspelen. De naam van de artiest wordt naar hen gestuurd.
+interface_panel_side = Kant
+interface_panel_side_description = Aan welke kant van de pagina de afspeellijstkolom staat.
+interface_queue_side = Kant van wachtrij- en songtekstkolom
+interface_queue_side_description = Aan welke kant de vastgezette wachtrij- en songtekstkolom opent.

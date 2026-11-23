@@ -40,14 +40,20 @@ impl NowPlaying {
         let header = self.tab_strip(showing, false, cx);
         let body = self.tab_body(showing, window, cx);
 
-        DockPanel::new("panel", Edge::Left)
+        let edge = match (store::layout(cx).interface.queue_side == store::layout::Side::Right)
+            != i18n::is_rtl()
+        {
+            true => Edge::Left,
+            false => Edge::Right,
+        };
+        DockPanel::new("panel", edge)
             .width(self.panel_width())
             .header(header)
             .body(body)
             .on_close(|_, cx| {
                 Chrome::global(cx).update(cx, |chrome, cx| chrome.set_panel(None, cx))
             })
-            // The left edge drags the column between 280 and 600 px.
+            // The edge facing the page drags the column between 280 and 600 px.
             .resizable(
                 self.panel_width(),
                 MIN_WIDTH,

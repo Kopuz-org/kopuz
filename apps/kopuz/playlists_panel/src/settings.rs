@@ -10,7 +10,7 @@ use gpui_kit::{
     Window,
 };
 use store::LayoutModel;
-use store::layout::{Panel, PinKind, Section as Group};
+use store::layout::{Panel, PinKind, Section as Group, Side};
 
 /// The widths the panel offers, inside what the drag handle allows.
 const WIDTHS: &[f32] = &[200., 260., 320., 380.];
@@ -143,6 +143,22 @@ impl Render for PanelSettings {
                             },
                         )
                         .shown(cx),
+                    )
+                    .children(
+                        SettingRow::new(t("interface_panel_side"))
+                            .description(t("interface_panel_side_description"))
+                            .control(choice(
+                                "interface-panel-side",
+                                &panel.side,
+                                vec![
+                                    (Side::Left, t("interface_sheet_side_left")),
+                                    (Side::Right, t("interface_sheet_side_right")),
+                                ],
+                                |value, cx| {
+                                    LayoutModel::edit(cx, |layout| layout.panel.side = value)
+                                },
+                            ))
+                            .shown(cx),
                     )
                     .children(
                         SettingRow::new(t("interface_panel_width"))

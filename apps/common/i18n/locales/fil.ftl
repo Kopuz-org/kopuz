@@ -1254,3 +1254,7 @@ interface_page_width_full = Buong lapad
 similar_artists = Mga katulad na artist
 interface_similar_artists = Mga katulad na artist sa mga pahina ng artist
 interface_similar_artists_description = Itanong sa MusicBrainz at ListenBrainz kung sino ang pinakikinggan kasama ng isang artist. Ipinapadala sa kanila ang pangalan ng artist.
+interface_panel_side = Gilid
+interface_panel_side_description = Sa aling gilid ng pahina ang column ng playlist.
+interface_queue_side = Gilid ng column ng queue at lyrics
+interface_queue_side_description = Sa aling gilid magbubukas ang column ng queue at lyrics.

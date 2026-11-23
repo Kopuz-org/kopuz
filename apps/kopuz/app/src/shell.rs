@@ -9,6 +9,7 @@ use gpui_kit::{
 };
 use gpui_kit::{FocusHandle, InteractiveElement as _, actions};
 use link::Connection;
+use store::layout::Side;
 use store::{Chrome, ConfigModel, Navigator, PlayerModel, SourcesModel};
 
 use crate::router::Router;
@@ -574,6 +575,36 @@ impl Render for Shell {
             false => pane,
         };
 
+        let playlists_side = store::layout(cx).panel.side;
+        let queue_side = store::layout(cx).interface.queue_side;
+        let playlists_column = (playlists_open && !in_rail).then(|| {
+            div()
+                .w(playlists_width)
+                .flex_shrink_0()
+                .child(
+                    gpui_kit::AnyView::from(self.playlists_panel.clone())
+                        .cached(gpui_kit::StyleRefinement::default().size_full()),
+                )
+                .into_any_element()
+        });
+        // The column opens out and fades in together, its contents laid out at full width throughout.
+        let queue_column = (dock > 0.).then(|| {
+            card(div())
+                .flex_shrink_0()
+                .overflow_hidden()
+                .w(panel_width * dock)
+                .opacity(dock)
+                .child(div().w(panel_width).h_full().child(self.side_panel.clone()))
+                .into_any_element()
+        });
+        let (playlists_left, playlists_right) = match playlists_side {
+            Side::Left => (playlists_column, None),
+            Side::Right => (None, playlists_column),
+        };
+        let (queue_left, queue_right) = match queue_side {
+            Side::Left => (queue_column, None),
+            Side::Right => (None, queue_column),
+        };
         // Compact swaps the body and nothing else. It used to return early, above the key context
         // and the dialog, sheet and notification layers, so the mini player had no shortcuts, no
         // toasts and no dialogs — and, being above the `connected` check, went on showing the last
@@ -613,14 +644,8 @@ impl Render for Shell {
                                 .when(!nav_left, |body| body.pl(skin.pane_gap * 1.5))
                         })
                         .children(rail_bar)
-                        .when(playlists_open && !in_rail, |body| {
-                            body.child(
-                                div().w(playlists_width).flex_shrink_0().child(
-                                    gpui_kit::AnyView::from(self.playlists_panel.clone())
-                                        .cached(gpui_kit::StyleRefinement::default().size_full()),
-                                ),
-                            )
-                        })
+                        .children(playlists_left)
+                        .children(queue_left)
                         .child(
                             card(div())
                                 .h_full()
@@ -633,22 +658,8 @@ impl Render for Shell {
                                 .child(self.overlays.clone())
                                 .child(self.debug_overlay.clone()),
                         )
-                        .when(dock > 0., |body| {
-                            // The column opens out and fades in together, its contents laid out at full width throughout.
-                            body.child(
-                                card(div())
-                                    .flex_shrink_0()
-                                    .overflow_hidden()
-                                    .w(panel_width * dock)
-                                    .opacity(dock)
-                                    .child(
-                                        div()
-                                            .w(panel_width)
-                                            .h_full()
-                                            .child(self.side_panel.clone()),
-                                    ),
-                            )
-                        }),
+                        .children(queue_right)
+                        .children(playlists_right),
                 )
                 .when(show_player_bar && !player_at_top, |window_body| {
                     window_body.child(self.player_bar.clone())

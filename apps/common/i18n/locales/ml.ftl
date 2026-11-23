@@ -1290,3 +1290,7 @@ interface_page_width_full = പൂർണ്ണ വീതി
 similar_artists = സമാന കലാകാരന്മാർ
 interface_similar_artists = കലാകാരന്റെ പേജിൽ സമാന കലാകാരന്മാർ
 interface_similar_artists_description = ഒരു കലാകാരനൊപ്പം ശ്രോതാക്കൾ കേൾക്കുന്നവരെ MusicBrainz, ListenBrainz-നോട് ചോദിക്കുക. കലാകാരന്റെ പേര് അവർക്ക് അയയ്ക്കും.
+interface_panel_side = വശം
+interface_panel_side_description = പ്ലേലിസ്റ്റ് കോളം പേജിന്റെ ഏത് വശത്ത്.
+interface_queue_side = ക്യൂ, വരികൾ കോളത്തിന്റെ വശം
+interface_queue_side_description = ക്യൂവും വരികളും ഏത് വശത്ത് തുറക്കും.

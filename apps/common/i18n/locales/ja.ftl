@@ -1266,3 +1266,7 @@ interface_page_width_full = 全幅
 similar_artists = 似たアーティスト
 interface_similar_artists = アーティストページに似たアーティストを表示
 interface_similar_artists_description = MusicBrainz と ListenBrainz に、一緒に聴かれているアーティストを問い合わせます。アーティスト名が送信されます。
+interface_panel_side = 位置
+interface_panel_side_description = プレイリスト列をページのどちら側に置くか。
+interface_queue_side = キューと歌詞の列の位置
+interface_queue_side_description = キューと歌詞の列をどちら側に開くか。

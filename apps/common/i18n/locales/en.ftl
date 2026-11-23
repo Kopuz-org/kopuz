@@ -1289,3 +1289,7 @@ interface_page_width_full = Full width
 similar_artists = Similar artists
 interface_similar_artists = Similar artists on artist pages
 interface_similar_artists_description = Ask MusicBrainz and ListenBrainz who listeners play alongside an artist. The artist's name is sent to them.
+interface_panel_side = Side
+interface_panel_side_description = Which side of the page the playlists column sits on.
+interface_queue_side = Queue and lyrics column side
+interface_queue_side_description = Which side of the page the docked queue and lyrics column opens on.

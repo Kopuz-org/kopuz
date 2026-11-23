@@ -1260,3 +1260,7 @@ interface_page_width_full = 전체 너비
 similar_artists = 비슷한 아티스트
 interface_similar_artists = 아티스트 페이지에 비슷한 아티스트 표시
 interface_similar_artists_description = MusicBrainz와 ListenBrainz에 함께 듣는 아티스트를 묻습니다. 아티스트 이름이 전송됩니다.
+interface_panel_side = 위치
+interface_panel_side_description = 재생목록 열을 페이지 어느 쪽에 둘지.
+interface_queue_side = 대기열·가사 열 위치
+interface_queue_side_description = 대기열과 가사 열을 어느 쪽에 열지.

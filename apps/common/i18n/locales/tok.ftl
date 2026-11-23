@@ -1260,3 +1260,7 @@ interface_page_width_full = suli ale
 similar_artists = jan kalama sama
 interface_similar_artists = jan kalama sama lon lipu jan
 interface_similar_artists_description = o toki tawa MusicBrainz en ListenBrainz. nimi jan li tawa ona.
+interface_panel_side = poka
+interface_panel_side_description = kulupu kalama li lon poka seme.
+interface_queue_side = poka pi linja kalama
+interface_queue_side_description = linja kalama en nimi li open lon poka seme.
