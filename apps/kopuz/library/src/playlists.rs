@@ -95,7 +95,7 @@ impl Library {
             buttons.push(
                 IconButton::new("library-new-folder", icons::FOLDER)
                     .tooltip(t("new_folder"))
-                    .on_click(|_, _, cx| new_folder(cx)),
+                    .on_click(|_, window, cx| new_folder(window, cx)),
             );
         }
         buttons.push(
@@ -125,12 +125,23 @@ impl Library {
     }
 }
 
-/// A folder named the way the Dioxus page named one, renamed from its card's menu.
-pub(crate) fn new_folder(cx: &mut App) {
-    let name = t("new_folder").to_string();
-    actions::run(cx, move |api| async move {
-        api.create_playlist_folder(name).await
-    });
+/// Ask for the new folder's name first; an empty answer makes nothing.
+pub(crate) fn new_folder(window: &mut Window, cx: &mut App) {
+    components::dialogs::open_rename(
+        t("new_folder"),
+        t("new_folder"),
+        |name, cx| {
+            let name = name.trim().to_string();
+            if name.is_empty() {
+                return;
+            }
+            actions::run(cx, move |api| async move {
+                api.create_playlist_folder(name).await
+            });
+        },
+        window,
+        cx,
+    );
 }
 
 /// The keys of every playlist a folder holds, in the folder's order.
