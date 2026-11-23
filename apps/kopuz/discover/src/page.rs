@@ -49,6 +49,8 @@ pub struct CatalogPage {
     // The source can keep marking a chip after it was cleared, so the local pick wins.
     picked: Option<Option<String>>,
     detail: Option<CatalogDetail>,
+    /// The page `detail` was read for, which a chip switch leaves behind until the new one answers.
+    detail_for: String,
     // Whether the first shelf held is the page's own track list.
     tracks_first: bool,
     shelves: Entity<Shelves>,
@@ -94,6 +96,7 @@ impl CatalogPage {
             strapline_to_host: embedded,
             picked: None,
             detail: None,
+            detail_for: String::new(),
             tracks_first: false,
             shelves,
             loading: false,
@@ -157,11 +160,14 @@ impl CatalogPage {
                         CatalogCache::put(&this.showing, ticket, detail.clone(), cx);
                         this.show(detail, cx);
                     }
-                    // A stale page on screen beats an error over it.
-                    Err(error) if this.detail.is_some() => {
+                    // A stale copy of the same page on screen beats an error over it; another chip's does not.
+                    Err(error) if this.detail.is_some() && this.detail_for == this.showing => {
                         tracing::warn!(%error, "catalog page refresh failed");
                     }
-                    Err(error) => this.error = Some(states::catalog_failure(&error)),
+                    Err(error) => {
+                        this.detail = None;
+                        this.error = Some(states::catalog_failure(&error));
+                    }
                 }
                 cx.notify();
             })
@@ -170,6 +176,7 @@ impl CatalogPage {
     }
 
     fn show(&mut self, detail: CatalogDetail, cx: &mut Context<Self>) {
+        self.detail_for = self.showing.clone();
         let mut held = Vec::with_capacity(detail.shelves.len() + 1);
         self.tracks_first = !detail.tracks.is_empty();
         if self.tracks_first {
