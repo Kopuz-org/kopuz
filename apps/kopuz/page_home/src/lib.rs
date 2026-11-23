@@ -555,6 +555,25 @@ impl Render for Home {
         let offline = shared.offline;
         // The queue to resume is not a library, so offline it does not hide that nothing else plays.
         let bare = settled && (offline || banner.is_none());
+        // A library that failed to answer is not an empty one.
+        let empty =
+            (bare && !offline).then(|| match self.albums.read(cx).error().map(store::human) {
+                Some(reason) => EmptyState::failed(
+                    t("library_read_failed"),
+                    cx.listener(|this, _, _, cx| {
+                        for query in [&this.albums, &this.recently_added, &this.new_releases] {
+                            query.update(cx, |query, cx| query.refresh(cx));
+                        }
+                    }),
+                )
+                .detail(reason),
+                None => EmptyState::new(t("no_albums_found"))
+                    .icon(icons::DISC)
+                    .detail(t("add_music_to_get_started"))
+                    .action(t("add_source"), |_, _, cx| {
+                        store::SetupModel::start_over(cx)
+                    }),
+            });
         let heading = self.heading(cx);
         v_flex()
             .id("home")
@@ -568,16 +587,7 @@ impl Render for Home {
             .children(banner)
             .children(rows)
             .when(bare && offline, |page| page.child(EmptyState::offline()))
-            .when(bare && !offline, |page| {
-                page.child(
-                    EmptyState::new(t("no_albums_found"))
-                        .icon(icons::DISC)
-                        .detail(t("add_music_to_get_started"))
-                        .action(t("add_source"), |_, _, cx| {
-                            store::SetupModel::start_over(cx)
-                        }),
-                )
-            })
+            .children(empty)
     }
 }
 
