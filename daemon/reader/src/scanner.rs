@@ -207,6 +207,48 @@ fn albums_with_files(library: &Library) -> HashSet<String> {
         .collect()
 }
 
+/// What splits one tagged release from a same-named one in another folder.
+const RELEASE_MARK: char = '~';
+
+/// Two releases of one album in different folders share a title and artist; files claiming the same disc and track tell them apart.
+fn split_releases_by_folder(library: &Library) -> Vec<(usize, String)> {
+    let mut groups: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (index, track) in library.tracks.iter().enumerate() {
+        if track.id.local_path().is_none() || is_folder_album(&track.album_id) {
+            continue;
+        }
+        let base = track
+            .album_id
+            .split(RELEASE_MARK)
+            .next()
+            .unwrap_or_default();
+        groups.entry(base).or_default().push(index);
+    }
+    let mut moves = Vec::new();
+    for (base, members) in groups {
+        let folders: BTreeSet<String> = members
+            .iter()
+            .filter_map(|&index| library.tracks[index].id.local_path().map(folder_key))
+            .collect();
+        let tracks: Vec<&Track> = members
+            .iter()
+            .map(|&index| &library.tracks[index])
+            .collect();
+        let split = folders.len() > 1 && positions_collide(&tracks);
+        for &index in &members {
+            let Some(path) = library.tracks[index].id.local_path() else {
+                continue;
+            };
+            let id = match split {
+                true => format!("{base}{RELEASE_MARK}{}", folder_key(path)),
+                false => base.to_string(),
+            };
+            moves.push((index, id));
+        }
+    }
+    moves
+}
+
 /// Two tracks claiming the same disc and track number cannot be one release.
 fn positions_collide(tracks: &[&Track]) -> bool {
     let mut seen = HashSet::new();
@@ -220,7 +262,7 @@ fn positions_collide(tracks: &[&Track]) -> bool {
         .any(|position| !seen.insert(position))
 }
 
-/// Settle what one file cannot: untagged files join the folder's lone tagged release, colliding same-titled albums split by artist.
+/// Settle what one file cannot: untagged files join the folder's lone tagged release, colliding same-titled albums split by artist, and two releases of one album split by folder.
 pub(crate) fn settle_local_albums(library: &mut Library) {
     join_releases_split_by_album_artist(library);
     let mut groups: HashMap<(String, String), Vec<usize>> = HashMap::new();
@@ -274,6 +316,7 @@ pub(crate) fn settle_local_albums(library: &mut Library) {
         }
     }
 
+    moves.extend(split_releases_by_folder(library));
     let mut album_rows: HashMap<String, usize> = library
         .albums
         .iter()
@@ -619,6 +662,86 @@ mod tests {
             .iter()
             .find(|album| &album.id == id)
             .expect("album row")
+    }
+
+    #[test]
+    fn two_releases_of_one_album_in_two_folders_stay_apart() {
+        let mut library = Library::default();
+        for folder in ["original", "remaster"] {
+            for number in 1..=2 {
+                let path = format!("/music/{folder}/{number}.flac");
+                scanned(
+                    &mut library,
+                    &path,
+                    "Divane",
+                    Some("Yaşar"),
+                    "Yaşar",
+                    number,
+                );
+            }
+        }
+        settle_local_albums(&mut library);
+
+        let original = album_of(&library, "/music/original/1.flac").id.clone();
+        let remaster = album_of(&library, "/music/remaster/1.flac").id.clone();
+        assert_ne!(original, remaster);
+        assert_eq!(album_of(&library, "/music/original/2.flac").id, original);
+        assert_eq!(album_of(&library, "/music/remaster/2.flac").id, remaster);
+
+        settle_local_albums(&mut library);
+        assert_eq!(album_of(&library, "/music/original/1.flac").id, original);
+    }
+
+    #[test]
+    fn one_release_spread_over_two_folders_stays_one_album() {
+        let mut library = Library::default();
+        scanned(
+            &mut library,
+            "/music/a/1.flac",
+            "Divane",
+            Some("Yaşar"),
+            "Yaşar",
+            1,
+        );
+        scanned(
+            &mut library,
+            "/music/b/2.flac",
+            "Divane",
+            Some("Yaşar"),
+            "Yaşar",
+            2,
+        );
+        settle_local_albums(&mut library);
+
+        assert_eq!(
+            album_of(&library, "/music/a/1.flac").id,
+            album_of(&library, "/music/b/2.flac").id
+        );
+    }
+
+    #[test]
+    fn a_release_whose_twin_is_gone_joins_back_into_one_album() {
+        let mut library = Library::default();
+        for folder in ["original", "remaster"] {
+            scanned(
+                &mut library,
+                &format!("/music/{folder}/1.flac"),
+                "Divane",
+                Some("Yaşar"),
+                "Yaşar",
+                1,
+            );
+        }
+        settle_local_albums(&mut library);
+        library
+            .tracks
+            .retain(|track| track.id.local_path() != Some(Path::new("/music/remaster/1.flac")));
+        settle_local_albums(&mut library);
+
+        assert_eq!(
+            album_of(&library, "/music/original/1.flac").id,
+            make_album_id("Divane", Some("Yaşar"), Path::new("/music/original/1.flac"))
+        );
     }
 
     #[test]
