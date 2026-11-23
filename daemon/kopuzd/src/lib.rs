@@ -148,6 +148,7 @@ async fn apps_gone(exit_with_app: bool, core: &Core, clients: &service::Clients)
     let mut playing = playing_now().await;
     let mut tick = tokio::time::interval(std::time::Duration::from_secs(1));
     let mut idle_since: Option<Instant> = None;
+    let mut alone_since: Option<Instant> = None;
     loop {
         tokio::select! {
             event = events.recv() => match event {
@@ -158,13 +159,29 @@ async fn apps_gone(exit_with_app: bool, core: &Core, clients: &service::Clients)
                     return std::future::pending().await;
                 }
             },
-            _ = tick.tick() => match clients.count() == 0 && !playing {
+            _ = tick.tick() => {
+                // An app that quits pauses first; one killed outright leaves the music playing to nobody.
+                match clients.count() == 0 {
+                    true if playing
+                        && alone_since.get_or_insert_with(Instant::now).elapsed() >= APP_GONE_AFTER =>
+                    {
+                        tracing::info!("every app is gone with music still playing; pausing it");
+                        if let Err(error) = core.api.player_command(api::PlayerCommand::Pause).await {
+                            tracing::warn!(%error, "could not pause the orphaned playback");
+                        }
+                        alone_since = None;
+                    }
+                    true => {}
+                    false => alone_since = None,
+                }
+                match clients.count() == 0 && !playing {
                 true if idle_since.get_or_insert_with(Instant::now).elapsed() >= APP_GONE_AFTER => {
                     return;
                 }
                 true => {}
                 false => idle_since = None,
-            },
+                }
+            }
         }
     }
 }
