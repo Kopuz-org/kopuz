@@ -130,7 +130,14 @@ impl Notices {
                 message,
             } = event
             {
-                let text = message.clone().unwrap_or_else(|| i18n::t(code));
+                let text = message.clone().unwrap_or_else(|| match i18n::t(code) {
+                    // A code this build has no sentence for reads as a generic failure, not a raw key.
+                    said if said == *code => i18n::t_with(
+                        "error_code_internal",
+                        &[("detail", code.replace('_', " ").into())],
+                    ),
+                    said => said,
+                });
                 this.say(Notice::new(*level, text), cx);
             }
         });
