@@ -500,6 +500,7 @@ pub struct Player {
     pub cover: TileSize,
     pub mini_frameless: bool,
     pub mini_hides_main: bool,
+    pub tray_lyrics: bool,
 }
 
 impl Default for Player {
@@ -516,6 +517,7 @@ impl Default for Player {
             cover: TileSize::Medium,
             mini_frameless: false,
             mini_hides_main: false,
+            tray_lyrics: false,
         }
     }
 }

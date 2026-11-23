@@ -1281,3 +1281,5 @@ import = Importar
 theme_exported = Tema salvo em um arquivo.
 theme_copy_of = Cópia de { $name }
 theme_import_failed = Não foi possível ler o tema: { $error }
+interface_player_tray_lyrics = Letra na bandeja
+interface_player_tray_lyrics_description = Mostra a linha cantada como título e dica do ícone da bandeja. No macOS aparece na barra de menus. Precisa do ícone da bandeja.

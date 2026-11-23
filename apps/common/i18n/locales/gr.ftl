@@ -1282,3 +1282,5 @@ import = Εισαγωγή
 theme_exported = Το θέμα αποθηκεύτηκε σε αρχείο.
 theme_copy_of = Αντίγραφο { $name }
 theme_import_failed = Δεν ήταν δυνατή η ανάγνωση του θέματος: { $error }
+interface_player_tray_lyrics = Στίχοι στην περιοχή ειδοποιήσεων
+interface_player_tray_lyrics_description = Εμφάνιση του στίχου ως τίτλου και συμβουλής του εικονιδίου. Στο macOS στη γραμμή μενού. Χρειάζεται το εικονίδιο.

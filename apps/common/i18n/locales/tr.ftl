@@ -1239,3 +1239,5 @@ import = İçe aktar
 theme_exported = Tema dosyaya kaydedildi.
 theme_copy_of = { $name } kopyası
 theme_import_failed = Tema okunamadı: { $error }
+interface_player_tray_lyrics = Sistem tepsisinde şarkı sözleri
+interface_player_tray_lyrics_description = Söylenen satırı tepsi simgesinin başlığı ve ipucu olarak göster. macOS'ta menü çubuğunda görünür. Tepsi simgesi açık olmalı.

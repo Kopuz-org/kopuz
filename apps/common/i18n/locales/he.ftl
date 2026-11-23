@@ -1282,3 +1282,5 @@ import = ייבוא
 theme_exported = ערכת הנושא נשמרה בקובץ.
 theme_copy_of = עותק של { $name }
 theme_import_failed = לא ניתן לקרוא את ערכת הנושא: { $error }
+interface_player_tray_lyrics = מילים במגש המערכת
+interface_player_tray_lyrics_description = הצגת השורה המושרת ככותרת ותיאור של סמל המגש. ב-macOS בשורת התפריטים. דורש את סמל המגש.

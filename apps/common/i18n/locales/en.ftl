@@ -1279,3 +1279,5 @@ import = Import
 theme_exported = Theme saved to a file.
 theme_copy_of = { $name } copy
 theme_import_failed = Could not read that theme: { $error }
+interface_player_tray_lyrics = Lyrics in the tray
+interface_player_tray_lyrics_description = Show the line being sung as the tray icon's title and tooltip. On macOS it scrolls in the menu bar. Needs the tray icon on.

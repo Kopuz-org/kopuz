@@ -172,6 +172,16 @@ impl Render for PlayerSettings {
                         )
                         .description(t("interface_player_mini_hides_main_description"))
                         .shown(cx),
+                    )
+                    .children(
+                        toggle_row(
+                            "player-tray-lyrics",
+                            t("interface_player_tray_lyrics"),
+                            player.tray_lyrics,
+                            |on, cx| LayoutModel::edit(cx, |layout| layout.player.tray_lyrics = on),
+                        )
+                        .description(t("interface_player_tray_lyrics_description"))
+                        .shown(cx),
                     ),
             )
             .into_any_element()

@@ -1250,3 +1250,5 @@ import = o kama jo
 theme_exported = kule li lon lipu.
 theme_copy_of = { $name } sin
 theme_import_failed = mi ken ala lukin e kule: { $error }
+interface_player_tray_lyrics = nimi kalama lon poki lili
+interface_player_tray_lyrics_description = o pana e nimi kalama ni lon sitelen lili. ona li wile e sitelen lili.

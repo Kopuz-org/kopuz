@@ -1288,3 +1288,5 @@ import = استيراد
 theme_exported = حُفظت السمة في ملف.
 theme_copy_of = نسخة من { $name }
 theme_import_failed = تعذّرت قراءة السمة: { $error }
+interface_player_tray_lyrics = الكلمات في شريط النظام
+interface_player_tray_lyrics_description = اعرض السطر المغنّى كعنوان وتلميح لأيقونة الشريط. في macOS يظهر في شريط القوائم. يتطلب تفعيل الأيقونة.

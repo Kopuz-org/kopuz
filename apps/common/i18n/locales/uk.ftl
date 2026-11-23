@@ -1298,3 +1298,5 @@ import = Імпорт
 theme_exported = Тему збережено у файл.
 theme_copy_of = { $name } (копія)
 theme_import_failed = Не вдалося прочитати тему: { $error }
+interface_player_tray_lyrics = Текст пісні в треї
+interface_player_tray_lyrics_description = Показувати поточний рядок як заголовок і підказку значка в треї. На macOS — у рядку меню. Потрібен значок у треї.

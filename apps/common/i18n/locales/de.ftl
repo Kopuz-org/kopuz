@@ -1251,3 +1251,5 @@ import = Importieren
 theme_exported = Theme in eine Datei gespeichert.
 theme_copy_of = { $name } Kopie
 theme_import_failed = Theme konnte nicht gelesen werden: { $error }
+interface_player_tray_lyrics = Songtext in der Leiste
+interface_player_tray_lyrics_description = Die gesungene Zeile als Titel und Tooltip des Tray-Symbols zeigen. Unter macOS läuft sie in der Menüleiste. Braucht das Tray-Symbol.

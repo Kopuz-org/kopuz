@@ -1280,3 +1280,5 @@ import = ഇംപോർട്ട്
 theme_exported = തീം ഫയലിൽ സേവ് ചെയ്തു.
 theme_copy_of = { $name } പകർപ്പ്
 theme_import_failed = തീം വായിക്കാനായില്ല: { $error }
+interface_player_tray_lyrics = ട്രേയിൽ വരികൾ
+interface_player_tray_lyrics_description = പാടുന്ന വരി ട്രേ ഐക്കണിന്റെ തലക്കെട്ടായും ടൂൾടിപ്പായും കാണിക്കുക. macOS-ൽ മെനു ബാറിൽ. ട്രേ ഐക്കൺ വേണം.
