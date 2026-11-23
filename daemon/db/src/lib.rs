@@ -239,6 +239,19 @@ pub struct CachedTrackRow {
     pub last_played_at: i64,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ListeningRows {
+    pub plays: u32,
+    pub seconds: u64,
+    /// Key, title, artist, plays.
+    pub tracks: Vec<(String, String, String, u32)>,
+    pub artists: Vec<(String, u32)>,
+    /// Album, artist, plays.
+    pub albums: Vec<(String, String, u32)>,
+    /// Days since the epoch, plays.
+    pub days: Vec<(i64, u32)>,
+}
+
 /// One track's play count, and when it was last played.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlayRecord {
@@ -328,6 +341,13 @@ pub trait ReadStore: Send + Sync {
 
     /// This source's recently-played track keys, newest first (capped).
     async fn recently_played(&self, source: &Source, limit: u32) -> Result<Vec<String>, DbError>;
+
+    /// What this source played since `since` (unix seconds), or ever.
+    async fn listening(
+        &self,
+        source: &Source,
+        since: Option<i64>,
+    ) -> Result<ListeningRows, DbError>;
 
     /// One representative (first-inserted) track per artist, artist A→Z — for
     /// artist tiles that need a cover without pulling the whole source.

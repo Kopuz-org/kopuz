@@ -682,7 +682,86 @@ pub async fn bump_listen_count(
     .bind(track_key)
     .execute(pool)
     .await?;
+    sqlx::query(
+        "INSERT INTO listen_events (source, track_key, played_at) VALUES (?1, ?2, unixepoch())",
+    )
+    .bind(source.as_str())
+    .bind(track_key)
+    .execute(pool)
+    .await?;
     Ok(())
+}
+
+pub async fn listening(
+    pool: &SqlitePool,
+    source: &Source,
+    since: Option<i64>,
+) -> Result<crate::ListeningRows, DbError> {
+    const FROM: &str = "FROM listen_events e          LEFT JOIN tracks t ON t.source = e.source AND t.track_key = e.track_key          WHERE e.source = ?1 AND e.played_at >= ?2";
+    let since = since.unwrap_or(0);
+    let (plays, seconds): (i64, i64) = sqlx::query_as(&format!(
+        "SELECT COUNT(*), COALESCE(SUM(t.duration), 0) {FROM}"
+    ))
+    .bind(source.as_str())
+    .bind(since)
+    .fetch_one(pool)
+    .await?;
+    let tracks: Vec<(String, Option<String>, Option<String>, i64)> = sqlx::query_as(&format!(
+        "SELECT e.track_key, MAX(t.title), MAX(t.artist), COUNT(*) AS plays {FROM}          GROUP BY e.track_key ORDER BY plays DESC LIMIT 25"
+    ))
+    .bind(source.as_str())
+    .bind(since)
+    .fetch_all(pool)
+    .await?;
+    let artists: Vec<(String, i64)> = sqlx::query_as(&format!(
+        "SELECT t.artist, COUNT(*) AS plays {FROM} AND t.artist != ''          GROUP BY t.artist ORDER BY plays DESC LIMIT 15"
+    ))
+    .bind(source.as_str())
+    .bind(since)
+    .fetch_all(pool)
+    .await?;
+    let albums: Vec<(String, String, i64)> = sqlx::query_as(&format!(
+        "SELECT t.album, MAX(t.artist), COUNT(*) AS plays {FROM} AND t.album != ''          GROUP BY t.album ORDER BY plays DESC LIMIT 15"
+    ))
+    .bind(source.as_str())
+    .bind(since)
+    .fetch_all(pool)
+    .await?;
+    let days: Vec<(i64, i64)> = sqlx::query_as(&format!(
+        "SELECT e.played_at / 86400 AS day, COUNT(*) {FROM} GROUP BY day ORDER BY day"
+    ))
+    .bind(source.as_str())
+    .bind(since)
+    .fetch_all(pool)
+    .await?;
+    let count = |n: i64| u32::try_from(n).unwrap_or(u32::MAX);
+    Ok(crate::ListeningRows {
+        plays: count(plays),
+        seconds: u64::try_from(seconds).unwrap_or(0),
+        tracks: tracks
+            .into_iter()
+            .map(|(key, title, artist, plays)| {
+                (
+                    key,
+                    title.unwrap_or_default(),
+                    artist.unwrap_or_default(),
+                    count(plays),
+                )
+            })
+            .collect(),
+        artists: artists
+            .into_iter()
+            .map(|(name, plays)| (name, count(plays)))
+            .collect(),
+        albums: albums
+            .into_iter()
+            .map(|(album, artist, plays)| (album, artist, count(plays)))
+            .collect(),
+        days: days
+            .into_iter()
+            .map(|(day, plays)| (day, count(plays)))
+            .collect(),
+    })
 }
 
 /// One source's recently-played track keys, newest first.

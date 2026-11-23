@@ -971,6 +971,42 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::Unit {}))
     }
 
+    async fn get_listening_stats(
+        &self,
+        request: Request<proto::ListeningStatsRequest>,
+    ) -> Result<Response<proto::ListeningStats>, Status> {
+        let stats = self
+            .0
+            .api
+            .listening_stats(request.into_inner().days)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::ListeningStats {
+            plays: stats.plays,
+            seconds: stats.seconds,
+            tracks: stats
+                .tracks
+                .into_iter()
+                .map(|track| proto::RankedTrack {
+                    key: track.key,
+                    title: track.title,
+                    artist: track.artist,
+                    plays: track.plays,
+                })
+                .collect(),
+            artists: stats.artists.into_iter().map(ranked_to_proto).collect(),
+            albums: stats.albums.into_iter().map(ranked_to_proto).collect(),
+            days: stats
+                .days
+                .into_iter()
+                .map(|day| proto::DayPlays {
+                    day: day.day,
+                    plays: day.plays,
+                })
+                .collect(),
+        }))
+    }
+
     async fn get_stats(
         &self,
         _request: Request<proto::GetStatsRequest>,
@@ -2290,5 +2326,13 @@ mod tests {
             b"not a socket",
             "a failed connect is not licence to unlink a file"
         );
+    }
+}
+
+fn ranked_to_proto(ranked: api::Ranked) -> proto::Ranked {
+    proto::Ranked {
+        name: ranked.name,
+        detail: ranked.detail,
+        plays: ranked.plays,
     }
 }

@@ -83,6 +83,7 @@ service Kopuz {
   rpc DeletePlaylistFolder(PlaylistFolderId) returns (Unit);
   rpc MovePlaylist(MovePlaylistRequest) returns (Unit);
   rpc GetStats(GetStatsRequest) returns (Stats);
+  rpc GetListeningStats(ListeningStatsRequest) returns (ListeningStats);
   rpc GetLyrics(TrackRef) returns (Lyrics);
   rpc GetFavorites(GetFavoritesRequest) returns (Favorites);
   rpc GetJobs(GetJobsRequest) returns (JobList);
@@ -2732,4 +2733,35 @@ message TrackUploadChunk {
 message RipAudioRequest {
   repeated string keys = 1;
   string output_dir = 2;
+}
+
+message ListeningStatsRequest {
+  optional uint32 days = 1;
+}
+
+message RankedTrack {
+  string key = 1;
+  string title = 2;
+  string artist = 3;
+  uint32 plays = 4;
+}
+
+message Ranked {
+  string name = 1;
+  string detail = 2;
+  uint32 plays = 3;
+}
+
+message DayPlays {
+  int64 day = 1;
+  uint32 plays = 2;
+}
+
+message ListeningStats {
+  uint32 plays = 1;
+  uint64 seconds = 2;
+  repeated RankedTrack tracks = 3;
+  repeated Ranked artists = 4;
+  repeated Ranked albums = 5;
+  repeated DayPlays days = 6;
 }

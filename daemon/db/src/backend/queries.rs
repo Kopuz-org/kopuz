@@ -1654,6 +1654,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn listening_ranks_what_this_source_played() {
+        let (pool, source) = seeded().await;
+        for key in ["/b.flac", "/b.flac", "/c.flac"] {
+            super::super::cfg_store::bump_listen_count(&pool, &source, key)
+                .await
+                .unwrap();
+        }
+        let elsewhere = Source::Server("srv".into());
+        super::super::cfg_store::bump_listen_count(&pool, &elsewhere, "/a.flac")
+            .await
+            .unwrap();
+
+        let rows = super::super::cfg_store::listening(&pool, &source, None)
+            .await
+            .unwrap();
+        assert_eq!(rows.plays, 3);
+        assert_eq!(rows.tracks[0].0, "/b.flac");
+        assert_eq!(rows.tracks[0].3, 2);
+        assert_eq!(rows.artists[0], ("Ada".to_string(), 2));
+        assert_eq!(rows.days.iter().map(|(_, plays)| plays).sum::<u32>(), 3);
+
+        let later = super::super::cfg_store::listening(&pool, &source, Some(i64::MAX))
+            .await
+            .unwrap();
+        assert_eq!(later.plays, 0);
+    }
+
+    #[tokio::test]
     async fn a_play_is_counted_and_stamped_per_source_most_played_first() {
         let pool = mem_pool().await;
         let source = Source::default();

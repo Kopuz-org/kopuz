@@ -5,6 +5,7 @@ mod columns;
 mod facet;
 mod filters;
 mod grid;
+mod listening;
 mod playlists;
 mod settings;
 mod states;
@@ -175,6 +176,7 @@ pub struct Library {
     liked: bool,
     /// The Activity page: tracks only, in a layout of its own, and none of it written to the library's route.
     activity: bool,
+    listening: Option<Entity<listening::ListeningPanel>>,
     // What the route last said, so adopting a route change cannot fight the page's own edit.
     encoded: String,
     columns: Vec<Column>,
@@ -397,6 +399,7 @@ impl Library {
             filters,
             liked,
             activity,
+            listening: activity.then(|| cx.new(listening::ListeningPanel::new)),
             encoded: opening,
             columns: Vec::new(),
             sort: Sort::default(),

@@ -769,6 +769,10 @@ impl api::LibraryApi for LocalApi {
         }
     }
 
+    async fn listening_stats(&self, days: Option<u32>) -> Result<api::ListeningStats, ApiError> {
+        self.library()?.listening_stats(days).await
+    }
+
     async fn stats(&self) -> Result<api::StatsView, ApiError> {
         match &self.library {
             Some(library) => library.stats().await,

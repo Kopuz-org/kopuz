@@ -78,6 +78,7 @@ impl Library {
             .gap_4()
             .pb_4()
             .child(header)
+            .children(self.listening.clone())
             .children(stats)
             .children(sync)
             .children(playlist_sync)

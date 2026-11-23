@@ -754,6 +754,44 @@ impl api::LibraryApi for GrpcApi {
         Ok(convert::lyrics_from_proto(lyrics.get_ref()))
     }
 
+    async fn listening_stats(&self, days: Option<u32>) -> Result<api::ListeningStats, ApiError> {
+        let stats = self
+            .client()
+            .get_listening_stats(Request::new(proto::ListeningStatsRequest { days }))
+            .await
+            .map_err(wire_error)?
+            .into_inner();
+        let ranked = |ranked: proto::Ranked| api::Ranked {
+            name: ranked.name,
+            detail: ranked.detail,
+            plays: ranked.plays,
+        };
+        Ok(api::ListeningStats {
+            plays: stats.plays,
+            seconds: stats.seconds,
+            tracks: stats
+                .tracks
+                .into_iter()
+                .map(|track| api::RankedTrack {
+                    key: track.key,
+                    title: track.title,
+                    artist: track.artist,
+                    plays: track.plays,
+                })
+                .collect(),
+            artists: stats.artists.into_iter().map(ranked).collect(),
+            albums: stats.albums.into_iter().map(ranked).collect(),
+            days: stats
+                .days
+                .into_iter()
+                .map(|day| api::DayPlays {
+                    day: day.day,
+                    plays: day.plays,
+                })
+                .collect(),
+        })
+    }
+
     async fn stats(&self) -> Result<api::StatsView, ApiError> {
         let stats = self
             .client()

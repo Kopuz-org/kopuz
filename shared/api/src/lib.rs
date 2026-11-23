@@ -43,9 +43,10 @@ pub use jobs::{
 };
 pub use library::{
     AlbumInfo, AlbumPage, AlbumQuery, ArtistCredit, ArtistDetail, ArtistInfo, ArtistPage,
-    ArtistQuery, DEFAULT_PAGE_LIMIT, LyricChunkView, LyricLineView, LyricsView, Page,
-    SearchRequest, SearchResults, SearchSuggestion, StatsView, TrackCounterpart, TrackFilter,
-    TrackInfo, TrackPage, TrackSort, TrackVersion, total_duration_secs,
+    ArtistQuery, DEFAULT_PAGE_LIMIT, DayPlays, ListeningStats, LyricChunkView, LyricLineView,
+    LyricsView, Page, Ranked, RankedTrack, SearchRequest, SearchResults, SearchSuggestion,
+    StatsView, TrackCounterpart, TrackFilter, TrackInfo, TrackPage, TrackSort, TrackVersion,
+    total_duration_secs,
 };
 pub use mutations::{ArtworkChange, ArtworkUpload, TrackMetadataPatch};
 pub use player::{
@@ -313,6 +314,9 @@ pub trait LibraryApi: Send + Sync {
     async fn lyrics(&self, key: String) -> Result<LyricsView, ApiError>;
 
     async fn stats(&self) -> Result<StatsView, ApiError>;
+
+    /// The active source's listening over the last `days` days, or ever.
+    async fn listening_stats(&self, days: Option<u32>) -> Result<ListeningStats, ApiError>;
 
     async fn favorites(&self) -> Result<FavoritesView, ApiError>;
 
