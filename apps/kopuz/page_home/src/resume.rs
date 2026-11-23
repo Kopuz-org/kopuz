@@ -8,7 +8,7 @@ use store::{PlayerModel, QueueModel};
 /// The queue left behind, as the banner draws it.
 #[derive(Clone)]
 pub(crate) struct Resume {
-    track: TrackInfo,
+    pub(crate) track: TrackInfo,
     left: usize,
     playing: bool,
 }
