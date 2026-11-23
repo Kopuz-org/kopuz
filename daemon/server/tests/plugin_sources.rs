@@ -142,7 +142,7 @@ async fn the_subsonic_plugin_syncs_a_library_through_the_facade() {
 
     let caps = src.capabilities();
     assert!(caps.sync && caps.downloads && caps.play_queue);
-    assert!(caps.radio.track && !caps.radio.playlist);
+    assert!(caps.radio.track && caps.radio.playlist);
     assert_eq!(caps.playlists, PlaylistOps::Reorder);
     assert!(caps.ratings);
 
@@ -501,4 +501,56 @@ async fn a_playlist_delete_lands_on_the_server() {
         .collect();
     assert_eq!(deletes.len(), 1, "requests: {:?}", server.requests());
     assert!(deletes[0].contains("id=pl-1"), "{}", deletes[0]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn playlist_radio_plays_what_sounds_like_the_playlist() {
+    let song = |id: &str| serde_json::json!({ "id": id, "title": id });
+    let mut routes = subsonic_library();
+    routes.insert(
+        "/rest/getPlaylist.view",
+        subsonic_ok(serde_json::json!({
+            "playlist": { "id": "pl-1", "entry": [song("s-1"), song("s-2")] }
+        })),
+    );
+    routes.insert(
+        "/rest/getOpenSubsonicExtensions.view",
+        subsonic_ok(serde_json::json!({
+            "openSubsonicExtensions": [{ "name": "sonicSimilarity", "versions": [1] }]
+        })),
+    );
+    // Every seed hears the same neighbours, one of them already on the playlist.
+    routes.insert(
+        "/rest/getSonicSimilarTracks.view",
+        subsonic_ok(serde_json::json!({
+            "sonicMatch": [
+                { "entry": song("s-2"), "similarity": 0.9 },
+                { "entry": song("s-9"), "similarity": 0.8 },
+                { "entry": song("s-8"), "similarity": 0.7 }
+            ]
+        })),
+    );
+    let server = FakeServer::start(routes).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, &server.url);
+    let src = source::resolve(db.clone(), &sources, &active);
+
+    assert!(
+        src.capabilities().radio.playlist,
+        "playlist radio is offered"
+    );
+    let page = src.start_playlist_radio("pl-1").await.expect("a mix");
+
+    let keys: Vec<String> = page
+        .tracks
+        .iter()
+        .map(|t| t.id.key().into_owned())
+        .collect();
+    assert_eq!(keys, ["s-9", "s-8"], "new songs only, each once");
+    let asked = server
+        .requests()
+        .iter()
+        .filter(|r| r.starts_with("/rest/getSonicSimilarTracks.view"))
+        .count();
+    assert_eq!(asked, 2, "one sonic lookup per seed");
 }
