@@ -1182,7 +1182,6 @@ impl Render for Library {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .pb_8()
                     // A held value that answers the previous filters is dimmed, never blanked.
                     .when(dimmed, |body| body.opacity(0.55))
                     .child(body),
