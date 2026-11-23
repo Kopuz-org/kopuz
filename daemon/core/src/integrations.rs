@@ -731,6 +731,7 @@ fn project(
 const DISCORD: &str = "discord";
 const LISTENBRAINZ: &str = "listenbrainz";
 const LIBREFM: &str = "librefm";
+const AUDIOMUSE: &str = api::AUDIOMUSE_INTEGRATION;
 
 /// The field keys a form and its answers agree on.
 const PRESENCE: &str = "presence";
@@ -739,6 +740,7 @@ const PRESENCE_SOURCE: &str = "source";
 const UPLOAD_COVER: &str = "upload_cover";
 const LISTEN_BUTTON: &str = "listen_button";
 const TOKEN: &str = "token";
+const URL: &str = "url";
 
 fn toggle_field(key: &str, config_key: &str, value: bool) -> FieldSpec {
     FieldSpec {
@@ -840,6 +842,33 @@ fn librefm(credentials: &Credentials) -> IntegrationInfo {
     }
 }
 
+fn audiomuse(credentials: &Credentials) -> IntegrationInfo {
+    let url = FieldSpec {
+        key: URL.to_string(),
+        label: Text::key("audiomuse_url"),
+        placeholder: Some(Text::key("audiomuse_url_placeholder")),
+        kind: FieldKind::Url,
+        value: Some(credentials.audiomuse_url.clone()),
+        ..Default::default()
+    };
+    IntegrationInfo {
+        id: AUDIOMUSE.to_string(),
+        name: Text::key("audiomuse"),
+        icon: Icon::Class("fa-solid fa-wand-magic-sparkles".into()),
+        configured: !credentials.audiomuse_url.trim().is_empty()
+            && !credentials.audiomuse_token.trim().is_empty(),
+        connect: ConnectKind::None,
+        fields: vec![
+            url,
+            secret_field(
+                TOKEN,
+                Text::key("audiomuse_token"),
+                "audiomuse_token_placeholder",
+            ),
+        ],
+    }
+}
+
 /// What this build publishes, in the order a settings page lists it.
 fn all(config: &config::Settings, credentials: &Credentials, paused: bool) -> Vec<IntegrationInfo> {
     let mut published = Vec::new();
@@ -849,6 +878,7 @@ fn all(config: &config::Settings, credentials: &Credentials, paused: bool) -> Ve
     }
     published.push(listenbrainz(credentials));
     published.push(librefm(credentials));
+    published.push(audiomuse(credentials));
     published
 }
 
@@ -917,6 +947,10 @@ fn apply_credentials(id: &str, values: &[FieldValue], credentials: &mut Credenti
     if id == LISTENBRAINZ {
         set_secret(values, TOKEN, &mut credentials.musicbrainz_token);
     }
+    if id == AUDIOMUSE {
+        set_secret(values, URL, &mut credentials.audiomuse_url);
+        set_secret(values, TOKEN, &mut credentials.audiomuse_token);
+    }
 }
 
 /// Clearing drops more than an integration publishes: a session key is held but never rendered.
@@ -924,6 +958,10 @@ fn clear_credentials(id: &str, credentials: &mut Credentials) {
     match id {
         LISTENBRAINZ => credentials.musicbrainz_token.clear(),
         LIBREFM => credentials.librefm_session_key.clear(),
+        AUDIOMUSE => {
+            credentials.audiomuse_url.clear();
+            credentials.audiomuse_token.clear();
+        }
         _ => {}
     }
 }
@@ -1347,6 +1385,52 @@ mod tests {
                 .discord_presence_upload_cover,
             Some(true)
         );
+    }
+
+    #[tokio::test]
+    async fn audiomuse_is_configured_only_with_both_its_address_and_token() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let database = db::init(&dir.path().join("muse.db")).await.expect("db");
+        let config = Arc::new(crate::config_service::ConfigService::new(
+            database.clone(),
+            dir.path().join("settings.toml"),
+            config::Settings::default(),
+        ));
+        let credentials = CredentialStore::load(&database).await.expect("credentials");
+        let pause = PresencePause::load(&database).await.expect("pause");
+        let service = IntegrationService::new(config, credentials, pause);
+
+        let info = service
+            .set_settings(AUDIOMUSE, vec![answer(URL, "http://muse.example:8000")])
+            .await
+            .expect("address");
+        assert!(!info.configured);
+        let url = info
+            .fields
+            .iter()
+            .find(|field| field.key == URL)
+            .expect("url");
+        assert_eq!(url.value.as_deref(), Some("http://muse.example:8000"));
+
+        let info = service
+            .set_settings(AUDIOMUSE, vec![answer(TOKEN, "secret-token")])
+            .await
+            .expect("token");
+        assert!(info.configured);
+        let token = info
+            .fields
+            .iter()
+            .find(|field| field.key == TOKEN)
+            .expect("token");
+        assert_eq!(token.value, None, "a secret never comes back out");
+
+        service.clear(AUDIOMUSE).await.expect("clear");
+        let listed = service.list().await;
+        let info = listed
+            .iter()
+            .find(|info| info.id == AUDIOMUSE)
+            .expect("listed");
+        assert!(!info.configured);
     }
 
     #[tokio::test]

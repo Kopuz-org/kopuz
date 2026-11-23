@@ -60,14 +60,24 @@ pub enum QueueContext {
         from: String,
         to: String,
     },
+    /// Songs AudioMuse-AI finds for a free-text description of the sound.
+    Described {
+        query: String,
+    },
+    /// Songs AudioMuse-AI picks from the listening profile it holds.
+    Fingerprint,
 }
 
 impl QueueContext {
-    /// Whether a queue built from this one is "playing from" something: not a raw track list, a mix of tracks or a sonic path.
+    /// Whether a queue built from this one is "playing from" something: not a raw track list, a mix of tracks, a sonic path or an AudioMuse-AI pick.
     pub fn names_container(&self) -> bool {
         !matches!(
             self,
-            Self::Tracks { .. } | Self::MixRadio { .. } | Self::SonicPath { .. }
+            Self::Tracks { .. }
+                | Self::MixRadio { .. }
+                | Self::SonicPath { .. }
+                | Self::Described { .. }
+                | Self::Fingerprint
         )
     }
 }

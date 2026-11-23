@@ -187,6 +187,18 @@ pub fn start_sonic_path(from: String, to: String, cx: &mut App) {
     start_radio(QueueContext::SonicPath { from, to }, cx);
 }
 
+/// Queue what AudioMuse-AI finds for a description; gated by [`crate::AudioMuseModel::ready`].
+pub fn start_described(query: String, cx: &mut App) {
+    Notices::info(i18n::t("described_searching"), cx);
+    play_context(QueueContext::Described { query }, Some(0), cx);
+}
+
+/// Queue AudioMuse-AI's picks from the listening profile; gated by [`crate::AudioMuseModel::ready`].
+pub fn start_fingerprint(cx: &mut App) {
+    Notices::info(i18n::t("radio_starting"), cx);
+    play_context(QueueContext::Fingerprint, Some(0), cx);
+}
+
 fn start_radio(context: QueueContext, cx: &mut App) {
     let call = Link::global(cx).call(move |api| async move {
         api.set_queue(SetQueueRequest {

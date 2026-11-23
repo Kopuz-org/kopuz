@@ -219,6 +219,7 @@ impl Scrobbler {
         let Credentials {
             musicbrainz_token: token_mb,
             librefm_session_key,
+            ..
         } = credentials;
         let has_librefm = !librefm_session_key.is_empty();
         if has_librefm && !offline {

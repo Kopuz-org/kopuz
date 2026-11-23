@@ -125,7 +125,9 @@ impl QueueMaterializer for StubLibrary {
                     QueueContext::Filter { .. }
                     | QueueContext::Tracks { .. }
                     | QueueContext::MixRadio { .. }
-                    | QueueContext::SonicPath { .. } => "filter".into(),
+                    | QueueContext::SonicPath { .. }
+                    | QueueContext::Described { .. }
+                    | QueueContext::Fingerprint => "filter".into(),
                 };
                 // A container named "empty" has nothing in it.
                 if name == "empty" {

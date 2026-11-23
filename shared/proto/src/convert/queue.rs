@@ -49,6 +49,10 @@ pub fn queue_context_to_proto(value: &api::QueueContext) -> QueueContext {
                 to: to.clone(),
             })
         }
+        api::QueueContext::Described { query } => queue_context::Kind::Described(query.clone()),
+        api::QueueContext::Fingerprint => {
+            queue_context::Kind::Fingerprint(queue_context::Fingerprint {})
+        }
     };
     QueueContext { kind: Some(kind) }
 }
@@ -92,6 +96,10 @@ pub fn queue_context_from_proto(value: &QueueContext) -> Option<api::QueueContex
             from: path.from.clone(),
             to: path.to.clone(),
         },
+        queue_context::Kind::Described(query) => api::QueueContext::Described {
+            query: query.clone(),
+        },
+        queue_context::Kind::Fingerprint(_) => api::QueueContext::Fingerprint,
     })
 }
 
@@ -311,6 +319,10 @@ mod tests {
                 from: "a".into(),
                 to: "b".into(),
             },
+            api::QueueContext::Described {
+                query: "calm piano".into(),
+            },
+            api::QueueContext::Fingerprint,
         ];
         for context in contexts {
             let back = queue_context_from_proto(&queue_context_to_proto(&context));

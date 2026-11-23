@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use api::{
@@ -25,6 +25,7 @@ use crate::session::SessionHandle;
 use crate::sources::source_error;
 
 mod artist_info;
+mod audiomuse;
 
 /// Roughly a few pages of browsing; the oldest tiles fall out.
 const MAX_REMEMBERED_TILES: usize = 4096;
@@ -65,6 +66,7 @@ pub struct CatalogService {
     thumbnails: Mutex<Thumbnails>,
     for_you: ForYouMixes,
     discover: DiscoverPicks,
+    credentials: OnceLock<crate::CredentialStore>,
 }
 
 #[derive(Default)]
@@ -82,6 +84,7 @@ impl CatalogService {
             thumbnails: Mutex::new(Thumbnails::default()),
             for_you: Mutex::default(),
             discover: Mutex::default(),
+            credentials: OnceLock::new(),
         })
     }
 
@@ -1108,6 +1111,8 @@ pub trait CatalogQueue: Send + Sync {
     async fn artist_radio(&self, artist: &str) -> Result<RadioPage, ApiError>;
     async fn mix_radio(&self, keys: &[String]) -> Result<RadioPage, ApiError>;
     async fn sonic_path(&self, from_key: &str, to_key: &str) -> Result<RadioPage, ApiError>;
+    async fn described_radio(&self, query: &str) -> Result<RadioPage, ApiError>;
+    async fn fingerprint_radio(&self) -> Result<RadioPage, ApiError>;
     async fn more_radio(&self, cursor: &str) -> Result<RadioPage, ApiError>;
 }
 
@@ -1147,6 +1152,14 @@ impl CatalogQueue for CatalogService {
 
     async fn sonic_path(&self, from_key: &str, to_key: &str) -> Result<RadioPage, ApiError> {
         CatalogService::sonic_path(self, from_key, to_key).await
+    }
+
+    async fn described_radio(&self, query: &str) -> Result<RadioPage, ApiError> {
+        CatalogService::described_radio(self, query).await
+    }
+
+    async fn fingerprint_radio(&self) -> Result<RadioPage, ApiError> {
+        CatalogService::fingerprint_radio(self).await
     }
 
     async fn more_radio(&self, cursor: &str) -> Result<RadioPage, ApiError> {

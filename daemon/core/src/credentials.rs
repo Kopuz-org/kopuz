@@ -5,6 +5,8 @@ use std::sync::{Arc, PoisonError, RwLock};
 
 const MUSICBRAINZ_TOKEN: &str = "musicbrainz_token";
 const LIBREFM_SESSION_KEY: &str = "librefm_session_key";
+const AUDIOMUSE_URL: &str = "audiomuse_url";
+const AUDIOMUSE_TOKEN: &str = "audiomuse_token";
 
 /// Each value is empty while it is unset.
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -12,6 +14,8 @@ pub struct Credentials {
     /// The ListenBrainz user token.
     pub musicbrainz_token: String,
     pub librefm_session_key: String,
+    pub audiomuse_url: String,
+    pub audiomuse_token: String,
 }
 
 impl Credentials {
@@ -20,14 +24,18 @@ impl Credentials {
         Self {
             musicbrainz_token: take(MUSICBRAINZ_TOKEN),
             librefm_session_key: take(LIBREFM_SESSION_KEY),
+            audiomuse_url: take(AUDIOMUSE_URL),
+            audiomuse_token: take(AUDIOMUSE_TOKEN),
         }
     }
 
     /// Each value under the `integration_credentials` key it is stored by.
-    fn rows(&self) -> [(&'static str, &str); 2] {
+    fn rows(&self) -> [(&'static str, &str); 4] {
         [
             (MUSICBRAINZ_TOKEN, &self.musicbrainz_token),
             (LIBREFM_SESSION_KEY, &self.librefm_session_key),
+            (AUDIOMUSE_URL, &self.audiomuse_url),
+            (AUDIOMUSE_TOKEN, &self.audiomuse_token),
         ]
     }
 }

@@ -1338,6 +1338,28 @@ static COMMANDS: &[Command] = &[
         action: Some(|| Box::new(crate::keys::GoRadio)),
     },
     Command {
+        id: "audiomuse.describe",
+        labels: &["describe_music"],
+        label: |_, _| t("describe_music"),
+        icon: Some(icons::SEARCH),
+        group: Group::Playback,
+        section: Section::Hidden,
+        keys: NO_KEYS,
+        danger: false,
+        applies: NOTHING,
+        available: |_, cx| store::AudioMuseModel::ready(cx),
+        run: |_, window, cx| {
+            components::dialogs::open_rename(
+                t("describe_music"),
+                "",
+                actions::start_described,
+                window,
+                cx,
+            )
+        },
+        action: None,
+    },
+    Command {
         id: "downloads.add_url",
         labels: &["downloader_add_url"],
         label: |_, _| t("downloader_add_url"),

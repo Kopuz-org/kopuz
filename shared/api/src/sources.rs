@@ -332,6 +332,9 @@ pub struct BrowserProfile {
     pub name: String,
 }
 
+/// The id of the AudioMuse-AI integration; its `configured` flag is what a client gates sonic search on.
+pub const AUDIOMUSE_INTEGRATION: &str = "audiomuse";
+
 /// Something configured per account rather than per source: a scrobbler, a
 /// metadata service, a presence integration. Same shape as a service, so the
 /// same renderer draws it; the credentials are never in it.
