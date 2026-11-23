@@ -57,6 +57,10 @@ impl RenderOnce for SyncStatus {
         let syncing = progress.is_some();
         let done = progress.and_then(|job| job.current).unwrap_or(0) as usize;
         let total = self.total;
+        let expected = progress
+            .and_then(|job| job.total)
+            .filter(|expected| *expected > 0)
+            .map_or(total, |expected| expected as usize);
         // The page's own count stands in when the job does not say how many it expects.
         let fraction = progress.and_then(|job| {
             crate::job::fraction(job)
@@ -83,7 +87,10 @@ impl RenderOnce for SyncStatus {
                     .items_center()
                     .when(syncing, |row| {
                         row.child(Spinner::new().xsmall().color(cx.theme().primary_hover))
-                            .child(SharedString::from(format!("{label} {done} / {total}")))
+                            .child(SharedString::from(match expected {
+                                0 => format!("{label} {done}"),
+                                _ => format!("{label} {done} / {expected}"),
+                            }))
                     })
                     .when(!syncing && total > 0, |row| {
                         row.child(icons::icon(icons::CHECK).text_color(cx.theme().success))
