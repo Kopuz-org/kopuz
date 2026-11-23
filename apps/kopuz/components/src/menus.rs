@@ -145,13 +145,13 @@ pub fn pictured(menu: Option<Menu>, picture: Option<Picture>) -> Option<Menu> {
     Some(Rc::new(move |popup, window, cx| {
         let popup = menu(popup, window, cx);
         match picture.spot.under(window) {
-            true => picture_items(popup, &picture),
+            true => picture_items(popup, &picture, cx),
             false => popup,
         }
     }))
 }
 
-fn picture_items(popup: PopupMenu, picture: &Picture) -> PopupMenu {
+fn picture_items(popup: PopupMenu, picture: &Picture, cx: &App) -> PopupMenu {
     let (copy, save, of) = (
         picture.target.clone(),
         picture.target.clone(),
@@ -161,11 +161,13 @@ fn picture_items(popup: PopupMenu, picture: &Picture) -> PopupMenu {
         .separator()
         .item(
             menu_item(t("copy_image"), Some(icons::COPY))
-                .on_click(move |_, _, cx| store::copy_picture(copy.clone(), cx)),
+                .on_click(move |_, _, cx| store::copy_picture(copy.clone(), cx))
+                .build(cx),
         )
         .item(
             menu_item(t("save_image"), Some(icons::DOWNLOAD))
-                .on_click(move |_, _, cx| store::save_picture(save.clone(), of.clone(), cx)),
+                .on_click(move |_, _, cx| store::save_picture(save.clone(), of.clone(), cx))
+                .build(cx),
         )
 }
 
@@ -200,30 +202,31 @@ impl MenuItem {
     }
 }
 
-impl From<MenuItem> for PopupMenuItem {
-    fn from(item: MenuItem) -> Self {
+impl MenuItem {
+    /// The popup entry; a danger glyph sits in the menu's own icon column, so it lines up with the rest.
+    pub fn build(self, cx: &App) -> PopupMenuItem {
         let MenuItem {
             label,
             icon,
             danger,
             pick,
-        } = item;
-        let entry = if danger {
-            PopupMenuItem::element(move |_, cx| {
+        } = self;
+        let entry = match danger {
+            true => PopupMenuItem::element(move |_, cx| {
                 h_flex()
-                    .gap_2()
-                    .items_center()
                     .text_color(cx.theme().danger)
-                    .children(icon.map(crate::icons::icon))
                     .child(label.clone())
                     .into_any_element()
-            })
-        } else {
-            let entry = PopupMenuItem::new(label);
-            match icon {
-                Some(icon) => entry.icon(crate::icons::icon(icon)),
-                None => entry,
-            }
+            }),
+            false => PopupMenuItem::new(label),
+        };
+        let ink = danger.then(|| cx.theme().danger);
+        let entry = match icon {
+            Some(icon) => entry.icon(match ink {
+                Some(ink) => crate::icons::icon(icon).text_color(ink),
+                None => crate::icons::icon(icon),
+            }),
+            None => entry,
         };
         match pick {
             Some(pick) => entry.on_click(move |event, window, cx| pick(event, window, cx)),
