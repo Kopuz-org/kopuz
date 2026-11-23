@@ -325,7 +325,12 @@ impl Library {
                         false => this.sort().toggled(id),
                     }
                     .to_layout();
-                    this.write_facet(cx, move |facet| facet.sort = next);
+                    this.write_facet(cx, move |facet| {
+                        if facet.group_by.as_deref() != Some(next.field.as_str()) {
+                            facet.group_by = None;
+                        }
+                        facet.sort = next;
+                    });
                 }),
             )
             .reorder(cx.listener(|this, moved: &ColumnMove, _, cx| {
