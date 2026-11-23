@@ -58,6 +58,9 @@ const CHROME_GLYPH: Pixels = px(15.);
 const RAIL_TRAFFIC_LIGHTS: Pixels = px(28.);
 // `bg-black/40` and `border-white/5`: the chrome's own scrim, as the rail wore it.
 const SCRIM: f32 = 0.40;
+/// The palette field centred in the slim control bar, and the source switcher at its end.
+const SEARCH_IN_BAR: Pixels = px(360.);
+const SWITCHER_IN_BAR: Pixels = px(168.);
 /// `h-10`: the sectioned sidebar's own room for the window buttons.
 const SIDEBAR_TRAFFIC_LIGHTS: Pixels = px(40.);
 // A section heading's ink and the divider's, as fractions of the sidebar's text colour.
@@ -208,7 +211,7 @@ impl TopBar {
             && skin::arrangement().nav == Nav::Strip
     }
 
-    fn source_switcher(&self, collapsed: bool, cx: &App) -> Option<AnyElement> {
+    fn source_switcher(&self, cx: &App) -> Option<AnyElement> {
         let shown = ConfigModel::global(cx)
             .read(cx)
             .config()
@@ -218,12 +221,10 @@ impl TopBar {
             let sources = SourcesModel::global(cx).read(cx).sources().to_vec();
             let status = SourcesModel::global(cx).read(cx).active_status();
             div()
-                .when(!collapsed, |slot| slot.w_full())
-                .child(
-                    SourceSwitcher::new(sources, status)
-                        .collapsed(collapsed)
-                        .bare(true),
-                )
+                .w(SWITCHER_IN_BAR)
+                .flex_shrink_1()
+                .min_w_0()
+                .child(SourceSwitcher::new(sources, status).bare(true))
                 .into_any_element()
         })
     }
@@ -232,23 +233,21 @@ impl TopBar {
         let history = self.history(cx);
         let search = self.search(cx);
         let rail_shown = !store::layout(cx).nav.rail_hidden;
-        let switcher = (!rail_shown)
-            .then(|| self.source_switcher(true, cx))
-            .flatten();
+        let switcher = self.source_switcher(cx);
         let side = store::Chrome::global(cx).read(cx).panel().is_some();
         let settings = chrome_button("controls-settings", icons::SETTINGS, cx)
             .tooltip(commands::tooltip("app.settings", t("settings"), cx))
             .on_click(|_, _, cx| Navigator::navigate(Route::Settings { section: None }, cx));
-        h_flex()
-            .w_full()
-            .h(style::chrome().bar_height)
-            .flex_shrink_0()
-            .items_center()
-            .gap_1()
-            .px_2()
-            .bg(style::black(SCRIM, cx))
-            .border_b_1()
-            .border_color(style::white(style::BORDER_SOFT, cx))
+        let half = || {
+            h_flex()
+                .h_full()
+                .flex_1()
+                .flex_basis(px(0.))
+                .min_w_0()
+                .items_center()
+                .gap_1()
+        };
+        let start = half()
             .children(frame::traffic_lights(window, cx).map(|inset| {
                 frame::drag_region("controls-traffic-lights", window, cx)
                     .h_full()
@@ -275,11 +274,16 @@ impl TopBar {
                     }),
             )
             .child(
-                frame::drag_region("controls-drag", window, cx)
+                frame::drag_region("controls-drag-start", window, cx)
+                    .h_full()
+                    .flex_1(),
+            );
+        let end = half()
+            .child(
+                frame::drag_region("controls-drag-end", window, cx)
                     .h_full()
                     .flex_1(),
             )
-            .child(div().w(px(260.)).flex_shrink_1().min_w_0().child(search))
             .children(self.activity.clone())
             .children(offline::indicator(true, cx))
             .children(switcher)
@@ -293,7 +297,26 @@ impl TopBar {
                             chrome.toggle_panel(store::SidePanel::Queue, cx)
                         })
                     }),
+            );
+        h_flex()
+            .w_full()
+            .h(style::chrome().bar_height)
+            .flex_shrink_0()
+            .items_center()
+            .gap_2()
+            .px_2()
+            .bg(style::black(SCRIM, cx))
+            .border_b_1()
+            .border_color(style::white(style::BORDER_SOFT, cx))
+            .child(start)
+            .child(
+                div()
+                    .w(SEARCH_IN_BAR)
+                    .flex_shrink_1()
+                    .min_w_0()
+                    .child(search),
             )
+            .child(end)
             .into_any_element()
     }
 
@@ -533,9 +556,8 @@ impl Render for TopBar {
                 })
                 .child(strip)
                 .child(self.rail_room())
-                .map(|rail| match self.controls_on_top() {
-                    true => rail.children(self.source_switcher(false, cx)),
-                    false => rail.child(v_flex().w_full().gap_1().child(cluster)),
+                .when(!self.controls_on_top(), |rail| {
+                    rail.child(v_flex().w_full().gap_1().child(cluster))
                 })
                 .into_any_element(),
         }
@@ -655,7 +677,6 @@ impl TopBar {
             .into_any_element()
     }
 }
-
 /// One section's entries as a roving strip, lit on `lit` when it is one of them.
 fn entry_strip(id: &'static str, entries: Vec<&'static str>, lit: &'static str) -> TabStrip {
     let current = entries.contains(&lit).then_some(lit);
