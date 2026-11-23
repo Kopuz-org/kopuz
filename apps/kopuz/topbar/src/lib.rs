@@ -289,12 +289,17 @@ impl TopBar {
             .children(switcher)
             .child(settings)
             .child(
+                // Lit for any open panel, so a press then closes whichever is open, and says so.
                 chrome_button("controls-side-panel", icons::PANEL_RIGHT, cx)
-                    .tooltip(t("up_next"))
+                    .tooltip(match side {
+                        true => t("hide_side_panel"),
+                        false => t("up_next"),
+                    })
                     .when(side, |button| button.selected(true))
-                    .on_click(|_, _, cx| {
-                        store::Chrome::global(cx).update(cx, |chrome, cx| {
-                            chrome.toggle_panel(store::SidePanel::Queue, cx)
+                    .on_click(move |_, _, cx| {
+                        store::Chrome::global(cx).update(cx, |chrome, cx| match side {
+                            true => chrome.set_panel(None, cx),
+                            false => chrome.toggle_panel(store::SidePanel::Queue, cx),
                         })
                     }),
             );
