@@ -426,6 +426,7 @@ made_for_you = Voor jou gemaakt
 recently_added = Onlangs toegevoegd
 customize_home = Startpagina aanpassen
 customize_sidebar = Zijbalk aanpassen…
+artist_about = Over
 interface_sidebar = Zijbalk
 done_editing = Klaar
 reset_home = Resetten

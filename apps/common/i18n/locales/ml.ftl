@@ -430,6 +430,7 @@ made_for_you = നിങ്ങൾക്കായി നിർമ്മിച്�
 recently_added = അടുത്തിടെ ചേർത്തവ
 customize_home = ഹോം ഇഷ്ടാനുസൃതമാക്കുക
 customize_sidebar = സൈഡ്‌ബാർ ഇഷ്ടാനുസൃതമാക്കുക…
+artist_about = വിവരം
 interface_sidebar = സൈഡ്‌ബാർ
 done_editing = പൂർത്തിയായി
 reset_home = റീസെറ്റ്

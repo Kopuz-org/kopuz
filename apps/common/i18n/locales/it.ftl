@@ -370,6 +370,7 @@ made_for_you = Scelto per te
 recently_added = Aggiunti recentemente
 customize_home = Personalizza la home
 customize_sidebar = Personalizza la barra laterale…
+artist_about = Informazioni
 interface_sidebar = Barra laterale
 done_editing = Fatto
 reset_home = Reset

@@ -469,6 +469,7 @@ made_for_you = Făcut pentru tine
 recently_added = Adăugate recent
 customize_home = Personalizează pagina principală
 customize_sidebar = Personalizează bara laterală…
+artist_about = Despre
 interface_sidebar = Bara laterală
 done_editing = Gata
 reset_home = Resetează

@@ -478,6 +478,7 @@ made_for_you = Подобрано для вас
 recently_added = Недавно добавленные
 customize_home = Настроить главную
 customize_sidebar = Настроить боковую панель…
+artist_about = Об исполнителе
 interface_sidebar = Боковая панель
 done_editing = Готово
 reset_home = Сбросить

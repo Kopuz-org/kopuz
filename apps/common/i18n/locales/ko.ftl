@@ -429,6 +429,7 @@ made_for_you = 당신을 위해
 recently_added = 최근 추가됨
 customize_home = 홈 맞춤설정
 customize_sidebar = 사이드바 맞춤설정…
+artist_about = 정보
 interface_sidebar = 사이드바
 done_editing = 완료
 reset_home = 초기화

@@ -256,6 +256,8 @@ pub enum HeaderLayout {
     Column,
     /// The artwork behind the words, edge to edge.
     Banner,
+    /// A round portrait over its own blurred picture, the words beside it: an artist.
+    Portrait,
 }
 
 /// `w-80`: the column layout's width, a cover and a little air.
@@ -581,13 +583,16 @@ impl DetailHeader {
     }
 }
 
+/// Hard breaks would throw off the three-line clamp, and three lines show no paragraphs anyway.
 fn description(text: SharedString, cx: &App) -> impl IntoElement {
     div()
         .max_w(rems(48.))
         .text_sm()
         .line_clamp(3)
         .text_color(style::white(style::TEXT_SECONDARY, cx))
-        .child(text)
+        .child(SharedString::from(
+            text.split_whitespace().collect::<Vec<_>>().join(" "),
+        ))
 }
 
 impl RenderOnce for DetailHeader {
@@ -596,6 +601,7 @@ impl RenderOnce for DetailHeader {
             HeaderLayout::Row => self.row(cx),
             HeaderLayout::Column => self.column(cx),
             HeaderLayout::Banner => self.banner(cx),
+            HeaderLayout::Portrait => self.portrait(cx),
         }
     }
 }
@@ -630,3 +636,55 @@ pub fn detail_header_skeleton(size: Pixels, round: bool, cx: &App) -> impl IntoE
                 .child(bar(px(220.), px(12.))),
         )
 }
+
+impl DetailHeader {
+    fn portrait(mut self, cx: &mut App) -> AnyElement {
+        let facts = self.facts(true, Some(style::white(0.7, cx)));
+        div()
+            .w_full()
+            .child(
+                h_flex()
+                    .relative()
+                    .w_full()
+                    .items_end()
+                    .gap_8()
+                    .px_10()
+                    .pt_24()
+                    .pb_10()
+                    .child(
+                        Cover::new(self.artwork.as_ref())
+                            .size(PORTRAIT)
+                            .rounded(PORTRAIT / 2.)
+                            .hq(true),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_3()
+                            .children(self.eyebrow)
+                            .child(
+                                div()
+                                    .text_size(rems(3.))
+                                    .line_height(relative(TITLE_LEADING))
+                                    .font_weight(FontWeight::BLACK)
+                                    .child(self.title),
+                            )
+                            .children(facts)
+                            .when(!self.actions.is_empty(), |words| {
+                                words.child(
+                                    h_flex()
+                                        .mt_2()
+                                        .gap_3()
+                                        .items_center()
+                                        .children(self.actions),
+                                )
+                            }),
+                    ),
+            )
+            .into_any_element()
+    }
+}
+
+/// The portrait's diameter, and how far its picture behind is softened.
+const PORTRAIT: Pixels = px(176.);

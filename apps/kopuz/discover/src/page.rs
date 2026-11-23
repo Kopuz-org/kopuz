@@ -410,7 +410,7 @@ impl CatalogPage {
                 return PageHeader::new(title).into_any_element();
             }
             CatalogHeader::Detail => HeaderLayout::Row,
-            CatalogHeader::Artist => HeaderLayout::Banner,
+            CatalogHeader::Artist => HeaderLayout::Portrait,
         };
         let play = detail.playback_id.clone().map(|id| {
             DetailActions::new("catalog-page", Rc::<[String]>::from([]))

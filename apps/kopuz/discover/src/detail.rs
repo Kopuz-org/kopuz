@@ -6,14 +6,15 @@ use api::{CatalogDetail, CatalogDetailRequest, CatalogItemKind};
 use components::format::t;
 use components::{
     DetailActions, DetailHeader, EmptyState, HeaderLayout, Loading, Look, MenuButton, MenuVariant,
-    PageHeader, TrackActions, TrackList, TrackListEvent, TrackListOptions, icons, menus,
+    PageHeader, SectionHeading, TrackActions, TrackList, TrackListEvent, TrackListOptions, icons,
+    menus, style,
 };
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
-    Styled, Subscription, Task, Window, div,
+    Styled, Subscription, Task, Window, div, relative, rems,
 };
 use store::{Link, PlayerModel, Target, actions};
 
@@ -236,35 +237,41 @@ impl CatalogArtist {
         let shuffle = detail.shuffle_radio.clone();
         let mix = detail.mix_radio.clone();
         let legacy = detail.playback_id.clone().filter(|_| shuffle.is_none());
-        let bar = (shuffle.is_some() || mix.is_some() || legacy.is_some()).then(|| {
-            let mut bar =
-                DetailActions::new("catalog-artist", Rc::<[String]>::from([])).look(Look::Banner);
-            if let Some(id) = shuffle {
-                bar =
-                    bar.shuffle_with(move |_, _, cx| actions::start_playlist_radio(id.clone(), cx));
-            }
-            if let Some(id) = legacy {
-                bar = bar.shuffle_with(cx.listener(move |this, _, _, cx| {
-                    let id = id.clone();
-                    this.shelves.update(cx, |shelves, cx| {
-                        shelves.play(CatalogItemKind::Playlist, id, cx)
+        let top = top_songs(detail);
+        let bar = (!top.is_empty() || shuffle.is_some() || mix.is_some() || legacy.is_some()).then(
+            || {
+                let mut bar = DetailActions::new("catalog-artist", Rc::<[String]>::from([]))
+                    .look(Look::Banner);
+                if !top.is_empty() {
+                    bar = bar.play_with(move |_, _, cx| actions::play_listing(top.clone(), 0, cx));
+                }
+                if let Some(id) = shuffle {
+                    bar = bar.shuffle_with(move |_, _, cx| {
+                        actions::start_playlist_radio(id.clone(), cx)
                     });
-                }));
-            }
-            if let Some(id) = mix {
-                bar = bar.radio(move |_, _, cx| actions::start_playlist_radio(id.clone(), cx));
-            }
-            bar
-        });
+                }
+                if let Some(id) = legacy {
+                    bar = bar.shuffle_with(cx.listener(move |this, _, _, cx| {
+                        let id = id.clone();
+                        this.shelves.update(cx, |shelves, cx| {
+                            shelves.play(CatalogItemKind::Playlist, id, cx)
+                        });
+                    }));
+                }
+                if let Some(id) = mix {
+                    bar = bar.radio(move |_, _, cx| actions::start_playlist_radio(id.clone(), cx));
+                }
+                bar
+            },
+        );
         let menu =
             Some(Target::catalog_page(detail)).filter(|target| commands::has_menu(target, cx));
         DetailHeader::new(detail.title.clone())
-            .layout(HeaderLayout::Banner)
+            .layout(HeaderLayout::Portrait)
             .artwork(detail.artwork.as_ref())
             .when_some(detail.subtitle.clone(), |header, subtitle| {
                 header.meta(subtitle)
             })
-            .description(detail.description.clone())
             .when_some(bar, |header, bar| header.action(bar))
             .when_some(menu, |header, target| {
                 header.action(
@@ -281,6 +288,12 @@ impl Render for CatalogArtist {
         let _timing = profile::render("catalog-artist");
         components::scroll::smooth("catalog-artist-scroll", &self.scroll, window, cx);
         let banner = self.detail.clone().map(|detail| self.banner(&detail, cx));
+        let about = self
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.description.clone())
+            .filter(|text| !text.trim().is_empty())
+            .map(|text| about(text, cx));
         div()
             .id("catalog-artist")
             .size_full()
@@ -304,8 +317,50 @@ impl Render for CatalogArtist {
                         ))
                     })
                     .children(banner)
-                    .child(self.shelves.clone()),
+                    .child(self.shelves.clone())
+                    .children(about),
             )
             .into_any_element()
     }
+}
+
+/// The artist's top songs, from its first shelf of nothing but tracks, for the banner's Play.
+fn top_songs(detail: &CatalogDetail) -> Vec<String> {
+    detail
+        .shelves
+        .iter()
+        .find(|shelf| {
+            !shelf.items.is_empty() && shelf.items.iter().all(|item| item.track.is_some())
+        })
+        .map(|shelf| {
+            shelf
+                .items
+                .iter()
+                .filter_map(|item| item.track.as_ref().map(|track| track.key.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The source's biography, given room of its own at the foot of the page rather than clipped in the banner.
+fn about(text: String, cx: &App) -> AnyElement {
+    v_flex()
+        .w_full()
+        .gap_4()
+        .child(SectionHeading::new(t("artist_about")))
+        .child(
+            div()
+                .w_full()
+                .max_w(rems(56.))
+                .p_6()
+                .rounded(style::radius_xl())
+                .bg(style::white(style::RAISED, cx))
+                .border_1()
+                .border_color(style::white(style::BORDER_SOFT, cx))
+                .text_sm()
+                .line_height(relative(1.7))
+                .text_color(style::white(style::TEXT_SECONDARY, cx))
+                .child(SharedString::from(text.trim().to_string())),
+        )
+        .into_any_element()
 }
