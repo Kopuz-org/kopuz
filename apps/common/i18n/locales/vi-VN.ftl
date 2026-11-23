@@ -284,6 +284,7 @@ artist_not_found = Artist not found
 artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = Không tìm thấy danh sách phát
 no_playlists_found = Không tìm thấy danh sách phát
+playlist_folder_missing = This folder no longer exists.
 no_playlists_yet = Chưa có danh sách phát. Hãy thêm bài hát từ thư viện của bạn!
 add_music_to_get_started = Thêm nhạc để bắt đầu
 

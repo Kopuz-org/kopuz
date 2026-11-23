@@ -238,6 +238,7 @@ artist_not_found = Artist not found
 artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = Η λίστα αναπαραγωγής δεν βρέθηκε
 no_playlists_found = Δεν βρέθηκαν λίστες αναπαραγωγής
+playlist_folder_missing = This folder no longer exists.
 no_playlists_yet = Δεν υπάρχουν ακόμα λίστες αναπαραγωγής. Προσθέστε τραγούδια στη βιβλιοθήκη σας!
 add_music_to_get_started = Προσθέστε μουσική για να ξεκινήσετε
 

@@ -308,6 +308,7 @@ artist_not_found = Artist not found
 artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = பிளேலிஸ்ட் கண்டுபிடிக்கப்படவில்லை
 no_playlists_found = பிளேலிஸ்ட்கள் எதுவும் கண்டுபிடிக்கப்படவில்லை
+playlist_folder_missing = This folder no longer exists.
 no_playlists_yet = இன்னும் பிளேலிஸ்ட்கள் இல்லை. உங்கள் நூலகத்திலிருந்து பாடல்களைச் சேர்க்கவும்!
 add_music_to_get_started = தொடங்க இசையைச் சேர்
 

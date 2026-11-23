@@ -243,6 +243,7 @@ artist_not_found = Artist not found
 artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = Lista de redare nu a fost găsită
 no_playlists_found = Nu au fost găsite liste de redare
+playlist_folder_missing = This folder no longer exists.
 no_playlists_yet = Încă nu ai liste de redare. Adaugă piese din biblioteca ta!
 add_music_to_get_started = Adaugă muzică pentru a începe
 

@@ -304,6 +304,7 @@ artist_not_found = Artist not found
 artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = Spellistan hittades inte
 no_playlists_found = Inga spellistor hittades
+playlist_folder_missing = This folder no longer exists.
 no_playlists_yet = Inga spellistor ännu. Lägg till låtar från ditt bibliotek.
 add_music_to_get_started = Lägg till musik för att komma igång
 

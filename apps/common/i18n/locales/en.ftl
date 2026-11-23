@@ -330,6 +330,7 @@ artist_not_found = Artist not found
 artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = Playlist not found
 no_playlists_found = No playlists found
+playlist_folder_missing = This folder no longer exists.
 no_playlists_yet = No playlists yet. Add songs from your library.
 add_music_to_get_started = Add music to get started
 

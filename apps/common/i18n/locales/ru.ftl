@@ -249,6 +249,7 @@ artist_not_found = Исполнитель не найден
 artist_load_failed = Не удалось загрузить исполнителя: { $error }
 playlist_not_found = Плейлист не найден
 no_playlists_found = Плейлисты не найдены
+playlist_folder_missing = This folder no longer exists.
 no_playlists_yet = Пока нет плейлистов. Добавьте песни из вашей библиотеки!
 add_music_to_get_started = Добавьте музыку, чтобы начать
 

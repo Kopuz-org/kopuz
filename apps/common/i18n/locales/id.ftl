@@ -284,6 +284,7 @@ artist_not_found = Artist not found
 artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = Daftar putar tidak ditemukan
 no_playlists_found = Tidak ada daftar putar ditemukan
+playlist_folder_missing = This folder no longer exists.
 no_playlists_yet = Tidak ada daftar putar. Tambahkan lagu dari pustaka anda!
 add_music_to_get_started = Tambahkan musik untuk memulai
 

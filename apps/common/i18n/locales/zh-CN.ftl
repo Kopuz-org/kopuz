@@ -218,6 +218,7 @@ artist_not_found = Artist not found
 artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = 未找到播放列表
 no_playlists_found = 未找到播放列表
+playlist_folder_missing = This folder no longer exists.
 no_playlists_yet = 还没有播放列表。请从媒体库添加歌曲！
 add_music_to_get_started = 添加音乐以开始使用
 

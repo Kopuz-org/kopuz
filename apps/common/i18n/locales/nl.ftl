@@ -304,6 +304,7 @@ artist_not_found = Artist not found
 artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = Afspeellijst niet gevonden
 no_playlists_found = Geen afspeellijsten gevonden
+playlist_folder_missing = This folder no longer exists.
 no_playlists_yet = Nog geen afspeellijsten. Voeg nummers toe vanuit je bibliotheek!
 add_music_to_get_started = Voeg muziek toe om te beginnen
 
