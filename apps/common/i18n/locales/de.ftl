@@ -436,6 +436,7 @@ music = Musik
 made_for_you = Für dich gemacht
 recently_added = Kürzlich hinzugefügt
 customize_home = Startseite anpassen
+customize_sidebar = Seitenleiste anpassen…
 done_editing = Fertig
 reset_home = Zurücksetzen
 hide_section = Ausblenden

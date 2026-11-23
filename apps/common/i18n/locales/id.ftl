@@ -393,6 +393,7 @@ music = Musik
 made_for_you = Dibuat Untuk Anda
 recently_added = Baru saja Ditambahkan
 customize_home = Kustomisasikan Beranda
+customize_sidebar = Kustomisasikan bilah sisi…
 done_editing = Selesai
 reset_home = Reset
 hide_section = Sembunyikan

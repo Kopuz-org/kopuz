@@ -393,6 +393,7 @@ music = Nhạc
 made_for_you = Dành cho bạn
 recently_added = Mới thêm gần đây
 customize_home = Tùy chỉnh Trang chủ
+customize_sidebar = Tùy chỉnh thanh bên…
 done_editing = Xong
 reset_home = Đặt lại
 hide_section = Ẩn

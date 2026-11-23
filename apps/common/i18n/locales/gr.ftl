@@ -460,6 +460,7 @@ music = Μουσική
 made_for_you = Φτιαγμένο για σένα
 recently_added = Προστέθηκαν πρόσφατα
 customize_home = Προσαρμογή αρχικής
+customize_sidebar = Προσαρμογή πλαϊνής στήλης…
 done_editing = Τέλος
 reset_home = Επαναφορά
 hide_section = Απόκρυψη

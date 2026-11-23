@@ -369,6 +369,7 @@ music = Musica
 made_for_you = Scelto per te
 recently_added = Aggiunti recentemente
 customize_home = Personalizza la home
+customize_sidebar = Personalizza la barra laterale…
 done_editing = Fatto
 reset_home = Reset
 hide_section = Nascondi

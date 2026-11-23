@@ -434,6 +434,7 @@ music = 音楽
 made_for_you = あなたのために
 recently_added = 最近追加
 customize_home = ホームをカスタマイズ
+customize_sidebar = サイドバーをカスタマイズ…
 done_editing = 完了
 reset_home = リセット
 hide_section = 非表示

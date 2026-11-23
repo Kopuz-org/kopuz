@@ -393,6 +393,7 @@ music = Musika
 made_for_you = Ginawa Para Sa Iyo
 recently_added = Kamakailang Idinagdag
 customize_home = I-customize ang Home
+customize_sidebar = I-customize ang sidebar…
 done_editing = Tapos na
 reset_home = I-reset
 hide_section = Itago

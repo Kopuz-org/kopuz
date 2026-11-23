@@ -476,6 +476,7 @@ music = Muzyka
 made_for_you = Stworzone dla Ciebie
 recently_added = Ostatnio dodane
 customize_home = Dostosuj stronę główną
+customize_sidebar = Dostosuj pasek boczny…
 done_editing = Gotowe
 reset_home = Zresetuj
 hide_section = Ukryj

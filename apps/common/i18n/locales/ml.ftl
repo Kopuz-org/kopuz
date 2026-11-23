@@ -429,6 +429,7 @@ music = സംഗീതം
 made_for_you = നിങ്ങൾക്കായി നിർമ്മിച്ചത്
 recently_added = അടുത്തിടെ ചേർത്തവ
 customize_home = ഹോം ഇഷ്ടാനുസൃതമാക്കുക
+customize_sidebar = സൈഡ്‌ബാർ ഇഷ്ടാനുസൃതമാക്കുക…
 done_editing = പൂർത്തിയായി
 reset_home = റീസെറ്റ്
 hide_section = മറയ്ക്കുക

@@ -425,6 +425,7 @@ music = Muziek
 made_for_you = Voor jou gemaakt
 recently_added = Onlangs toegevoegd
 customize_home = Startpagina aanpassen
+customize_sidebar = Zijbalk aanpassen…
 done_editing = Klaar
 reset_home = Resetten
 hide_section = Verbergen

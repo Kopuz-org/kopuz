@@ -477,6 +477,7 @@ music = Музыка
 made_for_you = Подобрано для вас
 recently_added = Недавно добавленные
 customize_home = Настроить главную
+customize_sidebar = Настроить боковую панель…
 done_editing = Готово
 reset_home = Сбросить
 hide_section = Скрыть

@@ -428,6 +428,7 @@ music = Müzik
 made_for_you = Sana özel
 recently_added = Son eklenenler
 customize_home = Ana sayfayı özelleştir
+customize_sidebar = Kenar çubuğunu özelleştir…
 done_editing = Tamam
 reset_home = Sıfırla
 hide_section = Gizle
