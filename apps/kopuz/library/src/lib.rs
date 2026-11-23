@@ -1083,7 +1083,12 @@ impl Library {
     pub(crate) fn jump_to(&self, index: usize) {
         let band = match self.filters.facet.is_grid() && self.mode == ViewMode::Grid {
             true => index / self.grid.columns(),
-            false => index,
+            // Grouped, the table draws a heading line before each group, so a row sits further down.
+            false => self
+                .lines
+                .iter()
+                .position(|line| matches!(line, Line::Track(at) if *at == index))
+                .unwrap_or(index),
         };
         self.scroll.scroll_to_item(band, ScrollStrategy::Top);
     }
