@@ -52,8 +52,7 @@ impl Render for PlayerSettings {
             .child(
                 section(t("interface_player"))
                     .children(
-                        // TODO(i18n): no "player bar size" key yet; the section's own "Player bar" names it.
-                        SettingRow::new(t("interface_player"))
+                        SettingRow::new(t("interface_player_size"))
                             .control(choice(
                                 "player-size",
                                 &player.size,
@@ -319,8 +318,7 @@ impl Render for SheetSettings {
                     )
                     .children(
                         SettingRow::new(t("interface_player_cover"))
-                            // TODO(i18n): no key describes the sheet's cover size, nor names an extra-large step.
-                            .description("How large the cover is drawn in the now-playing sheet.")
+                            .description(t("interface_sheet_cover_description"))
                             .control(choice(
                                 "sheet-cover",
                                 &sheet.cover,
@@ -328,7 +326,10 @@ impl Render for SheetSettings {
                                     (HeroSize::Small, t("interface_player_cover_small")),
                                     (HeroSize::Medium, t("interface_player_cover_medium")),
                                     (HeroSize::Large, t("interface_player_cover_large")),
-                                    (HeroSize::ExtraLarge, "Extra large".into()),
+                                    (
+                                        HeroSize::ExtraLarge,
+                                        t("interface_player_cover_extra_large"),
+                                    ),
                                 ],
                                 |value, cx| {
                                     LayoutModel::edit(cx, |layout| layout.sheet.cover = value)

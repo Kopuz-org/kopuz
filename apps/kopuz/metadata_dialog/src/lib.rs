@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use api::{ArtworkChange, TrackInfo, TrackMetadataPatch};
 use components::dialogs::{DialogSize, FormDialog, FormFooter};
-use components::format::{duration, t};
+use components::format::{duration, t, t_with};
 use components::{
     EditableCover, FactList, LabeledInput, Loading, TagFieldGrid, icons, motion, style,
 };
@@ -337,18 +337,29 @@ impl MetadataDialog {
         if let Some(secs) = track.duration_secs().filter(|secs| *secs > 0) {
             facts = facts.row(t("duration"), duration(secs * 1000).to_string());
         }
-        // TODO(i18n): the units are the literals the Dioxus app printed.
         if track.khz > 0 {
             facts = facts.row(
                 t("sample_rate"),
-                format!("{:.1} kHz", f64::from(track.khz) / 1000.0),
+                t_with(
+                    "sample_rate_khz",
+                    &[(
+                        "khz",
+                        format!("{:.1}", f64::from(track.khz) / 1000.0).into(),
+                    )],
+                ),
             );
         }
         if track.bit_depth > 0 {
-            facts = facts.row(t("bit_depth"), format!("{}-bit", track.bit_depth));
+            facts = facts.row(
+                t("bit_depth"),
+                t_with("bit_depth_bits", &[("bits", track.bit_depth.into())]),
+            );
         }
         if track.bitrate > 0 {
-            facts = facts.row(t("bitrate"), format!("{} kbps", track.bitrate));
+            facts = facts.row(
+                t("bitrate"),
+                t_with("bitrate_kbps", &[("kbps", track.bitrate.into())]),
+            );
         }
         let ids = [
             (t("musicbrainz_release"), &track.musicbrainz_release_id),
