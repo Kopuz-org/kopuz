@@ -114,12 +114,18 @@ impl QueueMaterializer for StubLibrary {
                 let name = match container {
                     QueueContext::Album { id }
                     | QueueContext::Playlist { id }
-                    | QueueContext::PlaylistRadio { id } => id.clone(),
-                    QueueContext::Artist { artist } => artist.clone(),
+                    | QueueContext::PlaylistRadio { id }
+                    | QueueContext::AlbumRadio { id } => id.clone(),
+                    QueueContext::Artist { artist } | QueueContext::ArtistRadio { artist } => {
+                        artist.clone()
+                    }
                     QueueContext::Genre { name } => name.clone(),
                     QueueContext::Radio { station_id, .. } => station_id.clone(),
                     QueueContext::TrackRadio { key } => key.clone(),
-                    QueueContext::Filter { .. } | QueueContext::Tracks { .. } => "filter".into(),
+                    QueueContext::Filter { .. }
+                    | QueueContext::Tracks { .. }
+                    | QueueContext::MixRadio { .. }
+                    | QueueContext::SonicPath { .. } => "filter".into(),
                 };
                 // A container named "empty" has nothing in it.
                 if name == "empty" {

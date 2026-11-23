@@ -209,6 +209,45 @@ static COMMANDS: &[Command] = &[
         action: None,
     },
     Command {
+        id: "track.sonic_start",
+        labels: &["sonic_path_start"],
+        label: |_, _| t("sonic_path_start"),
+        icon: Some(icons::RADIO),
+        group: Group::Playback,
+        section: Section::Act,
+        keys: NO_KEYS,
+        danger: false,
+        applies: TRACKS,
+        available: |target, cx| one_track(target, cx) && ops::caps(cx).sonic_path,
+        run: |target, _, cx| {
+            if let Some(key) = ops::first_key(&target) {
+                actions::mark_sonic_path_start(key, cx);
+            }
+        },
+        action: None,
+    },
+    Command {
+        id: "track.sonic_end",
+        labels: &["sonic_path_end"],
+        label: |_, _| t("sonic_path_end"),
+        icon: Some(icons::RADIO),
+        group: Group::Playback,
+        section: Section::Act,
+        keys: NO_KEYS,
+        danger: false,
+        applies: TRACKS,
+        available: |target, cx| {
+            let marked = store::SonicPathStart::global(cx).read(cx).from().is_some();
+            marked && one_track(target, cx) && ops::caps(cx).sonic_path
+        },
+        run: |target, _, cx| {
+            if let Some(key) = ops::first_key(&target) {
+                actions::finish_sonic_path(key, cx);
+            }
+        },
+        action: None,
+    },
+    Command {
         id: "track.download",
         labels: &["download_offline", "remove_download"],
         label: |target, cx| match ops::all_stored(&ops::track_keys(target), cx) {
@@ -520,6 +559,24 @@ static COMMANDS: &[Command] = &[
         action: None,
     },
     Command {
+        id: "album.radio",
+        labels: &["start_radio"],
+        label: |_, _| t("start_radio"),
+        icon: Some(icons::RADIO),
+        group: Group::Playback,
+        section: Section::Act,
+        keys: NO_KEYS,
+        danger: false,
+        applies: ALBUM,
+        available: |_, cx| ops::caps(cx).album_radio,
+        run: |target, _, cx| {
+            if let Some(id) = ops::album_id(&target) {
+                actions::start_album_radio(id, cx);
+            }
+        },
+        action: None,
+    },
+    Command {
         id: "album.add_to_queue",
         labels: &["add_all_to_queue"],
         label: |_, _| t("add_all_to_queue"),
@@ -636,6 +693,24 @@ static COMMANDS: &[Command] = &[
         applies: ARTIST,
         available: yes,
         run: |target, _, cx| ops::play_artist(&target, cx),
+        action: None,
+    },
+    Command {
+        id: "artist.radio",
+        labels: &["start_radio"],
+        label: |_, _| t("start_radio"),
+        icon: Some(icons::RADIO),
+        group: Group::Playback,
+        section: Section::Act,
+        keys: NO_KEYS,
+        danger: false,
+        applies: ARTIST,
+        available: |_, cx| ops::caps(cx).artist_radio,
+        run: |target, _, cx| {
+            if let Target::Artist { key, .. } = target {
+                actions::start_artist_radio(key, cx);
+            }
+        },
         action: None,
     },
     Command {
@@ -902,6 +977,22 @@ static COMMANDS: &[Command] = &[
         action: None,
     },
     // The app itself: no target, driven by key or palette.
+    Command {
+        id: "queue.mix",
+        labels: &["mix_from_queue"],
+        label: |_, _| t("mix_from_queue"),
+        icon: Some(icons::RADIO),
+        group: Group::Queue,
+        section: Section::Hidden,
+        keys: NO_KEYS,
+        danger: false,
+        applies: NOTHING,
+        available: |_, cx| {
+            ops::caps(cx).mix_radio && !store::QueueModel::global(cx).read(cx).is_empty()
+        },
+        run: |_, _, cx| actions::start_queue_mix(cx),
+        action: None,
+    },
     Command {
         id: "player.toggle",
         labels: &["play_pause"],

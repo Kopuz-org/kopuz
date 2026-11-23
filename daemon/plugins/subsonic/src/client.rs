@@ -2,7 +2,7 @@ use std::cell::OnceCell;
 use std::time::Duration;
 
 use kopuz_plugin_sdk::http::{self, Client};
-use kopuz_plugin_sdk::{ReplayGain, SourceError};
+use kopuz_plugin_sdk::{MixBasis, ReplayGain, SourceError};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
@@ -158,6 +158,13 @@ pub struct SubsonicPlaylist {
     pub cover_art: Option<String>,
 }
 
+/// Songs like a seed, and which kind of lookup found them.
+pub struct Similar {
+    pub songs: Vec<SubsonicSong>,
+    /// None when the server has no analysis-backed similarity to compare with.
+    pub basis: Option<MixBasis>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubsonicArtist {
@@ -210,6 +217,20 @@ struct GetAlbumList2Data {
 struct AlbumSongsContainer {
     #[serde(default)]
     song: Vec<SubsonicSong>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ArtistAlbumsContainer {
+    #[serde(default)]
+    album: Vec<SubsonicAlbum>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetArtistData {
+    #[serde(default)]
+    artist: Option<ArtistAlbumsContainer>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -427,21 +448,60 @@ impl SubsonicClient {
     /// library, which is both better matched and far quicker than the
     /// metadata-agent route. Everything else falls back to plain
     /// `getSimilarSongs`, which every Subsonic server since API 1.11.0 exposes.
-    pub fn get_similar_songs(
+    /// The basis is none on a server without the extension, so no hint shows there.
+    pub fn get_similar_songs(&self, song_id: &str, count: usize) -> Result<Similar, SourceError> {
+        if !self.has_sonic_similarity() {
+            let songs = self.get_similar_songs_by_metadata(song_id, count)?;
+            return Ok(Similar { songs, basis: None });
+        }
+
+        match self.get_sonic_similar_tracks(song_id, count) {
+            Ok(songs) if !songs.is_empty() => {
+                return Ok(Similar {
+                    songs,
+                    basis: Some(MixBasis::Sonic),
+                });
+            }
+            Ok(_) => kopuz_plugin_sdk::debug!("sonic similarity returned nothing for {song_id}"),
+            Err(e) => kopuz_plugin_sdk::warn!("sonic similarity failed for {song_id}: {e}"),
+        }
+        let songs = self.get_similar_songs_by_metadata(song_id, count)?;
+        Ok(Similar {
+            songs,
+            basis: Some(MixBasis::Metadata),
+        })
+    }
+
+    /// OpenSubsonic `findSonicPath`: songs that step from one song to another, both included.
+    pub fn find_sonic_path(
         &self,
-        song_id: &str,
+        from_id: &str,
+        to_id: &str,
         count: usize,
     ) -> Result<Vec<SubsonicSong>, SourceError> {
-        if self.has_sonic_similarity() {
-            match self.get_sonic_similar_tracks(song_id, count) {
-                Ok(songs) if !songs.is_empty() => return Ok(songs),
-                Ok(_) => {
-                    kopuz_plugin_sdk::debug!("sonic similarity returned nothing for {song_id}")
-                }
-                Err(e) => kopuz_plugin_sdk::warn!("sonic similarity failed for {song_id}: {e}"),
-            }
+        if !self.has_sonic_similarity() {
+            return Err(SourceError::unsupported("sonic path"));
         }
-        self.get_similar_songs_by_metadata(song_id, count)
+
+        let data = self.call_within::<GetSonicSimilarTracksData>(
+            "findSonicPath.view",
+            vec![
+                ("startSongId".to_string(), from_id.to_string()),
+                ("endSongId".to_string(), to_id.to_string()),
+                ("count".to_string(), count.to_string()),
+            ],
+            SIMILAR_SONGS_TIMEOUT,
+        )?;
+        Ok(data.sonic_match.into_iter().map(|m| m.entry).collect())
+    }
+
+    /// An artist's albums, as `getArtist` lists them.
+    pub fn get_artist_albums(&self, artist_id: &str) -> Result<Vec<SubsonicAlbum>, SourceError> {
+        let data = self.call::<GetArtistData>(
+            "getArtist.view",
+            vec![("id".to_string(), artist_id.to_string())],
+        )?;
+        Ok(data.artist.map(|a| a.album).unwrap_or_default())
     }
 
     /// Whether the server advertises [`SONIC_SIMILARITY_EXTENSION`]. Probed once

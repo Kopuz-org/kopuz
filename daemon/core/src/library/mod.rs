@@ -810,9 +810,12 @@ impl QueueMaterializer for LibraryService {
                 }
                 Ok(vec![self.radio_track(station_id, stream_id)])
             }
-            QueueContext::TrackRadio { .. } | QueueContext::PlaylistRadio { .. } => {
-                Ok(self.materialize_queue(context).await?.tracks)
-            }
+            QueueContext::TrackRadio { .. }
+            | QueueContext::PlaylistRadio { .. }
+            | QueueContext::AlbumRadio { .. }
+            | QueueContext::ArtistRadio { .. }
+            | QueueContext::MixRadio { .. }
+            | QueueContext::SonicPath { .. } => Ok(self.materialize_queue(context).await?.tracks),
         }
     }
 
@@ -820,6 +823,14 @@ impl QueueMaterializer for LibraryService {
         match context {
             QueueContext::TrackRadio { key } => self.catalog_service()?.track_radio(key).await,
             QueueContext::PlaylistRadio { id } => self.catalog_service()?.playlist_radio(id).await,
+            QueueContext::AlbumRadio { id } => self.catalog_service()?.album_radio(id).await,
+            QueueContext::ArtistRadio { artist } => {
+                self.catalog_service()?.artist_radio(artist).await
+            }
+            QueueContext::MixRadio { keys } => self.catalog_service()?.mix_radio(keys).await,
+            QueueContext::SonicPath { from, to } => {
+                self.catalog_service()?.sonic_path(from, to).await
+            }
             _ => Ok(RadioPage::last(self.materialize(context).await?)),
         }
     }
@@ -1337,6 +1348,22 @@ mod tests {
 
         async fn playlist_radio(&self, _id: &str) -> Result<RadioPage, ApiError> {
             Err(ApiError::unsupported("radio"))
+        }
+
+        async fn album_radio(&self, _id: &str) -> Result<RadioPage, ApiError> {
+            Err(ApiError::unsupported("radio"))
+        }
+
+        async fn artist_radio(&self, _artist: &str) -> Result<RadioPage, ApiError> {
+            Err(ApiError::unsupported("radio"))
+        }
+
+        async fn mix_radio(&self, _keys: &[String]) -> Result<RadioPage, ApiError> {
+            Err(ApiError::unsupported("radio"))
+        }
+
+        async fn sonic_path(&self, _from: &str, _to: &str) -> Result<RadioPage, ApiError> {
+            Err(ApiError::unsupported("sonic path"))
         }
 
         async fn more_radio(&self, _cursor: &str) -> Result<RadioPage, ApiError> {

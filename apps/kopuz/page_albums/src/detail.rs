@@ -420,6 +420,7 @@ impl AlbumDetail {
                 .label(t("cd_rip_flac"))
                 .on_click(move |_, window, cx| rip::open(keys.clone(), window, cx))
         });
+        let album_id = album.id.clone();
         let mut header = DetailHeader::new(SharedString::from(album.title.clone()))
             .cover(
                 self.cover(&album, components::skin::arrangement().pages.hero, radius)
@@ -438,6 +439,7 @@ impl AlbumDetail {
                     .offline(self.offline)
                     .shuffle_play(commands::shuffle_play)
                     .play(commands::play_all)
+                    .album_radio(move |_, _, cx| actions::start_album_radio(album_id.clone(), cx))
                     .extra(select_all)
                     .when_some(rip, |actions, rip| actions.extra(rip))
                     .download(commands::set_offline),

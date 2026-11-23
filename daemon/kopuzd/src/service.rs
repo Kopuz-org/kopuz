@@ -1107,11 +1107,14 @@ impl Kopuz for KopuzGrpc {
     async fn set_queue(
         &self,
         request: Request<proto::SetQueueRequest>,
-    ) -> Result<Response<proto::MutationResult>, Status> {
+    ) -> Result<Response<proto::SetQueueResult>, Status> {
         let request = convert::set_queue_from_proto(request.get_ref())
             .ok_or_else(|| Status::invalid_argument("missing queue context"))?;
         let ack = self.0.api.set_queue(request).await.map_err(failed)?;
-        Ok(Response::new(proto::MutationResult { rev: ack.rev }))
+        Ok(Response::new(proto::SetQueueResult {
+            rev: ack.rev,
+            basis: convert::mix_basis_to_proto(ack.basis) as i32,
+        }))
     }
 
     async fn edit_queue(

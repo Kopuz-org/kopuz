@@ -134,6 +134,59 @@ pub fn start_playlist_radio(id: String, cx: &mut App) {
     start_radio(QueueContext::PlaylistRadio { id }, cx);
 }
 
+/// Start the source's mix from an album; gated by `capabilities().album_radio`.
+pub fn start_album_radio(id: String, cx: &mut App) {
+    Notices::info(i18n::t("radio_starting"), cx);
+    start_radio(QueueContext::AlbumRadio { id }, cx);
+}
+
+/// Start the source's mix from an artist; gated by `capabilities().artist_radio`.
+pub fn start_artist_radio(artist: String, cx: &mut App) {
+    Notices::info(i18n::t("radio_starting"), cx);
+    start_radio(QueueContext::ArtistRadio { artist }, cx);
+}
+
+/// Start the source's mix from several tracks; gated by `capabilities().mix_radio`.
+pub fn start_mix_radio(keys: Vec<String>, cx: &mut App) {
+    Notices::info(i18n::t("radio_starting"), cx);
+    start_radio(QueueContext::MixRadio { keys }, cx);
+}
+
+/// Start the source's mix from everything in the queue; gated by `capabilities().mix_radio`.
+pub fn start_queue_mix(cx: &mut App) {
+    let keys = crate::QueueModel::global(cx)
+        .read(cx)
+        .items()
+        .iter()
+        .map(|track| track.key.clone())
+        .collect::<Vec<_>>();
+    if keys.is_empty() {
+        return;
+    }
+
+    start_mix_radio(keys, cx);
+}
+
+/// Remember a track as the start of a sonic path; the next "to here" ends it.
+pub fn mark_sonic_path_start(key: String, cx: &mut App) {
+    crate::SonicPathStart::global(cx).update(cx, |start, cx| start.set(key, cx));
+    Notices::info(i18n::t("sonic_path_marked"), cx);
+}
+
+/// End the remembered sonic path at `to`, forgetting its start.
+pub fn finish_sonic_path(to: String, cx: &mut App) {
+    let from = crate::SonicPathStart::global(cx).update(cx, |start, cx| start.take(cx));
+    if let Some(from) = from {
+        start_sonic_path(from, to, cx);
+    }
+}
+
+/// Queue the songs stepping from one track to another; gated by `capabilities().sonic_path`.
+pub fn start_sonic_path(from: String, to: String, cx: &mut App) {
+    Notices::info(i18n::t("radio_starting"), cx);
+    start_radio(QueueContext::SonicPath { from, to }, cx);
+}
+
 fn start_radio(context: QueueContext, cx: &mut App) {
     let call = Link::global(cx).call(move |api| async move {
         api.set_queue(SetQueueRequest {
@@ -144,10 +197,12 @@ fn start_radio(context: QueueContext, cx: &mut App) {
         })
         .await
     });
-    cx.spawn(async move |cx| {
-        if call.await.is_err() {
-            cx.update(|cx| Notices::error(i18n::t("radio_failed"), cx));
+    cx.spawn(async move |cx| match call.await {
+        Ok(ack) if ack.basis == Some(api::MixBasis::Metadata) => {
+            cx.update(|cx| Notices::info(i18n::t("radio_metadata_basis"), cx));
         }
+        Ok(_) => {}
+        Err(_) => cx.update(|cx| Notices::error(i18n::t("radio_failed"), cx)),
     })
     .detach();
 }

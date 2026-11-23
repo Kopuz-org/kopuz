@@ -34,6 +34,7 @@ mod settings_filter;
 mod setup;
 mod signin;
 mod sleep;
+mod sonic_path;
 mod sources;
 mod target;
 mod updates;
@@ -83,6 +84,7 @@ pub use signin::{
     sign_in_again, sign_in_wait, start_sign_in,
 };
 pub use sleep::{SleepAfter, SleepTimer};
+pub use sonic_path::SonicPathStart;
 pub use sources::{NetworkNotice, SourceStatus, SourcesModel, SwitchStarted};
 pub use target::{CatalogEntry, Kind, RowEdit, RowScope, Target, TrackActions};
 pub use updates::UpdateModel;
@@ -169,4 +171,5 @@ pub fn init(cx: &mut App) {
     register(cx, SettingsFilter::new);
     register(cx, SetupModel::new);
     register(cx, UpdateModel::new);
+    register(cx, SonicPathStart::new);
 }
