@@ -91,7 +91,9 @@ impl RenderOnce for PickList {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let raised = self.raised;
         let rows = self.items.into_iter().map(|item| {
-            let (hot, hover) = motion::hovered(motion::channel(&item.id, HOVER), window, cx);
+            let (over, hover) = motion::hovered(motion::channel(&item.id, HOVER), window, cx);
+            let focus = crate::focus::handle(format!("{}-pick-focus", item.id), window, cx);
+            let hot = over || focus.is_focused(window);
             let rest = match raised {
                 true => style::RAISED,
                 false => 0.,
@@ -104,7 +106,8 @@ impl RenderOnce for PickList {
             );
             let pick = self.on_pick.clone();
             let picked = item.id.clone();
-            h_flex()
+            let (keyed, keyed_id) = (self.on_pick.clone(), item.id.clone());
+            let row = h_flex()
                 .id(motion::channel(&item.id, ROW))
                 .gap_2()
                 .text_sm()
@@ -123,7 +126,13 @@ impl RenderOnce for PickList {
                     if let Some(pick) = pick.as_ref() {
                         pick(&picked, window, cx);
                     }
-                })
+                });
+            // Tab walks the rows and Enter picks, as a click would.
+            crate::focus::stop(row, &focus, move |window, cx| {
+                if let Some(pick) = keyed.as_ref() {
+                    pick(&keyed_id, window, cx);
+                }
+            })
         });
         v_flex()
             .id(motion::channel(&self.id, LIST))
