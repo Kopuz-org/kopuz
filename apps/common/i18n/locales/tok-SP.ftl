@@ -996,6 +996,7 @@ home_plays =
 interface_ambient = Ambient light
 interface_ambient_description = Let the current cover cast its colour across the window.
 interface_ambient_glow = Glow
+interface_ambient_off = Off
 interface_ambient_full = Whole window
 
 daemon_older = The background service is older than this app. Update it or restart it.
