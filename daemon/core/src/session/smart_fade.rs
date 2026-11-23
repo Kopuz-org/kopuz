@@ -1,6 +1,17 @@
 //! Smart crossfades: where a fade belongs between two tracks, and where it does not.
 
+use std::time::Duration;
+
 use reader::Track;
+
+/// Silence only ends a track early this close to its end. Further out it is a
+/// quiet intro or a pause, and the music resumes.
+const TAIL_WINDOW: Duration = Duration::from_secs(30);
+
+/// Whether `position` is inside the last `TAIL_WINDOW` of a track of `duration`.
+pub(super) fn in_tail(duration: Duration, position: Duration) -> bool {
+    !duration.is_zero() && position < duration && duration - position <= TAIL_WINDOW
+}
 
 /// The next track picks up where this one stops on the same album, so a fade would cut
 /// into a live set or a mixed record. `1 → 2` continues; `1 → 3`, another disc or
@@ -47,6 +58,21 @@ mod tests {
             plays: None,
             counterpart: None,
         }
+    }
+
+    #[test]
+    fn silence_ends_a_track_only_inside_its_tail() {
+        let duration = Duration::from_secs(240);
+
+        assert!(in_tail(duration, Duration::from_secs(215)), "tail");
+        assert!(in_tail(duration, Duration::from_secs(210)), "edge");
+        assert!(
+            !in_tail(duration, Duration::from_secs(209)),
+            "a pause mid-track"
+        );
+        assert!(!in_tail(duration, Duration::from_secs(3)), "a quiet intro");
+        assert!(!in_tail(duration, duration), "past the end");
+        assert!(!in_tail(Duration::ZERO, Duration::ZERO), "unknown length");
     }
 
     #[test]
