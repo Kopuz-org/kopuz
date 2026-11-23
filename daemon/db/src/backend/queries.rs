@@ -723,7 +723,6 @@ pub async fn unlinked_artist_keys(
     Ok(rows.into_iter().map(|r| (r.name_key, r.key)).collect())
 }
 
-/// Every artist key of `source`, by folded name.
 pub async fn artist_keys_by_name(
     pool: &SqlitePool,
     source: &Source,

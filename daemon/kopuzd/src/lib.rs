@@ -160,7 +160,6 @@ async fn apps_gone(exit_with_app: bool, core: &Core, clients: &service::Clients)
                 }
             },
             _ = tick.tick() => {
-                // An app that quits pauses first; one killed outright leaves the music playing to nobody.
                 match clients.count() == 0 {
                     true if playing
                         && alone_since.get_or_insert_with(Instant::now).elapsed() >= APP_GONE_AFTER =>

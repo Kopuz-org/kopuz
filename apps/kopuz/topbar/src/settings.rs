@@ -1,4 +1,4 @@
-//! Settings → Interface → Navigation and Sidebar: where the bar sits and where the app opens, then what the sidebar holds.
+//! Settings → Interface → Navigation: where the bar sits, what it holds, and where the app opens.
 
 use components::format::t;
 use components::settings::{SettingRow, choice, order_row, section, toggle_row};
@@ -53,7 +53,6 @@ impl Render for Sidebar {
         let layout = store::layout(cx);
         let (pins, playlists) = (layout.panel.show_pins, layout.panel.show_playlists);
         let nav = &layout.nav;
-        // A skin that sections the navigation fixes its entries, so only the strip's can be picked.
         let strip = components::skin::arrangement().nav == components::skin::Nav::Strip;
         let rows = DESTINATIONS
             .iter()

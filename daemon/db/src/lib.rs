@@ -257,7 +257,6 @@ pub struct TrackPlays {
     pub plays: u32,
 }
 
-/// An artist, or an album with its artist as the detail.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NamePlays {
     pub name: String,
@@ -267,7 +266,6 @@ pub struct NamePlays {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DayPlays {
-    /// Days since the unix epoch, UTC.
     pub day: i64,
     pub plays: u32,
 }
@@ -362,14 +360,12 @@ pub trait ReadStore: Send + Sync {
     /// This source's recently-played track keys, newest first (capped).
     async fn recently_played(&self, source: &Source, limit: u32) -> Result<Vec<String>, DbError>;
 
-    /// What this source played since `since` (unix seconds), or ever.
     async fn listening(
         &self,
         source: &Source,
         since: Option<i64>,
     ) -> Result<ListeningRows, DbError>;
 
-    /// Every artist key of this source, by folded name.
     async fn artist_keys_by_name(
         &self,
         source: &Source,

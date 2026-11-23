@@ -509,7 +509,6 @@ impl Actor {
                         let _ = reply.send(Err(message.clone()));
                     }
                     self.emit(Event::Error { token, message });
-                    // discard_pending above may have removed a published pending.
                     self.publish();
                     return;
                 }
@@ -836,7 +835,6 @@ impl Actor {
         }
     }
 
-    /// The audio already queued was decoded at the old speed, so the change lands as a seek to here.
     fn handle_speed(&mut self, speed: f32) {
         let permille = (speed.clamp(0.5, 2.0) * 1_000.).round() as u32;
         if self.speed.load(Ordering::Relaxed) == permille {

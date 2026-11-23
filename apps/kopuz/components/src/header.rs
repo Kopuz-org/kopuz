@@ -256,7 +256,6 @@ pub enum HeaderLayout {
     Column,
     /// The artwork behind the words, edge to edge.
     Banner,
-    /// A round portrait over its own blurred picture, the words beside it: an artist.
     Portrait,
 }
 
@@ -583,7 +582,6 @@ impl DetailHeader {
     }
 }
 
-/// Hard breaks would throw off the three-line clamp, and three lines show no paragraphs anyway.
 fn description(text: SharedString, cx: &App) -> impl IntoElement {
     div()
         .max_w(rems(48.))
@@ -686,5 +684,4 @@ impl DetailHeader {
     }
 }
 
-/// The portrait's diameter, and how far its picture behind is softened.
 const PORTRAIT: Pixels = px(176.);

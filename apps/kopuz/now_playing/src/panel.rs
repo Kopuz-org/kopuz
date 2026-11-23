@@ -53,7 +53,6 @@ impl NowPlaying {
             .on_close(|_, cx| {
                 Chrome::global(cx).update(cx, |chrome, cx| chrome.set_panel(None, cx))
             })
-            // The edge facing the page drags the column between 280 and 600 px.
             .resizable(
                 self.panel_width(),
                 MIN_WIDTH,

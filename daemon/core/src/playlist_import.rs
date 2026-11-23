@@ -1,5 +1,3 @@
-//! Playlists kept elsewhere: a public Spotify link, or a CSV a playlist exporter wrote.
-
 use api::{ApiError, ErrorCode, ExternalPlaylist, TrackInfo};
 
 const USER_AGENT: &str =
@@ -31,7 +29,6 @@ pub async fn read(source: ExternalPlaylist) -> Result<SongList, ApiError> {
     Ok(list)
 }
 
-/// `open.spotify.com/playlist/<id>` or `/album/<id>`, with or without `intl-xx/` and a query.
 fn spotify_target(link: &str) -> Option<(&'static str, String)> {
     let url = reqwest::Url::parse(link.trim()).ok()?;
     if url.host_str()? != "open.spotify.com" {
@@ -95,7 +92,6 @@ fn embed_songs(page: &str) -> Option<SongList> {
     Some(SongList { name, songs })
 }
 
-/// Exportify (`Track Name`, `Artist Name(s)`) and TuneMyMusic (`Track name`, `Artist name`) both work.
 pub fn csv(text: &str) -> Result<Vec<Song>, ApiError> {
     let mut rows = text.lines().filter(|line| !line.trim().is_empty());
     let header = split_row(
@@ -158,7 +154,6 @@ fn fold(text: &str) -> String {
         .join(" ")
 }
 
-/// The title before any `(feat. …)`, `[…]` or ` - Remastered` tail.
 fn core_title(title: &str) -> String {
     let cut = title
         .find(['(', '['])
@@ -169,7 +164,6 @@ fn core_title(title: &str) -> String {
     fold(&title[..cut])
 }
 
-/// The search hit that is this song, preferring one whose artist also matches.
 pub fn pick(results: &[TrackInfo], song: &Song) -> Option<String> {
     let want = core_title(&song.title);
     if want.is_empty() {

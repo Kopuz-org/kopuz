@@ -1,5 +1,3 @@
-//! Where things sit: the destinations, the controls, and which side the playlists and the queue open on.
-
 use components::format::t;
 use components::settings::{SettingRow, choice, toggle_row};
 use components::skin::{self, Nav};
@@ -14,7 +12,6 @@ fn sides() -> Vec<(Side, gpui_kit::SharedString)> {
     ]
 }
 
-/// The layout rows, in a card of their own under the look.
 pub(crate) fn card(cx: &App) -> Div {
     let layout = store::layout(cx);
     let strip = skin::arrangement().nav == Nav::Strip;

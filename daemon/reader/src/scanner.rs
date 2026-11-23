@@ -207,10 +207,8 @@ fn albums_with_files(library: &Library) -> HashSet<String> {
         .collect()
 }
 
-/// What splits one tagged release from a same-named one in another folder.
 const RELEASE_MARK: char = '~';
 
-/// Two releases of one album in different folders share a title and artist; files claiming the same disc and track tell them apart.
 fn split_releases_by_folder(library: &Library) -> Vec<(usize, String)> {
     let mut groups: HashMap<&str, Vec<usize>> = HashMap::new();
     for (index, track) in library.tracks.iter().enumerate() {
@@ -262,7 +260,6 @@ fn positions_collide(tracks: &[&Track]) -> bool {
         .any(|position| !seen.insert(position))
 }
 
-/// Settle what one file cannot: untagged files join the folder's lone tagged release, colliding same-titled albums split by artist, and two releases of one album split by folder.
 pub(crate) fn settle_local_albums(library: &mut Library) {
     join_releases_split_by_album_artist(library);
     let mut groups: HashMap<(String, String), Vec<usize>> = HashMap::new();
