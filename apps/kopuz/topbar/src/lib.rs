@@ -13,7 +13,8 @@ use components::skin::{self, Nav};
 use components::{Bar, SearchTrigger, Tab, TabStrip, icons, style};
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{Disableable as _, Selectable as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
+use gpui_kit::component::{Disableable as _, Icon, Selectable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, AnyView, App, Context, FontWeight, InteractiveElement as _, IntoElement,
@@ -358,7 +359,12 @@ impl TopBar {
             .current(current.map(|name| SharedString::from(name.to_string())))
             .tabs(tabs)
             .on_select(cx.listener(|this, index: &usize, _, cx| this.open(*index, cx)));
-        strip.into_any_element()
+        div()
+            .id("nav-strip-menu")
+            .when(vertical, |slot| slot.w_full())
+            .child(strip)
+            .context_menu(|menu, _, cx| customize_menu(menu, true, cx))
+            .into_any_element()
     }
 
     /// The palette's doorway: it looks like a field, and clicking it opens the palette.
@@ -652,7 +658,8 @@ impl TopBar {
                             .flex_shrink_0()
                             .bg(style::white(DIVIDER, cx)),
                     )
-                    .child(entry_strip("tools", skin::TOOLS.to_vec(), lit)),
+                    .child(entry_strip("tools", skin::TOOLS.to_vec(), lit))
+                    .context_menu(|menu, _, cx| customize_menu(menu, false, cx)),
             )
             .when(self.rail.is_some(), |sidebar| {
                 sidebar.child(self.rail_room().px_1())
@@ -677,6 +684,53 @@ impl TopBar {
             .into_any_element()
     }
 }
+
+/// Right-click on the destinations: show or hide each one, and the playlists column's parts, in place.
+fn customize_menu(mut menu: PopupMenu, destinations: bool, cx: &App) -> PopupMenu {
+    let layout = store::layout(cx);
+    if destinations {
+        for name in layout.nav.arranged() {
+            let shown = layout.nav.shows(name);
+            menu = menu.item(
+                PopupMenuItem::new(t(tabs::label(name)))
+                    .checked(shown)
+                    .on_click(move |_, _, cx| {
+                        LayoutModel::edit(cx, |layout| layout.nav.show(name, !shown))
+                    }),
+            );
+        }
+        menu = menu.separator();
+    }
+    let (pins, playlists) = (layout.panel.show_pins, layout.panel.show_playlists);
+    menu.item(
+        PopupMenuItem::new(t("interface_panel_show_pins"))
+            .checked(pins)
+            .on_click(move |_, _, cx| {
+                LayoutModel::edit(cx, |layout| layout.panel.show_pins = !pins)
+            }),
+    )
+    .item(
+        PopupMenuItem::new(t("interface_panel_show_playlists"))
+            .checked(playlists)
+            .on_click(move |_, _, cx| {
+                LayoutModel::edit(cx, |layout| layout.panel.show_playlists = !playlists)
+            }),
+    )
+    .separator()
+    .item(
+        PopupMenuItem::new(t("customize_sidebar"))
+            .icon(Icon::default().path(icons::SLIDERS))
+            .on_click(|_, _, cx| {
+                Navigator::navigate(
+                    Route::Settings {
+                        section: Some("interface".into()),
+                    },
+                    cx,
+                )
+            }),
+    )
+}
+
 /// One section's entries as a roving strip, lit on `lit` when it is one of them.
 fn entry_strip(id: &'static str, entries: Vec<&'static str>, lit: &'static str) -> TabStrip {
     let current = entries.contains(&lit).then_some(lit);
