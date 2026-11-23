@@ -376,26 +376,35 @@ impl AlbumDetail {
             .font_weight(gpui_kit::FontWeight::BOLD)
     }
 
-    fn tracks_body(&self, footer: Option<AnyElement>, cx: &mut Context<Self>) -> AnyElement {
-        if self.rows.is_empty() {
-            if let Some(reason) = self.tracks.read(cx).error().map(store::human) {
-                return EmptyState::failed(
-                    t("library_read_failed"),
-                    cx.listener(|this, _, _, cx| {
-                        this.tracks.update(cx, |query, cx| query.refresh(cx));
-                    }),
-                )
-                .detail(reason)
-                .into_any_element();
-            }
-            return EmptyState::new(t("no_tracks_found")).into_any_element();
-        }
+    /// The tracks in one scroll with whatever leads and follows them, so a tall
+    /// header scrolls away instead of squeezing the list.
+    fn tracks_body(
+        &self,
+        header: Option<AnyElement>,
+        footer: Option<AnyElement>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let empty = self.rows.is_empty().then(|| {
+            let Some(reason) = self.tracks.read(cx).error().map(store::human) else {
+                return EmptyState::new(t("no_tracks_found")).into_any_element();
+            };
+            EmptyState::failed(
+                t("library_read_failed"),
+                cx.listener(|this, _, _, cx| {
+                    this.tracks.update(cx, |query, cx| query.refresh(cx));
+                }),
+            )
+            .detail(reason)
+            .into_any_element()
+        });
         div()
             .id("album-tracks")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
+            .children(header)
+            .children(empty)
             .children(self.groups.iter().map(|group| {
                 let section = TrackSection::new(
                     format!("album-disc-{}", group.disc.unwrap_or(0)),
@@ -517,8 +526,11 @@ impl AlbumDetail {
             .relative()
             .pb_8()
             .overflow_hidden()
-            .child(div().flex_shrink_0().mb_12().child(header))
-            .child(self.tracks_body(self.sound_section(cx), cx))
+            .child(self.tracks_body(
+                Some(div().mb_12().child(header).into_any_element()),
+                self.sound_section(cx),
+                cx,
+            ))
             .children(self.selection_bar(cx))
             .into_any_element()
     }
@@ -586,7 +598,7 @@ impl AlbumDetail {
                             .min_w_0()
                             .h_full()
                             .min_h_0()
-                            .child(self.tracks_body(None, cx)),
+                            .child(self.tracks_body(None, None, cx)),
                     ),
             )
             .into_any_element()

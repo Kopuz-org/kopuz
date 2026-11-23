@@ -17,8 +17,9 @@ use config::{AlbumSortField, AlbumViewMode, SortCriterion, SortDirection};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
-    SharedString, Styled as _, Subscription, Task, Window, div, rems,
+    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Subscription, Task, Window, div, rems,
 };
 use store::{
     AudioMuseModel, ConfigModel, DownloadsModel, LayoutModel, Navigator, Offline, Pictured,
@@ -40,6 +41,8 @@ pub struct ArtistDetail {
     sound: Entity<Query<SoundView>>,
     sound_on: bool,
     about_open: bool,
+    // The About view is picked per page; tracks or albums is the remembered pref.
+    showing_about: bool,
     list: Entity<TrackList>,
     column: Option<(Column, SortDirection)>,
     // Derived once per change, not once per frame.
@@ -139,6 +142,7 @@ impl ArtistDetail {
             sound,
             sound_on,
             about_open: false,
+            showing_about: false,
             list,
             column: None,
             keys: Rc::from([]),
@@ -344,6 +348,11 @@ impl ArtistDetail {
 impl Render for ArtistDetail {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let albums_view = controls::albums_first(cx);
+        // Biography, similar artists and sound get a view of their own: above the
+        // tracks they left the list a sliver of the window.
+        let about = self.about(cx);
+        let has_about = about.is_some();
+        let page = cx.entity().downgrade();
         let failed = {
             let detail = self.detail.read(cx);
             detail
@@ -361,6 +370,8 @@ impl Render for ArtistDetail {
                 ),
             };
             EmptyState::new(message).icon(icons::MIC).into_any_element()
+        } else if let Some(about) = about.filter(|_| self.showing_about) {
+            self.about_view(about, cx)
         } else if albums_view {
             self.albums_view(window, cx)
         } else {
@@ -368,18 +379,41 @@ impl Render for ArtistDetail {
         };
         components::page()
             .gap_6()
-            .child(
-                h_flex()
-                    .w_full()
-                    .justify_end()
-                    .items_center()
-                    .child(controls::view_order_toggle(albums_view)),
-            )
+            .child(h_flex().w_full().justify_end().items_center().child(
+                controls::view_order_toggle(
+                    albums_view,
+                    has_about.then_some(self.showing_about),
+                    move |showing, cx| {
+                        page.update(cx, |page, cx| {
+                            page.showing_about = showing;
+                            cx.notify();
+                        })
+                        .ok();
+                    },
+                ),
+            ))
             .child(body)
     }
 }
 
 impl ArtistDetail {
+    fn about_view(&mut self, about: AnyElement, cx: &mut Context<Self>) -> AnyElement {
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .gap_12()
+            .child(self.hero(cx))
+            .child(
+                div()
+                    .id("artist-about")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .child(about),
+            )
+            .into_any_element()
+    }
+
     fn tracks_view(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let count = self.keys.len();
         let selecting = self.list.read(cx).is_selecting();
@@ -415,7 +449,6 @@ impl ArtistDetail {
             .gap_12()
             .child(self.hero(cx))
             .children(self.similar_row(cx))
-            .children(self.about(cx))
             .child(body)
             .when(selecting, |view| view.child(self.selection_bar(cx)))
             .into_any_element()
@@ -570,7 +603,6 @@ impl ArtistDetail {
             .min_h_0()
             .gap_12()
             .child(self.hero(cx))
-            .children(self.about(cx))
             .child(
                 v_flex()
                     .flex_1()

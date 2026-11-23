@@ -10,6 +10,7 @@ use components::{Segment, Segmented, SortControl};
 use config::{
     AlbumSortField, AlbumViewMode, ArtistSortField, ArtistViewOrder, SortCriterion, UiPrefs,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{App, IntoElement};
 use store::LayoutModel;
 
@@ -166,17 +167,34 @@ pub fn sort_control<F: SortTarget>(
 }
 
 /// Tracks ⇄ Albums for one artist, writing the `artist_view_order` pref.
-pub fn view_order_toggle(albums: bool) -> impl IntoElement {
+/// Tracks ⇄ albums, written to the pref, and About when `about` says whether it shows;
+/// `show_about` hears each pick.
+pub fn view_order_toggle(
+    albums: bool,
+    about: Option<bool>,
+    show_about: impl Fn(bool, &mut App) + 'static,
+) -> impl IntoElement {
+    let selected = match about {
+        Some(true) => ABOUT_SEGMENT,
+        _ => usize::from(albums),
+    };
     Segmented::new("artist-order")
         .pill(true)
         .segment(Segment::new("tracks").label(t("tracks")))
         .segment(Segment::new("albums").label(t("albums")))
-        .selected(Some(usize::from(albums)))
-        .on_select(|index, _, cx| {
+        .when(about.is_some(), |toggle| {
+            toggle.segment(Segment::new("about").label(t("artist_about")))
+        })
+        .selected(Some(selected))
+        .on_select(move |index, _, cx| {
+            show_about(*index == ABOUT_SEGMENT, cx);
             let order = match index {
                 0 => ArtistViewOrder::Tracks,
-                _ => ArtistViewOrder::Albums,
+                1 => ArtistViewOrder::Albums,
+                _ => return,
             };
             LayoutModel::edit(cx, move |layout| layout.ui.artist_view_order = order)
         })
 }
+
+const ABOUT_SEGMENT: usize = 2;
