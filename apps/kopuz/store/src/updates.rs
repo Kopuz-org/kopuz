@@ -65,6 +65,7 @@ impl UpdateModel {
         self._install = Some(cx.spawn(async move |this, cx| {
             if let Err(error) = call.await {
                 tracing::warn!(%error, "the daemon would not install the update");
+                cx.update(|cx| crate::Notices::failed(&error, cx));
                 this.update(cx, |this, cx| this.read(cx)).ok();
             }
         }));
