@@ -18,6 +18,8 @@ pub(crate) const TILE: Pixels = px(192.);
 pub(crate) struct Now {
     album_id: String,
     key: String,
+    /// The playlist the queue was built from, when it was built from one.
+    playlist: Option<String>,
     playing: bool,
 }
 
@@ -30,6 +32,10 @@ impl Now {
         Self {
             album_id: track.album_id.clone(),
             key: track.key.clone(),
+            playlist: match store::PlayerModel::global(cx).read(cx).queue_context() {
+                Some(api::QueueContext::Playlist { id, .. }) => Some(id.clone()),
+                _ => None,
+            },
             playing,
         }
     }
@@ -39,6 +45,7 @@ impl Now {
         match play {
             Play::Album(id) => !self.album_id.is_empty() && &self.album_id == id,
             Play::Track(key) => !self.key.is_empty() && &self.key == key,
+            Play::Playlist(id) => self.playlist.as_ref() == Some(id),
             _ => false,
         }
     }
