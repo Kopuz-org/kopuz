@@ -390,6 +390,8 @@ pub struct TileRow {
     play: Option<(PlayState, OnClick)>,
     playing: bool,
     selected: bool,
+    /// The keyboard cursor rests here, though focus is on the list around it.
+    cursor: bool,
     thumb: bool,
     pictured: Option<Pictured>,
 }
@@ -410,6 +412,7 @@ impl TileRow {
             play: None,
             playing: false,
             selected: false,
+            cursor: false,
             thumb: true,
             pictured: None,
         }
@@ -497,6 +500,11 @@ impl TileRow {
         self.selected = selected;
         self
     }
+
+    pub fn cursor(mut self, cursor: bool) -> Self {
+        self.cursor = cursor;
+        self
+    }
 }
 
 /// The edge of a row's thumb.
@@ -546,6 +554,9 @@ impl RenderOnce for TileRow {
         .mb_1()
         .rounded(style::radius_lg())
         .bg(wash)
+        .when(self.cursor, |row| {
+            row.child(crate::focus::ring(style::radius_lg(), cx))
+        })
         .on_hover(motion::track(pointer))
         .when_some(self.click, |row, click| {
             row.cursor_pointer()
