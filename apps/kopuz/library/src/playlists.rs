@@ -98,6 +98,10 @@ impl Library {
                     .on_click(|_, _, cx| new_folder(cx)),
             );
         }
+        // A source that keeps no playlists of its own has nothing to import into or add to.
+        if SourcesModel::global(cx).read(cx).capabilities().playlists == PlaylistCapability::None {
+            return buttons;
+        }
         buttons.push(
             IconButton::new("library-import-playlist", icons::IMPORT)
                 .tooltip(t("import_playlist"))
