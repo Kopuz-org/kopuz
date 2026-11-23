@@ -336,7 +336,17 @@ impl ArtistDetail {
         let count = self.keys.len();
         let selecting = self.list.read(cx).is_selecting();
         let settled = self.tracks.read(cx).is_settled();
-        let body = if !settled && count == 0 {
+        let failure = self.tracks.read(cx).error().map(store::human);
+        let body = if let Some(reason) = failure.filter(|_| count == 0) {
+            EmptyState::failed(
+                t("library_read_failed"),
+                cx.listener(|this, _, _, cx| {
+                    this.tracks.update(cx, |query, cx| query.refresh(cx));
+                }),
+            )
+            .detail(reason)
+            .into_any_element()
+        } else if !settled && count == 0 {
             Loading::new().into_any_element()
         } else if count == 0 {
             EmptyState::new(t("no_tracks_found"))
@@ -474,8 +484,18 @@ impl ArtistDetail {
         };
         let settled = self.billed.read(cx).is_settled();
         let empty = self.albums.is_empty();
+        let failure = self.billed.read(cx).error().map(store::human);
 
-        let body = if !settled && empty {
+        let body = if let Some(reason) = failure.filter(|_| empty) {
+            EmptyState::failed(
+                t("library_read_failed"),
+                cx.listener(|this, _, _, cx| {
+                    this.billed.update(cx, |query, cx| query.refresh(cx));
+                }),
+            )
+            .detail(reason)
+            .into_any_element()
+        } else if !settled && empty {
             Loading::new().into_any_element()
         } else if empty {
             EmptyState::new(t("no_albums_found"))
