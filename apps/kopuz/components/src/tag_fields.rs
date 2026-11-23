@@ -12,8 +12,8 @@ use gpui_kit::{
 use crate::style;
 use crate::{ErrorBanner, FieldProblem};
 
-/// `text-white/35`, a label over a value or a field.
-const LABEL: f32 = 0.35;
+/// A label over a value or a field; at 10px it needs this much ink to read.
+const LABEL: f32 = style::TEXT_MUTED;
 
 /// `text-[10px] font-bold text-white/35`: the label over a value or an edit field.
 pub fn caption(label: impl Into<SharedString>, cx: &App) -> Div {

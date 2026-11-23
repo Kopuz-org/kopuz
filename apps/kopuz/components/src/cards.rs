@@ -560,7 +560,7 @@ impl RenderOnce for TileRow {
                     // Tabular digits, so the numbers line up rather than wander by glyph width.
                     .font_family(SharedString::new_static("monospace"))
                     .text_xs()
-                    .text_color(style::white(style::TEXT_DIM, cx))
+                    .text_color(style::white(style::TEXT_SUBTLE, cx))
                     .child(lead),
             )
         })

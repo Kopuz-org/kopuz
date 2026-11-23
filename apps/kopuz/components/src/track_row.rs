@@ -595,7 +595,9 @@ fn link(
 }
 
 fn dim(cell: Div, cx: &App) -> Div {
-    cell.text_xs().text_color(style::white(style::TEXT_DIM, cx))
+    // Small type needs more ink than a large label to stay readable.
+    cell.text_xs()
+        .text_color(style::white(style::TEXT_SUBTLE, cx))
 }
 
 #[cfg(test)]
