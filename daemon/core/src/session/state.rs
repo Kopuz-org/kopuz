@@ -117,18 +117,30 @@ impl Session {
             .is_some_and(|track| track.duration == u64::MAX)
     }
 
-    pub(super) fn should_crossfade(&self) -> bool {
+    pub(super) fn should_crossfade(&self, next: Option<&reader::Track>) -> bool {
         // A drive has one optical head; overlapping tracks cause competing seeks.
         self.sources.active_service() != Some(config::MusicService::AudioCd)
             && self.settings.playback.crossfade_seconds > 0
+            && !self.joins_album(next)
             && self.phase == ApiPhase::Playing
             && self.player.can_resume()
     }
 
-    pub(super) fn should_play_gapless(&self) -> bool {
-        self.settings.playback.crossfade_seconds == 0
+    pub(super) fn should_play_gapless(&self, next: Option<&reader::Track>) -> bool {
+        (self.settings.playback.crossfade_seconds == 0 || self.joins_album(next))
             && self.phase == ApiPhase::Playing
             && self.player.can_resume()
+    }
+
+    /// Smart crossfades play the next track of the same album without a fade.
+    fn joins_album(&self, next: Option<&reader::Track>) -> bool {
+        if !self.settings.playback.smart_crossfade {
+            return false;
+        }
+        let (Some(current), Some(next)) = (self.model.current_track(), next) else {
+            return false;
+        };
+        super::smart_fade::continues_album(current, next)
     }
 
     pub(super) fn now_ms(&self) -> u64 {

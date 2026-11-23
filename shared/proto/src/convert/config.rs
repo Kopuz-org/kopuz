@@ -451,6 +451,7 @@ pub fn config_to_proto(value: &config::Settings) -> Config {
         autoplay_radio: playback.autoplay_radio,
         skip_explicit: playback.skip_explicit,
         pause_watch_history: playback.pause_watch_history,
+        smart_crossfade: Some(playback.smart_crossfade),
         player_bar_position: player_bar_position_to_proto(ui.player_bar_position) as i32,
         ui_style: ui_style_to_proto(ui.ui_style) as i32,
         settings_layout: settings_layout_to_proto(ui.settings_layout) as i32,
@@ -499,6 +500,7 @@ pub fn config_from_proto(value: &Config) -> config::Settings {
             autoplay_radio: value.autoplay_radio,
             skip_explicit: value.skip_explicit,
             pause_watch_history: value.pause_watch_history,
+            smart_crossfade: value.smart_crossfade.unwrap_or(true),
         },
         ui: config::Ui {
             theme: value.theme.clone(),
