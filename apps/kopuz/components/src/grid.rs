@@ -183,7 +183,9 @@ impl<V: 'static> Bands<'_, V> {
             }),
         )
         .track_scroll(&grid.scroll)
-        .size_full();
+        .size_full()
+        // Inside the list, so the bands scroll under it to the edge and only the last one stops short.
+        .pb_8();
         match self.rail {
             Some(rail) => h_flex()
                 .size_full()

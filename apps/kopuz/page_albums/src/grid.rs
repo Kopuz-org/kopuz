@@ -133,19 +133,11 @@ impl Render for Albums {
                     .child(self.view_toggle(cx))
                     .child(self.sort_control(cx)),
             )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .pb_8()
-                    .map(|body| match (bands, settled) {
-                        (Some(bands), _) => body.child(bands),
-                        (None, false) => body.child(Loading::new()),
-                        (None, true) => {
-                            body.child(EmptyState::new(t("no_albums_found")).icon(icons::DISC))
-                        }
-                    }),
-            )
+            .child(div().flex_1().min_h_0().map(|body| match (bands, settled) {
+                (Some(bands), _) => body.child(bands),
+                (None, false) => body.child(Loading::new()),
+                (None, true) => body.child(EmptyState::new(t("no_albums_found")).icon(icons::DISC)),
+            }))
     }
 }
 

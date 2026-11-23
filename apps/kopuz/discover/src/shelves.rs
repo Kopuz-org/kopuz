@@ -5,8 +5,9 @@ use std::collections::HashSet;
 use api::{CatalogDetailRequest, CatalogItem, CatalogItemKind, CatalogShelf, ShelfLayout};
 use components::format::t;
 use components::{
-    Arrows, Carousel, Cover, PlayState, SectionHeading, Tile, TileRow, TrackActions, TrackList,
-    TrackListEvent, TrackListOptions, TrackSection, heading_link, icons, motion, style,
+    Arrows, Carousel, Cover, Menu, Picture, PlayState, SectionHeading, Spot, Tile, TileRow,
+    TrackActions, TrackList, TrackListEvent, TrackListOptions, TrackSection, WithContextMenu as _,
+    heading_link, icons, menus, motion, style,
 };
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -67,6 +68,8 @@ pub struct Shelves {
     searching: bool,
     topping_up: Option<usize>,
     playing: bool,
+    // The player's track, so a song started from anywhere else moves the overlay here too.
+    current: Option<String>,
     _play: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -86,14 +89,26 @@ impl Shelves {
             searching: false,
             topping_up: None,
             playing: player.read(cx).is_playing(),
+            current: player.read(cx).track().map(|track| track.key.clone()),
             _play: None,
             _subscriptions: vec![
                 cx.observe(&player, |this, player, cx| {
-                    let playing = player.read(cx).is_playing();
-                    if playing != this.playing {
-                        this.playing = playing;
-                        cx.notify();
+                    let player = player.read(cx);
+                    let playing = player.is_playing();
+                    let current = player.track().map(|track| track.key.clone());
+                    if playing == this.playing && current == this.current {
+                        return;
                     }
+                    // A song this shelf started gives up its overlay once the player moves past it.
+                    if current != this.current
+                        && this.now_playing.is_some()
+                        && this.now_playing == this.current
+                    {
+                        this.now_playing = None;
+                    }
+                    this.playing = playing;
+                    this.current = current;
+                    cx.notify();
                 }),
                 cx.observe(&marks, |this, marks, cx| this.drop_removed(marks, cx)),
             ],
@@ -408,7 +423,7 @@ impl Shelves {
 
     /// A song starts a radio where the source runs one, else plays alone; pressing it again pauses.
     fn start_song(&mut self, key: String, radio: bool, cx: &mut Context<Self>) {
-        if self.now_playing.as_deref() == Some(key.as_str()) {
+        if self.current.as_deref() == Some(key.as_str()) {
             PlayerModel::global(cx).update(cx, |player, cx| player.toggle(cx));
             return;
         }
@@ -647,6 +662,17 @@ impl Shelves {
         let playing = song
             .as_deref()
             .is_some_and(|song| self.play_state(song) == PlayState::Playing);
+        let (menu, of) = match item.track.as_ref() {
+            Some(track) => (
+                Some(Target::track(track.key.clone(), track.title.clone())),
+                Pictured::Track {
+                    artist: track.artist.clone().into(),
+                    title: track.title.clone().into(),
+                },
+            ),
+            None => (menu_of(item, cx), pictured_of(item)),
+        };
+        let picture = Picture::new(item.artwork.as_ref(), of);
         let click = cx.listener(move |this, _, _, cx| match (&song, &route) {
             (Some(song), _) => this.start_song(song.clone(), radio, cx),
             (None, Some(route)) => Navigator::navigate(route.clone(), cx),
@@ -659,8 +685,9 @@ impl Shelves {
             artwork: item.artwork.clone(),
             round,
             playing,
+            spot: picture.as_ref().map(Picture::spot),
         }
-        .render(click)
+        .render(click, menus::pictured(menu.map(menus::menu_for), picture))
     }
 
     /// Items as list rows: a song plays, anything else opens.
@@ -793,7 +820,8 @@ impl Shelves {
         if self.pending.as_deref() == Some(id) {
             return PlayState::Loading;
         }
-        match self.now_playing.as_deref() == Some(id) && self.playing {
+        let marked = self.now_playing.as_deref() == Some(id) || self.current.as_deref() == Some(id);
+        match marked && self.playing {
             true => PlayState::Playing,
             false => PlayState::Idle,
         }
@@ -834,6 +862,18 @@ fn menu_of(item: &CatalogItem, cx: &App) -> Option<Target> {
             Some(Target::catalog(item)).filter(|target| commands::has_menu(target, cx))
         }
         _ => None,
+    }
+}
+
+fn pictured_of(item: &CatalogItem) -> Pictured {
+    let title = SharedString::from(item.title.clone());
+    match item.kind {
+        CatalogItemKind::Artist => Pictured::Artist(title),
+        CatalogItemKind::Album => Pictured::Album {
+            artist: SharedString::default(),
+            title,
+        },
+        _ => Pictured::Playlist(title),
     }
 }
 
@@ -979,19 +1019,21 @@ struct HeroCard {
     artwork: Option<api::ArtworkRef>,
     round: bool,
     playing: bool,
+    spot: Option<Spot>,
 }
 
 impl HeroCard {
     fn render(
         self,
         click: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut App) + 'static,
+        menu: Option<Menu>,
     ) -> AnyElement {
         div()
             .id(self.key.clone())
             .flex_shrink_0()
             .on_click(click)
             .child(HeroBody(self))
-            .into_any_element()
+            .with_context_menu(menu)
     }
 }
 
@@ -1023,6 +1065,7 @@ impl gpui_kit::RenderOnce for HeroBody {
             .on_hover(motion::track(pointer))
             .child(
                 Cover::new(card.artwork.as_ref())
+                    .spot(card.spot)
                     .size(HERO_COVER)
                     .rounded(radius)
                     .zoom(motion::channel(&card.key, 3), hovered),

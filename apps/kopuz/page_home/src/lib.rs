@@ -151,6 +151,7 @@ pub struct Home {
     shared: Shared,
     frozen: bool,
     playing: bool,
+    track: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -265,9 +266,12 @@ impl Home {
             cx.observe(&ForYouModel::global(cx), |this, _, cx| this.rebuild(cx)),
             cx.observe(&DownloadsModel::global(cx), |this, _, cx| this.rebuild(cx)),
             cx.observe(&PlayerModel::global(cx), |this: &mut Self, player, cx| {
-                let playing = player.read(cx).is_playing();
-                if playing != this.playing {
+                let player = player.read(cx);
+                let playing = player.is_playing();
+                let track = player.track().map(|track| track.key.clone());
+                if playing != this.playing || track != this.track {
                     this.playing = playing;
+                    this.track = track;
                     cx.notify();
                 }
             }),
@@ -299,6 +303,10 @@ impl Home {
             shared: Shared::default(),
             frozen: false,
             playing: PlayerModel::global(cx).read(cx).is_playing(),
+            track: PlayerModel::global(cx)
+                .read(cx)
+                .track()
+                .map(|track| track.key.clone()),
             _subscriptions: subscriptions,
         }
     }
