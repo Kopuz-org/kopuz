@@ -162,6 +162,8 @@ pub struct Palette {
     query: String,
     /// What the daemon was last asked for, so the same query is not asked twice.
     asked: String,
+    /// The text the held track results were fetched for; they are stale until it matches `asked`.
+    answered: String,
     /// `tab` narrowed the palette to one thing's own verbs.
     drill: Option<Target>,
     items: Vec<Item>,
@@ -217,6 +219,7 @@ impl Palette {
             mode: Mode::default(),
             query: String::new(),
             asked: String::new(),
+            answered: String::new(),
             drill: None,
             items: Vec::new(),
             lines: Vec::new(),
@@ -341,6 +344,7 @@ impl Palette {
                 return;
             };
             let typed = wanted.clone();
+            this.answered = wanted.clone();
             tracks.update(cx, |query, cx| match wanted.is_empty() {
                 true => query.hold(SearchResults::default(), cx),
                 false => query.set_fetch(search_fetch(wanted), cx),
@@ -419,7 +423,13 @@ impl Palette {
     }
 
     fn activate(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(act) = self.items.get(index).map(|item| item.act.clone()) else {
+        // A faded row answers the previous text, so it would play a track the user no longer sees.
+        let Some(act) = self
+            .items
+            .get(index)
+            .filter(|item| !item.faded)
+            .map(|item| item.act.clone())
+        else {
             return;
         };
         if let Act::Recall(query) = act {
@@ -686,7 +696,7 @@ impl Palette {
             return Vec::new();
         };
         let held = tracks.read(cx);
-        let faded = held.is_stale();
+        let faded = held.is_stale() || self.answered != self.asked;
         let Some(found) = held.value() else {
             return Vec::new();
         };
