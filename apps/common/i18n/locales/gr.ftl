@@ -461,6 +461,7 @@ made_for_you = Φτιαγμένο για σένα
 recently_added = Προστέθηκαν πρόσφατα
 customize_home = Προσαρμογή αρχικής
 customize_sidebar = Προσαρμογή πλαϊνής στήλης…
+artist_about = Σχετικά
 interface_sidebar = Πλαϊνή στήλη
 done_editing = Τέλος
 reset_home = Επαναφορά

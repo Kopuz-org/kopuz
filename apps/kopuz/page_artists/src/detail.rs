@@ -373,6 +373,7 @@ impl ArtistDetail {
             name: name.clone(),
         });
         DetailHeader::new(name)
+            .round(true)
             .artwork(artwork.as_ref())
             .placeholder(icons::MIC)
             .cover_menu(menu, picture)

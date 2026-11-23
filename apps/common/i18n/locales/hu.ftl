@@ -429,6 +429,7 @@ made_for_you = Neked készült
 recently_added = Nemrég hozzáadott
 customize_home = Kezdőlap testreszabása
 customize_sidebar = Oldalsáv testreszabása…
+artist_about = Névjegy
 interface_sidebar = Oldalsáv
 done_editing = Kész
 reset_home = Visszaállítás

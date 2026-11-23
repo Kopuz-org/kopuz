@@ -477,6 +477,7 @@ made_for_you = Stworzone dla Ciebie
 recently_added = Ostatnio dodane
 customize_home = Dostosuj stronę główną
 customize_sidebar = Dostosuj pasek boczny…
+artist_about = O wykonawcy
 interface_sidebar = Pasek boczny
 done_editing = Gotowe
 reset_home = Zresetuj

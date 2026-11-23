@@ -435,6 +435,7 @@ made_for_you = あなたのために
 recently_added = 最近追加
 customize_home = ホームをカスタマイズ
 customize_sidebar = サイドバーをカスタマイズ…
+artist_about = 概要
 interface_sidebar = サイドバー
 done_editing = 完了
 reset_home = リセット
