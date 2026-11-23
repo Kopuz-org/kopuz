@@ -19,6 +19,7 @@ use crate::{
 pub enum PlaybackEdit {
     VolumeScrollStep(f32),
     CrossfadeSeconds(u8),
+    SmartCrossfade(bool),
     BackBehavior(BackBehavior),
     ChannelMode(ChannelMode),
     Equalizer(EqualizerSettings),
@@ -359,6 +360,7 @@ impl Playback {
         match edit {
             PlaybackEdit::VolumeScrollStep(value) => self.volume_scroll_step = value,
             PlaybackEdit::CrossfadeSeconds(value) => self.crossfade_seconds = value,
+            PlaybackEdit::SmartCrossfade(value) => self.smart_crossfade = value,
             PlaybackEdit::BackBehavior(value) => self.back_behavior = value,
             PlaybackEdit::ChannelMode(value) => self.channel_mode = value,
             PlaybackEdit::Equalizer(value) => self.equalizer = value,
@@ -525,6 +527,7 @@ pub fn edit_samples() -> Vec<SettingsEdit> {
     vec![
         SettingsEdit::Playback(PlaybackEdit::VolumeScrollStep(0.1)),
         SettingsEdit::Playback(PlaybackEdit::CrossfadeSeconds(6)),
+        SettingsEdit::Playback(PlaybackEdit::SmartCrossfade(false)),
         SettingsEdit::Playback(PlaybackEdit::BackBehavior(BackBehavior::AlwaysPrev)),
         SettingsEdit::Playback(PlaybackEdit::ChannelMode(ChannelMode::Mono)),
         SettingsEdit::Playback(PlaybackEdit::Equalizer(equalizer)),

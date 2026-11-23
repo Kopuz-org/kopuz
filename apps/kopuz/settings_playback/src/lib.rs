@@ -353,6 +353,8 @@ impl PlaybackSettings {
                 .iter()
                 .any(|device| device.exclusive && Some(&device.id) == output_device.as_ref());
         let autoplay_radio = config.playback.autoplay_radio;
+        let fading = config.playback.crossfade_seconds > 0;
+        let smart_crossfade = config.playback.smart_crossfade;
         let skip_explicit = config.playback.skip_explicit;
         let stream_quality = config.playback.stream_quality;
         let pause_history = config.playback.pause_watch_history;
@@ -372,6 +374,21 @@ impl PlaybackSettings {
                     }))
                     .shown(cx),
             )
+            .when(fading, |section| {
+                section.children(
+                    toggle_row(
+                        "smart_crossfade",
+                        t("smart_crossfade"),
+                        smart_crossfade,
+                        ConfigModel::writer(|on| {
+                            SettingsEdit::Playback(PlaybackEdit::SmartCrossfade(on))
+                        }),
+                    )
+                    .bind("smart_crossfade", cx)
+                    .description(t("smart_crossfade_description"))
+                    .shown(cx),
+                )
+            })
             .children(
                 SettingRow::new(t("volume_scroll_step"))
                     .bind("volume_scroll_step", cx)

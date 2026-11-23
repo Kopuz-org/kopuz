@@ -2047,6 +2047,7 @@ message ConfigEdit {
   oneof edit {
     float volume_scroll_step = 40;
     uint32 crossfade_seconds = 41;
+    bool smart_crossfade = 93;
     BackBehavior back_behavior = 43;
     ChannelMode channel_mode = 44;
     EqualizerSettings equalizer = 45;
@@ -2218,6 +2219,7 @@ enum SettingKey {
   SETTING_KEY_AUTOPLAY_RADIO = 73;
   SETTING_KEY_SKIP_EXPLICIT = 74;
   SETTING_KEY_PAUSE_WATCH_HISTORY = 75;
+  SETTING_KEY_SMART_CROSSFADE = 93;
   SETTING_KEY_SYNC_INTERVAL_MINUTES = 78;
   SETTING_KEY_DISCORD_PRESENCE = 79;
   SETTING_KEY_DISCORD_PRESENCE_SOURCE = 80;
@@ -2425,6 +2427,7 @@ message Config {
   bool autoplay_radio = 73;
   bool skip_explicit = 74;
   bool pause_watch_history = 75;
+  optional bool smart_crossfade = 93;
   // Absent from a peer that predates it, which must not read as 0 (never).
   optional uint32 sync_interval_minutes = 78;
   optional bool discord_presence = 79;

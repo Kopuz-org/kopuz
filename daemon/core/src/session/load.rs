@@ -29,11 +29,11 @@ impl Session {
         let transition =
             if !allow_crossfade || restore_seek.is_some_and(|position| !position.is_zero()) {
                 Transition::Immediate
-            } else if self.should_crossfade() {
+            } else if self.should_crossfade(Some(&track)) {
                 Transition::Crossfade(Duration::from_secs(
                     self.settings.playback.crossfade_seconds as u64,
                 ))
-            } else if self.should_play_gapless() {
+            } else if self.should_play_gapless(Some(&track)) {
                 Transition::Gapless
             } else {
                 Transition::Immediate

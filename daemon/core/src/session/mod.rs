@@ -26,6 +26,7 @@ mod load;
 mod origin;
 mod radio_feed;
 mod reconciler;
+mod smart_fade;
 mod stations;
 mod versions;
 pub(crate) use stations::has_unrecorded_station;
@@ -2378,8 +2379,9 @@ impl Session {
 
     /// A track shorter than the preload never reaches the next position event.
     pub(super) fn arm_gapless_now(&mut self) -> bool {
-        let arm =
-            self.should_play_gapless() && self.should_arm_transition(self.player.get_position());
+        let next = self.peek_next_index();
+        let gapless = self.should_play_gapless(next.and_then(|idx| self.model.track_at(idx)));
+        let arm = gapless && self.should_arm_transition(self.player.get_position());
         if arm {
             self.arm_transition();
         }
