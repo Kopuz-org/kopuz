@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 api = { workspace = true }
 config = { workspace = true }
+serde_json = { workspace = true }
 i18n = { workspace = true }
 link = { workspace = true }
 store = { workspace = true }

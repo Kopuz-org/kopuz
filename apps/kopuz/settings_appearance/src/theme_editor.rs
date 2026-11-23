@@ -229,6 +229,105 @@ impl ThemeEditor {
         self.load(None, window, cx);
     }
 
+    fn start_new(
+        &mut self,
+        name: String,
+        vars: HashMap<String, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.selected = None;
+        self.name
+            .update(cx, |state, cx| state.set_value(name, window, cx));
+        for (key, field) in &self.rows {
+            let value = vars
+                .get(*key)
+                .cloned()
+                .or_else(|| default_vars().get(*key).cloned())
+                .unwrap_or_default();
+            self.vars.insert(key.to_string(), value.clone());
+            field.update(cx, |field, cx| field.set(&value, window, cx));
+        }
+        self.baseline = (String::new(), default_vars());
+        cx.notify();
+    }
+
+    fn duplicate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let name = self.name.read(cx).value().trim().to_string();
+        let copy = match name.is_empty() {
+            true => t("my_custom_theme").to_string(),
+            false => {
+                components::format::t_with("theme_copy_of", &[("name", name.into())]).to_string()
+            }
+        };
+        let vars = self.vars.clone();
+        self.start_new(copy, vars, window, cx);
+    }
+
+    fn export(&self, cx: &mut Context<Self>) {
+        let name = self.name.read(cx).value().trim().to_string();
+        let theme = CustomTheme {
+            name: name.clone(),
+            vars: self.vars.clone(),
+        };
+        let Ok(text) = serde_json::to_string_pretty(&theme) else {
+            return;
+        };
+        let home = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default();
+        let file = format!(
+            "{}.kopuz-theme.json",
+            match name.is_empty() {
+                true => "theme".to_string(),
+                false => name.replace(['/', '\\', ':'], "_"),
+            }
+        );
+        let chosen = cx.prompt_for_new_path(&home, Some(&file));
+        cx.spawn(async move |_, cx| {
+            let Ok(Ok(Some(path))) = chosen.await else {
+                return;
+            };
+            let written = std::fs::write(&path, text);
+            cx.update(|cx| match written {
+                Ok(()) => store::Notices::info(t("theme_exported"), cx),
+                Err(error) => store::Notices::error(error.to_string(), cx),
+            });
+        })
+        .detach();
+    }
+
+    fn import(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let picked = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: None,
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = picked.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let read = std::fs::read_to_string(&path)
+                .map_err(|error| error.to_string())
+                .and_then(|text| {
+                    serde_json::from_str::<CustomTheme>(&text).map_err(|error| error.to_string())
+                });
+            this.update_in(cx, |this, window, cx| match read {
+                Ok(theme) => this.start_new(theme.name, theme.vars, window, cx),
+                Err(error) => store::Notices::error(
+                    components::format::t_with("theme_import_failed", &[("error", error.into())]),
+                    cx,
+                ),
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     fn saved_themes(&self, cx: &Context<Self>) -> Vec<(String, String)> {
         let mut themes: Vec<(String, String)> = ConfigModel::global(cx)
             .read(cx)
@@ -327,6 +426,30 @@ impl Render for ThemeEditor {
                                     .label(t("save_theme"))
                                     .on_click(
                                         cx.listener(|this, _, window, cx| this.save(window, cx)),
+                                    ),
+                            )
+                            .child(
+                                Button::new("duplicate-theme")
+                                    .custom(style::soft_button(cx.theme().foreground, cx))
+                                    .label(t("duplicate"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.duplicate(window, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("export-theme")
+                                    .custom(style::soft_button(cx.theme().foreground, cx))
+                                    .icon(icons::icon(icons::EXPORT))
+                                    .label(t("export"))
+                                    .on_click(cx.listener(|this, _, _, cx| this.export(cx))),
+                            )
+                            .child(
+                                Button::new("import-theme")
+                                    .custom(style::soft_button(cx.theme().foreground, cx))
+                                    .icon(icons::icon(icons::IMPORT))
+                                    .label(t("import"))
+                                    .on_click(
+                                        cx.listener(|this, _, window, cx| this.import(window, cx)),
                                     ),
                             )
                             .when(self.selected.is_some(), |actions| {
