@@ -303,6 +303,16 @@ pub struct ArtistDetail {
     pub info: ArtistInfo,
 }
 
+/// What the active source says about an artist, for the artist page's About section.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArtistInfoView {
+    pub biography: Option<String>,
+    pub image: Option<crate::ArtworkRef>,
+    pub similar: Vec<SimilarArtist>,
+    /// A page about the artist elsewhere.
+    pub link: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ArtistPage {
     pub artists: Vec<ArtistInfo>,

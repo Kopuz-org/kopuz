@@ -27,11 +27,16 @@ use store::{
 
 use crate::controls::{self, ViewModeKey};
 
+mod about;
+
 /// One artist from the library: tracks and albums.
 pub struct ArtistDetail {
     key: String,
     tracks: Entity<Query<TrackPage>>,
     detail: Entity<Query<api::ArtistDetail>>,
+    // What the source says of the artist; empty for a source without artist info.
+    info: Entity<Query<Option<api::ArtistInfoView>>>,
+    about_open: bool,
     list: Entity<TrackList>,
     column: Option<(Column, SortDirection)>,
     // Derived once per change, not once per frame.
@@ -74,6 +79,17 @@ impl ArtistDetail {
                 cx,
             )
         });
+        let artist = key.clone();
+        let info = cx.new(|cx| {
+            Query::new(
+                &[],
+                move |api| {
+                    let artist = artist.clone();
+                    async move { api.artist_info(artist).await }
+                },
+                cx,
+            )
+        });
         let asked = controls::criteria::<AlbumSortField>(cx);
         let billed = cx.new(|cx| {
             Query::new(
@@ -88,6 +104,7 @@ impl ArtistDetail {
             cx.observe(&tracks, |this, _, cx| this.sync_rows(cx)),
             cx.observe(&billed, |this, _, cx| this.rebuild_albums(cx)),
             cx.observe(&detail, |this, _, cx| this.ask_similar(cx)),
+            cx.observe(&info, |_, _, cx| cx.notify()),
             cx.observe(&LayoutModel::global(cx), |this, _, cx| {
                 this.reorder_albums(cx);
                 this.ask_similar(cx);
@@ -106,6 +123,8 @@ impl ArtistDetail {
             key,
             tracks,
             detail,
+            info,
+            about_open: false,
             list,
             column: None,
             keys: Rc::from([]),
@@ -367,6 +386,7 @@ impl ArtistDetail {
             .gap_12()
             .child(self.hero(cx))
             .children(self.similar_row(cx))
+            .children(self.about(cx))
             .child(body)
             .when(selecting, |view| view.child(self.selection_bar(cx)))
             .into_any_element()
@@ -517,6 +537,7 @@ impl ArtistDetail {
             .min_h_0()
             .gap_12()
             .child(self.hero(cx))
+            .children(self.about(cx))
             .child(
                 v_flex()
                     .flex_1()

@@ -23,6 +23,9 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 /// the ordinary budget turned most radio starts into a silent timeout.
 const SIMILAR_SONGS_TIMEOUT: Duration = Duration::from_secs(90);
 
+/// Similar artists asked of `getArtistInfo2`.
+const SIMILAR_ARTISTS_COUNT: usize = 20;
+
 /// The OpenSubsonic extension that exposes analysis-backed similarity. A server
 /// advertises it only when something implements it (on Navidrome, the
 /// AudioMuse-AI plugin); the endpoints return a bare 404 otherwise, so it has to
@@ -328,6 +331,47 @@ struct GetOpenSubsonicExtensionsData {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SubsonicArtistInfo {
+    pub biography: Option<String>,
+    pub last_fm_url: Option<String>,
+    pub medium_image_url: Option<String>,
+    pub large_image_url: Option<String>,
+    #[serde(default)]
+    pub similar_artist: Vec<SubsonicArtist>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetArtistInfoData {
+    #[serde(default)]
+    artist_info2: Option<SubsonicArtistInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubsonicRadioStation {
+    pub id: String,
+    pub name: String,
+    pub stream_url: String,
+    pub home_page_url: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InternetRadioStationsContainer {
+    #[serde(default)]
+    internet_radio_station: Vec<SubsonicRadioStation>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetInternetRadioStationsData {
+    #[serde(default)]
+    internet_radio_stations: Option<InternetRadioStationsContainer>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct GetPlayQueueData {
     #[serde(default)]
     play_queue: Option<SubsonicPlayQueue>,
@@ -550,6 +594,28 @@ impl SubsonicClient {
             .into_iter()
             .flat_map(|idx| idx.artist)
             .collect())
+    }
+
+    pub fn get_artist_info(
+        &self,
+        artist_id: &str,
+    ) -> Result<Option<SubsonicArtistInfo>, SourceError> {
+        let params = vec![
+            ("id".to_string(), artist_id.to_string()),
+            ("count".to_string(), SIMILAR_ARTISTS_COUNT.to_string()),
+            ("includeNotPresent".to_string(), "false".to_string()),
+        ];
+        let data = self.call::<GetArtistInfoData>("getArtistInfo2.view", params)?;
+        Ok(data.artist_info2)
+    }
+
+    pub fn get_radio_stations(&self) -> Result<Vec<SubsonicRadioStation>, SourceError> {
+        let data =
+            self.call::<GetInternetRadioStationsData>("getInternetRadioStations.view", Vec::new())?;
+        Ok(data
+            .internet_radio_stations
+            .map(|stations| stations.internet_radio_station)
+            .unwrap_or_default())
     }
 
     pub fn get_starred_song_ids(&self) -> Result<Vec<String>, SourceError> {
@@ -830,6 +896,44 @@ mod tests {
 
         assert_eq!(data.sonic_match.len(), 1);
         assert_eq!(data.sonic_match[0].entry.id, "song-2");
+    }
+
+    #[test]
+    fn artist_info_response_parses() {
+        let data: GetArtistInfoData = parse(serde_json::json!({
+            "subsonic-response": {
+                "status": "ok",
+                "artistInfo2": {
+                    "biography": "Bio",
+                    "lastFmUrl": "https://last.fm/x",
+                    "largeImageUrl": "https://img.test/l.jpg",
+                    "similarArtist": [{ "id": "ar-2", "name": "Boris" }]
+                }
+            }
+        }));
+        let info = data.artist_info2.expect("info");
+        assert_eq!(
+            info.large_image_url.as_deref(),
+            Some("https://img.test/l.jpg")
+        );
+        assert_eq!(info.similar_artist[0].id, "ar-2");
+    }
+
+    #[test]
+    fn radio_stations_response_parses() {
+        let data: GetInternetRadioStationsData = parse(serde_json::json!({
+            "subsonic-response": {
+                "status": "ok",
+                "internetRadioStations": { "internetRadioStation": [
+                    { "id": "r1", "name": "Jazz", "streamUrl": "http://s/1", "homePageUrl": "http://h" }
+                ] }
+            }
+        }));
+        let stations = data
+            .internet_radio_stations
+            .expect("stations")
+            .internet_radio_station;
+        assert_eq!(stations[0].home_page_url.as_deref(), Some("http://h"));
     }
 
     #[test]

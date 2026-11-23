@@ -462,6 +462,17 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::artist_detail_to_proto(&detail)))
     }
 
+    async fn get_artist_info(
+        &self,
+        request: Request<proto::ArtistRequest>,
+    ) -> Result<Response<proto::ArtistInfoResponse>, Status> {
+        let artist = request.get_ref().key.clone();
+        let about = self.0.api.artist_info(artist).await.map_err(failed)?;
+        Ok(Response::new(proto::ArtistInfoResponse {
+            about: about.as_ref().map(convert::artist_about_to_proto),
+        }))
+    }
+
     async fn get_artist_sample_tracks(
         &self,
         request: Request<proto::Page>,

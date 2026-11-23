@@ -126,6 +126,23 @@ impl PluginSource {
     }
 }
 
+/// The daemon streams a station outside the sandbox, so one off the plugin's hosts is dropped like such a track stream.
+fn reachable_stations(
+    reach: &crate::plugins::Reach,
+    stations: Vec<wit::RadioStation>,
+) -> Vec<RadioStation> {
+    stations
+        .into_iter()
+        .filter(|station| reach.allows(&station.stream_url))
+        .map(|station| RadioStation {
+            id: station.id,
+            name: station.name,
+            stream_url: station.stream_url,
+            homepage: station.homepage,
+        })
+        .collect()
+}
+
 /// Keyed by item id, which is the key a plugin track is stored under.
 fn track_stats(track: &wit::Track) -> db::ServerTrackStats {
     db::ServerTrackStats {
@@ -617,15 +634,7 @@ impl MediaSource for PluginSource {
 
     async fn fetch_radio_stations(&self) -> Result<Vec<RadioStation>, SourceError> {
         let stations = answer(self.session.fetch_radio_stations().await)?;
-        Ok(stations
-            .into_iter()
-            .map(|station| RadioStation {
-                id: station.id,
-                name: station.name,
-                stream_url: station.stream_url,
-                homepage: station.homepage,
-            })
-            .collect())
+        Ok(reachable_stations(&self.artwork(), stations))
     }
 
     async fn save_play_queue(
@@ -841,6 +850,29 @@ mod tests {
             },
             "https://music.example",
         )
+    }
+
+    #[test]
+    fn a_community_plugin_keeps_only_stations_it_could_reach() {
+        let station = |id: &str, url: &str| wit::RadioStation {
+            id: id.into(),
+            name: id.into(),
+            stream_url: url.into(),
+            homepage: None,
+        };
+        let stations = vec![
+            station("own", "https://music.example/live.mp3"),
+            station("listed", "https://archive.org/stream.ogg"),
+            station("lan", "http://192.168.1.1/admin"),
+            station("elsewhere", "https://radio.example/live"),
+        ];
+
+        let kept: Vec<String> = reachable_stations(&community(), stations)
+            .into_iter()
+            .map(|station| station.id)
+            .collect();
+
+        assert_eq!(kept, ["own", "listed"]);
     }
 
     #[test]

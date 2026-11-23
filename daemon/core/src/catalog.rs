@@ -24,6 +24,8 @@ use crate::library::LibraryService;
 use crate::session::SessionHandle;
 use crate::sources::source_error;
 
+mod artist_info;
+
 /// Roughly a few pages of browsing; the oldest tiles fall out.
 const MAX_REMEMBERED_TILES: usize = 4096;
 

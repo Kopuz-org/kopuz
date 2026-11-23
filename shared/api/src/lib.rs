@@ -42,11 +42,11 @@ pub use jobs::{
     DownloadCandidate, DownloadHistoryEntry, DownloadItemState, DownloadItemStatus, DownloadState,
 };
 pub use library::{
-    AlbumInfo, AlbumPage, AlbumQuery, ArtistCredit, ArtistDetail, ArtistInfo, ArtistPage,
-    ArtistQuery, DEFAULT_PAGE_LIMIT, DayPlays, ListeningStats, LyricChunkView, LyricLineView,
-    LyricsView, Page, Ranked, RankedTrack, SearchRequest, SearchResults, SearchSuggestion,
-    SimilarArtist, StatsView, TrackCounterpart, TrackFilter, TrackInfo, TrackPage, TrackSort,
-    TrackVersion, total_duration_secs,
+    AlbumInfo, AlbumPage, AlbumQuery, ArtistCredit, ArtistDetail, ArtistInfo, ArtistInfoView,
+    ArtistPage, ArtistQuery, DEFAULT_PAGE_LIMIT, DayPlays, ListeningStats, LyricChunkView,
+    LyricLineView, LyricsView, Page, Ranked, RankedTrack, SearchRequest, SearchResults,
+    SearchSuggestion, SimilarArtist, StatsView, TrackCounterpart, TrackFilter, TrackInfo,
+    TrackPage, TrackSort, TrackVersion, total_duration_secs,
 };
 pub use mutations::{ArtworkChange, ArtworkUpload, TrackMetadataPatch};
 pub use player::{
@@ -66,7 +66,7 @@ pub use prefs::{
 pub use queue::{
     QueueContext, QueueEdit, QueueItem, QueueMode, QueueSnapshot, QueueWindow, SetQueueRequest,
 };
-pub use radio::{RadioStationInfo, RadioStreamInfo};
+pub use radio::{RadioOrigin, RadioStationInfo, RadioStreamInfo};
 pub use schema::{
     ChoiceOption, FieldKind, FieldSpec, FieldValue, Icon, Problem, Text, decode_directories,
     encode_directories, spec_value, toggle_of, value_of,
@@ -240,6 +240,9 @@ pub trait LibraryApi: Send + Sync {
     async fn artist(&self, artist: String) -> Result<ArtistDetail, ApiError>;
 
     async fn similar_artists(&self, name: String) -> Result<Vec<SimilarArtist>, ApiError>;
+    /// What the active source says about an artist: biography, similar artists, a link. `None` when
+    /// its capability [`SourceCapabilities::artist_info`] is off or it knows nothing of them.
+    async fn artist_info(&self, artist: String) -> Result<Option<ArtistInfoView>, ApiError>;
 
     /// One track per artist, for the artist grid's tiles.
     async fn artist_sample_tracks(&self, page: Page) -> Result<TrackPage, ApiError>;

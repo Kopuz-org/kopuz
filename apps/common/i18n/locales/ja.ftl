@@ -1310,3 +1310,6 @@ interface_panel_side = 位置
 interface_panel_side_description = プレイリスト列をページのどちら側に置くか。
 interface_queue_side = キューと歌詞の列の位置
 interface_queue_side_description = キューと歌詞の列をどちら側に開くか。
+artist_similar = Similar artists
+artist_info_link = このアーティストの詳細
+radio_from_server = サーバーから

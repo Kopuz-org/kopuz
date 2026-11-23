@@ -1334,3 +1334,6 @@ interface_panel_side = Side
 interface_panel_side_description = Which side of the page the playlists column sits on.
 interface_queue_side = Queue and lyrics column side
 interface_queue_side_description = Which side of the page the docked queue and lyrics column opens on.
+artist_similar = Similar artists
+artist_info_link = More about this artist
+radio_from_server = From your server

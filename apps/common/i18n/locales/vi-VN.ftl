@@ -1298,3 +1298,6 @@ interface_panel_side = Bên
 interface_panel_side_description = Cột danh sách phát nằm bên nào của trang.
 interface_queue_side = Bên của cột hàng đợi và lời
 interface_queue_side_description = Cột hàng đợi và lời mở ở bên nào.
+artist_similar = Similar artists
+artist_info_link = Xem thêm về nghệ sĩ này
+radio_from_server = Từ máy chủ của bạn

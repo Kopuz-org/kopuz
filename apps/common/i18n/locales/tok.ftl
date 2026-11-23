@@ -1304,3 +1304,6 @@ interface_panel_side = poka
 interface_panel_side_description = kulupu kalama li lon poka seme.
 interface_queue_side = poka pi linja kalama
 interface_queue_side_description = linja kalama en nimi li open lon poka seme.
+artist_similar = Similar artists
+artist_info_link = sona mute pi jan pali ni
+radio_from_server = tan pana sina

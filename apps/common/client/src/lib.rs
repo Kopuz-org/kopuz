@@ -360,6 +360,19 @@ impl api::LibraryApi for GrpcApi {
         Ok(convert::album_page_from_proto(albums.get_ref()))
     }
 
+    async fn artist_info(&self, artist: String) -> Result<Option<api::ArtistInfoView>, ApiError> {
+        let response = self
+            .client()
+            .get_artist_info(Request::new(proto::ArtistRequest { key: artist }))
+            .await
+            .map_err(wire_error)?;
+        Ok(response
+            .get_ref()
+            .about
+            .as_ref()
+            .map(convert::artist_about_from_proto))
+    }
+
     async fn album(&self, id: String) -> Result<Option<api::AlbumInfo>, ApiError> {
         let album = self
             .client()

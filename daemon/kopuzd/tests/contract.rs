@@ -2122,6 +2122,14 @@ async fn artists_are_keyed_by_identity_on_both_transports() {
             detail.info, **ada,
             "the page names the artist the grid does"
         );
+        assert_eq!(
+            pair.local
+                .artist_info(ada.key.clone())
+                .await
+                .expect("local"),
+            pair.wire.artist_info(ada.key.clone()).await.expect("wire"),
+            "a source without artist info answers none the same way over the wire"
+        );
     }
     let linked = adas
         .iter()
