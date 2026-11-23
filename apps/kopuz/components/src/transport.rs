@@ -20,6 +20,18 @@ use crate::menus::Menu;
 use store::SleepAfter;
 
 const SLEEP_MINUTES: [u64; 5] = [5, 15, 30, 45, 60];
+const SPEEDS: [f32; 6] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+
+fn speed_value(speed: f32) -> SharedString {
+    SharedString::from(format!("{speed}×"))
+}
+
+fn speed_label(speed: f32) -> SharedString {
+    match (speed - 1.).abs() < 0.01 {
+        true => t("playback_speed"),
+        false => SharedString::from(format!("{} · {}", t("playback_speed"), speed_value(speed))),
+    }
+}
 use crate::{icons, motion, style};
 
 /// The channel the play button keeps its glyph swap under.
@@ -629,10 +641,25 @@ impl RenderOnce for TransportOverflow {
                             .on_click(|_, _, cx| store::toggle_stage(cx)),
                     )
                 })
-                .item(
-                    PopupMenuItem::new(t("playback_speed"))
-                        .icon(icons::icon(GAUGE))
-                        .disabled(true),
+                .submenu_with_icon(
+                    Some(icons::icon(GAUGE)),
+                    speed_label(store::PlayerModel::global(cx).read(cx).speed()),
+                    window,
+                    cx,
+                    |menu, _, cx| {
+                        let now = store::PlayerModel::global(cx).read(cx).speed();
+                        SPEEDS.iter().fold(menu, |menu, speed| {
+                            let speed = *speed;
+                            menu.item(
+                                PopupMenuItem::new(speed_value(speed))
+                                    .checked((now - speed).abs() < 0.01)
+                                    .on_click(move |_, _, cx| {
+                                        store::PlayerModel::global(cx)
+                                            .update(cx, |player, cx| player.set_speed(speed, cx));
+                                    }),
+                            )
+                        })
+                    },
                 )
         });
         MenuButton::new(self.id, menu).variant(MenuVariant::Icon {

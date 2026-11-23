@@ -153,6 +153,8 @@ pub enum Command {
         pause_device: bool,
     },
     SetVolume(f32),
+    /// 0.5 to 2.0; the pitch moves with it.
+    SetSpeed(f32),
     SetChannelMode(ChannelMode),
     SetEqualizer(EqualizerSettings),
     SetReplayGain(ReplayGainSettings),
@@ -237,8 +239,11 @@ pub struct EngineStatus {
     pub(crate) played_samples: Arc<AtomicU64>,
     pub(crate) channels: u32,
     pub(crate) sample_rate: u32,
+    pub(crate) speed_permille: u32,
     pub(crate) output_latency_micros: Arc<AtomicU64>,
 }
+
+pub(crate) const SPEED_NORMAL: u32 = 1_000;
 
 /// Position from a base offset plus the samples the RT callback has played,
 /// clamped to the track duration. Shared by the current and fading sessions.
@@ -247,11 +252,14 @@ fn position_from(
     played_samples: &AtomicU64,
     channels: u32,
     sample_rate: u32,
+    speed_permille: u32,
     duration: Duration,
 ) -> Duration {
     let played = played_samples.load(Ordering::Relaxed);
     let micros = if channels > 0 && sample_rate > 0 {
-        base_micros + (played * 1_000_000) / (channels as u64 * sample_rate as u64)
+        base_micros
+            + (played * 1_000 * u64::from(speed_permille.max(1)))
+                / (channels as u64 * sample_rate as u64)
     } else {
         base_micros
     };
@@ -276,6 +284,7 @@ impl EngineStatus {
             played_samples: Arc::new(AtomicU64::new(0)),
             channels: 0,
             sample_rate: 0,
+            speed_permille: SPEED_NORMAL,
             output_latency_micros: Arc::new(AtomicU64::new(0)),
         }
     }
@@ -300,6 +309,7 @@ impl EngineStatus {
             &self.played_samples,
             self.channels,
             self.sample_rate,
+            self.speed_permille,
             self.duration,
         )
     }
@@ -314,6 +324,7 @@ impl EngineStatus {
             &fading.played_samples,
             self.channels,
             self.sample_rate,
+            self.speed_permille,
             fading.duration,
         ))
     }

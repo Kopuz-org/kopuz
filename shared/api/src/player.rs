@@ -139,6 +139,18 @@ pub struct PlayerState {
     pub error: Option<crate::error::ErrorBody>,
     /// Output pipeline latency, for lyric/visual sync offsets.
     pub output_latency_ms: Option<u64>,
+    /// Playback speed; 0 from a daemon that predates it, read through [`Self::rate`].
+    pub speed: f32,
+}
+
+impl PlayerState {
+    /// How fast the position moves against the wall clock.
+    pub fn rate(&self) -> f32 {
+        match self.speed > 0. {
+            true => self.speed,
+            false => 1.,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -158,6 +170,10 @@ pub enum PlayerCommand {
     },
     SetMuted {
         muted: bool,
+    },
+    /// 0.5 to 2.0; the pitch moves with it.
+    SetSpeed {
+        speed: f32,
     },
     SetMode {
         shuffle: Option<bool>,

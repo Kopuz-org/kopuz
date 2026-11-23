@@ -53,6 +53,7 @@ kopuzctl next
 kopuzctl previous
 kopuzctl seek 90
 kopuzctl volume 65
+kopuzctl speed 1.25
 kopuzctl queue --offset 0 --limit 50
 kopuzctl stop
 ```

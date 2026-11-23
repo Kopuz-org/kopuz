@@ -69,5 +69,6 @@ pub(super) fn sample_state() -> api::PlayerState {
             reason: None,
         }),
         output_latency_ms: Some(120),
+        speed: 1.25,
     }
 }

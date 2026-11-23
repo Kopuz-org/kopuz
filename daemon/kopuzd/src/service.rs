@@ -209,6 +209,16 @@ impl Kopuz for KopuzGrpc {
         .await
     }
 
+    async fn set_speed(
+        &self,
+        request: Request<proto::SetSpeed>,
+    ) -> Result<Response<proto::MutationResult>, Status> {
+        self.player_mutation(api::PlayerCommand::SetSpeed {
+            speed: request.get_ref().speed,
+        })
+        .await
+    }
+
     async fn set_muted(
         &self,
         request: Request<proto::SetMuted>,

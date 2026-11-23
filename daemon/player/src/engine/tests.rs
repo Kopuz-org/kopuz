@@ -284,6 +284,56 @@ fn load_plays_and_position_advances() {
 }
 
 #[test]
+fn double_speed_covers_two_seconds_of_track_per_second_played() {
+    let (sink, engine) = spawn_engine();
+    let (factory, duration) = wav_factory(8.0);
+    load(&engine, 1, factory, duration);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("non-silent audio", || {
+        sink.pull(4410).iter().any(|s| *s != 0.0)
+    });
+
+    sink.pull(TEST_CONFIG.sample_rate as usize * TEST_CONFIG.channels * 2);
+    let before = engine.status().position();
+    assert!(
+        before > Duration::from_millis(1_500),
+        "played only {before:?} before the change"
+    );
+    engine.send(Command::SetSpeed(2.0));
+    wait_until("the speed lands", || {
+        engine.status().speed_permille == 2_000
+    });
+    let changed = engine.status().position();
+    assert!(
+        changed.abs_diff(before) < Duration::from_millis(250),
+        "changing speed moved the position from {before:?} to {changed:?}"
+    );
+
+    let second = TEST_CONFIG.sample_rate as usize * TEST_CONFIG.channels;
+    wait_until("audio at the new speed", || {
+        sink.pull(4410).iter().any(|s| *s != 0.0)
+    });
+    let start = engine.status().position();
+    sink.pull(second);
+    let advanced = engine.status().position() - start;
+    assert!(
+        advanced > Duration::from_millis(1_800) && advanced < Duration::from_millis(2_200),
+        "one second played at 2x moved the position by {advanced:?}"
+    );
+
+    engine.send(Command::SetSpeed(9.0));
+    wait_until("speed is clamped", || {
+        engine.status().speed_permille == 2_000
+    });
+    engine.send(Command::SetSpeed(0.1));
+    wait_until("speed is clamped low", || {
+        engine.status().speed_permille == 500
+    });
+
+    engine.shutdown();
+}
+
+#[test]
 fn replay_gain_settings_scale_the_playing_track() {
     let (sink, engine) = spawn_engine();
     let (factory, duration) = wav_factory(5.0);

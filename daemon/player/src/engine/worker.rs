@@ -79,6 +79,7 @@ pub(crate) struct WorkerHandle {
 pub(crate) fn spawn(
     token: u64,
     factory: SourceFactory,
+    speed: Arc<std::sync::atomic::AtomicU32>,
     msg_tx: Sender<ActorMsg>,
 ) -> std::io::Result<WorkerHandle> {
     let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
@@ -86,7 +87,7 @@ pub(crate) fn spawn(
         .name(format!("kopuz-decode-{token}"))
         .spawn(move || {
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run(token, factory, &msg_tx, &cmd_rx)
+                run(token, factory, &speed, &msg_tx, &cmd_rx)
             }));
             if outcome.is_err() {
                 tracing::error!(token, "decode worker panicked");
@@ -139,6 +140,7 @@ enum SeekOutcome {
 fn run(
     token: u64,
     factory: SourceFactory,
+    speed: &std::sync::atomic::AtomicU32,
     msg_tx: &Sender<ActorMsg>,
     cmd_rx: &Receiver<WorkerCmd>,
 ) {
@@ -330,6 +332,7 @@ fn run(
             &decoded,
             output.channels,
             output.sample_rate,
+            speed.load(std::sync::atomic::Ordering::Relaxed),
             &mut scratch,
         );
         if output_gain != 1.0 {
@@ -627,9 +630,11 @@ fn audio_buf_to_f32_interleaved<'a>(
     buf: &GenericAudioBufferRef,
     target_channels: usize,
     target_sample_rate: u32,
+    speed_permille: u32,
     scratch: &'a mut Scratch,
 ) -> &'a mut [f32] {
-    let source_sample_rate = buf.spec().rate();
+    let source_sample_rate =
+        ((u64::from(buf.spec().rate()) * u64::from(speed_permille)) / 1_000) as u32;
     let src_chans = buf.num_planes().max(1);
 
     scratch.interleaved.clear();

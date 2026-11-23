@@ -27,6 +27,7 @@ service Kopuz {
   rpc Seek(Seek) returns (MutationResult);
   rpc SetVolume(SetVolume) returns (MutationResult);
   rpc SetMuted(SetMuted) returns (MutationResult);
+  rpc SetSpeed(SetSpeed) returns (MutationResult);
   rpc SetMode(SetMode) returns (MutationResult);
   rpc SetVersion(SetVersion) returns (MutationResult);
 
@@ -218,6 +219,11 @@ message EventEnvelope {
 
 message Seek {
   uint64 position_ms = 1;
+}
+
+message SetSpeed {
+  // 0.5 to 2.0; the pitch moves with it.
+  float speed = 1;
 }
 
 message SetVolume {
@@ -415,6 +421,8 @@ message PlayerState {
   optional TrackInfo row = 14;
   // Output is silenced; `volume` is still the level unmuting returns to.
   bool muted = 15;
+  // Playback speed; 0 means normal, for daemons that predate it.
+  float speed = 16;
 }
 
 // phase is engine truth; intent is what the daemon is trying to do.
