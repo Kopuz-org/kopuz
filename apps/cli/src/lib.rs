@@ -59,6 +59,11 @@ pub enum Command {
         #[arg(value_parser = clap::value_parser!(u8).range(0..=100))]
         percent: u8,
     },
+    /// Set playback speed from 0.5 to 2.0; the pitch moves with it.
+    Speed {
+        #[arg(value_parser = parse_speed)]
+        speed: f32,
+    },
     /// List a window of the playback queue.
     Queue(PageArgs),
     /// Search the active source's indexed library.
@@ -290,6 +295,7 @@ pub async fn execute(
         Command::Volume { percent } => Some(PlayerCommand::SetVolume {
             volume: f32::from(percent) / 100.0,
         }),
+        Command::Speed { speed } => Some(PlayerCommand::SetSpeed { speed }),
         Command::Play { ref keys, .. } if keys.is_empty() => Some(PlayerCommand::Play),
         _ => None,
     };
@@ -305,6 +311,7 @@ pub async fn execute(
                 "protocol_revision": status.proto_revision,
                 "phase": format!("{:?}", state.phase).to_lowercase(),
                 "volume_percent": (state.volume * 100.0).round(),
+                "speed": state.rate(),
                 "queue_length": state.queue.length,
                 "track": state.track.map(|track| format!("{} — {}", track.artist, track.title)),
             }))
@@ -614,6 +621,16 @@ pub fn write_output(mut output: impl Write, value: &Value, json: bool) -> io::Re
             Ok(())
         }
         other => writeln!(output, "{}", cell(other)),
+    }
+}
+
+fn parse_speed(text: &str) -> Result<f32, String> {
+    let speed: f32 = text
+        .parse()
+        .map_err(|_| format!("{text} is not a number"))?;
+    match (0.5..=2.0).contains(&speed) {
+        true => Ok(speed),
+        false => Err("speed must be between 0.5 and 2.0".to_string()),
     }
 }
 

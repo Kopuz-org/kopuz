@@ -245,6 +245,10 @@ impl Player {
         self.engine.send(Command::SetVolume(volume));
     }
 
+    pub fn set_speed(&self, speed: f32) {
+        self.engine.send(Command::SetSpeed(speed));
+    }
+
     pub fn set_channel_mode(&self, mode: ChannelMode) {
         self.engine.send(Command::SetChannelMode(mode));
     }

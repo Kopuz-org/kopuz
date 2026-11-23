@@ -173,6 +173,11 @@ impl api::PlayerApi for GrpcApi {
                     .set_muted(Request::new(proto::SetMuted { muted }))
                     .await
             }
+            PlayerCommand::SetSpeed { speed } => {
+                self.client()
+                    .set_speed(Request::new(proto::SetSpeed { speed }))
+                    .await
+            }
             PlayerCommand::SetMode { shuffle, loop_mode } => {
                 self.client()
                     .set_mode(Request::new(proto::SetMode {

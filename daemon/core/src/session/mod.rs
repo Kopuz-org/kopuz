@@ -364,6 +364,7 @@ impl SessionHandle {
             rev: 0,
             queue_rev: 0,
             volume,
+            speed: 1.0,
             muted: services.muted,
             origin: None,
             epoch: Instant::now(),
@@ -793,6 +794,7 @@ struct Session {
     /// The level unmuting returns to; the engine plays at zero while `muted`.
     volume: f32,
     muted: bool,
+    speed: f32,
     /// The container the queue was built from; None for a raw track list.
     origin: Option<QueueContext>,
     epoch: Instant,
@@ -1122,6 +1124,12 @@ impl Session {
             PlayerCommand::SetMuted { muted } => {
                 self.muted = muted;
                 self.player.set_volume(self.output_volume());
+            }
+            PlayerCommand::SetSpeed { speed } => {
+                self.speed = speed.clamp(0.5, 2.0);
+                self.player.set_speed(self.speed);
+                let playing = self.phase == ApiPhase::Playing;
+                self.publish_position_anchor(state_tx, None, None, playing);
             }
             PlayerCommand::SetVersion { version } => {
                 queue_changed = self.set_version(version, state_tx)?;
@@ -2048,6 +2056,7 @@ impl Session {
                 | PlayerCommand::Previous
                 | PlayerCommand::Toggle
                 | PlayerCommand::SetMuted { .. }
+                | PlayerCommand::SetSpeed { .. }
                 | PlayerCommand::SetMode { .. }
                 | PlayerCommand::SetVersion { .. } => Ok(()),
             };

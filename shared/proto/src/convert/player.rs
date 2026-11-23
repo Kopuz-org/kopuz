@@ -143,6 +143,7 @@ pub fn player_state_to_proto(value: &api::PlayerState) -> PlayerState {
         }),
         error: value.error.as_ref().map(error_body_to_proto),
         output_latency_ms: value.output_latency_ms,
+        speed: value.speed,
     }
 }
 
@@ -174,6 +175,7 @@ pub fn player_state_from_proto(value: &PlayerState) -> api::PlayerState {
             }),
         error: value.error.as_ref().map(error_body_from_proto),
         output_latency_ms: value.output_latency_ms,
+        speed: value.speed,
     }
 }
 

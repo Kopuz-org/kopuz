@@ -201,7 +201,8 @@ impl PlayerModel {
             return 0;
         };
         let position = if anchor.playing {
-            anchor.ms + self.daemon_now_ms().saturating_sub(anchor.at_ms)
+            let elapsed = self.daemon_now_ms().saturating_sub(anchor.at_ms) as f64;
+            anchor.ms + (elapsed * f64::from(self.state.rate())) as u64
         } else {
             anchor.ms
         };
@@ -322,6 +323,21 @@ impl PlayerModel {
     }
 
     /// `volume` is 0.0..=1.0; the daemon persists it, and setting a level unmutes.
+    pub fn speed(&self) -> f32 {
+        self.state.rate()
+    }
+
+    pub fn set_speed(&mut self, speed: f32, cx: &mut Context<Self>) {
+        self.state.speed = speed.clamp(0.5, 2.0);
+        crate::notify(cx);
+        send(
+            PlayerCommand::SetSpeed {
+                speed: self.state.speed,
+            },
+            cx,
+        );
+    }
+
     pub fn set_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
         self.state.volume = volume.clamp(0.0, 1.0);
         self.state.muted = false;

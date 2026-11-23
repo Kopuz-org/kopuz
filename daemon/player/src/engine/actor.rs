@@ -217,6 +217,7 @@ struct Actor {
     events: Vec<tokio::sync::mpsc::UnboundedSender<Event>>,
 
     volume: Arc<AtomicU32>,
+    speed: Arc<AtomicU32>,
     paused: Arc<AtomicBool>,
     eq_settings: EqualizerSettings,
     replay_gain_settings: ReplayGainSettings,
@@ -271,6 +272,7 @@ impl Actor {
             status,
             events: Vec::new(),
             volume: Arc::new(AtomicU32::new(super::rt::volume_bits(1.0))),
+            speed: Arc::new(AtomicU32::new(super::SPEED_NORMAL)),
             paused: Arc::new(AtomicBool::new(false)),
             eq_settings: EqualizerSettings::default(),
             replay_gain_settings: ReplayGainSettings::default(),
@@ -382,6 +384,7 @@ impl Actor {
                 self.volume
                     .store(super::rt::volume_bits(gain), Ordering::Relaxed);
             }
+            Command::SetSpeed(speed) => self.handle_speed(speed),
             Command::SetChannelMode(mode) => {
                 self.channel_mode = mode;
                 self.send_rt(RtCmd::SetChannelMode(mode));
@@ -497,19 +500,20 @@ impl Actor {
             reply,
         } = request;
 
-        let worker = match super::worker::spawn(token, factory, self.self_tx.clone()) {
-            Ok(worker) => worker,
-            Err(e) => {
-                let message = Failure::from(format!("failed to spawn decode worker: {e}"));
-                if let Some(reply) = reply {
-                    let _ = reply.send(Err(message.clone()));
+        let worker =
+            match super::worker::spawn(token, factory, self.speed.clone(), self.self_tx.clone()) {
+                Ok(worker) => worker,
+                Err(e) => {
+                    let message = Failure::from(format!("failed to spawn decode worker: {e}"));
+                    if let Some(reply) = reply {
+                        let _ = reply.send(Err(message.clone()));
+                    }
+                    self.emit(Event::Error { token, message });
+                    // discard_pending above may have removed a published pending.
+                    self.publish();
+                    return;
                 }
-                self.emit(Event::Error { token, message });
-                // discard_pending above may have removed a published pending.
-                self.publish();
-                return;
-            }
-        };
+            };
         self.pending = Some(Pending {
             plan: StartPlan {
                 token,
@@ -830,6 +834,20 @@ impl Actor {
         if let Some(fading) = self.fading.take() {
             self.retire_session(fading);
         }
+    }
+
+    /// The audio already queued was decoded at the old speed, so the change lands as a seek to here.
+    fn handle_speed(&mut self, speed: f32) {
+        let permille = (speed.clamp(0.5, 2.0) * 1_000.).round() as u32;
+        if self.speed.load(Ordering::Relaxed) == permille {
+            return;
+        }
+        let here = self.status.load().position();
+        self.speed.store(permille, Ordering::Relaxed);
+        if self.current.is_some() {
+            self.handle_seek(here, None);
+        }
+        self.publish();
     }
 
     fn handle_seek(&mut self, target: Duration, expect_token: Option<u64>) {
@@ -1205,6 +1223,7 @@ impl Actor {
                 played_samples: current.played.clone(),
                 channels,
                 sample_rate,
+                speed_permille: self.speed.load(Ordering::Relaxed),
                 output_latency_micros,
             },
             None => EngineStatus {
@@ -1218,6 +1237,7 @@ impl Actor {
                 played_samples: Arc::new(AtomicU64::new(0)),
                 channels: 0,
                 sample_rate: 0,
+                speed_permille: self.speed.load(Ordering::Relaxed),
                 output_latency_micros,
             },
         };

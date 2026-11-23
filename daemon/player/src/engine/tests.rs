@@ -284,6 +284,57 @@ fn load_plays_and_position_advances() {
 }
 
 #[test]
+fn double_speed_covers_two_seconds_of_track_per_second_played() {
+    let (sink, engine) = spawn_engine();
+    let (factory, duration) = wav_factory(8.0);
+    load(&engine, 1, factory, duration);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("non-silent audio", || {
+        sink.pull(4410).iter().any(|s| *s != 0.0)
+    });
+
+    wait_until("a second and a half played", || {
+        sink.pull(4410);
+        engine.status().position() > Duration::from_millis(1_500)
+    });
+    let before = engine.status().position();
+    engine.send(Command::SetSpeed(2.0));
+    wait_until("the speed lands", || {
+        engine.status().speed_permille == 2_000
+    });
+    let changed = engine.status().position();
+    assert!(
+        changed.abs_diff(before) < Duration::from_millis(250),
+        "changing speed moved the position from {before:?} to {changed:?}"
+    );
+
+    let second = TEST_CONFIG.sample_rate as usize * TEST_CONFIG.channels;
+    let start = engine.status().position();
+    let mut played = 0;
+    wait_until("a second played at the new speed", || {
+        played += sink.pull(4410).iter().filter(|s| **s != 0.0).count();
+        played >= second
+    });
+    let advanced = (engine.status().position() - start).as_secs_f64();
+    let expected = 2. * played as f64 / second as f64;
+    assert!(
+        (advanced - expected).abs() < 0.2,
+        "{expected:.2}s of track played at 2x moved the position by {advanced:.2}s"
+    );
+
+    engine.send(Command::SetSpeed(9.0));
+    wait_until("speed is clamped", || {
+        engine.status().speed_permille == 2_000
+    });
+    engine.send(Command::SetSpeed(0.1));
+    wait_until("speed is clamped low", || {
+        engine.status().speed_permille == 500
+    });
+
+    engine.shutdown();
+}
+
+#[test]
 fn replay_gain_settings_scale_the_playing_track() {
     let (sink, engine) = spawn_engine();
     let (factory, duration) = wav_factory(5.0);
