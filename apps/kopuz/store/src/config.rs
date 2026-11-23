@@ -156,7 +156,9 @@ impl ConfigModel {
         queue(&mut self.pending, edit);
         crate::notify(cx);
         // Held until the daemon's config is read, so a defaulted copy is never what gets written.
-        if self.loaded {
+        // A write in flight sends what is queued once it answers; restarting it here would drop
+        // that answer and let the two writes land out of order.
+        if self.loaded && self.writing.is_none() {
             self.schedule_save(cx);
         }
     }
