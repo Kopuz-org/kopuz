@@ -200,6 +200,7 @@ remove_from_cache = கேஷிலிருந்து அகற்று
 create = உருவாக்கு
 save = சேமி
 minimize = சிறிதாக்கு
+restore_window = Restore window
 maximize = பெரிதாக்கு
 close = மூடு
 mini_player = மினி பிளேயர்

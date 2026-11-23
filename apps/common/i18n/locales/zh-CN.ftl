@@ -271,6 +271,7 @@ folder_playlists = 文件夹播放列表
 folder_playlist = 文件夹
 featured_album = 精选专辑
 minimize = 最小化
+restore_window = Restore window
 maximize = 最大化
 close = 关闭
 mini_player = 迷你播放器

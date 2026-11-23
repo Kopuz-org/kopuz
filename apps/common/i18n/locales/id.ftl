@@ -200,6 +200,7 @@ remove_from_cache = Hapus dari Tembolok
 create = Buat
 save = Simpan
 minimize = Minimalkan
+restore_window = Restore window
 maximize = Maksimalkan
 close = Tutup
 mini_player = Pemutar mini

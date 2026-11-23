@@ -311,6 +311,7 @@ folder_playlists = Playlisturi de foldere
 folder_playlist = Folder
 featured_album = Album recomandat
 minimize = Minimizează
+restore_window = Restore window
 maximize = Maximizează
 close = Închide
 mini_player = Mini player

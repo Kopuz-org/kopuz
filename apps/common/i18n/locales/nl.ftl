@@ -200,6 +200,7 @@ remove_from_cache = Uit cache verwijderen
 create = Aanmaken
 save = Opslaan
 minimize = Minimaliseren
+restore_window = Restore window
 maximize = Maximaliseren
 close = Sluiten
 mini_player = Minispeler

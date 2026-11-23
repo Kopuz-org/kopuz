@@ -303,6 +303,7 @@ folder_playlists = قوائم تشغيل المجلدات
 folder_playlist = مجلد
 featured_album = ألبوم مميز
 minimize = تصغير
+restore_window = Restore window
 maximize = تكبير
 close = إغلاق
 mini_player = مشغل مصغر

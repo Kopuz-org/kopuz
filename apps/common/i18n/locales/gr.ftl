@@ -303,6 +303,7 @@ folder_playlists = Λίστες φακέλων
 folder_playlist = Φάκελος
 featured_album = Προτεινόμενο άλμπουμ
 minimize = Ελαχιστοποίηση
+restore_window = Restore window
 maximize = Μεγιστοποίηση
 close = Κλείσιμο
 mini_player = Μίνι αναπαραγωγή

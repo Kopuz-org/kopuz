@@ -167,6 +167,7 @@ remove_from_cache = Apagar da cache
 create = Criar
 save = Guardar
 minimize = Minimizar
+restore_window = Restore window
 maximize = Maximizar
 close = Fechar
 mini_player = Mini reprodutor

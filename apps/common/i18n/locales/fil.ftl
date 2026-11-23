@@ -200,6 +200,7 @@ remove_from_cache = Alisin sa Cache
 create = Gawin
 save = I-save
 minimize = I-minimize
+restore_window = Restore window
 maximize = I-maximize
 close = Isara
 mini_player = Mini player

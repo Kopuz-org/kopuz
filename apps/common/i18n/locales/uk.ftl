@@ -319,6 +319,7 @@ folder_playlists = Плейлисти папок
 folder_playlist = Папка
 featured_album = Вибраний альбом
 minimize = Згорнути
+restore_window = Restore window
 maximize = Розгорнути
 close = Закрити
 mini_player = Міні-плеєр

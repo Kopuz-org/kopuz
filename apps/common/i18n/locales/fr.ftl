@@ -394,6 +394,7 @@ downloader_status_waiting = En attente...
 
 featured_album = Album en vedette
 minimize = Réduire
+restore_window = Restore window
 maximize = Agrandir
 close = Fermer
 mini_player = Mini-lecteur

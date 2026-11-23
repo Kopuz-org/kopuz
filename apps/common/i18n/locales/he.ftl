@@ -303,6 +303,7 @@ folder_playlists = פלייליסטים של תיקיות
 folder_playlist = תיקייה
 featured_album = אלבום מומלץ
 minimize = מזער
+restore_window = Restore window
 maximize = הגדל
 close = סגור
 mini_player = נגן מוקטן

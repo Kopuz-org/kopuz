@@ -374,6 +374,7 @@ downloader_status_waiting = 󱥎 󱤈...
 
 featured_album = 󱥯 󱤶 󱥬
 minimize = 󱥬 󱤴
+restore_window = Restore window
 maximize = 󱥬 󱤿
 close = 󱥔
 mini_player = ilo lili
