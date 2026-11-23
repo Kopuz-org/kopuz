@@ -1112,6 +1112,7 @@ error_browser_profile_signed_out = Dieses Browserprofil ist beim Dienst nicht an
 error_browser_profile_no_token = Der Dienst hat für dieses Profil kein Token angezeigt. Füge es stattdessen ein.
 error_integration_unreachable = Der Dienst ist nicht erreichbar. Prüfe deine Verbindung.
 error_credential_rejected = Der Dienst akzeptiert dieses Token nicht. Füge stattdessen dein Token ein.
+error_integration_failed = Der Dienst hat mit einem Fehler geantwortet. Versuche es später noch einmal.
 error_default_source_undeletable = Die Standard-Ordnerquelle kann nicht gelöscht werden.
 error_empty_source_folder = Ein Quellordner darf nicht leer sein.
 error_code_invalid_input = Nicht akzeptiert: { $detail }
