@@ -1253,3 +1253,7 @@ sleep_timer_end_of_track = பாடல் முடிவில்
 sleep_timer_left = { $minutes } நிமிடத்தில் நிற்கும்
 export_m3u = M3U ஆக ஏற்றுமதி செய்
 playlist_exported = { $count } பாடல்கள் கோப்பில் சேமிக்கப்பட்டன.
+interface_notifications_track = இப்போது இசைப்பது
+interface_notifications_track_description = பாடல் மாறும்போது எந்தப் பாடல் தொடங்கியது எனக் காட்டு.
+interface_notifications_track_in_app = செயலியில்
+interface_notifications_track_desktop = டெஸ்க்டாப் அறிவிப்பு

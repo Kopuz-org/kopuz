@@ -1223,3 +1223,7 @@ sleep_timer_end_of_track = 트랙이 끝나면
 sleep_timer_left = { $minutes }분 후 정지
 export_m3u = M3U로 내보내기
 playlist_exported = { $count }곡을 파일에 저장했습니다.
+interface_notifications_track = 지금 재생 중
+interface_notifications_track_description = 트랙이 바뀌면 어떤 곡이 시작됐는지 알려줍니다.
+interface_notifications_track_in_app = 앱 안에서
+interface_notifications_track_desktop = 데스크톱 알림

@@ -1229,3 +1229,7 @@ sleep_timer_end_of_track = 曲の終わり
 sleep_timer_left = あと { $minutes } 分で停止
 export_m3u = M3U として書き出す
 playlist_exported = { $count } 曲をファイルに保存しました。
+interface_notifications_track = 再生中
+interface_notifications_track_description = 曲が切り替わったときに再生を始めた曲を表示します。
+interface_notifications_track_in_app = アプリ内
+interface_notifications_track_desktop = デスクトップ通知

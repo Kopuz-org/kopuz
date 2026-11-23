@@ -1223,3 +1223,7 @@ sleep_timer_end_of_track = A szám végén
 sleep_timer_left = { $minutes } perc múlva leáll
 export_m3u = Exportálás M3U-ként
 playlist_exported = { $count } dal mentve a fájlba.
+interface_notifications_track = Most szól
+interface_notifications_track_description = Számváltáskor megmutatja, melyik dal indult.
+interface_notifications_track_in_app = Az alkalmazásban
+interface_notifications_track_desktop = Asztali értesítés

@@ -1256,3 +1256,7 @@ sleep_timer_end_of_track = Fin du titre
 sleep_timer_left = Arrêt dans { $minutes } min
 export_m3u = Exporter en M3U
 playlist_exported = { $count } titres enregistrés dans le fichier.
+interface_notifications_track = Lecture en cours
+interface_notifications_track_description = Indique quel titre commence quand la piste change.
+interface_notifications_track_in_app = Dans l'app
+interface_notifications_track_desktop = Notification du bureau

@@ -1236,3 +1236,7 @@ sleep_timer_end_of_track = pini kalama
 sleep_timer_left = tenpo lili { $minutes } la ona li pini
 export_m3u = o pana tawa lipu M3U
 playlist_exported = kalama { $count } li lon lipu.
+interface_notifications_track = kalama ni
+interface_notifications_track_description = kalama sin li open la o toki e nimi ona.
+interface_notifications_track_in_app = lon ilo
+interface_notifications_track_desktop = toki lon sitelen supa

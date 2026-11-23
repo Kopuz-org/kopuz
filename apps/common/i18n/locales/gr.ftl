@@ -1255,3 +1255,7 @@ sleep_timer_end_of_track = Τέλος κομματιού
 sleep_timer_left = Διακοπή σε { $minutes } λεπτά
 export_m3u = Εξαγωγή ως M3U
 playlist_exported = Αποθηκεύτηκαν { $count } τραγούδια στο αρχείο.
+interface_notifications_track = Παίζει τώρα
+interface_notifications_track_description = Δείχνει ποιο τραγούδι ξεκίνησε όταν αλλάζει το κομμάτι.
+interface_notifications_track_in_app = Μέσα στην εφαρμογή
+interface_notifications_track_desktop = Ειδοποίηση επιφάνειας εργασίας

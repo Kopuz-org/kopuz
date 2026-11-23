@@ -1244,3 +1244,7 @@ sleep_timer_end_of_track = Fine del brano
 sleep_timer_left = Si ferma tra { $minutes } min
 export_m3u = Esporta come M3U
 playlist_exported = { $count } brani salvati nel file.
+interface_notifications_track = In riproduzione
+interface_notifications_track_description = Mostra quale brano è partito quando cambia traccia.
+interface_notifications_track_in_app = Nell'app
+interface_notifications_track_desktop = Notifica del desktop

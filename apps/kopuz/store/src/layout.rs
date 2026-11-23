@@ -911,6 +911,16 @@ pub struct Notifications {
     pub errors: bool,
     /// Per job kind; a kind with no entry toasts.
     pub jobs: BTreeMap<String, bool>,
+    pub track_change: TrackToast,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrackToast {
+    #[default]
+    Off,
+    InApp,
+    Desktop,
 }
 
 impl Default for Notifications {
@@ -918,6 +928,7 @@ impl Default for Notifications {
         Self {
             errors: true,
             jobs: BTreeMap::new(),
+            track_change: TrackToast::Off,
         }
     }
 }

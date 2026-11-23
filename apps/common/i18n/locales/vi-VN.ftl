@@ -1217,3 +1217,7 @@ sleep_timer_end_of_track = Hết bài
 sleep_timer_left = Dừng sau { $minutes } phút
 export_m3u = Xuất dạng M3U
 playlist_exported = Đã lưu { $count } bài vào tệp.
+interface_notifications_track = Đang phát
+interface_notifications_track_description = Báo bài nào bắt đầu khi đổi bài.
+interface_notifications_track_in_app = Trong ứng dụng
+interface_notifications_track_desktop = Thông báo trên màn hình

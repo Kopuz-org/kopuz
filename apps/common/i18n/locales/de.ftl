@@ -1224,3 +1224,7 @@ sleep_timer_end_of_track = Ende des Titels
 sleep_timer_left = Stoppt in { $minutes } Min.
 export_m3u = Als M3U exportieren
 playlist_exported = { $count } Songs in die Playlist-Datei gespeichert.
+interface_notifications_track = Läuft gerade
+interface_notifications_track_description = Zeigt beim Titelwechsel, welcher Song gestartet ist.
+interface_notifications_track_in_app = In der App
+interface_notifications_track_desktop = Desktop-Benachrichtigung

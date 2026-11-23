@@ -1249,3 +1249,7 @@ sleep_timer_end_of_track = Slutet av låten
 sleep_timer_left = Stannar om { $minutes } min
 export_m3u = Exportera som M3U
 playlist_exported = Sparade { $count } låtar i filen.
+interface_notifications_track = Spelas nu
+interface_notifications_track_description = Visa vilken låt som börjar när spåret byts.
+interface_notifications_track_in_app = I appen
+interface_notifications_track_desktop = Skrivbordsnotis

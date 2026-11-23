@@ -1217,3 +1217,7 @@ sleep_timer_end_of_track = Akhir lagu
 sleep_timer_left = Berhenti dalam { $minutes } mnt
 export_m3u = Ekspor sebagai M3U
 playlist_exported = { $count } lagu disimpan ke berkas.
+interface_notifications_track = Sedang diputar
+interface_notifications_track_description = Beri tahu lagu apa yang mulai saat trek berganti.
+interface_notifications_track_in_app = Di aplikasi
+interface_notifications_track_desktop = Notifikasi desktop

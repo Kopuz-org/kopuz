@@ -1272,3 +1272,7 @@ sleep_timer_end_of_track = Конец трека
 sleep_timer_left = Остановка через { $minutes } мин
 export_m3u = Экспорт в M3U
 playlist_exported = Сохранено треков в файл: { $count }.
+interface_notifications_track = Сейчас играет
+interface_notifications_track_description = Показывать, какая песня началась при смене трека.
+interface_notifications_track_in_app = В приложении
+interface_notifications_track_desktop = Уведомление рабочего стола
