@@ -320,7 +320,10 @@ impl QueueView {
         let summary = queue.summary();
         let upcoming = queue.upcoming().len();
         let empty = queue.is_empty();
-        let place = format!("{}/{}", summary.position.max(1), summary.count);
+        let place = match summary.position {
+            0 => summary.count.to_string(),
+            at => format!("{at}/{}", summary.count),
+        };
         let label = SharedString::from(match summary.total_ms {
             Some(total) => format!("{place} • {}", duration(total)),
             None => place,
