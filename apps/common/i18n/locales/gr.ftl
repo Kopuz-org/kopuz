@@ -1260,3 +1260,4 @@ interface_notifications_track_description = Δείχνει ποιο τραγού
 interface_notifications_track_in_app = Μέσα στην εφαρμογή
 interface_notifications_track_desktop = Ειδοποίηση επιφάνειας εργασίας
 player_on_other_display = Πρόγραμμα αναπαραγωγής στην άλλη οθόνη
+import_playlist_link = Εισαγωγή συνδέσμου λίστας Spotify

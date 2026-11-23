@@ -1234,3 +1234,4 @@ interface_notifications_track_description = 曲が切り替わったときに再
 interface_notifications_track_in_app = アプリ内
 interface_notifications_track_desktop = デスクトップ通知
 player_on_other_display = もう一方の画面でプレーヤーを表示
+import_playlist_link = Spotify プレイリストのリンクを読み込む

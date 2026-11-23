@@ -1259,6 +1259,32 @@ impl api::PlaylistApi for GrpcApi {
         Ok(id.into_inner().id)
     }
 
+    async fn import_external_playlist(
+        &self,
+        source: api::ExternalPlaylist,
+    ) -> Result<api::PlaylistImport, ApiError> {
+        use proto::import_external_playlist_request::Source;
+        let source = match source {
+            api::ExternalPlaylist::Link(link) => Source::Link(link),
+            api::ExternalPlaylist::Csv { name, text } => {
+                Source::Csv(proto::CsvPlaylist { name, text })
+            }
+        };
+        let import = self
+            .client()
+            .import_external_playlist(Request::new(proto::ImportExternalPlaylistRequest {
+                source: Some(source),
+            }))
+            .await
+            .map_err(wire_error)?
+            .into_inner();
+        Ok(api::PlaylistImport {
+            id: import.id,
+            matched: import.matched,
+            missing: import.missing,
+        })
+    }
+
     async fn import_playlist(
         &self,
         name: String,

@@ -1,3 +1,12 @@
+/// A playlist kept somewhere else, as a share link or an exported CSV.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExternalPlaylist {
+    /// A public Spotify playlist or album link.
+    Link(String),
+    /// An Exportify or TuneMyMusic CSV export.
+    Csv { name: String, text: String },
+}
+
 /// A playlist as the wire sees it: identity, name, cover, and the track refs
 /// in order. The refs are library keys, so a client resolves them through
 /// [`crate::LibraryApi::tracks_by_keys`] like any other list.

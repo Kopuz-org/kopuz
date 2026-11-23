@@ -774,6 +774,32 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::PlaylistId { id }))
     }
 
+    async fn import_external_playlist(
+        &self,
+        request: Request<proto::ImportExternalPlaylistRequest>,
+    ) -> Result<Response<proto::PlaylistImport>, Status> {
+        use proto::import_external_playlist_request::Source;
+        let source = match request.into_inner().source {
+            Some(Source::Link(link)) => api::ExternalPlaylist::Link(link),
+            Some(Source::Csv(csv)) => api::ExternalPlaylist::Csv {
+                name: csv.name,
+                text: csv.text,
+            },
+            None => return Err(Status::invalid_argument("no playlist to import")),
+        };
+        let import = self
+            .0
+            .api
+            .import_external_playlist(source)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::PlaylistImport {
+            id: import.id,
+            matched: import.matched,
+            missing: import.missing,
+        }))
+    }
+
     async fn import_playlist(
         &self,
         request: Request<proto::ImportPlaylistRequest>,

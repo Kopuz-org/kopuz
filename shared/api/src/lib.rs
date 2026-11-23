@@ -54,8 +54,8 @@ pub use player::{
     VideoRequest,
 };
 pub use playlists::{
-    PlaylistCatalog, PlaylistEdit, PlaylistFolderInfo, PlaylistImport, PlaylistInfo,
-    PlaylistPrivacy, PlaylistReorder,
+    ExternalPlaylist, PlaylistCatalog, PlaylistEdit, PlaylistFolderInfo, PlaylistImport,
+    PlaylistInfo, PlaylistPrivacy, PlaylistReorder,
 };
 pub use plugins::{PluginCatalog, PluginInfo, PluginOrigin, PluginUpdate};
 pub use prefs::{
@@ -376,6 +376,13 @@ pub trait PlaylistApi: Send + Sync {
         name: String,
         m3u: String,
         base_dir: Option<String>,
+    ) -> Result<PlaylistImport, ApiError>;
+
+    /// Create a playlist from a share link or a CSV export, finding each
+    /// song in the library or, on a source with a catalog, by searching it.
+    async fn import_external_playlist(
+        &self,
+        source: ExternalPlaylist,
     ) -> Result<PlaylistImport, ApiError>;
 
     async fn rename_playlist(&self, id: String, name: String) -> Result<(), ApiError>;

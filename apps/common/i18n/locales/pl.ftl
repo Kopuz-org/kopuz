@@ -1276,3 +1276,4 @@ interface_notifications_track_description = Pokazuje, jaki utwór się zaczął 
 interface_notifications_track_in_app = W aplikacji
 interface_notifications_track_desktop = Powiadomienie systemowe
 player_on_other_display = Odtwarzacz na drugim ekranie
+import_playlist_link = Importuj link do playlisty Spotify

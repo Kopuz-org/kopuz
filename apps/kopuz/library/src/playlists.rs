@@ -104,6 +104,19 @@ impl Library {
                 .on_click(|_, _, cx| store::import_m3u(cx)),
         );
         buttons.push(
+            IconButton::new("library-import-link", icons::LINK)
+                .tooltip(t("import_playlist_link"))
+                .on_click(|_, window, cx| {
+                    components::dialogs::open_rename(
+                        t("import_playlist_link"),
+                        "",
+                        store::import_playlist_link,
+                        window,
+                        cx,
+                    )
+                }),
+        );
+        buttons.push(
             IconButton::new("library-add-playlist", icons::PLUS)
                 .tooltip(t("add_playlist"))
                 .on_click(|_, window, cx| open_add_playlist(window, cx)),

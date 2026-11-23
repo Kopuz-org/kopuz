@@ -1217,3 +1217,4 @@ interface_notifications_track_description = Parça değişince hangi şarkının
 interface_notifications_track_in_app = Uygulama içinde
 interface_notifications_track_desktop = Masaüstü bildirimi
 player_on_other_display = Oynatıcıyı diğer ekranda aç
+import_playlist_link = Spotify çalma listesi bağlantısını içe aktar

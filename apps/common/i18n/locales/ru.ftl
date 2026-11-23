@@ -1277,3 +1277,4 @@ interface_notifications_track_description = Показывать, какая п�
 interface_notifications_track_in_app = В приложении
 interface_notifications_track_desktop = Уведомление рабочего стола
 player_on_other_display = Плеер на другом экране
+import_playlist_link = Импорт ссылки на плейлист Spotify

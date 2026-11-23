@@ -1261,3 +1261,4 @@ interface_notifications_track_description = Indique quel titre commence quand la
 interface_notifications_track_in_app = Dans l'app
 interface_notifications_track_desktop = Notification du bureau
 player_on_other_display = Lecteur sur l'autre écran
+import_playlist_link = Importer un lien de playlist Spotify

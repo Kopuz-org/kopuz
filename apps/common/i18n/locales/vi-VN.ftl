@@ -1222,3 +1222,4 @@ interface_notifications_track_description = Báo bài nào bắt đầu khi đ�
 interface_notifications_track_in_app = Trong ứng dụng
 interface_notifications_track_desktop = Thông báo trên màn hình
 player_on_other_display = Trình phát trên màn hình kia
+import_playlist_link = Nhập liên kết danh sách phát Spotify

@@ -1222,3 +1222,4 @@ interface_notifications_track_description = Beri tahu lagu apa yang mulai saat t
 interface_notifications_track_in_app = Di aplikasi
 interface_notifications_track_desktop = Notifikasi desktop
 player_on_other_display = Pemutar di layar lain
+import_playlist_link = Impor tautan daftar putar Spotify

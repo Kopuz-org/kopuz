@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use api::{JobKind, TrackInfo};
+use api::{ApiError, ExternalPlaylist, JobKind, PlaylistImport, TrackInfo};
 use gpui_kit::{App, PathPromptOptions};
 
 use crate::{JobsModel, Link, Notices, SourcesModel};
@@ -30,37 +30,62 @@ pub fn import(cx: &mut App) {
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
             .unwrap_or_else(|| i18n::t("import_playlist"));
+        let csv = path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("csv"));
         let base = path.parent().map(|dir| dir.to_string_lossy().into_owned());
         let call = cx.update(|cx| {
-            Link::global(cx)
-                .call(move |api| async move { api.import_playlist(name, text, base).await })
+            Link::global(cx).call(move |api| async move {
+                match csv {
+                    true => {
+                        api.import_external_playlist(ExternalPlaylist::Csv { name, text })
+                            .await
+                    }
+                    false => api.import_playlist(name, text, base).await,
+                }
+            })
         });
         let result = call.await;
-        cx.update(|cx| match result {
-            Ok(import) => {
-                if SourcesModel::global(cx).read(cx).capabilities().sync {
-                    JobsModel::global(cx)
-                        .update(cx, |jobs, cx| jobs.start(JobKind::PlaylistSync, cx));
-                }
-                let key = match import.missing.is_empty() {
-                    true => "playlist_imported",
-                    false => "playlist_imported_partly",
-                };
-                Notices::info(
-                    plain(i18n::t_with(
-                        key,
-                        &[
-                            ("matched", import.matched.into()),
-                            ("missing", import.missing.len().into()),
-                        ],
-                    )),
-                    cx,
-                );
-            }
-            Err(error) => Notices::failed(&error, cx),
-        });
+        cx.update(|cx| announce(result, cx));
     })
     .detach();
+}
+
+pub fn import_link(link: String, cx: &mut App) {
+    let call = Link::global(cx).call(move |api| async move {
+        api.import_external_playlist(ExternalPlaylist::Link(link))
+            .await
+    });
+    cx.spawn(async move |cx| {
+        let result = call.await;
+        cx.update(|cx| announce(result, cx));
+    })
+    .detach();
+}
+
+fn announce(result: Result<PlaylistImport, ApiError>, cx: &mut App) {
+    match result {
+        Ok(import) => {
+            if SourcesModel::global(cx).read(cx).capabilities().sync {
+                JobsModel::global(cx).update(cx, |jobs, cx| jobs.start(JobKind::PlaylistSync, cx));
+            }
+            let key = match import.missing.is_empty() {
+                true => "playlist_imported",
+                false => "playlist_imported_partly",
+            };
+            Notices::info(
+                plain(i18n::t_with(
+                    key,
+                    &[
+                        ("matched", import.matched.into()),
+                        ("missing", import.missing.len().into()),
+                    ],
+                )),
+                cx,
+            );
+        }
+        Err(error) => Notices::failed(&error, cx),
+    }
 }
 
 pub fn export(name: String, keys: Vec<String>, cx: &mut App) {

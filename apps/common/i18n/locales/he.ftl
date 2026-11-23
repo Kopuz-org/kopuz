@@ -1260,3 +1260,4 @@ interface_notifications_track_description = הצגת השיר שהתחיל כש�
 interface_notifications_track_in_app = בתוך האפליקציה
 interface_notifications_track_desktop = התראת שולחן עבודה
 player_on_other_display = הנגן במסך השני
+import_playlist_link = ייבוא קישור לרשימת השמעה של Spotify
