@@ -1292,3 +1292,7 @@ interface_page_width_full = Πλήρες πλάτος
 similar_artists = Παρόμοιοι καλλιτέχνες
 interface_similar_artists = Παρόμοιοι καλλιτέχνες στις σελίδες καλλιτεχνών
 interface_similar_artists_description = Ερώτηση στο MusicBrainz και ListenBrainz για το τι ακούνε οι ακροατές μαζί με έναν καλλιτέχνη. Το όνομα του καλλιτέχνη στέλνεται σε αυτά.
+interface_panel_side = Πλευρά
+interface_panel_side_description = Σε ποια πλευρά της σελίδας είναι η στήλη λιστών.
+interface_queue_side = Πλευρά στήλης ουράς και στίχων
+interface_queue_side_description = Σε ποια πλευρά ανοίγει η στήλη ουράς και στίχων.

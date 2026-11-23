@@ -1249,3 +1249,7 @@ interface_page_width_full = Tam genişlik
 similar_artists = Benzer sanatçılar
 interface_similar_artists = Sanatçı sayfalarında benzer sanatçılar
 interface_similar_artists_description = Dinleyicilerin bir sanatçıyla birlikte kimi dinlediğini MusicBrainz ve ListenBrainz'e sor. Sanatçının adı onlara gönderilir.
+interface_panel_side = Taraf
+interface_panel_side_description = Çalma listesi sütununun sayfanın hangi tarafında duracağı.
+interface_queue_side = Sıra ve şarkı sözü sütunu tarafı
+interface_queue_side_description = Sabitlenen sıra ve şarkı sözü sütununun sayfanın hangi tarafında açılacağı.

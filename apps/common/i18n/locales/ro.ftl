@@ -1300,3 +1300,7 @@ interface_page_width_full = Lățime completă
 similar_artists = Artiști similari
 interface_similar_artists = Artiști similari pe paginile artiștilor
 interface_similar_artists_description = Întreabă MusicBrainz și ListenBrainz pe cine ascultă oamenii alături de un artist. Numele artistului le este trimis.
+interface_panel_side = Parte
+interface_panel_side_description = Pe ce parte a paginii stă coloana de playlisturi.
+interface_queue_side = Partea coloanei de coadă și versuri
+interface_queue_side_description = Pe ce parte se deschide coloana de coadă și versuri.

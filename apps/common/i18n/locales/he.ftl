@@ -1292,3 +1292,7 @@ interface_page_width_full = רוחב מלא
 similar_artists = אמנים דומים
 interface_similar_artists = אמנים דומים בדפי אמנים
 interface_similar_artists_description = שאלת MusicBrainz ו-ListenBrainz את מי מאזינים לצד אמן. שם האמן נשלח אליהם.
+interface_panel_side = צד
+interface_panel_side_description = באיזה צד של הדף נמצאת עמודת הרשימות.
+interface_queue_side = צד עמודת התור והמילים
+interface_queue_side_description = באיזה צד נפתחת עמודת התור והמילים.

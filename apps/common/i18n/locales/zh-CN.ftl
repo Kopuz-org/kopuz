@@ -1260,3 +1260,7 @@ interface_page_width_full = 全宽
 similar_artists = 相似艺人
 interface_similar_artists = 在艺人页显示相似艺人
 interface_similar_artists_description = 向 MusicBrainz 和 ListenBrainz 查询听众常一起听的艺人。会把艺人名称发送给它们。
+interface_panel_side = 位置
+interface_panel_side_description = 播放列表栏在页面的哪一侧。
+interface_queue_side = 队列和歌词栏位置
+interface_queue_side_description = 停靠的队列和歌词栏在哪一侧打开。

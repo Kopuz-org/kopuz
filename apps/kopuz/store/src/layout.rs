@@ -81,7 +81,7 @@ impl Motion {
     }
 }
 
-/// Which side of the content the now-playing sheet's panel sits on.
+/// Which side of the content a panel sits on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Side {
@@ -358,6 +358,7 @@ pub struct Panel {
     pub pins: Vec<Pin>,
     pub show_pins: bool,
     pub show_playlists: bool,
+    pub side: Side,
 }
 
 impl Default for Panel {
@@ -369,6 +370,7 @@ impl Default for Panel {
             pins: Vec::new(),
             show_pins: true,
             show_playlists: true,
+            side: Side::Left,
         }
     }
 }
@@ -905,6 +907,7 @@ pub struct Interface {
     pub font: Option<String>,
     pub page_width: PageWidth,
     pub similar_artists: bool,
+    pub queue_side: Side,
 }
 
 /// How wide a page may grow before it stops stretching and centres.
@@ -924,6 +927,7 @@ impl Default for Interface {
             font: None,
             page_width: PageWidth::Standard,
             similar_artists: false,
+            queue_side: Side::Right,
         }
     }
 }

@@ -1308,3 +1308,7 @@ interface_page_width_full = На всю ширину
 similar_artists = Схожі виконавці
 interface_similar_artists = Схожі виконавці на сторінках виконавців
 interface_similar_artists_description = Питати MusicBrainz і ListenBrainz, кого слухають разом із виконавцем. Ім'я виконавця надсилається їм.
+interface_panel_side = Бік
+interface_panel_side_description = З якого боку сторінки стоїть колонка плейлистів.
+interface_queue_side = Бік колонки черги й тексту
+interface_queue_side_description = З якого боку відкривається колонка черги й тексту.

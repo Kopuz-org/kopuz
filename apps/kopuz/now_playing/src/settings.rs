@@ -257,6 +257,24 @@ impl Render for SheetSettings {
                             .shown(cx),
                     )
                     .children(
+                        SettingRow::new(t("interface_queue_side"))
+                            .description(t("interface_queue_side_description"))
+                            .control(choice(
+                                "queue-side",
+                                &store::layout(cx).interface.queue_side,
+                                vec![
+                                    (Side::Left, t("interface_sheet_side_left")),
+                                    (Side::Right, t("interface_sheet_side_right")),
+                                ],
+                                |value, cx| {
+                                    LayoutModel::edit(cx, |layout| {
+                                        layout.interface.queue_side = value
+                                    })
+                                },
+                            ))
+                            .shown(cx),
+                    )
+                    .children(
                         SettingRow::new(t("interface_queue_style"))
                             .description(t("interface_queue_style_description"))
                             .control(choice(

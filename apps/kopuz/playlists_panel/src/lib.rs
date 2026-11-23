@@ -498,10 +498,11 @@ impl Render for PlaylistsPanel {
         }
         let panel = cx.entity().downgrade();
         // Right to left the panel sits right of the content, so it borders it on its left.
-        let edge = match i18n::is_rtl() {
-            true => Edge::Left,
-            false => Edge::Right,
-        };
+        let edge =
+            match (store::layout(cx).panel.side == store::layout::Side::Left) != i18n::is_rtl() {
+                true => Edge::Right,
+                false => Edge::Left,
+            };
 
         self.roving
             .group(v_flex().id("playlists-panel"), "PlaylistsPanel")
