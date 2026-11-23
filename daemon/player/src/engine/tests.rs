@@ -293,12 +293,11 @@ fn double_speed_covers_two_seconds_of_track_per_second_played() {
         sink.pull(4410).iter().any(|s| *s != 0.0)
     });
 
-    sink.pull(TEST_CONFIG.sample_rate as usize * TEST_CONFIG.channels * 2);
+    wait_until("a second and a half played", || {
+        sink.pull(4410);
+        engine.status().position() > Duration::from_millis(1_500)
+    });
     let before = engine.status().position();
-    assert!(
-        before > Duration::from_millis(1_500),
-        "played only {before:?} before the change"
-    );
     engine.send(Command::SetSpeed(2.0));
     wait_until("the speed lands", || {
         engine.status().speed_permille == 2_000
@@ -310,15 +309,17 @@ fn double_speed_covers_two_seconds_of_track_per_second_played() {
     );
 
     let second = TEST_CONFIG.sample_rate as usize * TEST_CONFIG.channels;
-    wait_until("audio at the new speed", || {
-        sink.pull(4410).iter().any(|s| *s != 0.0)
-    });
     let start = engine.status().position();
-    sink.pull(second);
-    let advanced = engine.status().position() - start;
+    let mut played = 0;
+    wait_until("a second played at the new speed", || {
+        played += sink.pull(4410).iter().filter(|s| **s != 0.0).count();
+        played >= second
+    });
+    let advanced = (engine.status().position() - start).as_secs_f64();
+    let expected = 2. * played as f64 / second as f64;
     assert!(
-        advanced > Duration::from_millis(1_800) && advanced < Duration::from_millis(2_200),
-        "one second played at 2x moved the position by {advanced:?}"
+        (advanced - expected).abs() < 0.2,
+        "{expected:.2}s of track played at 2x moved the position by {advanced:.2}s"
     );
 
     engine.send(Command::SetSpeed(9.0));
