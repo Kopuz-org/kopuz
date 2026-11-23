@@ -714,6 +714,7 @@ first_run_server_title = Choose a media server
 first_run_server_hint = Pick a service and Kopuz will ask for what it needs.
 first_run_streaming_title = Choose a streaming service
 first_run_streaming_hint = Signing in opens your browser; Kopuz never sees your password.
+first_run_services_failed = Could not load services
 first_run_no_services = No services available
 first_run_sync_title = Building your library
 first_run_sync_hint = This runs in the background. Tracks appear as they are found.

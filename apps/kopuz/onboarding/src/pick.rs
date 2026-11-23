@@ -1,11 +1,9 @@
 //! Picking a service, in its group, and answering the shared "add source" form for it.
 
-use api::ServiceInfo;
 use components::format::{t, text};
 use components::source_mark::{self, SourceMark};
-use components::{ChoiceCard, EmptyState, Heading, SectionHeading};
+use components::{ChoiceCard, EmptyState, Heading, Loading, SectionHeading};
 use gpui_kit::component::v_flex;
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, Context, IntoElement, ParentElement as _, SharedString, Styled, Window, px,
 };
@@ -14,13 +12,31 @@ use crate::{FirstRun, flow};
 
 impl FirstRun {
     pub(crate) fn pick_step(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let services: Vec<ServiceInfo> =
-            self.services.read(cx).value().cloned().unwrap_or_default();
-        let groups = flow::grouped(&services);
+        let query = self.services.read(cx);
+        let Some(services) = query.value().filter(|services| !services.is_empty()) else {
+            if query.is_loading() {
+                return Loading::new().compact().into_any_element();
+            }
+            if let Some(error) = query.error() {
+                let query = self.services.clone();
+                return EmptyState::failed(t("first_run_services_failed"), move |_, _, cx| {
+                    query.update(cx, |query, cx| query.refresh(cx));
+                })
+                .detail(store::human(error))
+                .compact()
+                .into_any_element();
+            }
+            return if query.value().is_some() {
+                EmptyState::new(t("first_run_no_services"))
+                    .compact()
+                    .into_any_element()
+            } else {
+                Loading::new().compact().into_any_element()
+            };
+        };
+        let groups = flow::grouped(services);
         let mut first = None;
-        let mut column = v_flex().w_full().gap_6().when(services.is_empty(), |step| {
-            step.child(EmptyState::new(t("first_run_no_services")).compact())
-        });
+        let mut column = v_flex().w_full().gap_6();
         for (group, members) in groups {
             let mut cards = v_flex().w_full().gap_3().child(
                 v_flex()
