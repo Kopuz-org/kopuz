@@ -485,7 +485,23 @@ impl LibraryService {
                 }
             })
             .collect();
-        Ok(api::StatsView { listen_counts })
+        let ratings = self
+            .db
+            .server_ratings(&self.query_source())
+            .await
+            .map_err(db_error)?;
+        Ok(api::StatsView {
+            listen_counts,
+            ratings,
+        })
+    }
+
+    /// Stars go to the source first; only what it accepted is kept locally, so the two never disagree.
+    pub async fn set_star_rating(&self, key: &str, stars: u8) -> Result<(), ApiError> {
+        let source = server::source::active(self.db.clone(), &self.current_sources());
+        rate_track(source.as_ref(), key, stars).await?;
+        self.invalidate(Table::Recents);
+        Ok(())
     }
 
     /// Lyrics for one library track, through the app's full provider chain
@@ -817,6 +833,35 @@ impl QueueMaterializer for LibraryService {
     }
 }
 
+const MAX_STARS: u8 = 5;
+
+/// The source takes the stars first; a refusal leaves the stored ratings as they were.
+async fn rate_track(
+    source: &dyn server::source::MediaSource,
+    key: &str,
+    stars: u8,
+) -> Result<(), ApiError> {
+    if key.trim().is_empty() {
+        return Err(ApiError::invalid_input("nothing to rate"));
+    }
+    if stars > MAX_STARS {
+        return Err(ApiError::invalid_input("a rating is 0 to 5 stars"));
+    }
+    if !source.capabilities().ratings {
+        return Err(ApiError::unsupported("ratings"));
+    }
+
+    source
+        .set_rating(key, stars)
+        .await
+        .map_err(crate::sources::source_error)?;
+    source
+        .db()
+        .set_server_rating(source.source(), key, (stars > 0).then_some(stars))
+        .await
+        .map_err(db_error)
+}
+
 fn youtube_music_lyrics_auth(
     server: &config::MusicServer,
 ) -> Option<server::lyrics::YouTubeMusicLyricsAuth> {
@@ -841,6 +886,125 @@ fn ranked(row: db::NamePlays) -> api::Ranked {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use server::source::{Capabilities, MediaSource, SourceError};
+
+    /// A local source that claims ratings and answers `set_rating` as told.
+    struct Rater {
+        inner: Box<dyn MediaSource>,
+        accept: bool,
+        ratings: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl MediaSource for Rater {
+        fn source(&self) -> &config::Source {
+            self.inner.source()
+        }
+        fn db(&self) -> &db::Db {
+            self.inner.db()
+        }
+        fn capabilities(&self) -> Capabilities {
+            Capabilities {
+                ratings: self.ratings,
+                ..self.inner.capabilities()
+            }
+        }
+        async fn add_to_playlist(
+            &self,
+            id: &str,
+            keys: &[String],
+        ) -> Result<Vec<String>, SourceError> {
+            self.inner.add_to_playlist(id, keys).await
+        }
+        async fn create_playlist(
+            &self,
+            name: &str,
+            keys: &[String],
+        ) -> Result<String, SourceError> {
+            self.inner.create_playlist(name, keys).await
+        }
+        async fn remove_from_playlist(
+            &self,
+            id: &str,
+            track: &Track,
+            position: usize,
+        ) -> Result<(), SourceError> {
+            self.inner.remove_from_playlist(id, track, position).await
+        }
+        async fn resolve_stream(
+            &self,
+            key: &str,
+            quality: config::StreamQuality,
+        ) -> Result<server::source::StreamInfo, SourceError> {
+            self.inner.resolve_stream(key, quality).await
+        }
+        async fn validate(&self) -> server::source::AuthOutcome {
+            self.inner.validate().await
+        }
+        async fn fetch_favorites(&self) -> Result<Vec<String>, SourceError> {
+            self.inner.fetch_favorites().await
+        }
+        async fn push_favorite(&self, key: &str, on: bool) -> Result<(), SourceError> {
+            self.inner.push_favorite(key, on).await
+        }
+        async fn set_rating(&self, _: &str, _: u8) -> Result<(), SourceError> {
+            match self.accept {
+                true => Ok(()),
+                false => Err(SourceError::Connectivity),
+            }
+        }
+    }
+
+    async fn rater(dir: &tempfile::TempDir, accept: bool, ratings: bool) -> Rater {
+        let database = db::init(&dir.path().join("rating.db")).await.expect("db");
+        Rater {
+            inner: server::source::local(database, config::Source::default()),
+            accept,
+            ratings,
+        }
+    }
+
+    async fn stored(source: &Rater) -> HashMap<String, u8> {
+        source
+            .db()
+            .server_ratings(source.source())
+            .await
+            .expect("ratings")
+    }
+
+    #[tokio::test]
+    async fn a_rating_the_source_took_is_stored_and_zero_clears_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = rater(&dir, true, true).await;
+
+        rate_track(&source, "t1", 4).await.expect("rate");
+        assert_eq!(stored(&source).await.get("t1"), Some(&4));
+
+        rate_track(&source, "t1", 0).await.expect("clear");
+        assert!(stored(&source).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_rating_the_source_refused_stores_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = rater(&dir, false, true).await;
+
+        assert!(rate_track(&source, "t1", 4).await.is_err());
+        assert!(stored(&source).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn too_many_stars_or_no_capability_is_refused_before_the_source() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = rater(&dir, true, true).await;
+        let error = rate_track(&source, "t1", 6).await.expect_err("six stars");
+        assert_eq!(error.code, api::ErrorCode::InvalidInput);
+
+        let plain = rater(&dir, true, false).await;
+        let error = rate_track(&plain, "t1", 3).await.expect_err("no ratings");
+        assert_eq!(error.code, api::ErrorCode::Unsupported);
+        assert!(stored(&plain).await.is_empty());
+    }
 
     fn synced(text: &str) -> server::lyrics::LyricLine {
         server::lyrics::LyricLine {

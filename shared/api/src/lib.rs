@@ -326,6 +326,10 @@ pub trait LibraryApi: Send + Sync {
     /// local state and surfaces the error.
     async fn set_favorite(&self, key: String, favorite: bool) -> Result<(), ApiError>;
 
+    /// 1 to 5 stars on a track, 0 clears; more than 5 is invalid input. Gated by
+    /// [`SourceCapabilities::ratings`]; a source without it answers `unsupported`.
+    async fn set_star_rating(&self, key: String, stars: u8) -> Result<(), ApiError>;
+
     /// Tell the active source to stop recommending this track. Gated by
     /// [`SourceCapabilities::dont_recommend`]; a source without it answers
     /// `unsupported`. It is not a favorite -- but the source may clear a like

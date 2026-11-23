@@ -99,6 +99,7 @@ service Kopuz {
   rpc SelectExternalDevice(SelectExternalDeviceRequest) returns (Unit);
   rpc OpenListenLink(OpenListenLinkRequest) returns (Unit);
   rpc SetFavorite(FavoriteRequest) returns (SetFavoriteResponse);
+  rpc SetStarRating(StarRatingRequest) returns (Unit);
   rpc DontRecommend(DontRecommendRequest) returns (Unit);
   rpc Rate(RateRequest) returns (Unit);
   rpc Follow(FollowRequest) returns (Unit);
@@ -1781,6 +1782,7 @@ message TrackRef {
 
 message Stats {
   map<string, uint64> listen_counts = 1;
+  map<string, uint32> ratings = 2;
 }
 
 message Lyrics {
@@ -1817,6 +1819,11 @@ message Favorites {
 message FavoriteRequest {
   string key = 1;
   bool favorite = 2;
+}
+
+message StarRatingRequest {
+  string key = 1;
+  uint32 stars = 2;
 }
 
 message StartJobRequest {

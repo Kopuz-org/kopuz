@@ -987,6 +987,14 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Evaluare
+rate_stars =
+    { $count ->
+        [one] Evaluează cu { $count } stea
+        [few] Evaluează cu { $count } stele
+       *[other] Evaluează cu { $count } de stele
+    }
+clear_rating = Șterge evaluarea
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.

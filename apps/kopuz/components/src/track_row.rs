@@ -60,6 +60,7 @@ pub struct TrackRow {
     bit_depth: SharedString,
     bitrate: SharedString,
     plays: u64,
+    rating: u8,
     columns: Layout,
     height: Length,
     lead: Option<SharedString>,
@@ -97,6 +98,7 @@ impl TrackRow {
             bit_depth: crate::format::bit_depth(track.bit_depth),
             bitrate: crate::format::bitrate(track.bitrate),
             plays: 0,
+            rating: 0,
             columns: columns::standard(true),
             height: style::row_height().into(),
             lead: None,
@@ -151,6 +153,12 @@ impl TrackRow {
     /// What the plays column reads, when it is shown.
     pub fn plays(mut self, plays: u64) -> Self {
         self.plays = plays;
+        self
+    }
+
+    /// What the rating column reads, in stars; 0 is unrated.
+    pub fn rating(mut self, stars: u8) -> Self {
+        self.rating = stars;
         self
     }
 
@@ -434,6 +442,9 @@ impl RenderOnce for TrackRow {
                         )
                     })
                     .child(self.plays.to_string())
+                    .into_any_element(),
+                "rating" => dim(cell, cx)
+                    .child(crate::format::stars(self.rating))
                     .into_any_element(),
                 "format" => dim(cell, cx).child(self.format.clone()).into_any_element(),
                 "sample_rate" => dim(cell, cx)

@@ -977,6 +977,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Classificação
+rate_stars =
+    { $count ->
+        [one] Classificar com { $count } estrela
+       *[other] Classificar com { $count } estrelas
+    }
+clear_rating = Limpar classificação
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.

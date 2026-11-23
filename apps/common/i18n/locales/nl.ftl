@@ -973,6 +973,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Beoordeling
+rate_stars =
+    { $count ->
+        [one] Beoordeel met { $count } ster
+       *[other] Beoordeel met { $count } sterren
+    }
+clear_rating = Beoordeling wissen
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.

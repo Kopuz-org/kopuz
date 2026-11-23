@@ -215,6 +215,7 @@ pub struct Library {
     rail_letters: Option<std::collections::HashSet<char>>,
     albums_meta: HashMap<String, AlbumMeta>,
     plays: HashMap<String, u64>,
+    ratings: HashMap<String, u8>,
     playlist_offline: HashMap<String, (Rc<[String]>, store::Offline)>,
     // Artists already sent for a photo; the daemon remembers its misses, this saves the round trip.
     asked_artwork: HashSet<String>,
@@ -431,6 +432,7 @@ impl Library {
             rail_letters: None,
             albums_meta: HashMap::new(),
             plays: HashMap::new(),
+            ratings: HashMap::new(),
             playlist_offline: HashMap::new(),
             asked_artwork: HashSet::new(),
             playing: store::Playing::default(),
@@ -885,12 +887,11 @@ impl Library {
     }
 
     fn adopt_stats(&mut self, cx: &mut Context<Self>) {
-        self.plays = self
-            .stats
-            .read(cx)
-            .value()
+        let stats = self.stats.read(cx).value();
+        self.plays = stats
             .map(|stats| stats.listen_counts.clone())
             .unwrap_or_default();
+        self.ratings = stats.map(|stats| stats.ratings.clone()).unwrap_or_default();
         cx.notify();
     }
 
@@ -991,6 +992,10 @@ impl Library {
 
     pub(crate) fn plays_for(&self, track: &TrackInfo) -> u64 {
         self.plays.get(&track.uid).copied().unwrap_or_default()
+    }
+
+    pub(crate) fn rating_for(&self, track: &TrackInfo) -> u8 {
+        self.ratings.get(&track.key).copied().unwrap_or_default()
     }
 
     pub(crate) fn is_playing(&self, key: &str) -> bool {
