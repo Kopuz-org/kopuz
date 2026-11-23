@@ -3,13 +3,12 @@
 use api::{ArtistInfoView, SimilarArtist};
 use components::format::t;
 use components::{
-    Badge, BadgeTone, Chip, ChipSize, ChipTone, Cover, Heading, SectionHeading, sound_profile,
-    style,
+    Badge, BadgeTone, Chip, ChipSize, ChipTone, Heading, SectionHeading, sound_profile, style,
 };
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, Context, IntoElement, ParentElement as _, SharedString, Styled as _, div, px,
+    AnyElement, App, Context, IntoElement, ParentElement as _, SharedString, Styled as _, div,
 };
 use store::{Navigator, Route};
 
@@ -20,8 +19,6 @@ const CLAMPED_LINES: usize = 4;
 
 /// A biography this short fits its clamp, so it offers no "Show more".
 const CLAMP_FITS_CHARS: usize = 320;
-
-const PICTURE: gpui_kit::Pixels = px(96.);
 
 impl ArtistDetail {
     /// What the source says of the artist, what AudioMuse-AI hears, and one row of similar
@@ -128,33 +125,19 @@ impl ArtistDetail {
                 .on_click(move |_, _, cx| cx.open_url(&url))
         });
 
-        h_flex()
+        // No picture beside the text: the header above already shows the artist.
+        v_flex()
             .w_full()
-            .gap_4()
-            .items_start()
-            .when(info.image.is_some(), |row| {
-                row.child(
-                    Cover::new(info.image.as_ref())
-                        .size(PICTURE)
-                        .rounded(px(8.))
-                        .placeholder(components::icons::MIC),
-                )
-            })
+            .gap_3()
             .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap_3()
-                    .child(
-                        div()
-                            .w_full()
-                            .text_sm()
-                            .text_color(ink)
-                            .when(!open, |text| text.line_clamp(CLAMPED_LINES))
-                            .child(SharedString::from(text)),
-                    )
-                    .child(h_flex().gap_2().children(toggle).children(link)),
+                div()
+                    .w_full()
+                    .text_sm()
+                    .text_color(ink)
+                    .when(!open, |text| text.line_clamp(CLAMPED_LINES))
+                    .child(SharedString::from(text)),
             )
+            .child(h_flex().gap_2().children(toggle).children(link))
             .into_any_element()
     }
 }
