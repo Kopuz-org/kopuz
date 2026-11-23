@@ -2,6 +2,7 @@
 
 mod appearance;
 mod flow;
+mod layout;
 mod pick;
 mod playback;
 mod privacy;
@@ -109,7 +110,9 @@ impl FirstRun {
             )
         });
         let add = cx.new(|cx| AddSource::new(window, cx).embedded());
+        let layout = store::LayoutModel::global(cx);
         let subscriptions = vec![
+            cx.observe(&layout, |_, _, cx| cx.notify()),
             cx.observe(&sources, |this, _, cx| this.sources_moved(cx)),
             cx.observe(&services, |_, _, cx| cx.notify()),
             cx.observe(&tracks, |_, _, cx| cx.notify()),

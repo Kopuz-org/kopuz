@@ -61,6 +61,7 @@ impl FirstRun {
             });
         v_flex()
             .w_full()
+            .gap_4()
             .child(
                 crate::ui::card(cx)
                     .child(
@@ -80,6 +81,7 @@ impl FirstRun {
                             .bind("cover_art_background", cx),
                     ),
             )
+            .child(crate::layout::card(cx))
             .into_any_element()
     }
 }
