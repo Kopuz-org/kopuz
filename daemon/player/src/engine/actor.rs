@@ -15,8 +15,8 @@ use super::rt::{GainRamp, Retired, RtCmd, RtSession, RtState};
 use super::sink::{AudioSink, DataCallbackFactory, SinkConfig};
 use super::worker::{WorkerCmd, WorkerHandle, WorkerMsg};
 use super::{
-    Command, EngineStatus, Event, FadingStatus, Failure, LoadOutcome, LoadReply, LoadRequest,
-    Phase, Transition,
+    Command, EngineStatus, Event, FadingStatus, Failure, LeadingSilence, LoadOutcome, LoadReply,
+    LoadRequest, Phase, Transition,
 };
 use crate::player::PlayerInitError;
 #[cfg(any(target_os = "android", target_os = "linux", target_os = "macos"))]
@@ -131,6 +131,10 @@ struct Session {
     played: Arc<AtomicU64>,
     eof_flag: Arc<AtomicBool>,
     starved: Arc<AtomicBool>,
+    /// The callback's run of silent samples; see `RtSession::quiet`.
+    quiet: Arc<AtomicU64>,
+    /// `Event::Silent` went out for the current silent stretch.
+    silence_reported: bool,
     /// Reported as stalled; `played` at that moment, which audio flowing again moves past.
     stalled_at: Option<u64>,
     /// Linear ReplayGain factor the audio callback reads for this session.
@@ -160,6 +164,7 @@ struct StartPlan {
     worker: WorkerHandle,
     duration: Duration,
     transition: Transition,
+    leading_silence: LeadingSilence,
     start_at: Option<Duration>,
     album_context: bool,
     service_replay_gain: ReplayGainInfo,
@@ -177,6 +182,7 @@ struct RingParts {
     played: Arc<AtomicU64>,
     eof: Arc<AtomicBool>,
     starved: Arc<AtomicBool>,
+    quiet: Arc<AtomicU64>,
     rt_session: RtSession,
 }
 
@@ -189,12 +195,14 @@ fn make_ring(config: SinkConfig, gain: Arc<AtomicU32>) -> RingParts {
     let played = Arc::new(AtomicU64::new(0));
     let eof = Arc::new(AtomicBool::new(false));
     let starved = Arc::new(AtomicBool::new(false));
+    let quiet = Arc::new(AtomicU64::new(0));
     RingParts {
         producer,
         written,
         played: played.clone(),
         eof: eof.clone(),
         starved: starved.clone(),
+        quiet: quiet.clone(),
         rt_session: RtSession {
             consumer,
             played,
@@ -202,6 +210,7 @@ fn make_ring(config: SinkConfig, gain: Arc<AtomicU32>) -> RingParts {
             gain,
             eof,
             starved,
+            quiet,
         },
     }
 }
@@ -494,6 +503,7 @@ impl Actor {
             factory,
             duration,
             transition,
+            leading_silence,
             start_at,
             album_context,
             service_replay_gain,
@@ -519,6 +529,7 @@ impl Actor {
                 worker,
                 duration,
                 transition,
+                leading_silence,
                 start_at,
                 album_context,
                 service_replay_gain,
@@ -652,6 +663,7 @@ impl Actor {
             worker,
             duration,
             transition,
+            leading_silence,
             start_at,
             album_context,
             service_replay_gain,
@@ -757,11 +769,16 @@ impl Actor {
             played,
             eof,
             starved,
+            quiet,
             rt_session,
         } = make_ring(config, gain.clone());
+        // Only a track that really crossfades in has dead air worth dropping.
+        let lead_trim =
+            (crossfaded && leading_silence == LeadingSilence::Trim).then(|| played.clone());
         let _ = worker.cmd_tx.send(WorkerCmd::Start {
             producer,
             written: written.clone(),
+            lead_trim,
             channels: config.channels,
             sample_rate: config.sample_rate,
             start_at,
@@ -775,6 +792,8 @@ impl Actor {
             played,
             eof_flag: eof,
             starved,
+            quiet,
+            silence_reported: false,
             stalled_at: None,
             gain,
             replay_gain,
@@ -923,6 +942,8 @@ impl Actor {
         current.played = ring.played;
         current.eof_flag = ring.eof;
         current.starved = ring.starved;
+        current.quiet = ring.quiet;
+        current.silence_reported = false;
         current.stalled_at = current.stalled_at.map(|_| 0);
         current.base_micros = target.as_micros() as u64;
         current.eof = false;
@@ -1057,6 +1078,7 @@ impl Actor {
         self.reap_rt_retired();
         self.latch_drain_complete();
         self.report_stall();
+        self.report_silence();
         self.emit_throttled_position();
 
         // Finished detached workers just get dropped (JoinHandle drop detaches);
@@ -1162,6 +1184,33 @@ impl Actor {
             _ => return,
         };
         self.emit(event);
+    }
+
+    /// Tells subscribers once when the visible session has gone quiet; the
+    /// callback only counts, so nothing here touches the audio thread.
+    fn report_silence(&mut self) {
+        let Some(config) = self.sink.config() else {
+            return;
+        };
+        let paused = self.paused.load(Ordering::Relaxed);
+        let Some(current) = self.current.as_mut() else {
+            return;
+        };
+        let min_samples = (super::SILENCE_MIN_SPAN.as_secs_f64()
+            * config.sample_rate as f64
+            * config.channels as f64) as u64;
+        let quiet = current.quiet.load(Ordering::Relaxed);
+        if quiet == 0 {
+            current.silence_reported = false;
+            return;
+        }
+        if paused || current.ended || current.silence_reported || quiet < min_samples {
+            return;
+        }
+        current.silence_reported = true;
+        let token = current.token;
+        let position = self.status.load().position();
+        self.emit(Event::Silent { token, position });
     }
 
     /// Position once per second while playing — subscribers render seconds,

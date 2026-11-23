@@ -207,6 +207,27 @@ fn wav_factory(seconds: f64) -> (SourceFactory, Duration) {
     (factory, Duration::from_secs_f64(seconds))
 }
 
+/// A WAV of constant-amplitude runs; amplitude 0 is digital silence.
+fn segments_factory(segments: &[(f64, i16)]) -> (SourceFactory, Duration) {
+    let rate = TEST_CONFIG.sample_rate;
+    let channels = TEST_CONFIG.channels as u16;
+    let mut pcm = Vec::new();
+    for (seconds, amplitude) in segments {
+        let frames = (seconds * rate as f64) as usize;
+        for _ in 0..frames * channels as usize {
+            pcm.extend_from_slice(&amplitude.to_le_bytes());
+        }
+    }
+    let mut bytes = wav_bytes(0, rate, channels);
+    bytes[4..8].copy_from_slice(&((36 + pcm.len()) as u32).to_le_bytes());
+    bytes[40..44].copy_from_slice(&(pcm.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(&pcm);
+    let total: f64 = segments.iter().map(|(seconds, _)| seconds).sum();
+    let factory: SourceFactory =
+        Box::new(move || Ok(crate::decoder::from_stream(std::io::Cursor::new(bytes))));
+    (factory, Duration::from_secs_f64(total))
+}
+
 /// A real cue-less WebM/Opus stream (matches YouTube's itag-774 structure):
 /// symphonia's Matroska demuxer can't `seek` once it has read past EOF, which
 /// is the seek-after-a-YT-track-ends repro.
@@ -229,6 +250,24 @@ fn load_with(
     duration: Duration,
     transition: Transition,
 ) -> LoadOutcome {
+    load_trimmed(
+        engine,
+        token,
+        factory,
+        duration,
+        transition,
+        LeadingSilence::Keep,
+    )
+}
+
+fn load_trimmed(
+    engine: &EngineHandle,
+    token: u64,
+    factory: SourceFactory,
+    duration: Duration,
+    transition: Transition,
+    leading_silence: LeadingSilence,
+) -> LoadOutcome {
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
     engine.send(Command::Load(LoadRequest {
         token,
@@ -236,6 +275,7 @@ fn load_with(
         duration,
         transition,
         start_at: None,
+        leading_silence,
         album_context: false,
         service_replay_gain: config::ReplayGainInfo::default(),
         reply: Some(reply_tx),
@@ -394,6 +434,7 @@ fn service_replay_gain_levels_a_stream_without_tags() {
         duration,
         transition: Transition::Immediate,
         start_at: None,
+        leading_silence: LeadingSilence::Keep,
         album_context: false,
         service_replay_gain: config::ReplayGainInfo {
             track_gain_db: Some(-6.0),
@@ -437,6 +478,7 @@ fn service_loudness_attenuates_and_its_absence_is_unity() {
             duration,
             transition: Transition::Immediate,
             start_at: None,
+            leading_silence: LeadingSilence::Keep,
             album_context: false,
             service_replay_gain: config::ReplayGainInfo {
                 loudness_db,
@@ -604,6 +646,7 @@ fn album_context_updates_both_sessions_during_a_crossfade() {
                 Transition::Crossfade(Duration::from_secs(2))
             },
             start_at: None,
+            leading_silence: LeadingSilence::Keep,
             album_context: true,
             service_replay_gain: config::ReplayGainInfo {
                 track_gain_db: Some(-6.0),
@@ -1115,6 +1158,7 @@ fn status_reports_pending_and_fading() {
         duration: Duration::from_secs(1),
         transition: Transition::Immediate,
         start_at: None,
+        leading_silence: LeadingSilence::Keep,
         album_context: false,
         service_replay_gain: config::ReplayGainInfo::default(),
         reply: None,
@@ -1261,6 +1305,7 @@ fn superseding_load_drops_stale_session() {
         duration: Duration::from_secs(1),
         transition: Transition::Immediate,
         start_at: None,
+        leading_silence: LeadingSilence::Keep,
         album_context: false,
         service_replay_gain: config::ReplayGainInfo::default(),
         reply: Some(reply_tx),
@@ -1304,6 +1349,7 @@ fn try_load_with(
         duration,
         transition,
         start_at: None,
+        leading_silence: LeadingSilence::Keep,
         album_context: false,
         service_replay_gain: config::ReplayGainInfo::default(),
         reply: Some(reply_tx),
@@ -2045,6 +2091,7 @@ fn load_paced_source(
         duration: Duration::from_secs_f64(seconds),
         transition: Transition::Immediate,
         start_at: None,
+        leading_silence: LeadingSilence::Keep,
         album_context: false,
         service_replay_gain: config::ReplayGainInfo::default(),
         reply: Some(reply_tx),
@@ -2183,4 +2230,159 @@ fn a_cancelled_gapless_load_lets_the_current_track_end() {
     assert_eq!(engine.status().token, 1);
     assert!(sink.pull(4096).iter().all(|sample| *sample == 0.0));
     engine.shutdown();
+}
+
+const LOUD: i16 = 16_000;
+
+/// Plays at roughly 2x realtime until `done`, giving the actor's ticks time to see the level.
+fn pull_paced(sink: &FakeSinkHandle, mut done: impl FnMut() -> bool) {
+    wait_until("paced playback", || {
+        sink.pull(4096);
+        std::thread::sleep(Duration::from_millis(20));
+        done()
+    });
+}
+
+fn silent_events(seen: &[Event]) -> Vec<Duration> {
+    seen.iter()
+        .filter_map(|event| match event {
+            Event::Silent { token: 1, position } => Some(*position),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_session_gone_quiet_emits_silent_once() {
+    let (sink, engine) = spawn_engine();
+    let mut events = engine_subscribe(&engine);
+    let mut seen = Vec::new();
+
+    let (factory, duration) = segments_factory(&[(0.5, LOUD), (4.0, 0)]);
+    load(&engine, 1, factory, duration);
+
+    pull_paced(&sink, || {
+        drain_events(&mut events, &mut seen);
+        engine.status().phase == Phase::Ended
+    });
+    for _ in 0..10 {
+        sink.pull(4096);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    drain_events(&mut events, &mut seen);
+
+    let silent = silent_events(&seen);
+    assert_eq!(silent.len(), 1, "once per silent stretch: {seen:?}");
+    assert!(
+        silent[0] >= Duration::from_secs(2),
+        "after the span, not at its start: {:?}",
+        silent[0]
+    );
+    engine.shutdown();
+}
+
+#[test]
+fn music_after_a_pause_rearms_the_silent_event() {
+    let (sink, engine) = spawn_engine();
+    let mut events = engine_subscribe(&engine);
+    let mut seen = Vec::new();
+
+    let (factory, duration) = segments_factory(&[(0.3, LOUD), (2.5, 0), (0.3, LOUD), (2.5, 0)]);
+    load(&engine, 1, factory, duration);
+
+    pull_paced(&sink, || {
+        drain_events(&mut events, &mut seen);
+        engine.status().phase == Phase::Ended
+    });
+    drain_events(&mut events, &mut seen);
+
+    let silent = silent_events(&seen);
+    assert_eq!(silent.len(), 2, "one per stretch: {seen:?}");
+    assert!(silent[0] < Duration::from_secs(3), "{silent:?}");
+    assert!(silent[1] > Duration::from_secs(4), "{silent:?}");
+    engine.shutdown();
+}
+
+#[test]
+fn quiet_but_audible_music_is_not_silent() {
+    let (sink, engine) = spawn_engine();
+    let mut events = engine_subscribe(&engine);
+    let mut seen = Vec::new();
+
+    // About -40 dBFS, above the threshold.
+    let (factory, duration) = segments_factory(&[(3.0, 330)]);
+    load(&engine, 1, factory, duration);
+
+    pull_paced(&sink, || {
+        drain_events(&mut events, &mut seen);
+        engine.status().phase == Phase::Ended
+    });
+
+    assert!(silent_events(&seen).is_empty(), "{seen:?}");
+    engine.shutdown();
+}
+
+/// Plays `track` over a running one and returns where it stands after the
+/// first audio has been pulled.
+fn position_after_start(
+    leading_silence: LeadingSilence,
+    transition: Transition,
+    segments: &[(f64, i16)],
+) -> Duration {
+    let (sink, engine) = spawn_engine();
+    let (first, first_duration) = wav_factory(30.0);
+    load(&engine, 1, first, first_duration);
+    wait_until("audio from A", || sink.pull(4096).iter().any(|s| *s != 0.0));
+
+    let (factory, duration) = segments_factory(segments);
+    load_trimmed(&engine, 2, factory, duration, transition, leading_silence);
+    wait_until("status switches to token 2", || engine.status().token == 2);
+    // Lets the worker run past its leading silence, if it drops any.
+    std::thread::sleep(Duration::from_millis(300));
+    sink.pull(1024);
+
+    let position = engine.status().position();
+    engine.shutdown();
+    position
+}
+
+const FADE: Transition = Transition::Crossfade(Duration::from_millis(500));
+
+#[test]
+fn leading_silence_is_trimmed_for_a_smart_crossfade() {
+    let position = position_after_start(LeadingSilence::Trim, FADE, &[(2.0, 0), (3.0, LOUD)]);
+
+    assert!(
+        position >= Duration::from_millis(2000) && position < Duration::from_millis(2300),
+        "position follows the track timeline past the dropped silence: {position:?}"
+    );
+}
+
+#[test]
+fn leading_silence_is_kept_without_the_flag() {
+    let position = position_after_start(LeadingSilence::Keep, FADE, &[(2.0, 0), (3.0, LOUD)]);
+
+    assert!(position < Duration::from_millis(500), "{position:?}");
+}
+
+#[test]
+fn leading_silence_is_kept_when_the_load_does_not_crossfade() {
+    let position = position_after_start(
+        LeadingSilence::Trim,
+        Transition::Immediate,
+        &[(2.0, 0), (3.0, LOUD)],
+    );
+
+    assert!(position < Duration::from_millis(500), "{position:?}");
+}
+
+#[test]
+fn leading_silence_trim_stops_at_the_cap() {
+    let position = position_after_start(LeadingSilence::Trim, FADE, &[(8.0, 0), (3.0, LOUD)]);
+
+    assert!(
+        position >= LEADING_SILENCE_CAP
+            && position < LEADING_SILENCE_CAP + Duration::from_millis(300),
+        "{position:?}"
+    );
 }
