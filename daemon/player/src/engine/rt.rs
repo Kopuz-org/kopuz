@@ -31,6 +31,8 @@ pub(crate) struct RtSession {
     pub eof: Arc<AtomicBool>,
     /// Raised when a block wanted more than the ring held before the end; the actor clears it.
     pub starved: Arc<AtomicBool>,
+    /// Samples read in a row under `SILENCE_PEAK`, before gain. The actor polls it.
+    pub quiet: Arc<AtomicU64>,
     pub applied_gain: GainRamp,
 }
 
@@ -340,6 +342,7 @@ impl RtState {
                 .as_mut()
                 .map(|s| {
                     let read = read_into(&mut s.consumer, active_scratch);
+                    track_quiet(s, &active_scratch[..read]);
                     s.played.fetch_add(read as u64, Ordering::Relaxed);
                     apply_session_gain(s, &mut active_scratch[..read], channels, ramp_frames);
                     read
@@ -411,6 +414,24 @@ impl RtState {
     }
 }
 
+/// Extends or resets the session's run of silent samples. A block counts as
+/// silent when its peak stays under the threshold; no allocation, no locking.
+fn track_quiet(session: &RtSession, samples: &[f32]) {
+    if samples.is_empty() {
+        return;
+    }
+    let peak = samples
+        .iter()
+        .fold(0.0f32, |peak, sample| peak.max(sample.abs()));
+    if peak >= super::SILENCE_PEAK {
+        session.quiet.store(0, Ordering::Relaxed);
+        return;
+    }
+    session
+        .quiet
+        .fetch_add(samples.len() as u64, Ordering::Relaxed);
+}
+
 fn read_session(
     session: &mut RtSession,
     out: &mut [f32],
@@ -418,6 +439,7 @@ fn read_session(
     ramp_frames: f32,
 ) -> usize {
     let read = read_into(&mut session.consumer, out);
+    track_quiet(session, &out[..read]);
     session.played.fetch_add(read as u64, Ordering::Relaxed);
     apply_session_gain(session, &mut out[..read], channels, ramp_frames);
     read
@@ -579,6 +601,7 @@ mod tests {
                 applied_gain: GainRamp::new(initial),
                 eof: Arc::new(AtomicBool::new(true)),
                 starved: Arc::new(AtomicBool::new(false)),
+                quiet: Arc::new(AtomicU64::new(0)),
             }
         };
         let outgoing = session(1.0, 0.5);
@@ -643,6 +666,7 @@ mod tests {
                         applied_gain: GainRamp::new(1.0),
                         eof: Arc::new(AtomicBool::new(eof)),
                         starved: flag.clone(),
+                        quiet: Arc::new(AtomicU64::new(0)),
                     },
                     fade: None,
                 })
@@ -716,6 +740,7 @@ mod tests {
                 applied_gain: GainRamp::new(1.0),
                 eof: Arc::new(AtomicBool::new(true)),
                 starved: Arc::new(AtomicBool::new(false)),
+                quiet: Arc::new(AtomicU64::new(0)),
             }
         };
         let (cmd_tx, cmd_rx) = mpsc::channel();
