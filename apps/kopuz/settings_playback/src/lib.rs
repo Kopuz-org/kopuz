@@ -730,7 +730,15 @@ fn output_device_options(
     if let Some(current) = current
         && !devices.iter().any(|device| device.id == current)
     {
-        options.push((Some(current.to_string()), current.to_string().into()));
+        // The id leads with the audio host (`alsa:hw:CARD=PCH,DEV=0`); the rest names the device.
+        let device = current
+            .split_once(':')
+            .map_or(current, |(_, device)| device);
+        let label = t_with(
+            "output_device_missing",
+            &[("device", device.to_string().into())],
+        );
+        options.push((Some(current.to_string()), label));
     }
     options
 }

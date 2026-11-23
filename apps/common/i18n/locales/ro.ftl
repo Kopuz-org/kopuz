@@ -1250,6 +1250,7 @@ listen_address = Serve the API on a TCP address
 listen_address_description = An <ip>:<port> where kopuzctl and other clients can reach Kopuz without the local socket. Anyone who can reach it can control playback, so keep it on 127.0.0.1 unless you trust your network. Takes effect after a restart.
 output_device = Output device
 output_device_description = Where Kopuz plays. A device picked here stays put when the system default changes.
+output_device_missing = { $device } (not connected)
 output_device_system_default = System default
 exclusive_output = Exclusive mode
 exclusive_output_description = Hold the chosen card's hardware device alone, with no mixing, at each track's own sample rate. Nothing else can play on it meanwhile; under PipeWire, release the card first with pw-reserve.
