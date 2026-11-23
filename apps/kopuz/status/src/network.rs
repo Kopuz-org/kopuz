@@ -73,6 +73,8 @@ impl Render for NetworkBanner {
                 .child(div().flex_1().min_w_0().child(t("error_network_down")))
                 .into_any_element(),
             Some(NetworkNotice::BackOnline { source }) => {
+                let focus = components::focus::handle("network-dismiss", window, cx);
+                let focused = focus.is_focused(window);
                 let sources = SourcesModel::global(cx).read(cx);
                 let name = sources
                     .sources()
@@ -118,14 +120,25 @@ impl Render for NetworkBanner {
                     .child(
                         div()
                             .id("network-dismiss")
+                            .track_focus(&focus)
+                            .tab_index(0)
                             .flex()
                             .flex_shrink_0()
                             .p_1()
                             .cursor_pointer()
-                            .opacity(dismiss)
+                            .opacity(if focused { 1. } else { dismiss })
                             .on_hover(motion::track(pointer))
                             .tooltip(|window, cx| Tooltip::new(t("close")).build(window, cx))
                             .child(icons::icon(icons::CLOSE).size(GLYPH))
+                            .on_key_down({
+                                let offer = offer.clone();
+                                cx.listener(move |this, event: &gpui_kit::KeyDownEvent, _, cx| {
+                                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                        this.dismissed = Some(offer.clone());
+                                        cx.notify();
+                                    }
+                                })
+                            })
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.dismissed = Some(offer.clone());
                                 cx.notify();

@@ -72,6 +72,8 @@ impl UpdateBanner {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let focus = components::focus::handle("update-dismiss", window, cx);
+        let focused = focus.is_focused(window);
         let (over, pointer) = motion::hovered("update-dismiss-hover", window, cx);
         let dismiss = motion::amount(
             "update-dismiss-alpha",
@@ -108,14 +110,25 @@ impl UpdateBanner {
             .child(
                 div()
                     .id("update-dismiss")
+                    .track_focus(&focus)
+                    .tab_index(0)
                     .flex()
                     .flex_shrink_0()
                     .p_1()
                     .cursor_pointer()
-                    .opacity(dismiss)
+                    .opacity(if focused { 1. } else { dismiss })
                     .on_hover(motion::track(pointer))
                     .tooltip(|window, cx| Tooltip::new(t("close")).build(window, cx))
                     .child(icons::icon(icons::CLOSE).size(GLYPH))
+                    .on_key_down({
+                        let version = version.clone();
+                        cx.listener(move |this, event: &gpui_kit::KeyDownEvent, _, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                this.dismissed = Some(version.clone());
+                                cx.notify();
+                            }
+                        })
+                    })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.dismissed = Some(version.clone());
                         cx.notify();

@@ -129,6 +129,8 @@ impl Overlays {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let focus = components::focus::handle("dismiss-playback-error", window, cx);
+        let focused = focus.is_focused(window);
         let danger = cx.theme().danger;
         let (over, pointer) = motion::hovered("dismiss-error-hover", window, cx);
         let dismiss = motion::amount(
@@ -165,11 +167,19 @@ impl Overlays {
             .child(
                 div()
                     .id("dismiss-playback-error")
+                    .track_focus(&focus)
+                    .tab_index(0)
+                    .on_key_down(|event: &gpui_kit::KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            PlayerModel::global(cx)
+                                .update(cx, |player, cx| player.dismiss_error(cx));
+                        }
+                    })
                     .flex()
                     .flex_shrink_0()
                     .p_1()
                     .cursor_pointer()
-                    .opacity(dismiss)
+                    .opacity(if focused { 1. } else { dismiss })
                     .text_color(style::white(DISMISS_TEXT, cx))
                     .on_hover(motion::track(pointer))
                     .tooltip(|window, cx| Tooltip::new(t("close")).build(window, cx))
