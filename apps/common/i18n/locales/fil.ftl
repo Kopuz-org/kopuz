@@ -517,6 +517,7 @@ back_behavior = Pag-uugali ng Back Button
 back_behavior_rewind = REWIND → PREV
 back_behavior_always_prev = LAGING PREV
 
+metadata_read_failed = Could not load track metadata
 metadata = Metadata
 auto_fetch_covers = Awtomatikong kunin ang mga album cover
 prefer_local_lyrics = Unahin ang lokal na lyrics (.lrc / embedded, walang online fallback)

@@ -553,6 +553,7 @@ back_behavior = ബാക്ക് ബട്ടൺ പെരുമാറ്റ�
 back_behavior_rewind = റീവൈൻഡ് → മുമ്പത്തേത്
 back_behavior_always_prev = എപ്പോഴും മുമ്പത്തേത്
 
+metadata_read_failed = Could not load track metadata
 metadata = മെറ്റാഡാറ്റ
 auto_fetch_covers = ആൽബം കവറുകൾ സ്വയം ലഭ്യമാക്കുക
 prefer_local_lyrics = ലോക്കൽ വരികൾക്ക് മുൻഗണന (.lrc / ഉൾച്ചേർത്തത്, ഓൺലൈൻ ഫാൾബാക്ക് ഇല്ല)

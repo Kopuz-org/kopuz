@@ -549,6 +549,7 @@ back_behavior = Gedrag van terugknop
 back_behavior_rewind = TERUGSPOELEN → VORIGE
 back_behavior_always_prev = ALTIJD VORIGE
 
+metadata_read_failed = Could not load track metadata
 metadata = Metadata
 auto_fetch_covers = Albumhoezen automatisch ophalen
 prefer_local_lyrics = Voorkeur voor lokale songteksten (.lrc / ingesloten, geen online terugval)

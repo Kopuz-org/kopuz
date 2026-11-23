@@ -466,6 +466,7 @@ player_bar_position = Player-Leistenposition
 position_bottom = Unten
 position_top = Oben
 
+metadata_read_failed = Could not load track metadata
 metadata = Metadaten
 auto_fetch_covers = Albumcover automatisch abrufen
 prefer_local_lyrics = Lokale Liedtexte bevorzugen (.lrc / eingebettet, kein Online-Fallback)

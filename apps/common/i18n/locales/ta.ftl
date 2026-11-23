@@ -553,6 +553,7 @@ back_behavior = பின் பொத்தான் நடத்தை
 back_behavior_rewind = ரிவைண்ட் → முந்தைய
 back_behavior_always_prev = எப்போதும் முந்தைய
 
+metadata_read_failed = Could not load track metadata
 metadata = மெட்டாடேட்டா
 auto_fetch_covers = ஆல்பம் கவர்களைத் தானாகப் பெறு
 prefer_local_lyrics = உள்ளூர் வரிகளை விரும்பு (.lrc / உட்பொதிந்த, ஆன்லைன் மாற்று இல்லை)

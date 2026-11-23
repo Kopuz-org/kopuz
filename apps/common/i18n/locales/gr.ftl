@@ -490,6 +490,7 @@ player_bar_position = Θέση μπάρας αναπαραγωγής
 position_bottom = Κάτω
 position_top = Πάνω
 
+metadata_read_failed = Could not load track metadata
 metadata = Μεταδεδομένα
 auto_fetch_covers = Αυτόματη λήψη εξωφύλλων άλμπουμ
 prefer_local_lyrics = Προτίμηση τοπικών στίχων (.lrc / ενσωματωμένοι, χωρίς διαδικτυακή εναλλακτική)

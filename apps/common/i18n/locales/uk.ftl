@@ -506,6 +506,7 @@ player_bar_position = Положення панелі плеєра
 position_bottom = Знизу
 position_top = Зверху
 
+metadata_read_failed = Could not load track metadata
 metadata = Метадані
 auto_fetch_covers = Автоматично завантажувати обкладинки альбомів
 prefer_local_lyrics = Надавати перевагу локальним текстам (.lrc / вбудовані, без онлайн-резерву)

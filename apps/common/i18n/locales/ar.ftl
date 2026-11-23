@@ -496,6 +496,7 @@ player_bar_position = موضع شريط المشغل
 position_bottom = أسفل
 position_top = أعلى
 
+metadata_read_failed = Could not load track metadata
 metadata = بيانات وصفية
 auto_fetch_covers = الجلب التلقائي لأغلفة الألبومات
 prefer_local_lyrics = تفضيل كلمات الأغاني المحلية (.lrc / مضمّنة، دون رجوع إلى الإنترنت)
