@@ -10,7 +10,7 @@ use components::album_collection::available_fields;
 use components::format::{t, t_with, total_duration};
 use components::track_sort::{Column, next_sort, sort_tracks};
 use components::{
-    AlbumCollection, Chip, DetailActions, DetailHeader, EmptyState, GridMode, Loading, Picture,
+    AlbumCollection, DetailActions, DetailHeader, EmptyState, GridMode, Loading, Picture,
     TrackActions, TrackHeader, TrackList, TrackListEvent, TrackListOptions, icons, menus,
 };
 use config::{AlbumSortField, AlbumViewMode, SortCriterion, SortDirection};
@@ -22,8 +22,8 @@ use gpui_kit::{
     Subscription, Task, Window, div, rems,
 };
 use store::{
-    AudioMuseModel, ConfigModel, DownloadsModel, LayoutModel, Navigator, Offline, Pictured,
-    PlayerModel, Query, Route, SourcesModel, Target, actions,
+    AudioMuseModel, ConfigModel, DownloadsModel, LayoutModel, Offline, Pictured, PlayerModel,
+    Query, SourcesModel, Target, actions,
 };
 
 use crate::controls::{self, ViewModeKey};
@@ -299,43 +299,6 @@ impl ArtistDetail {
         }));
     }
 
-    fn similar_row(&self, cx: &App) -> Option<AnyElement> {
-        let similar = self.similar.as_ref().filter(|found| !found.is_empty())?;
-        Some(
-            v_flex()
-                .gap_2()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(components::style::white(
-                            components::style::TEXT_SECONDARY,
-                            cx,
-                        ))
-                        .child(t("similar_artists")),
-                )
-                .child(
-                    h_flex()
-                        .flex_wrap()
-                        .gap_2()
-                        .children(similar.iter().map(|artist| {
-                            let chip =
-                                Chip::new(SharedString::from(format!("similar-{}", artist.name)))
-                                    .label(SharedString::from(artist.name.clone()));
-                            match artist.key.clone() {
-                                Some(key) => chip
-                                    .icon(icons::MIC)
-                                    .on_click(move |_, _, cx| {
-                                        Navigator::navigate(Route::Artist(key.clone()), cx)
-                                    })
-                                    .into_any_element(),
-                                None => div().opacity(0.6).child(chip).into_any_element(),
-                            }
-                        })),
-                )
-                .into_any_element(),
-        )
-    }
-
     fn name(&self, cx: &App) -> SharedString {
         self.detail
             .read(cx)
@@ -448,7 +411,6 @@ impl ArtistDetail {
             .min_h_0()
             .gap_12()
             .child(self.hero(cx))
-            .children(self.similar_row(cx))
             .child(body)
             .when(selecting, |view| view.child(self.selection_bar(cx)))
             .into_any_element()

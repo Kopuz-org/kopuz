@@ -1,6 +1,6 @@
-//! The About section: what the source says of the artist, and the artists it calls similar.
+//! The About view: what the source says of the artist, its sound, and artists like it.
 
-use api::ArtistInfoView;
+use api::{ArtistInfoView, SimilarArtist};
 use components::format::t;
 use components::{
     Badge, BadgeTone, Chip, ChipSize, ChipTone, Cover, Heading, SectionHeading, sound_profile,
@@ -24,25 +24,36 @@ const CLAMP_FITS_CHARS: usize = 320;
 const PICTURE: gpui_kit::Pixels = px(96.);
 
 impl ArtistDetail {
-    /// What the source says of the artist, with what AudioMuse-AI hears above the source's similar artists; `None` when neither has anything.
+    /// What the source says of the artist, what AudioMuse-AI hears, and one row of similar
+    /// artists; `None` when there is nothing to show.
     pub(super) fn about(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let sound = self.sound_like(cx);
         let info = match capabilities(cx).artist_info {
             true => self.info.read(cx).value().cloned().flatten(),
             false => None,
         };
-        let Some(info) = info else {
-            return sound;
-        };
-        let body = self.biography(&info, cx);
+        // ListenBrainz, when its switch is on and it found any, else the source's own list.
+        let similar = self
+            .similar
+            .as_deref()
+            .filter(|found| !found.is_empty())
+            .or(info.as_ref().map(|info| info.similar.as_slice()))
+            .and_then(similar_artists);
+        let biography = info.map(|info| self.biography(&info, cx));
+        if biography.is_none() && sound.is_none() && similar.is_none() {
+            return None;
+        }
         Some(
             v_flex()
                 .w_full()
                 .gap_4()
-                .child(SectionHeading::new(t("artist_about")).heading(Heading::Group))
-                .child(body)
+                .when_some(biography, |about, biography| {
+                    about
+                        .child(SectionHeading::new(t("artist_about")).heading(Heading::Group))
+                        .child(biography)
+                })
                 .children(sound)
-                .children(similar_artists(&info))
+                .children(similar)
                 .into_any_element(),
         )
     }
@@ -149,11 +160,11 @@ impl ArtistDetail {
 }
 
 /// A chip to open each similar artist the library holds, plain text for the others.
-fn similar_artists(info: &ArtistInfoView) -> Option<AnyElement> {
-    if info.similar.is_empty() {
+fn similar_artists(similar: &[SimilarArtist]) -> Option<AnyElement> {
+    if similar.is_empty() {
         return None;
     }
-    let chips = info.similar.iter().map(|artist| {
+    let chips = similar.iter().map(|artist| {
         let name = SharedString::from(artist.name.clone());
         match artist.key.clone() {
             Some(key) => Chip::new(SharedString::from(format!("similar-{key}")))
@@ -171,7 +182,7 @@ fn similar_artists(info: &ArtistInfoView) -> Option<AnyElement> {
         v_flex()
             .w_full()
             .gap_2()
-            .child(SectionHeading::new(t("artist_similar")).heading(Heading::Group))
+            .child(SectionHeading::new(t("similar_artists")).heading(Heading::Group))
             .child(h_flex().w_full().flex_wrap().gap_2().children(chips))
             .into_any_element(),
     )
