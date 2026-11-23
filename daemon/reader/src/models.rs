@@ -322,11 +322,15 @@ impl CoverRef {
             "jellyfin" if !item_id.is_empty() => {
                 Self::remote_item(MusicService::Jellyfin, item_id, value)
             }
-            "subsonic" if !item_id.is_empty() => {
-                Self::remote_item(MusicService::Subsonic, item_id, value)
-            }
-            "custom" if !item_id.is_empty() => {
-                Self::remote_item(MusicService::Custom, item_id, value)
+            // The cover id can hold a colon itself (Navidrome's per-disc
+            // `dc-<album>:<disc>`); only a legacy embedded URL is a third segment.
+            "subsonic" | "custom" if !item_id.is_empty() => {
+                match value.and_then(Self::decode_embedded) {
+                    Some(url) => Self::EmbeddedUrl(url),
+                    None => Self::SubsonicItem {
+                        item_id: stored[prefix.len() + 1..].to_string(),
+                    },
+                }
             }
             // YT Music, SoundCloud and Apple Music refs only carry
             // self-contained artwork — a URL, or an Apple artwork template.
@@ -787,6 +791,17 @@ mod tests {
     }
 
     #[test]
+    fn a_navidrome_disc_cover_id_keeps_its_disc_number() {
+        let cover = CoverRef::stored_item_ref(MusicService::Subsonic, "dc-02cunk:1", None);
+        assert_eq!(
+            CoverRef::for_track(&track(MusicService::Subsonic, "song-1", Some(&cover), "")),
+            CoverRef::SubsonicItem {
+                item_id: "dc-02cunk:1".to_string(),
+            }
+        );
+    }
+
+    #[test]
     fn a_subsonic_cover_art_id_in_the_cover_slot_names_that_art() {
         let cover = CoverRef::stored_item_ref(MusicService::Custom, "al-7_0", None);
         assert_eq!(
@@ -810,37 +825,39 @@ mod tests {
 
     #[test]
     fn stored_item_refs_round_trip_through_parse() {
-        for (service, expected) in [
-            (
+        let stored = CoverRef::stored_item_ref(MusicService::Jellyfin, "item-1", Some("tag-1"));
+        assert_eq!(
+            CoverRef::parse(&stored),
+            CoverRef::JellyfinItem {
+                item_id: "item-1".to_string(),
+                tag: Some("tag-1".to_string()),
+            }
+        );
+        assert_eq!(
+            CoverRef::parse(&CoverRef::stored_item_ref(
                 MusicService::Jellyfin,
-                CoverRef::JellyfinItem {
-                    item_id: "item-1".to_string(),
-                    tag: Some("tag-1".to_string()),
-                },
-            ),
-            (
-                MusicService::Subsonic,
-                CoverRef::SubsonicItem {
-                    item_id: "item-1".to_string(),
-                },
-            ),
-            (
-                MusicService::Custom,
-                CoverRef::SubsonicItem {
-                    item_id: "item-1".to_string(),
-                },
-            ),
-        ] {
-            let stored = CoverRef::stored_item_ref(service, "item-1", Some("tag-1"));
-            assert_eq!(CoverRef::parse(&stored), expected, "{stored}");
+                "item-1",
+                Some(CoverRef::NO_COVER)
+            )),
+            CoverRef::None,
+            "the no-cover sentinel survives the round trip"
+        );
+        for service in [MusicService::Subsonic, MusicService::Custom] {
+            let stored = CoverRef::stored_item_ref(service, "item-1", None);
             assert_eq!(
-                CoverRef::parse(&CoverRef::stored_item_ref(
-                    service,
-                    "item-1",
-                    Some(CoverRef::NO_COVER)
-                )),
-                CoverRef::None,
-                "the no-cover sentinel survives the round trip"
+                CoverRef::parse(&stored),
+                CoverRef::SubsonicItem {
+                    item_id: "item-1".to_string(),
+                },
+                "{stored}"
+            );
+            let url = "https://img.example/a:b.jpg";
+            let legacy =
+                CoverRef::stored_item_ref(service, "al-1", Some(&CoverRef::encode_url(url)));
+            assert_eq!(
+                CoverRef::parse(&legacy),
+                CoverRef::EmbeddedUrl(url.to_string()),
+                "a legacy embedded cover still resolves: {legacy}"
             );
         }
 
