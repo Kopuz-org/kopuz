@@ -269,8 +269,13 @@ impl PlaylistsPanel {
                 let artwork = match call.await {
                     Ok(Some(artwork)) => artwork,
                     Ok(None) => return,
+                    // Forgotten, so the next change to the pins asks again rather than never.
                     Err(error) => {
                         tracing::debug!(%error, "no artwork for a pinned item");
+                        this.update(cx, |this, _| {
+                            this.asked.remove(&(pin.kind, pin.id.clone()));
+                        })
+                        .ok();
                         return;
                     }
                 };
