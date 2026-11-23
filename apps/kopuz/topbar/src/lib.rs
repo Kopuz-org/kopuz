@@ -64,7 +64,7 @@ const SWITCHER_IN_BAR: Pixels = px(168.);
 /// `h-10`: the sectioned sidebar's own room for the window buttons.
 const SIDEBAR_TRAFFIC_LIGHTS: Pixels = px(40.);
 // A section heading's ink and the divider's, as fractions of the sidebar's text colour.
-const SECTION_INK: f32 = 0.25;
+const SECTION_INK: f32 = style::TEXT_SUBTLE;
 const DIVIDER: f32 = 0.06;
 
 /// The frame a page draws inside, so a table stops stretching and a grid centres.
