@@ -148,7 +148,8 @@ impl TrackList {
             row_actions: TrackActions::default(),
             me: cx.weak_entity(),
             selection: Selection::new(),
-            focus: cx.focus_handle(),
+            // A tab stop, so the arrows and Enter reach the rows without a click first.
+            focus: crate::focus::stop_handle(cx),
             scroll: UniformListScrollHandle::new(),
             page: None,
             painted: Rc::default(),
