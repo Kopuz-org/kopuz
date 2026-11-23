@@ -907,6 +907,8 @@ pub struct Interface {
     pub page_width: PageWidth,
     pub similar_artists: bool,
     pub queue_side: Side,
+    /// The docked queue and lyrics column, as last dragged; `None` keeps the default.
+    pub queue_width: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -926,6 +928,7 @@ impl Default for Interface {
             page_width: PageWidth::Standard,
             similar_artists: false,
             queue_side: Side::Right,
+            queue_width: None,
         }
     }
 }

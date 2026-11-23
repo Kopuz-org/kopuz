@@ -62,6 +62,9 @@ impl NowPlaying {
                         .update(cx, |this, cx| {
                             if this.panel_width != Some(width) {
                                 this.panel_width = Some(width);
+                                store::LayoutModel::edit(cx, move |layout| {
+                                    layout.interface.queue_width = Some(width.as_f32());
+                                });
                                 cx.notify();
                             }
                         })

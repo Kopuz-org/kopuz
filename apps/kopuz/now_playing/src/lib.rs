@@ -202,7 +202,7 @@ impl NowPlaying {
             volume,
             volume_held: false,
             tab: store::layout(cx).sheet.tab,
-            panel_width: None,
+            panel_width: store::layout(cx).interface.queue_width.map(gpui_kit::px),
             root: None,
             hero: None,
             sheet_fade: components::motion::Fade::hidden(),
