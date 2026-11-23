@@ -167,6 +167,12 @@ loading_lyrics = جارٍ تحميل الكلمات...
 lyrics_not_found = لم يتم العثور على الكلمات
 instrumental_break = موسيقى فقط
 no_previous_songs = لا توجد أغانٍ سابقة
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count =
     { $count ->
         [few] { $count } مقاطع

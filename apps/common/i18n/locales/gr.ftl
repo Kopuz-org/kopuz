@@ -167,6 +167,12 @@ loading_lyrics = Φόρτωση στίχων...
 lyrics_not_found = Οι στίχοι δεν βρέθηκαν
 instrumental_break = Ορχηστρικό
 no_previous_songs = Δεν υπάρχει προηγούμενο τραγούδι
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count =
     { $count ->
         [one] { $count } κομμάτι

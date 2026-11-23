@@ -167,6 +167,12 @@ loading_lyrics = 歌詞を読み込み中...
 lyrics_not_found = 歌詞が見つかりません
 instrumental_break = 間奏
 no_previous_songs = 以前の曲はありません
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count = { $count } トラック
 playlist_folder_count = { $count } 件のプレイリスト
 playlists_synced_count = { $count } 件のプレイリストを同期済み

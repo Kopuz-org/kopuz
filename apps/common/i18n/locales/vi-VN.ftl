@@ -233,6 +233,12 @@ loading_lyrics = Đang tải lời bài hát...
 lyrics_not_found = Không tìm thấy lời bài hát
 instrumental_break = Nhạc dạo
 no_previous_songs = Không có bài hát trước đó
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count = { $count } bài
 playlist_folder_count = { $count } danh sách phát
 playlists_synced_count = Đã đồng bộ { $count } danh sách phát

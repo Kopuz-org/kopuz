@@ -65,13 +65,39 @@ impl PlaylistsModel {
             .find(|playlist| playlist.id == id)
     }
 
+    /// Add `keys` the playlist does not hold yet, and say how many went in.
     pub fn add_tracks(&mut self, id: String, keys: Vec<String>, cx: &mut Context<Self>) {
+        let (name, keys) = match self.playlist(&id) {
+            Some(playlist) => (
+                playlist.name.clone(),
+                keys.into_iter()
+                    .filter(|key| !playlist.track_keys.contains(key))
+                    .collect::<Vec<_>>(),
+            ),
+            None => (String::new(), keys),
+        };
+        if keys.is_empty() {
+            Notices::info(
+                i18n::t_with("playlist_already_holds", &[("playlist", name.into())]),
+                cx,
+            );
+            return;
+        }
+        let count = keys.len();
         let call = Link::global(cx)
             .call(move |api| async move { api.add_playlist_tracks(id, keys).await });
         cx.spawn(async move |_, cx| {
-            if let Err(error) = call.await {
-                cx.update(|cx| Notices::failed(&error, cx));
-            }
+            let result = call.await;
+            cx.update(|cx| match result {
+                Ok(_) => Notices::info(
+                    i18n::t_with(
+                        "playlist_tracks_added",
+                        &[("count", count.into()), ("playlist", name.into())],
+                    ),
+                    cx,
+                ),
+                Err(error) => Notices::failed(&error, cx),
+            });
         })
         .detach();
     }

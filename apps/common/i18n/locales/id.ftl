@@ -233,6 +233,12 @@ loading_lyrics = Memuat lirik...
 lyrics_not_found = Lirik tidak ditemukan
 instrumental_break = Instrumental
 no_previous_songs = Tidak ada lagu sebelumnya
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count = { $count } trek
 playlist_folder_count = { $count } daftar putar
 playlists_synced_count = { $count } daftar putar tersinkron

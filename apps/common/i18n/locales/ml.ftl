@@ -233,6 +233,12 @@ loading_lyrics = വരികൾ ലോഡ് ചെയ്യുന്നു...
 lyrics_not_found = വരികൾ കണ്ടെത്തിയില്ല
 instrumental_break = ഇൻസ്ട്രുമെന്റൽ
 no_previous_songs = മുൻ പാട്ടുകളൊന്നുമില്ല
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count =
     { $count ->
         [one] { $count } ട്രാക്ക്

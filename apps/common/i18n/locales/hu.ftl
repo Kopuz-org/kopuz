@@ -167,6 +167,12 @@ loading_lyrics = Dalszöveg betöltése...
 lyrics_not_found = Dalszöveg nem található
 instrumental_break = Hangszeres rész
 no_previous_songs = Nincsenek előző dalok
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count = { $count } dal
 playlist_folder_count = { $count } lejátszási lista
 playlists_synced_count = { $count } lejátszási lista szinkronizálva

@@ -233,6 +233,12 @@ loading_lyrics = Laddar låttexter...
 lyrics_not_found = Inga låttexter hittades
 instrumental_break = Instrumentalt
 no_previous_songs = Inga tidigare låtar
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count =
     { $count ->
         [one] { $count } låt

@@ -167,6 +167,12 @@ loading_lyrics = Ładowanie tekstu...
 lyrics_not_found = Nie znaleziono tekstu utworu
 instrumental_break = Instrumental
 no_previous_songs = Brak poprzednich utworów
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count =
     { $count ->
         [one] { $count } utwór

@@ -167,6 +167,12 @@ loading_lyrics = 가사 불러오는 중...
 lyrics_not_found = 가사를 찾을 수 없습니다
 instrumental_break = 간주
 no_previous_songs = 이전 곡이 없습니다
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count = { $count }곡
 playlist_folder_count = 재생목록 { $count }개
 playlists_synced_count = 재생목록 { $count }개 동기화됨

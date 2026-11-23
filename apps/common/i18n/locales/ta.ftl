@@ -233,6 +233,12 @@ loading_lyrics = வரிகள் ஏற்றப்படுகிறது..
 lyrics_not_found = வரிகள் கண்டுபிடிக்கப்படவில்லை
 instrumental_break = இசைப் பகுதி
 no_previous_songs = முந்தைய பாடல்கள் இல்லை
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count =
     { $count ->
         [one] { $count } தடம்

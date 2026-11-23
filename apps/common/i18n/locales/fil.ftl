@@ -233,6 +233,12 @@ loading_lyrics = Nilo-load ang lyrics...
 lyrics_not_found = Hindi natagpuan ang lyrics
 instrumental_break = Instrumental
 no_previous_songs = Walang naunang kanta
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count = { $count } na track
 playlist_folder_count = { $count } na playlist
 playlists_synced_count = { $count } na playlist ang na-sync
