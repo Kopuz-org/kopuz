@@ -220,11 +220,12 @@ impl AddPlaylist {
             multiple: false,
             prompt: None,
         });
-        window.close_dialog(cx);
-        cx.spawn(async move |_, cx| {
+        // The dialog stays up until a folder is picked, so dismissing the picker leaves it as it was.
+        cx.spawn_in(window, async move |_, cx| {
             let Ok(Ok(Some(paths))) = picked.await else {
                 return;
             };
+            cx.update(|window, cx| window.close_dialog(cx)).ok();
             let Some(path) = paths.into_iter().next() else {
                 return;
             };
@@ -238,13 +239,14 @@ impl AddPlaylist {
             } else {
                 format!("{raw}{}", std::path::MAIN_SEPARATOR)
             };
-            cx.update(|cx| {
+            cx.update(|_, cx| {
                 actions::run(cx, move |api| async move {
                     let page = api.folder_tracks(prefix, store::all()).await?;
                     let keys = page.items.into_iter().map(|track| track.key).collect();
                     api.create_playlist(name, keys).await
                 });
-            });
+            })
+            .ok();
         })
         .detach();
     }
