@@ -187,6 +187,7 @@ impl MediaSource for SpotifySource {
             albums,
             tracks,
             artists: Vec::new(),
+            track_stats: Vec::new(),
         })
     }
 

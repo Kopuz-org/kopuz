@@ -10,6 +10,7 @@ use reader::models::{Album, CoverRef, Track};
 use sqlx::SqlitePool;
 
 use super::rows::{AlbumRow, CreditRow, TrackRow};
+use super::server_stats::PLAY_COUNTS;
 use crate::{AlbumQuery, ArtistQuery, DbError, Listing, Page, Source, TrackFilter, TrackSort};
 
 /// Track columns for a `TrackRow`, `t.`-aliased and read via [`TRACKS_FROM`] so a
@@ -279,12 +280,12 @@ pub async fn tracks_page(
     let (limit_n, offset_n) = c.page_slots();
     let clauses = &c.sql;
     let order = order_by(&filter.sort, filter.reverse);
-    // PlayCount needs the listen_counts join; the other sorts stay join-free
+    // PlayCount needs the PLAY_COUNTS join; the other sorts stay join-free
     // so they read straight off the tracks indexes.
     let sql = if filter.sort == TrackSort::PlayCount {
         format!(
             "SELECT {TRACK_COLUMNS} {TRACKS_FROM} \
-             LEFT JOIN listen_counts lc ON lc.source = t.source AND lc.track_key = t.track_key \
+             LEFT JOIN {PLAY_COUNTS} lc ON lc.source = t.source AND lc.track_key = t.track_key \
              WHERE t.source = ?1{clauses} ORDER BY {order} LIMIT ?{limit_n} OFFSET ?{offset_n}",
         )
     } else {
@@ -429,16 +430,17 @@ pub async fn artist_sample_tracks(
 
 pub async fn top_genre(pool: &SqlitePool, source: &Source) -> Result<Option<String>, DbError> {
     let src = source.as_str();
-    Ok(sqlx::query_scalar!(
-        r#"SELECT a.genre FROM tracks t
-             JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
-             JOIN listen_counts lc ON lc.source = t.source AND lc.track_key = t.track_key
-            WHERE t.source = ?1 AND TRIM(a.genre) != ''
-            GROUP BY a.genre ORDER BY SUM(lc.count) DESC LIMIT 1"#,
-        src
-    )
-    .fetch_optional(pool)
-    .await?)
+    let sql = format!(
+        "SELECT a.genre FROM tracks t \
+           JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id \
+           JOIN {PLAY_COUNTS} lc ON lc.source = t.source AND lc.track_key = t.track_key \
+          WHERE t.source = ?1 AND TRIM(a.genre) != '' \
+          GROUP BY a.genre ORDER BY SUM(lc.count) DESC LIMIT 1"
+    );
+    Ok(sqlx::query_scalar(&sql)
+        .bind(src)
+        .fetch_optional(pool)
+        .await?)
 }
 
 /// The one whole-source read: full-text search needs the corpus because its
@@ -1070,7 +1072,7 @@ pub async fn favorites_liked_at(
 
 /// An album counts as played once any of its tracks has a play count or a place in the recent history.
 pub async fn unplayed_albums(pool: &SqlitePool, source: &Source) -> Result<Vec<Album>, DbError> {
-    let rows = sqlx::query_as::<_, AlbumRow>(
+    let sql = format!(
         "SELECT al.source_album_id, al.title, al.artist, al.genre, al.year, al.cover_path, \
                 al.manual_cover, ar.key AS artist_key, ar.source_artist_id AS artist_source_id \
            FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_pk \
@@ -1078,7 +1080,7 @@ pub async fn unplayed_albums(pool: &SqlitePool, source: &Source) -> Result<Vec<A
             AND EXISTS (SELECT 1 FROM tracks t \
                          WHERE t.source = al.source AND t.source_album_id = al.source_album_id) \
             AND NOT EXISTS (SELECT 1 FROM tracks t \
-                              JOIN listen_counts lc \
+                              JOIN {PLAY_COUNTS} lc \
                                 ON lc.source = t.source AND lc.track_key = t.track_key \
                              WHERE t.source = al.source AND t.source_album_id = al.source_album_id \
                                AND lc.count > 0) \
@@ -1087,10 +1089,11 @@ pub async fn unplayed_albums(pool: &SqlitePool, source: &Source) -> Result<Vec<A
                                 ON rp.source = t.source AND rp.track_key = t.track_key \
                              WHERE t.source = al.source AND t.source_album_id = al.source_album_id) \
           ORDER BY al.artist COLLATE LOCALE, al.title COLLATE LOCALE",
-    )
-    .bind(source.as_str())
-    .fetch_all(pool)
-    .await?;
+    );
+    let rows = sqlx::query_as::<_, AlbumRow>(&sql)
+        .bind(source.as_str())
+        .fetch_all(pool)
+        .await?;
     Ok(rows.into_iter().map(Into::into).collect())
 }
 

@@ -186,6 +186,7 @@ impl MediaSource for SmbSource {
             albums: library.albums,
             tracks: library.tracks,
             artists: Vec::new(),
+            track_stats: Vec::new(),
         })
     }
 

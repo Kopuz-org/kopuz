@@ -277,6 +277,8 @@ pub struct LibrarySnapshot {
     pub tracks: Vec<reader::Track>,
     /// The source's own artist listing, with each photo URL it has.
     pub artists: Vec<(reader::ArtistCredit, Option<String>)>,
+    /// What the server reports per track for the account: plays and ratings.
+    pub track_stats: Vec<db::ServerTrackStats>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

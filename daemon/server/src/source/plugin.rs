@@ -126,6 +126,16 @@ impl PluginSource {
     }
 }
 
+/// Keyed by item id, which is the key a plugin track is stored under.
+fn track_stats(track: &wit::Track) -> db::ServerTrackStats {
+    db::ServerTrackStats {
+        track_key: track.item_id.clone(),
+        play_count: track.play_count,
+        last_played_at: track.last_played,
+        rating: track.rating.filter(|stars| (1..=5).contains(stars)),
+    }
+}
+
 fn answer<T>(result: Result<Result<T, wit::SourceError>, PluginError>) -> Result<T, SourceError> {
     match result {
         Ok(Ok(value)) => Ok(value),
@@ -683,10 +693,12 @@ impl MediaSource for PluginSource {
 
     async fn fetch_library(&self) -> Result<LibrarySnapshot, SourceError> {
         let snapshot = answer(self.session.fetch_library().await)?;
+        let track_stats = snapshot.tracks.iter().map(track_stats).collect();
         Ok(LibrarySnapshot {
             albums: self.albums(snapshot.albums),
             tracks: self.tracks(snapshot.tracks),
             artists: self.listings(snapshot.artists),
+            track_stats,
         })
     }
 

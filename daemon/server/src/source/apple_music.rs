@@ -299,6 +299,7 @@ impl MediaSource for AppleMusicSource {
             albums,
             tracks,
             artists: Vec::new(),
+            track_stats: Vec::new(),
         })
     }
 
