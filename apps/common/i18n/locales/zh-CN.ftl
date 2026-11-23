@@ -1242,6 +1242,7 @@ listening_top_artists = 最常听的艺人
 listening_top_albums = 最常听的专辑
 interface_panel_show_pins = 显示已固定项目
 interface_panel_show_playlists = 显示播放列表
+interface_panel_playlist_covers = 显示播放列表封面
 interface_panel_no_pins = 还没有固定任何内容。右键点击专辑、艺人或播放列表，选择固定到侧边栏。
 interface_nav_controls_up_top = 控件置顶
 interface_nav_controls_up_top_description = 把后退、前进、搜索和状态按钮放到顶部细条中，侧边栏只放页面。

@@ -1236,6 +1236,7 @@ listening_top_artists = Mga nangungunang artist
 listening_top_albums = Mga nangungunang album
 interface_panel_show_pins = Ipakita ang mga naka-pin
 interface_panel_show_playlists = Ipakita ang mga playlist
+interface_panel_playlist_covers = Ipakita ang mga cover ng playlist
 interface_panel_no_pins = Wala pang naka-pin. I-right click ang album, artist o playlist at piliin ang I-pin sa sidebar.
 interface_nav_controls_up_top = Mga kontrol sa itaas
 interface_nav_controls_up_top_description = Ilagay ang back, forward, search at status buttons sa manipis na bar sa itaas, at sa sidebar ang mga lugar.

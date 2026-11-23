@@ -1272,6 +1272,7 @@ listening_top_artists = முன்னணி கலைஞர்கள்
 listening_top_albums = முன்னணி ஆல்பங்கள்
 interface_panel_show_pins = பொருத்தியவற்றைக் காட்டு
 interface_panel_show_playlists = பிளேலிஸ்ட்களைக் காட்டு
+interface_panel_playlist_covers = பிளேலிஸ்ட் அட்டைகளைக் காட்டு
 interface_panel_no_pins = இன்னும் எதுவும் பொருத்தப்படவில்லை. ஆல்பம், கலைஞர் அல்லது பிளேலிஸ்டில் வலது கிளிக் செய்து பக்கப்பட்டியில் பொருத்து என்பதைத் தேர்வுசெய்யவும்.
 interface_nav_controls_up_top = கட்டுப்பாடுகள் மேலே
 interface_nav_controls_up_top_description = பின், முன், தேடல், நிலை பொத்தான்களை மேலே மெல்லிய பட்டியில் வைத்து, பக்கப்பட்டியை இடங்களுக்கு மட்டும் வை.

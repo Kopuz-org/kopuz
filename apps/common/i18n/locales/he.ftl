@@ -1274,6 +1274,7 @@ listening_top_artists = האמנים המובילים
 listening_top_albums = האלבומים המובילים
 interface_panel_show_pins = הצגת פריטים מוצמדים
 interface_panel_show_playlists = הצגת רשימות השמעה
+interface_panel_playlist_covers = הצגת עטיפות של רשימות השמעה
 interface_panel_no_pins = עדיין לא הוצמד דבר. לחצו קליק ימני על אלבום, אמן או רשימה ובחרו הצמדה לסרגל הצד.
 interface_nav_controls_up_top = פקדים למעלה
 interface_nav_controls_up_top_description = חזרה, קדימה, חיפוש וכפתורי המצב בפס דק למעלה, וסרגל הצד נשאר למקומות.

@@ -1248,6 +1248,7 @@ listening_top_artists = よく聴くアーティスト
 listening_top_albums = よく聴くアルバム
 interface_panel_show_pins = ピン留めを表示
 interface_panel_show_playlists = プレイリストを表示
+interface_panel_playlist_covers = プレイリストのカバーを表示
 interface_panel_no_pins = まだ何もピン留めされていません。アルバム、アーティスト、プレイリストを右クリックしてサイドバーにピン留めを選んでください。
 interface_nav_controls_up_top = コントロールを上部に
 interface_nav_controls_up_top_description = 戻る、進む、検索、ステータスボタンを上部の細いバーに置き、サイドバーは移動先だけにします。

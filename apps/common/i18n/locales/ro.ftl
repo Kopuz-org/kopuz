@@ -1282,6 +1282,7 @@ listening_top_artists = Artiști de top
 listening_top_albums = Albume de top
 interface_panel_show_pins = Arată elementele fixate
 interface_panel_show_playlists = Arată playlisturile
+interface_panel_playlist_covers = Arată copertele playlisturilor
 interface_panel_no_pins = Nimic fixat încă. Clic dreapta pe un album, artist sau playlist și alege Fixează în bara laterală.
 interface_nav_controls_up_top = Controale sus
 interface_nav_controls_up_top_description = Pune înapoi, înainte, căutarea și butoanele de stare într-o bară subțire sus, iar bara laterală rămâne pentru locuri.

@@ -394,9 +394,13 @@ impl PlaylistsPanel {
         let id = row.id.to_string();
         let route = row.route();
         let panel = cx.entity().downgrade();
+        let covers = store::layout(cx).panel.playlist_covers;
         let zones = ReorderDropZones::new(
             ElementId::from(("panel-drop", index)),
-            components::tall_row(),
+            match covers {
+                true => components::tall_row(),
+                false => style::list_row(),
+            },
             index,
         )
         .on_drop::<RowDrag>(move |drag, at, _, cx| {
@@ -408,7 +412,7 @@ impl PlaylistsPanel {
                 true => icons::FOLDER,
                 false => icons::LIST,
             })
-            .cover(row.artwork.clone(), false)
+            .when(covers, |item| item.cover(row.artwork.clone(), false))
             .detail(row.detail.clone())
             .active(current == route)
             .collapsed(self.collapsed())

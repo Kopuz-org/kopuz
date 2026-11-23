@@ -1273,6 +1273,7 @@ listening_top_artists = Artistas mais ouvidos
 listening_top_albums = Álbuns mais ouvidos
 interface_panel_show_pins = Mostrar fixados
 interface_panel_show_playlists = Mostrar playlists
+interface_panel_playlist_covers = Mostrar capas das playlists
 interface_panel_no_pins = Nada fixado ainda. Clique com o botão direito em um álbum, artista ou playlist e escolha Fixar na barra lateral.
 interface_nav_controls_up_top = Controles no topo
 interface_nav_controls_up_top_description = Coloque voltar, avançar, busca e os botões de status numa barra fina no topo e deixe a barra lateral para os lugares.

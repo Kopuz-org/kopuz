@@ -700,6 +700,7 @@ fn customize_menu(mut menu: PopupMenu, destinations: bool, cx: &App) -> PopupMen
         menu = menu.separator();
     }
     let (pins, playlists) = (layout.panel.show_pins, layout.panel.show_playlists);
+    let covers = layout.panel.playlist_covers;
     menu.item(
         PopupMenuItem::new(t("interface_panel_show_pins"))
             .checked(pins)
@@ -712,6 +713,13 @@ fn customize_menu(mut menu: PopupMenu, destinations: bool, cx: &App) -> PopupMen
             .checked(playlists)
             .on_click(move |_, _, cx| {
                 LayoutModel::edit(cx, |layout| layout.panel.show_playlists = !playlists)
+            }),
+    )
+    .item(
+        PopupMenuItem::new(t("interface_panel_playlist_covers"))
+            .checked(covers)
+            .on_click(move |_, _, cx| {
+                LayoutModel::edit(cx, |layout| layout.panel.playlist_covers = !covers)
             }),
     )
     .separator()
