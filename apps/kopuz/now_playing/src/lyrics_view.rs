@@ -341,7 +341,7 @@ impl LyricsView {
             }),
         ];
         let romanize = config.read(cx).config().lyrics.romanize_lyrics;
-        Self {
+        let mut view = Self {
             lyrics: Lyrics::Idle,
             key: None,
             generation: 0,
@@ -356,7 +356,10 @@ impl LyricsView {
             shown: None,
             _fetch: None,
             _subscriptions: subscriptions,
-        }
+        };
+        // Opened mid-song, the words are wanted now, not after the player next changes.
+        view.track_changed(&player, cx);
+        view
     }
 
     /// A tick only matters here once the sung line changes, or the list has drifted off its parking spot.
