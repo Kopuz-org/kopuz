@@ -42,13 +42,20 @@ const PANEL_DEPTH: (f32, f32) = (1.1, 6.0);
 const DEPTH_QUANTUM: f32 = 0.5;
 // Each blurred line is several text copies, so only lines in view, and this many past it, blur.
 const VIEW_MARGIN: usize = 2;
-// The fade per line of distance, and the most it takes away at full strength.
-const FADE_STEP: f32 = 0.09;
-const FADE_MAX: f32 = 0.55;
+// The fade per line of distance, and the most it takes away at full strength: the blur carries the depth, so the words stay readable.
+const FADE_STEP: f32 = 0.06;
+const FADE_MAX: f32 = 0.35;
 // `leading-relaxed` on unsynced words.
 const RELAXED: f32 = 1.625;
+// `leading-snug` on a reading, set a step smaller than its line.
+const SNUG: f32 = 1.375;
+const READING_SIZE: f32 = 0.8;
+// Unsynced words are all there is to read, so they sit brighter than the Dioxus `text-white/70`.
+const PLAIN_ALPHA: f32 = 0.85;
 // A romanized reading under an unsynced line, quieter than the words it reads.
-const READING_ALPHA: f32 = 0.45;
+const READING_ALPHA: f32 = 0.55;
+// The sheet's unsynced words keep to `max-w-2xl`.
+const PLAIN_WIDTH: f32 = 42.;
 
 /// A word or syllable of a line, with the byte range it occupies in the line's text.
 #[derive(Clone, Debug, PartialEq)]
@@ -133,6 +140,24 @@ fn convert(view: LyricLineView) -> Line {
         opposite: view.opposite_turn,
         interlude: false,
     }
+}
+
+/// A blank timed line marks where the voice stops: it ends the line before it instead of taking a row.
+fn fold_blanks(lines: Vec<Line>) -> Vec<Line> {
+    let mut kept: Vec<Line> = Vec::with_capacity(lines.len());
+    for line in lines {
+        if !line.text.trim().is_empty() {
+            kept.push(line);
+            continue;
+        }
+        if let Some(previous) = kept.iter_mut().rev().find(|kept| !kept.background)
+            && previous.start <= line.start
+            && previous.end.is_none_or(|end| end > line.start)
+        {
+            previous.end = Some(line.start);
+        }
+    }
+    kept
 }
 
 /// Foreground lines carry the song; a file of nothing but background lines falls back to all of them.
@@ -223,6 +248,19 @@ fn active_main_index(lines: &[Line], main: &[usize], time: f64) -> Option<usize>
         .last()
 }
 
+/// The line the depth of field centres on: the one sung, else the last one started, else the first.
+fn depth_anchor(lines: &[Line], main: &[usize], time: f64, lit: &[usize]) -> Option<usize> {
+    active_main_index(lines, main, time)
+        .or_else(|| lit.iter().copied().max())
+        .or_else(|| {
+            main.iter()
+                .copied()
+                .take_while(|&index| lines[index].start <= time)
+                .last()
+        })
+        .or_else(|| main.first().copied())
+}
+
 /// A background line carries its own timing; without an end it runs until the next main line.
 fn background_bound(lines: &[Line], main: &[usize], line: &Line) -> Option<f64> {
     if line.end.is_some() {
@@ -296,6 +334,25 @@ enum Lyrics {
     },
 }
 
+/// The settings the daemon answers a lookup under, so changing one asks for the words again.
+#[derive(Clone, Copy, PartialEq)]
+struct Ask {
+    romanize: bool,
+    musixmatch: bool,
+    prefer_local: bool,
+}
+
+impl Ask {
+    fn of(config: &ConfigModel) -> Self {
+        let lyrics = &config.config().lyrics;
+        Self {
+            romanize: lyrics.romanize_lyrics,
+            musixmatch: lyrics.enable_musixmatch_lyrics,
+            prefer_local: lyrics.prefer_local_lyrics,
+        }
+    }
+}
+
 /// An eased glide of the scroll offset, so the active line slides into place instead of jumping.
 struct Slide {
     from: Pixels,
@@ -308,8 +365,10 @@ pub struct LyricsView {
     lyrics: Lyrics,
     key: Option<String>,
     generation: u64,
-    /// The romanization setting the words on show were asked for under.
-    romanize: bool,
+    /// The settings the words on show were asked for under.
+    ask: Ask,
+    /// The last lookup failed because the daemon was gone, so a reconnect asks again.
+    stranded: bool,
     scroll: ScrollHandle,
     auto_sync: bool,
     active: Option<usize>,
@@ -318,6 +377,8 @@ pub struct LyricsView {
     /// The lit lines that move with the playhead, each redrawing itself on a tick or a frame.
     clocks: HashMap<usize, Entity<LineClock>>,
     slide: Option<Slide>,
+    /// Drawn at the sheet's size rather than the docked panel's.
+    large: bool,
     /// The step and clamp of the depth blur, which the sheet's larger type takes further.
     depth: (f32, f32),
     /// The lines the depth blur covered, as last drawn.
@@ -339,24 +400,34 @@ impl LyricsView {
                 this.config_changed(&config, cx);
                 cx.notify();
             }),
+            cx.observe(&link::Link::connection(cx), |this, connection, cx| {
+                if this.stranded && connection.read(cx).is_connected() {
+                    this.retry(cx);
+                }
+            }),
         ];
-        let romanize = config.read(cx).config().lyrics.romanize_lyrics;
-        Self {
+        let ask = Ask::of(config.read(cx));
+        let mut view = Self {
             lyrics: Lyrics::Idle,
             key: None,
             generation: 0,
-            romanize,
+            ask,
+            stranded: false,
             scroll: ScrollHandle::new(),
             auto_sync: true,
             active: None,
             lit: Vec::new(),
             clocks: HashMap::new(),
             slide: None,
+            large: sheet,
             depth: if sheet { SHEET_DEPTH } else { PANEL_DEPTH },
             shown: None,
             _fetch: None,
             _subscriptions: subscriptions,
-        }
+        };
+        // A view built while a track already plays would otherwise wait for the next player change.
+        view.track_changed(&player, cx);
+        view
     }
 
     /// A tick only matters here once the sung line changes, or the list has drifted off its parking spot.
@@ -386,6 +457,7 @@ impl LyricsView {
             return;
         }
         self.key = key.clone();
+        self.stranded = false;
         self.auto_sync = true;
         self.active = None;
         self.lit.clear();
@@ -405,15 +477,21 @@ impl LyricsView {
         cx.notify();
     }
 
-    /// Romanization is done by the daemon, so turning it on or off asks for the words again.
+    /// Romanization and the provider chain are the daemon's, so changing either asks for the words again.
     fn config_changed(&mut self, config: &Entity<ConfigModel>, cx: &mut Context<Self>) {
         let config = config.read(cx);
-        let romanize = config.config().lyrics.romanize_lyrics;
+        let ask = Ask::of(config);
         // Until the edit is saved the daemon would answer under the old setting.
-        if romanize == self.romanize || config.is_saving() {
+        if ask == self.ask || config.is_saving() {
             return;
         }
-        self.romanize = romanize;
+        self.ask = ask;
+        self.retry(cx);
+    }
+
+    /// Ask for the playing track's words again, keeping what is on show until they come.
+    fn retry(&mut self, cx: &mut Context<Self>) {
+        self.stranded = false;
         if matches!(self.lyrics, Lyrics::Idle) {
             return;
         }
@@ -444,6 +522,7 @@ impl LyricsView {
                     Ok(view) => adopt(view),
                     Err(error) => {
                         tracing::debug!(%error, "no lyrics for this track");
+                        this.stranded = error.code == api::ErrorCode::DaemonGone;
                         Lyrics::Plain(t("lyrics_not_found"))
                     }
                 };
@@ -451,6 +530,21 @@ impl LyricsView {
             })
             .ok();
         }));
+    }
+
+    /// A click on a line seeks there and hands the scroll back to the sync, which follows the seek.
+    fn seeker(cx: &Context<Self>) -> impl Fn(u64, &mut Window, &mut App) + Clone + 'static {
+        let view = cx.entity().downgrade();
+        move |ms, _, cx| {
+            PlayerModel::global(cx).update(cx, |player, cx| player.seek(ms, cx));
+            view.update(cx, |this, cx| {
+                if !this.auto_sync {
+                    this.auto_sync = true;
+                    cx.notify();
+                }
+            })
+            .ok();
+        }
     }
 
     fn rearm(&mut self, cx: &mut Context<Self>) {
@@ -585,7 +679,11 @@ fn adopt(view: LyricsSource) -> Lyrics {
     if view.synced.is_empty() {
         return Lyrics::Plain(t("lyrics_not_found"));
     }
-    let lines = with_interludes(view.synced.into_iter().map(convert).collect());
+    let lines = fold_blanks(view.synced.into_iter().map(convert).collect());
+    if lines.is_empty() {
+        return Lyrics::Plain(t("lyrics_not_found"));
+    }
+    let lines = with_interludes(lines);
     let main = main_indices(&lines);
     Lyrics::Synced { lines, main }
 }
@@ -607,14 +705,13 @@ fn start_ms(line: &Line) -> u64 {
     (line.start.max(0.0) * 1000.0) as u64
 }
 
-fn seek_to(ms: u64, _: &mut Window, cx: &mut App) {
-    PlayerModel::global(cx).update(cx, |player, cx| player.seek(ms, cx));
-}
+type Seek = std::rc::Rc<dyn Fn(u64, &mut Window, &mut App)>;
 
 /// How a lit line sits among the others, which only the list can know.
 #[derive(Clone, Copy, PartialEq)]
 struct Look {
     paired: bool,
+    large: bool,
 }
 
 /// A lit line that moves with the playhead: it alone redraws on a tick or an animation frame.
@@ -622,15 +719,17 @@ struct LineClock {
     index: usize,
     line: Line,
     look: Look,
+    seek: Seek,
     _playhead: Subscription,
 }
 
 impl LineClock {
-    fn new(index: usize, line: Line, look: Look, cx: &mut Context<Self>) -> Self {
+    fn new(index: usize, line: Line, look: Look, seek: Seek, cx: &mut Context<Self>) -> Self {
         Self {
             index,
             line,
             look,
+            seek,
             _playhead: cx.observe(&Playhead::global(cx), |_, _, cx| cx.notify()),
         }
     }
@@ -646,17 +745,18 @@ impl LineClock {
 impl Render for LineClock {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let time = lyric_time(cx);
-        let lyric_scale = store::layout(cx).sheet.lyrics.scale();
         let line = &self.line;
+        let seek = self.seek.clone();
         let mut row = LyricLine::new(self.index, start_ms(line), line.text.clone())
-            .scale(lyric_scale)
+            .scale(store::layout(cx).sheet.lyrics.scale())
             .reading(line.reading.clone())
             .ink(sung_ink(window, cx))
             .lit(true)
             .background(line.background)
             .opposite(line.opposite)
             .paired(self.look.paired)
-            .on_seek(seek_to);
+            .large(self.look.large)
+            .on_seek(move |ms, window, cx| seek(ms, window, cx));
         if line.interlude {
             let span = line.end.unwrap_or(line.start) - line.start;
             let progress = if span > 0.0 {
@@ -753,16 +853,34 @@ impl Render for LyricsView {
         };
         let time = lyric_time(cx);
 
-        let (mut active, mut lit) = (None, Vec::new());
+        let (mut active, mut lit, mut anchor) = (None, Vec::new(), None);
         if let Lyrics::Synced { lines, main } = &self.lyrics {
             active = active_main_index(lines, main, time);
             lit = active_secondary(lines, main, time, active);
+            // A pause between lines keeps the focus where it was rather than snapping every line sharp.
+            anchor = depth_anchor(lines, main, time, &lit);
         }
         let settling = self.follow(active);
-        // Nothing lit anchors the depth on the last line still ringing out.
-        let anchor = active.or_else(|| lit.iter().copied().max());
         // The sung words wear the cover's colour, clamped until it is legible on the background.
         let sung = sung_ink(window, cx);
+        let large = self.large;
+        let scale = store::layout(cx).sheet.lyrics.scale();
+        // `text-lg` on the sheet, `text-sm` in the panel, times the reader's size.
+        let words_size = if large { 1.125 } else { 0.875 } * scale;
+        let (plain_ink, reading_ink) = (
+            style::white(PLAIN_ALPHA, cx),
+            style::white(READING_ALPHA, cx),
+        );
+        let words = |el: gpui_kit::Div| {
+            el.w_full()
+                .max_w(rems(PLAIN_WIDTH))
+                .mx_auto()
+                .text_size(rems(words_size))
+                .text_center()
+                .font_medium()
+                .line_height(relative(RELAXED))
+                .text_color(plain_ink)
+        };
 
         let body = match &self.lyrics {
             Lyrics::Idle => div().into_any_element(),
@@ -771,7 +889,8 @@ impl Render for LyricsView {
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_sm()
+                .when(large, |el| el.text_base())
+                .when(!large, |el| el.text_sm())
                 .text_color(style::white(BACKGROUND_ALPHA, cx))
                 .child(t("loading_lyrics"))
                 .into_any_element(),
@@ -779,49 +898,42 @@ impl Render for LyricsView {
                 .scroller(cx)
                 .py_4()
                 .px_4()
-                .text_size(rems(0.875 * store::layout(cx).sheet.lyrics.scale()))
-                .text_center()
-                .font_medium()
-                .line_height(relative(RELAXED))
-                .text_color(style::white(BACKGROUND_ALPHA, cx))
-                .child(text.clone())
+                .child(words(div()).child(text.clone()))
                 .into_any_element(),
             Lyrics::Read(lines) => self
                 .scroller(cx)
                 .py_4()
                 .px_4()
-                .text_size(rems(0.875 * store::layout(cx).sheet.lyrics.scale()))
-                .text_center()
-                .font_medium()
-                .line_height(relative(RELAXED))
-                .text_color(style::white(BACKGROUND_ALPHA, cx))
-                .children(lines.iter().map(|(line, reading)| {
+                .child(words(div()).children(lines.iter().map(|(line, reading)| {
+                    // A blank line still holds its height, so stanzas stay apart.
                     if line.trim().is_empty() {
-                        return div().h_5();
+                        return div().child("\u{a0}");
                     }
                     div()
                         .child(line.clone())
                         .children(reading.clone().map(|reading| {
                             div()
-                                .text_xs()
-                                .text_color(style::white(READING_ALPHA, cx))
+                                .text_size(rems(words_size * READING_SIZE))
+                                .line_height(relative(SNUG))
+                                .text_color(reading_ink)
                                 .child(reading)
                         }))
-                }))
+                })))
                 .into_any_element(),
             Lyrics::Synced { lines, .. } => {
                 let paired = lines.iter().any(|line| line.opposite);
-                let lyric_scale = store::layout(cx).sheet.lyrics.scale();
                 let height = self.scroll.bounds().size.height;
                 let shown = self.shown_lines();
                 self.shown = shown.clone();
+                let seek = Self::seeker(cx);
                 let mut children = Vec::with_capacity(lines.len());
                 for (index, line) in lines.iter().enumerate() {
                     let is_lit = Some(index) == active || lit.contains(&index);
                     if is_lit && (line.interlude || !line.chunks.is_empty()) {
-                        let look = Look { paired };
+                        let look = Look { paired, large };
                         let clock = self.clocks.entry(index).or_insert_with(|| {
-                            cx.new(|cx| LineClock::new(index, line.clone(), look, cx))
+                            let seek: Seek = std::rc::Rc::new(seek.clone());
+                            cx.new(|cx| LineClock::new(index, line.clone(), look, seek, cx))
                         });
                         clock.update(cx, |clock, cx| clock.set_look(look, cx));
                         children.push(clock.clone().into_any_element());
@@ -829,20 +941,25 @@ impl Render for LyricsView {
                     }
                     let (opacity, blur) =
                         depth(index, anchor, is_lit, strength, self.depth, shown.as_ref());
-                    children.push(
-                        LyricLine::new(index, start_ms(line), line.text.clone())
-                            .scale(lyric_scale)
-                            .reading(line.reading.clone())
-                            .ink(sung)
-                            .lit(is_lit)
-                            .background(line.background)
-                            .opposite(line.opposite)
-                            .paired(paired)
-                            .opacity(opacity)
-                            .blur(blur)
-                            .on_seek(seek_to)
-                            .into_any_element(),
-                    );
+                    let row = LyricLine::new(index, start_ms(line), line.text.clone())
+                        .scale(scale)
+                        .reading(line.reading.clone())
+                        .ink(sung)
+                        .lit(is_lit)
+                        .background(line.background)
+                        .opposite(line.opposite)
+                        .paired(paired)
+                        .large(large)
+                        .opacity(opacity)
+                        .blur(blur)
+                        .on_seek(seek.clone());
+                    // An interlude not being played still shows its note, empty, the way Dioxus keeps it at 40%.
+                    let row = if line.interlude {
+                        row.interlude(0.)
+                    } else {
+                        row
+                    };
+                    children.push(row.into_any_element());
                 }
                 self.clocks
                     .retain(|index, _| Some(*index) == active || lit.contains(index));
@@ -980,6 +1097,71 @@ mod tests {
             ..LyricsSource::default()
         };
         assert!(matches!(adopt(view), Lyrics::Plain(_)));
+    }
+
+    fn titled(start: f64, end: Option<f64>, text: &str) -> Line {
+        Line {
+            text: text.into(),
+            ..line(start, end)
+        }
+    }
+
+    #[test]
+    fn a_blank_line_ends_the_one_before_it_and_takes_no_row() {
+        let lines = fold_blanks(vec![
+            titled(10.0, None, "la"),
+            titled(14.0, None, "  "),
+            titled(30.0, None, "da"),
+        ]);
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].end, Some(14.0));
+        let lines = with_interludes(lines);
+        let marks: Vec<bool> = lines.iter().map(|line| line.interlude).collect();
+        assert_eq!(marks, vec![true, false, true, false]);
+        assert_eq!(lines[2].start, 14.0);
+    }
+
+    #[test]
+    fn a_blank_line_never_stretches_a_line_that_already_ends_sooner() {
+        let lines = fold_blanks(vec![titled(10.0, Some(12.0), "la"), titled(14.0, None, "")]);
+        assert_eq!(lines[0].end, Some(12.0));
+    }
+
+    #[test]
+    fn synced_lyrics_of_nothing_but_blanks_are_not_found() {
+        let blank = LyricLineView {
+            start_ms: 1000,
+            end_ms: None,
+            text: " ".into(),
+            chunks: Vec::new(),
+            parent_line_index: None,
+            background: false,
+            opposite_turn: false,
+            romanized: None,
+        };
+        let view = LyricsSource {
+            synced: vec![blank],
+            ..LyricsSource::default()
+        };
+        assert!(matches!(adopt(view), Lyrics::Plain(_)));
+    }
+
+    #[test]
+    fn a_pause_between_lines_keeps_the_depth_on_the_line_just_sung() {
+        let lines = vec![line(1.0, Some(2.0)), line(6.0, Some(7.0)), line(9.0, None)];
+        let main = main_indices(&lines);
+
+        assert_eq!(active_main_index(&lines, &main, 4.0), None);
+        assert_eq!(depth_anchor(&lines, &main, 4.0, &[]), Some(0));
+        assert_eq!(depth_anchor(&lines, &main, 0.5, &[]), Some(0));
+        assert_eq!(depth_anchor(&lines, &main, 6.5, &[]), Some(1));
+    }
+
+    #[test]
+    fn the_depth_fade_leaves_a_neighbour_most_of_its_ink() {
+        assert!(depth_opacity(5, Some(4), false, 1.0) >= 0.9);
+        assert!(fade_floor(1.0) >= 0.6);
     }
 
     #[test]
