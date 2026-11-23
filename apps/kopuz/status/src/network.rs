@@ -16,7 +16,6 @@ const FILL: f32 = 0.45;
 
 /// The network strip. It renders nothing while there is nothing to say.
 pub struct NetworkBanner {
-    // The offer someone closed, so it stays gone until the daemon offers a different source.
     dismissed: Option<NetworkNotice>,
     _subscriptions: Vec<Subscription>,
 }
@@ -26,7 +25,13 @@ impl NetworkBanner {
         let sources = SourcesModel::global(cx);
         Self {
             dismissed: None,
-            _subscriptions: vec![cx.observe(&sources, |_, _, cx| cx.notify())],
+            _subscriptions: vec![cx.observe(&sources, |this, sources, cx| {
+                let notice = sources.read(cx).network_notice();
+                if this.dismissed != notice {
+                    this.dismissed = None;
+                }
+                cx.notify();
+            })],
         }
     }
 
