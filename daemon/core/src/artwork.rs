@@ -504,12 +504,24 @@ impl ArtworkService {
         {
             return Err(ApiError::internal("artwork exceeds the maximum size"));
         }
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(fetch_failed)? {
             if bytes.len().saturating_add(chunk.len()) > MAX_REMOTE_ARTWORK_BYTES {
                 return Err(ApiError::internal("artwork exceeds the maximum size"));
             }
             bytes.extend_from_slice(&chunk);
+        }
+
+        // Kept out of the cache, or the error would be served as a cover for a week.
+        if is_error_body(content_type.as_deref(), &bytes) {
+            return Err(ApiError::not_found(
+                "the server answered with an error, not artwork",
+            ));
         }
         Ok(resize_remote(bytes, hq).await)
     }
@@ -520,6 +532,16 @@ impl ArtworkService {
             content_type,
         }
     }
+}
+
+/// A body that is an API answer rather than a picture. Subsonic servers
+/// report a bad `getCoverArt` id with HTTP 200 and a JSON or XML error.
+fn is_error_body(content_type: Option<&str>, bytes: &[u8]) -> bool {
+    const ERROR_TYPES: [&str; 3] = ["application/json", "text/", "application/xml"];
+
+    let declared =
+        content_type.is_some_and(|value| ERROR_TYPES.iter().any(|kind| value.starts_with(kind)));
+    declared || bytes.starts_with(b"{")
 }
 
 /// A client that follows no redirect, for a fetch that checks each hop itself.
@@ -724,6 +746,23 @@ mod tests {
         let small = THUMB_MAX / 4;
         let (bytes, _) = resize_remote(jpeg_of(small), false).await;
         assert_eq!(edge_of(&bytes), small, "shrinking only ever goes down");
+    }
+
+    #[test]
+    fn a_subsonic_error_answer_is_not_a_cover() {
+        // Navidrome answers a bad `getCoverArt` id with 200 and a JSON error.
+        let body = br#"{"subsonic-response":{"status":"failed","error":{"code":0}}}"#;
+        assert!(is_error_body(Some("application/json"), body));
+        assert!(
+            is_error_body(None, body),
+            "sniffed when the header is missing"
+        );
+        assert!(is_error_body(
+            Some("text/xml; charset=utf-8"),
+            b"<subsonic-response/>"
+        ));
+        assert!(!is_error_body(Some("image/jpeg"), &jpeg_of(4)));
+        assert!(!is_error_body(None, &jpeg_of(4)));
     }
 
     #[tokio::test]
