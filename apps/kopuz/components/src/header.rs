@@ -8,7 +8,7 @@ use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
-    Pixels, RenderOnce, SharedString, Styled, Window, div, px, rems,
+    Pixels, RenderOnce, SharedString, Styled, Window, div, px, relative, rems,
 };
 use store::{Navigator, SourcesModel};
 
@@ -102,6 +102,7 @@ impl RenderOnce for PageHeader {
         let title = (!display || pages.greeting).then(|| {
             div()
                 .text_color(cx.theme().foreground)
+                .line_height(relative(TITLE_LEADING))
                 .map(|title| match self.size {
                     TitleSize::Page => title
                         .text_size(pages.title)
@@ -260,6 +261,7 @@ pub enum HeaderLayout {
 /// `w-80`: the column layout's width, a cover and a little air.
 const COLUMN: Pixels = px(320.);
 const TITLE_MIN: Pixels = px(224.);
+const TITLE_LEADING: f32 = 1.1;
 
 /// The block every detail page opens with: the cover, what it is, and what you can do to it.
 #[derive(IntoElement)]
@@ -477,6 +479,7 @@ impl DetailHeader {
                             })
                             .line_clamp(3)
                             .text_size(pages.hero_title)
+                            .line_height(relative(TITLE_LEADING))
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(self.title),
                     )
@@ -507,6 +510,7 @@ impl DetailHeader {
                     .child(
                         div()
                             .text_3xl()
+                            .line_height(relative(TITLE_LEADING))
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(self.title),
                     )
@@ -557,6 +561,7 @@ impl DetailHeader {
                     .child(
                         div()
                             .text_size(rems(3.75))
+                            .line_height(relative(TITLE_LEADING))
                             .font_weight(FontWeight::BLACK)
                             .child(self.title),
                     )
