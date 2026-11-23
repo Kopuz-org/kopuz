@@ -285,7 +285,13 @@ impl Settings {
         v_flex()
             .w_full()
             .py_8()
-            .child(EmptyState::new(t("settings_unavailable")).icon(icons::WARNING))
+            .child(
+                EmptyState::new(t("settings_unavailable"))
+                    .icon(icons::WARNING)
+                    .action(t("retry_now"), |_, _, cx| {
+                        ConfigModel::global(cx).update(cx, |config, cx| config.reload(cx));
+                    }),
+            )
             .child(
                 div()
                     .w_full()
