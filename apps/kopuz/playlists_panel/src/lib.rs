@@ -4,7 +4,7 @@ mod order;
 mod settings;
 
 use components::focus::{Axis, Roving, Step};
-use components::format::t;
+use components::format::{t, t_with};
 use components::{
     DockPanel, DockSize, Edge, EmptyState, NavListRow, ReorderDropZones, TrackDrag, icons, style,
 };
@@ -214,7 +214,10 @@ impl PlaylistsPanel {
                         id: f.id.clone().into(),
                         name: f.name.clone().into(),
                         folder: true,
-                        detail: SharedString::from(f.playlist_ids.len().to_string()),
+                        detail: t_with(
+                            "playlist_folder_count",
+                            &[("count", f.playlist_ids.len().into())],
+                        ),
                         // A folder wears its first playlist's cover, as the Playlists page draws it.
                         artwork: f
                             .playlist_ids
@@ -226,7 +229,10 @@ impl PlaylistsPanel {
                     id: p.id.clone().into(),
                     name: p.name.clone().into(),
                     folder: false,
-                    detail: SharedString::from(p.track_keys.len().to_string()),
+                    detail: t_with(
+                        "playlist_track_count",
+                        &[("count", p.track_keys.len().into())],
+                    ),
                     artwork: p.artwork.clone(),
                 }),
             })
