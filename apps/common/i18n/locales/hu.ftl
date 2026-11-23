@@ -1237,3 +1237,6 @@ listening_plays = { $count } lejátszás
 listening_hours = { $hours } óra
 listening_top_artists = Legtöbbet hallgatott előadók
 listening_top_albums = Legtöbbet hallgatott albumok
+interface_panel_show_pins = Rögzítettek megjelenítése
+interface_panel_show_playlists = Lejátszási listák megjelenítése
+interface_panel_no_pins = Még nincs rögzítve semmi. Kattints jobb gombbal egy albumra, előadóra vagy listára, és válaszd a Rögzítés az oldalsávra lehetőséget.

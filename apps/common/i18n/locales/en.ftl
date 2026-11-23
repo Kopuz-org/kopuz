@@ -1266,3 +1266,6 @@ listening_plays = { $count } plays
 listening_hours = { $hours } hours
 listening_top_artists = Top artists
 listening_top_albums = Top albums
+interface_panel_show_pins = Show pinned items
+interface_panel_show_playlists = Show playlists
+interface_panel_no_pins = Nothing pinned yet. Right click an album, artist or playlist and pick Pin to sidebar.

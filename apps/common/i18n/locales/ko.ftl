@@ -1237,3 +1237,6 @@ listening_plays = { $count }회 재생
 listening_hours = { $hours }시간
 listening_top_artists = 많이 들은 아티스트
 listening_top_albums = 많이 들은 앨범
+interface_panel_show_pins = 고정 항목 표시
+interface_panel_show_playlists = 재생목록 표시
+interface_panel_no_pins = 아직 고정된 항목이 없습니다. 앨범, 아티스트 또는 재생목록을 오른쪽 클릭하고 사이드바에 고정을 선택하세요.

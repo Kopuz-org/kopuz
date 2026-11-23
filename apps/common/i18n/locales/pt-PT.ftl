@@ -1267,3 +1267,6 @@ listening_plays = { $count } reproduções
 listening_hours = { $hours } horas
 listening_top_artists = Artistas mais ouvidos
 listening_top_albums = Álbuns mais ouvidos
+interface_panel_show_pins = Mostrar afixados
+interface_panel_show_playlists = Mostrar listas
+interface_panel_no_pins = Nada afixado. Clique com o botão direito num álbum, artista ou lista e escolha Afixar na barra lateral.

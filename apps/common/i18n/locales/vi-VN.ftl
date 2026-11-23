@@ -1231,3 +1231,6 @@ listening_plays = { $count } lượt phát
 listening_hours = { $hours } giờ
 listening_top_artists = Nghệ sĩ nghe nhiều
 listening_top_albums = Album nghe nhiều
+interface_panel_show_pins = Hiện mục đã ghim
+interface_panel_show_playlists = Hiện danh sách phát
+interface_panel_no_pins = Chưa ghim gì. Nhấp chuột phải vào album, nghệ sĩ hoặc danh sách phát và chọn Ghim vào thanh bên.

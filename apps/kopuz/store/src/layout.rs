@@ -352,6 +352,8 @@ pub struct Panel {
     pub width: f32,
     pub pinned: Vec<String>,
     pub pins: Vec<Pin>,
+    pub show_pins: bool,
+    pub show_playlists: bool,
 }
 
 impl Default for Panel {
@@ -361,6 +363,8 @@ impl Default for Panel {
             width: 260.,
             pinned: Vec::new(),
             pins: Vec::new(),
+            show_pins: true,
+            show_playlists: true,
         }
     }
 }

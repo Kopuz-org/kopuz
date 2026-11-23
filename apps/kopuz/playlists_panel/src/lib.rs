@@ -275,7 +275,7 @@ impl PlaylistsPanel {
     }
 
     fn pinned(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.pins.is_empty() {
+        if self.pins.is_empty() || !store::layout(cx).panel.show_pins {
             return None;
         }
         let current = Navigator::global(cx).read(cx).current().clone();
@@ -482,8 +482,11 @@ impl Render for PlaylistsPanel {
                 .border_color(style::white(style::BORDER_SOFT, cx))
                 .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.key(event, cx)))
                 .children(pinned)
-                .child(div().px_2().pt_1().pb_1().child(self.header(cx)))
-                .child(body);
+                .when(store::layout(cx).panel.show_playlists, |panel| {
+                    panel
+                        .child(div().px_2().pt_1().pb_1().child(self.header(cx)))
+                        .child(body)
+                });
         }
         let panel = cx.entity().downgrade();
         // Right to left the panel sits right of the content, so it borders it on its left.
@@ -501,7 +504,14 @@ impl Render for PlaylistsPanel {
                 DockPanel::new("playlists-panel", edge)
                     .size(DockSize::Compact)
                     .when(!collapsed, |dock| dock.header(self.header(cx)))
-                    .body(v_flex().size_full().children(pinned).child(body))
+                    .body(
+                        v_flex()
+                            .size_full()
+                            .children(pinned)
+                            .when(store::layout(cx).panel.show_playlists, |list| {
+                                list.child(body)
+                            }),
+                    )
                     .on_close(|_, cx| toggle(cx))
                     .resizable(self.width, RAIL_WIDTH, MAX_WIDTH, move |width, _, cx| {
                         panel.update(cx, |this, cx| this.on_resize(width, cx)).ok();

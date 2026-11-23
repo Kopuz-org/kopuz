@@ -1275,3 +1275,6 @@ listening_plays = { $count } تشغيل
 listening_hours = { $hours } ساعة
 listening_top_artists = أكثر الفنانين استماعًا
 listening_top_albums = أكثر الألبومات استماعًا
+interface_panel_show_pins = إظهار العناصر المثبّتة
+interface_panel_show_playlists = إظهار قوائم التشغيل
+interface_panel_no_pins = لا شيء مثبّت بعد. انقر بزر الفأرة الأيمن على ألبوم أو فنان أو قائمة واختر تثبيت في الشريط الجانبي.

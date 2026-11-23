@@ -1285,3 +1285,6 @@ listening_plays = { $count } odtworzeń
 listening_hours = { $hours } godz.
 listening_top_artists = Najczęściej słuchani wykonawcy
 listening_top_albums = Najczęściej słuchane albumy
+interface_panel_show_pins = Pokaż przypięte
+interface_panel_show_playlists = Pokaż playlisty
+interface_panel_no_pins = Nic nie przypięto. Kliknij prawym przyciskiem album, wykonawcę lub playlistę i wybierz Przypnij do paska bocznego.

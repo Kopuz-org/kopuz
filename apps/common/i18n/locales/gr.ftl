@@ -1269,3 +1269,6 @@ listening_plays = { $count } αναπαραγωγές
 listening_hours = { $hours } ώρες
 listening_top_artists = Κορυφαίοι καλλιτέχνες
 listening_top_albums = Κορυφαία άλμπουμ
+interface_panel_show_pins = Εμφάνιση καρφιτσωμένων
+interface_panel_show_playlists = Εμφάνιση λιστών
+interface_panel_no_pins = Δεν υπάρχει τίποτα καρφιτσωμένο. Κάντε δεξί κλικ σε άλμπουμ, καλλιτέχνη ή λίστα και επιλέξτε Καρφίτσωμα στην πλαϊνή μπάρα.

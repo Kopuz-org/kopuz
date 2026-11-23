@@ -1277,3 +1277,6 @@ listening_plays = { $count } redări
 listening_hours = { $hours } ore
 listening_top_artists = Artiști de top
 listening_top_albums = Albume de top
+interface_panel_show_pins = Arată elementele fixate
+interface_panel_show_playlists = Arată playlisturile
+interface_panel_no_pins = Nimic fixat încă. Clic dreapta pe un album, artist sau playlist și alege Fixează în bara laterală.

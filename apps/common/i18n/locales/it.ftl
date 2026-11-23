@@ -1258,3 +1258,6 @@ listening_plays = { $count } ascolti
 listening_hours = { $hours } ore
 listening_top_artists = Artisti più ascoltati
 listening_top_albums = Album più ascoltati
+interface_panel_show_pins = Mostra fissati
+interface_panel_show_playlists = Mostra playlist
+interface_panel_no_pins = Niente di fissato. Fai clic destro su un album, artista o playlist e scegli Fissa nella barra laterale.

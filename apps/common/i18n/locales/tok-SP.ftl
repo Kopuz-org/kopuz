@@ -1250,3 +1250,6 @@ listening_plays = kute { $count }
 listening_hours = tenpo suli { $hours }
 listening_top_artists = jan kalama pi kute mute
 listening_top_albums = kulupu kalama pi kute mute
+interface_panel_show_pins = o lukin e ijo awen
+interface_panel_show_playlists = o lukin e kulupu kalama
+interface_panel_no_pins = ijo awen li lon ala. o luka sinpin e kulupu kalama anu jan kalama, o pana e ona tawa poka.

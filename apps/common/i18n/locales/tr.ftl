@@ -1226,3 +1226,6 @@ listening_plays = { $count } dinleme
 listening_hours = { $hours } saat
 listening_top_artists = En çok dinlenen sanatçılar
 listening_top_albums = En çok dinlenen albümler
+interface_panel_show_pins = Sabitlenenleri göster
+interface_panel_show_playlists = Çalma listelerini göster
+interface_panel_no_pins = Henüz sabitlenen yok. Bir albüme, sanatçıya veya çalma listesine sağ tıklayıp Kenar çubuğuna sabitle'yi seçin.

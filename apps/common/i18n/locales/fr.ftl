@@ -1270,3 +1270,6 @@ listening_plays = { $count } écoutes
 listening_hours = { $hours } heures
 listening_top_artists = Artistes les plus écoutés
 listening_top_albums = Albums les plus écoutés
+interface_panel_show_pins = Afficher les éléments épinglés
+interface_panel_show_playlists = Afficher les playlists
+interface_panel_no_pins = Rien d'épinglé. Faites un clic droit sur un album, un artiste ou une playlist et choisissez Épingler dans la barre latérale.

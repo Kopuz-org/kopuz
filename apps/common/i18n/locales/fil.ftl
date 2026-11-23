@@ -1231,3 +1231,6 @@ listening_plays = { $count } play
 listening_hours = { $hours } oras
 listening_top_artists = Mga nangungunang artist
 listening_top_albums = Mga nangungunang album
+interface_panel_show_pins = Ipakita ang mga naka-pin
+interface_panel_show_playlists = Ipakita ang mga playlist
+interface_panel_no_pins = Wala pang naka-pin. I-right click ang album, artist o playlist at piliin ang I-pin sa sidebar.
