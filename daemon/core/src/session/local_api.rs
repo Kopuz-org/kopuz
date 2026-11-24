@@ -1204,8 +1204,10 @@ impl api::SourceApi for LocalApi {
     }
 
     async fn accounts(&self, id: String) -> Result<Vec<api::SourceAccount>, ApiError> {
+        let sources = self.sources()?;
         let id = id.as_str();
-        self.recovering(|| async move { self.sources()?.accounts(id).await })
+        sources
+            .recovering_for(id, || async move { sources.accounts(id).await })
             .await
     }
 

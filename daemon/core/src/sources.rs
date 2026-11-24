@@ -1634,7 +1634,37 @@ impl SourceService {
         A: Future<Output = Result<T, ApiError>>,
     {
         let seen = self.recovery.epoch();
-        let result = once_more(attempt, auth_expired, || self.recover_active(seen)).await;
+        self.recovering_with(attempt, || self.recover_active(seen))
+            .await
+    }
+
+    /// [`Self::recovering`] for a request that names its source: recovery repairs
+    /// the active source, so a request against another one is answered as it is.
+    pub async fn recovering_for<T, A>(
+        &self,
+        id: &str,
+        attempt: impl FnMut() -> A,
+    ) -> Result<T, ApiError>
+    where
+        A: Future<Output = Result<T, ApiError>>,
+    {
+        let seen = self.recovery.epoch();
+        self.recovering_with(attempt, || async move {
+            self.snapshot().await.active.as_str() == id && self.recover_source(id, seen).await
+        })
+        .await
+    }
+
+    async fn recovering_with<T, A, R>(
+        &self,
+        attempt: impl FnMut() -> A,
+        repair: impl FnOnce() -> R,
+    ) -> Result<T, ApiError>
+    where
+        A: Future<Output = Result<T, ApiError>>,
+        R: Future<Output = bool>,
+    {
+        let result = once_more(attempt, auth_expired, repair).await;
         if self.network_status().internet_down {
             self.check_network_soon();
         } else if matches!(&result, Err(error) if error.code == ErrorCode::SourceUnreachable)
@@ -1908,12 +1938,16 @@ impl SourceService {
         let Some(id) = self.snapshot().await.active.server_id().map(str::to_string) else {
             return false;
         };
+        self.recover_source(&id, seen).await
+    }
+
+    async fn recover_source(&self, id: &str, seen: u64) -> bool {
         // Once recovery gives up, the re-probe retries it, so each request against
         // a dead session does not read a browser profile.
-        if self.status(&id) == Some(SourceState::AuthExpired) {
+        if self.status(id) == Some(SourceState::AuthExpired) {
             return false;
         }
-        self.recover(&id, seen).await
+        self.recover(id, seen).await
     }
 
     /// At most one attempt at a time across the daemon.
@@ -1948,7 +1982,13 @@ impl SourceService {
             tracing::warn!(source = %id, "the YouTube Music session expired and could not be recovered");
             return false;
         };
-        let user = server::ytmusic::derive_user_id(&cookies).or(server.user_id);
+        // The stored session still stands, so the retry is all there is to do.
+        // Storing it again would invalidate the servers table, and a read that
+        // table re-runs would then recover on every answer.
+        let user = server::ytmusic::derive_user_id(&cookies).or(server.user_id.clone());
+        if server.access_token.as_deref() == Some(cookies.as_str()) && user == server.user_id {
+            return true;
+        }
         match self
             .provision_credentials(CredentialProvision {
                 server_id: id.to_string(),
@@ -2407,6 +2447,57 @@ mod tests {
             1,
             "the re-probe owns the next attempt"
         );
+    }
+
+    #[tokio::test]
+    async fn a_request_against_another_source_leaves_the_active_one_alone() {
+        let upstream = Arc::new(FakeUpstream::recovering_to(None));
+        let fixture = signed_in(upstream.clone()).await;
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+
+        let error = fixture
+            .sources
+            .recovering_for("elsewhere", || async {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                Err::<(), _>(expired())
+            })
+            .await
+            .expect_err("still expired");
+
+        assert_eq!(error.code, ErrorCode::SourceAuthExpired);
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        assert_eq!(upstream.recoveries(), 0);
+        assert_ne!(fixture.sources.status("yt"), Some(SourceState::AuthExpired));
+    }
+
+    #[tokio::test]
+    async fn a_session_recovered_unchanged_is_retried_without_being_stored_again() {
+        let upstream = Arc::new(FakeUpstream::recovering_to(Some("SAPISID=leftover")));
+        let fixture = signed_in(upstream.clone()).await;
+        // The seeded server has no user id, so the first recovery stores one.
+        let first = std::sync::atomic::AtomicUsize::new(0);
+        request(&fixture, &first).await.expect("retried");
+        let stored = fixture.db.load_server("yt").await.expect("load");
+        assert!(stored.is_some_and(|server| server.user_id.is_some()));
+        let mut events = fixture.sources.session.subscribe();
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+
+        request(&fixture, &attempts).await.expect("retried");
+
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        fixture
+            .sources
+            .session
+            .emit_event(ApiEvent::NetworkStatus(NetworkStatus::default()));
+        loop {
+            match events.recv().await.expect("an event") {
+                ApiEvent::LibraryInvalidated { table } => {
+                    assert_ne!(table, Table::Servers, "nothing was stored");
+                }
+                ApiEvent::NetworkStatus(_) => break,
+                _ => continue,
+            }
+        }
     }
 
     #[tokio::test]
