@@ -78,7 +78,9 @@ impl FirstRun {
                         SettingRow::new(t("cover_art_background"))
                             .description(t("cover_art_background_description"))
                             .control(backdrop)
-                            .bind("cover_art_background", cx),
+                            .bind("cover_art_background", cx)
+                            // The look also writes the blur; a pin on either is a pin on the row.
+                            .locked(pinned),
                     ),
             )
             .child(crate::layout::card(cx))
