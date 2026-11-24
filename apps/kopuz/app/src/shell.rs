@@ -4,7 +4,7 @@ use components::motion;
 use gpui_kit::component::{ActiveTheme as _, Root, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled,
+    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Pixels, Render, Styled,
     Subscription, Task, Window, div, px,
 };
 use gpui_kit::{FocusHandle, InteractiveElement as _, actions};
@@ -100,6 +100,8 @@ pub struct Shell {
     playlists_panel: Entity<playlists_panel::PlaylistsPanel>,
     player_bar: Entity<now_playing::NowPlaying>,
     side_panel: Entity<now_playing::NowPlaying>,
+    playlists_slot: (Pixels, bool),
+    side_panel_width: Pixels,
     fullscreen: Entity<now_playing::NowPlaying>,
     quick_search: Entity<palette::Palette>,
     mini_player: Entity<now_playing::NowPlaying>,
@@ -161,10 +163,36 @@ impl Shell {
         let config = ConfigModel::global(cx);
         let sources = SourcesModel::global(cx);
         let first_run = cx.new(|cx| onboarding::FirstRun::new(window, cx));
+        let playlists_panel = cx.new(|cx| playlists_panel::PlaylistsPanel::new(window, cx));
+        let side_panel = cx.new(|cx| now_playing::NowPlaying::panel(window, cx));
+        let playlists_slot = {
+            let panel = playlists_panel.read(cx);
+            (panel.width(), panel.is_open(cx))
+        };
+        let side_panel_width = side_panel.read(cx).panel_width();
         let booted = connection.read(cx).is_connected()
             && store::SetupModel::global(cx).read(cx).is_decided();
 
         let subscriptions = vec![
+            // The panels size their own slots, so a drag or a toggle has to redraw the shell around them.
+            cx.observe(&playlists_panel, |this, panel, cx| {
+                let slot = {
+                    let panel = panel.read(cx);
+                    (panel.width(), panel.is_open(cx))
+                };
+                if this.playlists_slot != slot {
+                    this.playlists_slot = slot;
+                    cx.notify();
+                }
+            }),
+            // The column notifies on every playhead tick; only its width matters here.
+            cx.observe(&side_panel, |this, panel, cx| {
+                let width = panel.read(cx).panel_width();
+                if this.side_panel_width != width {
+                    this.side_panel_width = width;
+                    cx.notify();
+                }
+            }),
             // Unmounted, the guide's own notify has no ancestor to dirty, so it would never appear.
             cx.observe(&first_run, |_, _, cx| cx.notify()),
             cx.observe(&store::SetupModel::global(cx), |this, _, cx| this.boot(cx)),
@@ -204,8 +232,11 @@ impl Shell {
                 this.follow_frame(window, cx);
                 cx.notify();
             }),
-            // The skin sizes the player bar, which the toasts have to clear.
-            cx.observe(&store::LayoutModel::global(cx), |_, _, cx| place_toasts(cx)),
+            // The skin sizes the player bar, which the toasts have to clear; the rest moves the panes.
+            cx.observe(&store::LayoutModel::global(cx), |_, _, cx| {
+                place_toasts(cx);
+                cx.notify();
+            }),
             // Held from the ask, not the answer: the queue and the mix change before the source list does.
             cx.subscribe(&sources, |this, _, _: &store::SwitchStarted, cx| {
                 this.hand_over(true, cx);
@@ -245,9 +276,11 @@ impl Shell {
             connection,
             topbar,
             control_bar,
-            playlists_panel: cx.new(|cx| playlists_panel::PlaylistsPanel::new(window, cx)),
+            playlists_panel,
             player_bar: cx.new(|cx| now_playing::NowPlaying::bar(window, cx)),
-            side_panel: cx.new(|cx| now_playing::NowPlaying::panel(window, cx)),
+            side_panel,
+            playlists_slot,
+            side_panel_width,
             fullscreen: cx.new(|cx| now_playing::NowPlaying::sheet(window, cx)),
             quick_search: cx.new(|cx| palette::Palette::new(window, cx)),
             mini_player: cx.new(|cx| now_playing::NowPlaying::mini(window, cx)),
