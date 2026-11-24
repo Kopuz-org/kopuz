@@ -119,7 +119,7 @@ impl Render for General {
                                         vec![
                                             (Ambient::Glow, t("interface_ambient_glow")),
                                             (Ambient::Full, t("interface_ambient_full")),
-                                            (Ambient::Off, t("interface_accent_off")),
+                                            (Ambient::Off, t("interface_ambient_off")),
                                         ],
                                         |value, cx| {
                                             LayoutModel::edit(cx, |layout| layout.ambient = value)
