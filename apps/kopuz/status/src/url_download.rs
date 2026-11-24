@@ -334,10 +334,16 @@ impl UrlDownload {
     fn load_settings(&mut self, cx: &mut Context<Self>) {
         let call = Link::global(cx).call(|api| async move { api.downloader_settings().await });
         cx.spawn(async move |this, cx| {
-            let Ok(specs) = call.await else { return };
-            this.update(cx, |this, cx| {
-                this.options
-                    .update(cx, |form, cx| form.set_specs(specs, cx));
+            let result = call.await;
+            this.update(cx, |this, cx| match result {
+                Ok(specs) => this
+                    .options
+                    .update(cx, |form, cx| form.set_specs(specs, cx)),
+                // Otherwise the Options drawer just opens empty, with no word why.
+                Err(error) => {
+                    tracing::warn!(%error, "reading the downloader settings failed");
+                    Notices::failed(&error, cx);
+                }
             })
             .ok();
         })
