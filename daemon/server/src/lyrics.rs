@@ -66,9 +66,11 @@ macro_rules! lyrics_debug {
 }
 
 mod musixmatch;
+mod netease;
 mod paxsenix;
 
 use musixmatch::fetch_from_musixmatch_enhanced;
+use netease::fetch_from_netease;
 use paxsenix::fetch_from_paxsenix_apple_music;
 
 #[derive(Debug, Deserialize)]
@@ -452,19 +454,24 @@ where
     let apple_started = Instant::now();
     let musixmatch_started = Instant::now();
     let lrclib_started = Instant::now();
+    let netease_started = Instant::now();
     let apple = fetch_from_paxsenix_apple_music(artist, title, duration, reach);
     let musixmatch = fetch_from_musixmatch_enhanced(artist, title, reach);
     let lrclib = fetch_from_lrclib(artist, title, album, duration, reach);
+    let netease = fetch_from_netease(artist, title, duration, reach);
     tokio::pin!(apple);
     tokio::pin!(musixmatch);
     tokio::pin!(lrclib);
+    tokio::pin!(netease);
 
     let mut apple_done = false;
     let mut musixmatch_done = !enable_musixmatch;
     let mut lrclib_done = !allow_lrclib;
+    let mut netease_done = false;
     let mut progressed: Option<Lyrics> = None;
     let mut primary_quality = 0;
     let mut musixmatch_candidate: Option<Lyrics> = None;
+    let mut netease_candidate: Option<Lyrics> = None;
     if !enable_musixmatch {
         lyrics_debug!("provider=musixmatch skipped reason=disabled");
     }
@@ -474,9 +481,11 @@ where
 
     while !apple_done
         || (!musixmatch_done && primary_quality < 2)
+        || (!netease_done && primary_quality < 2)
         || (!lrclib_done
             && lyrics_quality_option(fallback.as_ref())
                 .max(lyrics_quality_option(musixmatch_candidate.as_ref()))
+                .max(lyrics_quality_option(netease_candidate.as_ref()))
                 < 1)
     {
         tokio::select! {
@@ -532,7 +541,25 @@ where
                     musixmatch_candidate = Some(lyrics);
                 }
             }
-            result = &mut lrclib, if !lrclib_done && lyrics_quality_option(fallback.as_ref()).max(lyrics_quality_option(musixmatch_candidate.as_ref())) < 1 => {
+            result = &mut netease, if !netease_done && primary_quality < 2 => {
+                netease_done = true;
+                tracing::info!(
+                    target: "kopuz::lyrics",
+                    "netease key_hash={} elapsed_ms={} kind={}",
+                    log_lyrics_key_hash(&cache_key),
+                    netease_started.elapsed().as_millis(),
+                    lyrics_kind(result.as_ref())
+                );
+                lyrics_debug!(
+                    "provider=netease elapsed_ms={} kind={}",
+                    netease_started.elapsed().as_millis(),
+                    lyrics_kind(result.as_ref())
+                );
+                if let Some(lyrics) = result {
+                    netease_candidate = Some(lyrics);
+                }
+            }
+            result = &mut lrclib, if !lrclib_done && lyrics_quality_option(fallback.as_ref()).max(lyrics_quality_option(musixmatch_candidate.as_ref())).max(lyrics_quality_option(netease_candidate.as_ref())) < 1 => {
                 lrclib_done = true;
                 tracing::info!(
                     target: "kopuz::lyrics",
@@ -559,14 +586,19 @@ where
         }
     }
 
-    if let Some(lyrics) = musixmatch_candidate
-        && fallback
+    // Musixmatch first, so it keeps winning a tie with NetEase as it did before NetEase joined.
+    for lyrics in [musixmatch_candidate, netease_candidate]
+        .into_iter()
+        .flatten()
+    {
+        if fallback
             .as_ref()
             .map(|current| lyrics_quality(&lyrics) > lyrics_quality(current))
             .unwrap_or(true)
-    {
-        fallback = Some(lyrics.clone());
-        on_progress(lyrics);
+        {
+            fallback = Some(lyrics.clone());
+            on_progress(lyrics);
+        }
     }
 
     if enable_musixmatch && !musixmatch_done {
@@ -737,7 +769,7 @@ fn lyrics_terminal_debug_enabled() -> bool {
 
 /// Bumped whenever the chain gains a provider, so a miss remembered before
 /// that provider could answer is not served in place of asking it.
-const PROVIDER_REVISION: u32 = 2;
+const PROVIDER_REVISION: u32 = 3;
 
 fn lyrics_cache_key(
     artist: &str,
