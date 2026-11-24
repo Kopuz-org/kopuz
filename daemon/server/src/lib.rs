@@ -4,6 +4,7 @@
 //! providers they are read through.
 
 pub mod applemusic;
+pub mod artist_photo;
 pub mod audio_cd;
 pub mod catalog;
 pub mod cookies;

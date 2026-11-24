@@ -81,7 +81,11 @@ impl LibraryService {
         let sources = self.current_sources();
         let source: ActiveSource = Arc::from(server::source::active(self.db.clone(), &sources));
         match source.capabilities().artist_view {
-            ArtistView::Library => self.refresh_bulk(&source).await,
+            // A library of files lists no artists; its photos come from the web instead.
+            ArtistView::Library => match self.refresh_bulk(&source).await? {
+                true => Ok(()),
+                false => self.refresh_web(&source, &wanted).await,
+            },
             ArtistView::Remote => {
                 let scope = source.source();
                 let rows = self.db.artists(scope).await.map_err(db_error)?;
@@ -93,10 +97,11 @@ impl LibraryService {
     }
 
     /// One listing for the whole server; only a photo or name that differs from the stored one is written and announced.
-    async fn refresh_bulk(&self, source: &ActiveSource) -> Result<(), ApiError> {
+    /// Answers whether the source listed any artists at all.
+    async fn refresh_bulk(&self, source: &ActiveSource) -> Result<bool, ApiError> {
         let listed = source.fetch_artists().await.unwrap_or_default();
         if listed.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
         let mut changed = match source.name_listed_artists(&listed).await {
             Ok(renamed) => renamed > 0,
@@ -121,10 +126,75 @@ impl LibraryService {
         if changed {
             self.invalidate(Table::Artists);
         }
+        Ok(true)
+    }
+
+    /// Web photos for the artists of a library that lists none, one at a time and paced, matched
+    /// through their albums; a definite miss is remembered like any other.
+    async fn refresh_web(&self, source: &ActiveSource, wanted: &Wanted) -> Result<(), ApiError> {
+        let scope = source.source();
+        let (overrides, photos) = self.db.artist_images().await.map_err(db_error)?;
+        let fresh_misses: HashSet<String> = self
+            .db
+            .meta_keys_since(MISS_KIND, MISS_TTL_SECS)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        let albums = self.db.albums(scope).await.map_err(db_error)?;
+        let pending: Vec<db::ArtistRow> = self
+            .db
+            .artists(scope)
+            .await
+            .map_err(db_error)?
+            .into_iter()
+            .filter(|row| match wanted {
+                Wanted::Missing => true,
+                Wanted::Keys(keys) => keys.contains(&row.key),
+            })
+            .filter(|row| {
+                let identity = (scope.as_str().to_string(), row.key.clone());
+                !overrides.contains_key(&identity)
+                    && !photos.contains_key(&identity)
+                    && !fresh_misses.contains(&db::artist_miss_name(scope, &row.key))
+            })
+            .collect();
+        let mut found = 0;
+        for row in pending {
+            let titles = albums_of(&albums, &row);
+            match server::artist_photo::lookup(&row.name, &titles).await {
+                Ok(Some(url)) => {
+                    if source
+                        .set_artist_image(&row.key, "web", Some(&url))
+                        .await
+                        .is_ok()
+                    {
+                        found += 1;
+                        if found % 20 == 0 {
+                            self.invalidate(Table::Artists);
+                        }
+                    }
+                }
+                Ok(None) => {
+                    let miss = db::artist_miss_name(scope, &row.key);
+                    let _ = source.set_meta(&miss, MISS_KIND, "").await;
+                }
+                // No answer is not a miss; the next sweep asks again.
+                Err(error) => {
+                    tracing::debug!(%error, artist = %row.name, "web artist photo lookup failed")
+                }
+            }
+            if matches!(wanted, Wanted::Missing) {
+                tokio::time::sleep(SWEEP_LOOKUP_GAP).await;
+            }
+        }
+        if found > 0 {
+            self.invalidate(Table::Artists);
+        }
         Ok(())
     }
 
-    /// One search per artist, a few at a time, each worker waiting `gap` between two.
+    /// One search per artist), a few at a time, each worker waiting `gap` between two.
     async fn refresh_each(
         &self,
         source: &ActiveSource,
@@ -269,6 +339,19 @@ async fn resolve_one(source: &ActiveSource, artist: &reader::ArtistCredit) -> bo
             renamed
         }
     }
+}
+
+/// The titles of an artist's albums, by the key its albums credit, else by its name.
+fn albums_of(albums: &[reader::Album], artist: &db::ArtistRow) -> Vec<String> {
+    let name = artist.name.to_lowercase();
+    albums
+        .iter()
+        .filter(|album| match &album.artist_id {
+            Some(id) => *id == artist.key,
+            None => album.artist.to_lowercase() == name,
+        })
+        .map(|album| album.title.clone())
+        .collect()
 }
 
 /// The wanted artists a catalog can look up: only those it issued an id for, since a credit's text may name a stranger.

@@ -15,6 +15,8 @@ pub async fn artist_images(pool: &SqlitePool) -> Result<ArtistImages, DbError> {
         .await?;
     let mut overrides = HashMap::new();
     let mut photos: HashMap<(String, String), ArtistImageRef> = HashMap::new();
+    // A photo found on the web stands in only where the source and the disk have none.
+    let mut web: HashMap<(String, String), ArtistImageRef> = HashMap::new();
     for r in rows {
         let identity = (r.source, r.artist_key);
         match r.kind.as_str() {
@@ -25,12 +27,18 @@ pub async fn artist_images(pool: &SqlitePool) -> Result<ArtistImages, DbError> {
             "server" => {
                 photos.insert(identity, ArtistImageRef::Remote(r.image_ref));
             }
+            "web" => {
+                web.insert(identity, ArtistImageRef::Remote(r.image_ref));
+            }
             _ => {
                 photos
                     .entry(identity)
                     .or_insert_with(|| ArtistImageRef::Local(PathBuf::from(r.image_ref)));
             }
         }
+    }
+    for (identity, photo) in web {
+        photos.entry(identity).or_insert(photo);
     }
     Ok((overrides, photos))
 }
