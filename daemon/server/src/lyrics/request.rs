@@ -34,6 +34,10 @@ pub struct LyricsRequest {
     pub track_path: String,
     pub server: Option<LyricsServerAuth>,
     pub prefer_local: bool,
+    /// Word-timed lyrics are wanted; a stored line-timed answer is worth asking about again.
+    pub prefer_word_sync: bool,
+    /// Ask the providers even when an answer is cached; the new answer replaces it.
+    pub refresh: bool,
     /// Optional Apple Music auth for the lyrics provider. When present and the
     /// track path starts with `applemusic:`, the lyrics chain fetches TTML
     /// directly from the amp-api instead of using the paxsenix proxy.
@@ -57,6 +61,8 @@ impl LyricsRequest {
             track_path: track_path.into(),
             server: None,
             prefer_local: false,
+            prefer_word_sync: false,
+            refresh: false,
             apple_music_auth: None,
             youtube_music_auth: None,
         }
@@ -81,6 +87,16 @@ impl LyricsRequest {
         self
     }
 
+    pub fn prefer_word_sync(mut self, value: bool) -> Self {
+        self.prefer_word_sync = value;
+        self
+    }
+
+    pub fn refresh(mut self) -> Self {
+        self.refresh = true;
+        self
+    }
+
     pub fn apple_music_auth(mut self, auth: AppleMusicLyricsAuth) -> Self {
         self.apple_music_auth = Some(auth);
         self
@@ -98,6 +114,7 @@ impl LyricsRequest {
             &self.album,
             self.duration,
             &self.track_path,
+            self.prefer_word_sync,
         )
     }
 }

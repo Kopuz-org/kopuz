@@ -339,6 +339,7 @@ enum Lyrics {
 struct Ask {
     romanize: bool,
     prefer_local: bool,
+    word_sync: bool,
 }
 
 impl Ask {
@@ -347,6 +348,7 @@ impl Ask {
         Self {
             romanize: lyrics.romanize_lyrics,
             prefer_local: lyrics.prefer_local_lyrics,
+            word_sync: lyrics.prefer_word_synced_lyrics,
         }
     }
 }

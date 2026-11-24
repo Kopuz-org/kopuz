@@ -107,6 +107,7 @@
     "prevent_clipping": true
   },
   "romanize_lyrics": false,
+  "prefer_word_synced_lyrics": false,
   "sample_rate_mode": "System",
   "settings_layout": "Cd",
   "show_row_images": true,

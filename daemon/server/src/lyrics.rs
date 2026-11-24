@@ -177,10 +177,11 @@ where
         request.duration,
         request.prefer_local
     );
-    if let Some(cached) = lyrics_cache()
-        .lock()
-        .ok()
-        .and_then(|mut cache| cache.get_cloned(&cache_key))
+    if !request.refresh
+        && let Some(cached) = lyrics_cache()
+            .lock()
+            .ok()
+            .and_then(|mut cache| cache.get_cloned(&cache_key))
     {
         tracing::info!(
             target: "kopuz::lyrics",
@@ -604,7 +605,8 @@ pub async fn local_lyrics_for_request(request: &LyricsRequest) -> Option<Lyrics>
     fetch_local_lrc(&request.track_path).await
 }
 
-fn has_word_timestamps(lyrics: &Lyrics) -> bool {
+/// Whether any line carries timing for its words, not only for itself.
+pub fn has_word_timestamps(lyrics: &Lyrics) -> bool {
     match lyrics {
         Lyrics::Synced(lines) => lines.iter().any(|line| line.chunks.len() > 1),
         Lyrics::Plain(_) => false,
@@ -736,8 +738,13 @@ fn lyrics_cache_key(
     album: &str,
     duration: u64,
     track_path: &str,
+    prefer_word_sync: bool,
 ) -> String {
-    let provider_policy = format!("p{PROVIDER_REVISION}");
+    // Its own key, so turning it on asks again for every track rather than reading old answers.
+    let provider_policy = format!(
+        "{}p{PROVIDER_REVISION}",
+        if prefer_word_sync { "ws:on|" } else { "" }
+    );
     if !track_path.trim().is_empty() {
         return format!("{}|{}", track_path.trim(), provider_policy);
     }

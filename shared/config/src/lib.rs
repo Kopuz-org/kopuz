@@ -1033,6 +1033,10 @@ pub struct Lyrics {
     #[serde(default)]
     #[garde(skip)]
     pub romanize_lyrics: bool,
+    /// Keep looking for word-timed lyrics past a line-timed answer, and look again at stored lyrics that have none.
+    #[serde(default)]
+    #[garde(skip)]
+    pub prefer_word_synced_lyrics: bool,
     /// Milliseconds to hold the lyrics behind the playback clock.
     #[serde(default, deserialize_with = "deserialize_lyrics_offset_ms")]
     #[garde(range(min = -LYRICS_OFFSET_LIMIT_MS, max = LYRICS_OFFSET_LIMIT_MS))]
@@ -1056,6 +1060,7 @@ impl Default for Lyrics {
         Self {
             prefer_local_lyrics: false,
             romanize_lyrics: false,
+            prefer_word_synced_lyrics: false,
             lyrics_offset_ms: 0,
             lyrics_offset_auto: true,
             lyrics_depth_blur: true,
