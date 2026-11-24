@@ -278,6 +278,7 @@ fn load_trimmed(
         leading_silence,
         album_context: false,
         service_replay_gain: config::ReplayGainInfo::default(),
+        mix: None,
         reply: Some(reply_tx),
     }));
     reply_rx
@@ -440,6 +441,7 @@ fn service_replay_gain_levels_a_stream_without_tags() {
             track_gain_db: Some(-6.0),
             ..Default::default()
         },
+        mix: None,
         reply: Some(reply_tx),
     }));
     reply_rx
@@ -484,6 +486,7 @@ fn service_loudness_attenuates_and_its_absence_is_unity() {
                 loudness_db,
                 ..Default::default()
             },
+            mix: None,
             reply: Some(reply_tx),
         }));
         reply_rx
@@ -653,6 +656,7 @@ fn album_context_updates_both_sessions_during_a_crossfade() {
                 album_gain_db: Some(-12.0),
                 ..Default::default()
             },
+            mix: None,
             reply: Some(reply),
         }));
         received.blocking_recv().unwrap().unwrap();
@@ -1161,6 +1165,7 @@ fn status_reports_pending_and_fading() {
         leading_silence: LeadingSilence::Keep,
         album_context: false,
         service_replay_gain: config::ReplayGainInfo::default(),
+        mix: None,
         reply: None,
     }));
     wait_until("pending token 2 visible", || {
@@ -1308,6 +1313,7 @@ fn superseding_load_drops_stale_session() {
         leading_silence: LeadingSilence::Keep,
         album_context: false,
         service_replay_gain: config::ReplayGainInfo::default(),
+        mix: None,
         reply: Some(reply_tx),
     }));
 
@@ -1352,6 +1358,7 @@ fn try_load_with(
         leading_silence: LeadingSilence::Keep,
         album_context: false,
         service_replay_gain: config::ReplayGainInfo::default(),
+        mix: None,
         reply: Some(reply_tx),
     }));
     reply_rx.blocking_recv().expect("load reply")
@@ -2094,6 +2101,7 @@ fn load_paced_source(
         leading_silence: LeadingSilence::Keep,
         album_context: false,
         service_replay_gain: config::ReplayGainInfo::default(),
+        mix: None,
         reply: Some(reply_tx),
     }));
     reply_rx
@@ -2385,4 +2393,169 @@ fn leading_silence_trim_stops_at_the_cap() {
             && position < LEADING_SILENCE_CAP + Duration::from_millis(300),
         "{position:?}"
     );
+}
+
+fn flat_mix(length: Duration) -> DeckMix {
+    let step = Duration::from_millis(100);
+    DeckMix::new(mix::flat_curves(2), mix::TEST_FILTERS, step, length).expect("valid mix")
+}
+
+/// Loads `token` as the incoming deck of `from_token`'s planned mix.
+fn load_mixed(
+    engine: &EngineHandle,
+    token: u64,
+    factory: SourceFactory,
+    duration: Duration,
+    from_token: u64,
+) -> LoadOutcome {
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    engine.send(Command::Load(LoadRequest {
+        token,
+        factory,
+        duration,
+        transition: FADE,
+        start_at: None,
+        leading_silence: LeadingSilence::Trim,
+        album_context: false,
+        service_replay_gain: config::ReplayGainInfo::default(),
+        mix: Some(IncomingMix {
+            mix: flat_mix(Duration::from_millis(500)),
+            from_token,
+        }),
+        reply: Some(reply_tx),
+    }));
+    reply_rx
+        .blocking_recv()
+        .expect("load reply")
+        .expect("load ok")
+}
+
+fn samples_at(seconds: f64) -> usize {
+    (seconds * TEST_CONFIG.sample_rate as f64) as usize * TEST_CONFIG.channels
+}
+
+#[test]
+fn a_planned_mix_brings_the_incoming_track_in_on_the_target_frame() {
+    let (sink, engine) = spawn_engine();
+    let mut events = engine_subscribe(&engine);
+    let mut seen = Vec::new();
+
+    // A is silent where the mix runs (3.0 s to 3.5 s) and loud again after
+    // it, so B is the first sound past 0.5 s and A playing on would show.
+    let (factory_a, duration_a) = segments_factory(&[(0.5, LOUD), (3.0, 0), (6.5, LOUD)]);
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    engine.send(Command::PlanOutgoing {
+        token: 1,
+        at: Duration::from_secs(3),
+        mix: flat_mix(Duration::from_millis(500)),
+    });
+
+    let (factory_b, duration_b) = segments_factory(&[(5.0, LOUD / 2)]);
+    let outcome = load_mixed(&engine, 2, factory_b, duration_b, 1);
+    assert!(outcome.mixed && outcome.crossfaded && !outcome.gapless);
+    std::thread::sleep(Duration::from_millis(200));
+
+    // Paced well under the worker's refill, so a gap could only be the mix's.
+    let mut samples = Vec::new();
+    while samples.len() < samples_at(4.0) {
+        samples.extend(sink.pull(4096));
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    wait_until("TrackSwitched", || {
+        drain_events(&mut events, &mut seen);
+        seen.iter().any(|e| {
+            matches!(
+                e,
+                Event::TrackSwitched {
+                    token: 2,
+                    from_token: 1
+                }
+            )
+        })
+    });
+    assert!(
+        !seen
+            .iter()
+            .any(|e| matches!(e, Event::Stalled { .. } | Event::MixMissed { .. })),
+        "{seen:?}"
+    );
+
+    let target = samples_at(3.0);
+    let after_a = samples_at(0.5);
+    let first_b = samples[after_a..].iter().position(|s| *s != 0.0);
+    assert_eq!(first_b.map(|index| index + after_a), Some(target));
+
+    let b_level = samples[target];
+    assert!((samples[0] / b_level - 2.0).abs() < 1e-3, "A is twice B");
+    let tail = &samples[target..samples_at(4.0)];
+    assert!(
+        tail.iter().all(|s| (s - b_level).abs() < 1e-6),
+        "only B past the mix start, A stopped after it: {:?}",
+        tail.iter().position(|s| (s - b_level).abs() >= 1e-6)
+    );
+    assert_eq!(engine.status().token, 2);
+    engine.shutdown();
+}
+
+#[test]
+fn a_plan_the_decoder_has_passed_is_refused() {
+    let (_sink, engine) = spawn_engine();
+    let mut events = engine_subscribe(&engine);
+    let mut seen = Vec::new();
+
+    let (factory_a, duration_a) = wav_factory(10.0);
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    // Lets the worker fill its ring, seconds past `at`.
+    std::thread::sleep(Duration::from_millis(200));
+    engine.send(Command::PlanOutgoing {
+        token: 1,
+        at: Duration::from_millis(500),
+        mix: flat_mix(Duration::from_millis(500)),
+    });
+    engine.send(Command::PlanOutgoing {
+        token: 9,
+        at: Duration::from_secs(5),
+        mix: flat_mix(Duration::from_millis(500)),
+    });
+
+    wait_until("MixMissed for both", || {
+        drain_events(&mut events, &mut seen);
+        [1, 9]
+            .iter()
+            .all(|token| seen.contains(&Event::MixMissed { token: *token }))
+    });
+
+    // Without an armed plan the incoming load follows its transition.
+    let (factory_b, duration_b) = wav_factory(10.0);
+    let outcome = load_mixed(&engine, 2, factory_b, duration_b, 1);
+    assert!(!outcome.mixed && outcome.crossfaded);
+    engine.shutdown();
+}
+
+#[test]
+fn a_seek_drops_a_planned_mix() {
+    let (_sink, engine) = spawn_engine();
+    let mut events = engine_subscribe(&engine);
+    let mut seen = Vec::new();
+
+    let (factory_a, duration_a) = wav_factory(30.0);
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    engine.send(Command::PlanOutgoing {
+        token: 1,
+        at: Duration::from_secs(20),
+        mix: flat_mix(Duration::from_secs(1)),
+    });
+    engine.send(Command::Seek {
+        position: Duration::from_secs(5),
+        token: None,
+    });
+
+    wait_until("MixMissed", || {
+        drain_events(&mut events, &mut seen);
+        seen.contains(&Event::MixMissed { token: 1 })
+    });
+    engine.shutdown();
 }

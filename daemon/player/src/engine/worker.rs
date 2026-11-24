@@ -20,8 +20,11 @@ use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, Track, TrackType};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use symphonia::core::units::Time;
+use symphonia::core::packet::Packet;
+use symphonia::core::units::{Time, TimeBase};
 
+use super::deck::{Deck, Side};
+use super::mix::{DeckMix, MixStart};
 use super::{ActorMsg, Failure, SourceFactory};
 use crate::replaygain;
 
@@ -39,6 +42,15 @@ pub(crate) enum WorkerCmd {
         lead_trim: Option<Arc<AtomicU64>>,
         /// Ring generation this decode feeds; echoed back on `Eof`.
         epoch: u64,
+        /// The incoming deck of a planned mix, played from the first sample.
+        mix: Option<DeckMix>,
+    },
+    /// Play `mix` as the outgoing deck from source time `at` on, then end the
+    /// stream. Refused (through `start`) once decoding has passed `at`.
+    Mix {
+        at: Duration,
+        mix: DeckMix,
+        start: MixStart,
     },
     /// Re-seek and switch to a fresh ring (the old one was swapped out of the
     /// audio callback; pre-seek samples die with it). Carries the output config
@@ -116,6 +128,26 @@ struct Output {
     /// Head-of-track silence still to drop; `None` once audio starts, the cap
     /// is spent, or a seek replaced the ring.
     lead: Option<LeadTrim>,
+    /// Source time, in seconds, of the next frame to decode.
+    clock: f64,
+    /// A planned mix this ring plays; a seek drops it with the ring.
+    mix: Option<MixPhase>,
+}
+
+enum MixPhase {
+    /// The outgoing deck waits for its source time `at`, in seconds.
+    Armed {
+        at: f64,
+        start: MixStart,
+        deck: Deck,
+    },
+    Live(Deck),
+}
+
+impl MixPhase {
+    fn done(&self) -> bool {
+        matches!(self, Self::Live(deck) if deck.done())
+    }
 }
 
 struct LeadTrim {
@@ -186,6 +218,7 @@ fn run(
         return fail(Failure::from("no supported audio tracks found".to_string()));
     };
     let mut track_id = track.id;
+    let time_base = track.time_base;
 
     let Some(audio_params) = audio_params_for_track(track) else {
         return fail(Failure::from("no audio codec parameters".to_string()));
@@ -221,6 +254,7 @@ fn run(
             start_at,
             lead_trim,
             epoch,
+            mix,
         }) => {
             if let Some(target) = start_at {
                 let outcome = seek_reader(format.as_mut(), decoder.as_mut(), track_id, target);
@@ -244,6 +278,10 @@ fn run(
                 lead: lead_trim.map(|played| LeadTrim {
                     played,
                     budget: cap as usize * channels,
+                }),
+                clock: start_at.unwrap_or_default().as_secs_f64(),
+                mix: mix.map(|mix| {
+                    MixPhase::Live(Deck::new(mix, Side::Incoming, sample_rate, channels))
                 }),
             }
         }
@@ -280,6 +318,7 @@ fn run(
     }
 
     let mut scratch = Scratch::default();
+    let mut mixed = Vec::new();
     loop {
         let change = drain_commands(
             cmd_rx,
@@ -347,11 +386,16 @@ fn run(
             }
         };
 
+        let speed_permille = speed.load(std::sync::atomic::Ordering::Relaxed);
+        let packet_start = packet_seconds(&packet, time_base).unwrap_or(output.clock);
+        output.clock =
+            packet_start + decoded.frames() as f64 / f64::from(decoded.spec().rate().max(1));
+
         let samples = audio_buf_to_f32_interleaved(
             &decoded,
             output.channels,
             output.sample_rate,
-            speed.load(std::sync::atomic::Ordering::Relaxed),
+            speed_permille,
             &mut scratch,
         );
         if output_gain != 1.0 {
@@ -360,23 +404,119 @@ fn run(
             }
         }
 
+        let decoded_len = samples.len();
         let samples = trim_lead(&mut output, samples);
+        let at = MixAt {
+            packet_start,
+            skipped: decoded_len - samples.len(),
+            speed_permille,
+        };
+        let (head, tail) = mix_packet(&mut output, samples, at, &mut mixed);
 
         let change = write_all(
             cmd_rx,
             &mut output,
-            samples,
+            head,
             format.as_mut(),
             decoder.as_mut(),
             track_id,
-        );
+        )
+        .or_else(|| {
+            write_all(
+                cmd_rx,
+                &mut output,
+                tail,
+                format.as_mut(),
+                decoder.as_mut(),
+                track_id,
+            )
+        });
         match change {
             None => {}
             Some(FlowChange::Seeked) => continue,
             Some(FlowChange::Reprobe(t)) => reprobe_or_fail!(t),
             Some(FlowChange::Exit) => return,
         }
+
+        // The outgoing deck played its whole mix: the track ends here.
+        if output.mix.as_ref().is_some_and(MixPhase::done) {
+            send(WorkerMsg::Eof {
+                token,
+                epoch: output.epoch,
+            });
+            park_and_handle!()
+        }
     }
+}
+
+/// Source time of a packet's first frame, when the track has a time base.
+fn packet_seconds(packet: &Packet, time_base: Option<TimeBase>) -> Option<f64> {
+    let time_base = time_base?;
+    let ticks = packet.pts.get() as f64;
+    Some(ticks * f64::from(time_base.numer.get()) / f64::from(time_base.denom.get()))
+}
+
+/// Where a decoded packet sits on the source timeline.
+struct MixAt {
+    /// Source time of the packet's first frame, in seconds.
+    packet_start: f64,
+    /// Interleaved samples `trim_lead` dropped from its head.
+    skipped: usize,
+    speed_permille: u32,
+}
+
+/// Splits a packet into the part written as decoded and the part the mix
+/// deck rendered into `mixed`. When the outgoing deck's `at` falls inside
+/// the packet, the split is the first frame at or past it, and its ring
+/// index is published so the callback can bring the incoming deck in there.
+fn mix_packet<'a, 'b>(
+    output: &mut Output,
+    samples: &'a [f32],
+    at: MixAt,
+    mixed: &'b mut Vec<f32>,
+) -> (&'a [f32], &'b [f32]) {
+    let channels = output.channels.max(1);
+    let split = match output.mix.as_ref() {
+        None => return (samples, &[]),
+        Some(MixPhase::Live(_)) => 0,
+        Some(MixPhase::Armed { at: mix_at, .. }) => {
+            let rate = f64::from(output.sample_rate) * f64::from(super::SPEED_NORMAL)
+                / f64::from(at.speed_permille.max(1));
+            let frames = ((mix_at - at.packet_start) * rate).round().max(0.0) as usize;
+            let split = (frames * channels).saturating_sub(at.skipped);
+            if split >= samples.len() {
+                return (samples, &[]);
+            }
+            split
+        }
+    };
+
+    let (head, rest) = samples.split_at(split);
+    let Some(phase) = output.mix.take() else {
+        return (samples, &[]);
+    };
+    let mut deck = match phase {
+        MixPhase::Armed { start, deck, .. } => {
+            start.set(output.written.load(Ordering::Relaxed) + head.len() as u64);
+            deck
+        }
+        MixPhase::Live(deck) => deck,
+    };
+    deck.process(rest, mixed);
+    output.mix = Some(MixPhase::Live(deck));
+    (head, mixed)
+}
+
+/// Arms the outgoing deck, or refuses when the decode has passed `at` or a
+/// deck already plays.
+fn arm_mix(output: &mut Output, at: Duration, mix: DeckMix, start: MixStart) {
+    let at = at.as_secs_f64();
+    if at < output.clock || matches!(output.mix, Some(MixPhase::Live(_))) {
+        start.refuse();
+        return;
+    }
+    let deck = Deck::new(mix, Side::Outgoing, output.sample_rate, output.channels);
+    output.mix = Some(MixPhase::Armed { at, start, deck });
 }
 
 enum ParkOutcome {
@@ -412,6 +552,8 @@ fn park_at_eof(
                     sample_rate,
                     epoch,
                     lead: None,
+                    clock: target.as_secs_f64(),
+                    mix: None,
                 };
                 return match seek_reader(format, decoder, track_id, target) {
                     SeekOutcome::Done => ParkOutcome::Resume,
@@ -419,6 +561,8 @@ fn park_at_eof(
                 };
             }
             Ok(WorkerCmd::Stop) | Err(_) => return ParkOutcome::Exit,
+            // The track has ended; nothing is left to mix from.
+            Ok(WorkerCmd::Mix { start, .. }) => start.refuse(),
             Ok(WorkerCmd::Start { .. }) => {
                 tracing::warn!("unexpected Start for an already-started decode worker");
             }
@@ -452,6 +596,8 @@ fn apply_command(
                 sample_rate,
                 epoch,
                 lead: None,
+                clock: target.as_secs_f64(),
+                mix: None,
             };
             match seek_reader(format, decoder, track_id, target) {
                 SeekOutcome::Done => {
@@ -462,6 +608,10 @@ fn apply_command(
             }
         }
         WorkerCmd::Stop => Some(FlowChange::Exit),
+        WorkerCmd::Mix { at, mix, start } => {
+            arm_mix(output, at, mix, start);
+            None
+        }
         WorkerCmd::Start { .. } => {
             tracing::warn!("unexpected Start for an already-started decode worker");
             None

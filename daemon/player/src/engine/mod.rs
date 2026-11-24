@@ -7,12 +7,8 @@
 //! callback owns its own state and never takes a lock (see `rt.rs`).
 
 mod actor;
-// Wired into the worker and the callback by the planned-mix commit.
-#[allow(dead_code)]
 mod deck;
-#[allow(dead_code)]
 mod filter;
-#[allow(dead_code)]
 mod mix;
 mod rt;
 mod sink;
@@ -137,6 +133,9 @@ pub struct LoadOutcome {
     /// Audible on `TrackSwitched`. False when it fell back to an immediate switch
     /// because nothing was left to play first.
     pub gapless: bool,
+    /// The load's `IncomingMix` plays against the outgoing session's planned
+    /// mix. `crossfaded` is set too: the outgoing session fades out the same way.
+    pub mixed: bool,
 }
 
 /// Resolved once the source is playing (`Ok`) or failed to load (`Err`).
@@ -158,6 +157,10 @@ pub struct LoadRequest {
     /// tags win where it has them; this is what a transcoded stream, whose
     /// tags the server dropped, falls back to.
     pub service_replay_gain: ReplayGainInfo,
+    /// The incoming deck of a planned mix. Played only when `from_token` is
+    /// the current session with a `PlanOutgoing` still armed; otherwise the
+    /// load follows `transition` and plays flat.
+    pub mix: Option<IncomingMix>,
     pub reply: Option<LoadReply>,
 }
 
@@ -171,6 +174,15 @@ pub enum Command {
     Seek {
         position: Duration,
         token: Option<u64>,
+    },
+    /// Play `mix` as session `token`'s outgoing deck from its source time `at`;
+    /// the session ends when the mix does. A load carrying an `IncomingMix`
+    /// from this token enters on the same output frame. `Event::MixMissed`
+    /// reports a plan that will not play.
+    PlanOutgoing {
+        token: u64,
+        at: Duration,
+        mix: DeckMix,
     },
     Pause,
     Resume,
@@ -226,6 +238,11 @@ pub enum Event {
     },
     /// Audio flows again after a `Stalled`.
     Resumed {
+        token: u64,
+    },
+    /// The `PlanOutgoing` for session `token` will not play: it was not the
+    /// live session, its decoder had passed `at`, or a seek dropped the plan.
+    MixMissed {
         token: u64,
     },
     /// A crossfade finished, or a gapless session took over at the last sample
