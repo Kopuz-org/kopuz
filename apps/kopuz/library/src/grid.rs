@@ -239,6 +239,7 @@ impl Library {
             .placeholder(tile.placeholder)
             .playing(tile.playing)
             .selected(self.selection.contains(&tile.id))
+            .cursor(self.selection.cursor() == Some(index))
             .on_click(self.click_listener(tile.clone(), index, cx))
             .menu(Some(tile.target.clone()));
         match tile.pictured.clone() {
