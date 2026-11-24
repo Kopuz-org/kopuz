@@ -59,6 +59,7 @@ pub static ROWS: &[Entry] = &[
     entry("download_quality", "offline"),
     entry("prefer_local_lyrics", "metadata"),
     entry("romanize_lyrics", "metadata"),
+    entry("prefer_word_synced_lyrics", "metadata"),
     entry("lyrics_offset_auto", "metadata"),
     entry("lyrics_offset", "metadata"),
     entry("crossfade", "player"),

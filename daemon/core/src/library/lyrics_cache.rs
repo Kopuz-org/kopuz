@@ -34,7 +34,51 @@ fn answer(cached: CachedLyrics, now: i64) -> Option<Option<Lyrics>> {
     }
 }
 
+/// Cache keys a word-sync upgrade has been tried for this run, so a track that has no
+/// word timing anywhere is asked about once per start, not on every open.
+fn upgrade_tried() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static TRIED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    TRIED.get_or_init(Default::default)
+}
+
 impl LibraryService {
+    /// Look again, in the background, for word timing a stored line-timed answer lacks; a
+    /// better answer replaces it for the next open. At most once per track per run.
+    pub(super) fn upgrade_to_word_sync(
+        &self,
+        cache_key: &str,
+        request: server::lyrics::LyricsRequest,
+        held: Option<&Lyrics>,
+    ) {
+        let Some(held) = held
+            .filter(|held| !server::lyrics::has_word_timestamps(held))
+            .cloned()
+        else {
+            return;
+        };
+        let fresh = upgrade_tried()
+            .lock()
+            .is_ok_and(|mut tried| tried.insert(cache_key.to_string()));
+        if !fresh {
+            return;
+        }
+        let (db, cache_key) = (self.db.clone(), cache_key.to_string());
+        tokio::spawn(async move {
+            let fetched = server::lyrics::fetch_lyrics_for_request(&request.refresh()).await;
+            match fetched.lyrics.filter(server::lyrics::has_word_timestamps) {
+                Some(better) => {
+                    if let Err(error) = db.cache_lyrics(&cache_key, Some(&better)).await {
+                        tracing::debug!(%error, "storing upgraded lyrics failed");
+                    }
+                    server::lyrics::prime(&cache_key, Some(better));
+                }
+                // The refresh cached what it found; the stored answer stands until a better one.
+                None => server::lyrics::prime(&cache_key, Some(held)),
+            }
+        });
+    }
+
     pub(super) async fn persisted_lyrics(&self, cache_key: &str) -> Option<Option<Lyrics>> {
         let cached = self.db.cached_lyrics(cache_key).await.ok()??;
         answer(cached, now_unix())

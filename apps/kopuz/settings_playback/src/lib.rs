@@ -249,6 +249,7 @@ impl PlaybackSettings {
         let config = model.read(cx).config();
         let prefer_local = config.lyrics.prefer_local_lyrics;
         let romanize = config.lyrics.romanize_lyrics;
+        let word_synced = config.lyrics.prefer_word_synced_lyrics;
         let auto = config.lyrics.lyrics_offset_auto;
         let latency_ms = PlayerModel::global(cx)
             .read(cx)
@@ -282,6 +283,19 @@ impl PlaybackSettings {
                 )
                 .bind("romanize_lyrics", cx)
                 .description(t("romanize_lyrics_description"))
+                .shown(cx),
+            )
+            .children(
+                toggle_row(
+                    "prefer_word_synced_lyrics",
+                    t("prefer_word_synced_lyrics"),
+                    word_synced,
+                    ConfigModel::writer(|on| {
+                        SettingsEdit::Lyrics(LyricsEdit::PreferWordSyncedLyrics(on))
+                    }),
+                )
+                .bind("prefer_word_synced_lyrics", cx)
+                .description(t("prefer_word_synced_lyrics_description"))
                 .shown(cx),
             )
             .children(
