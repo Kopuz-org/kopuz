@@ -85,17 +85,17 @@ impl Step {
 /// Where a service's card is listed, read off the form it publishes rather than its name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Group {
-    Local,
+    Folders,
     Server,
     Streaming,
 }
 
 impl Group {
-    pub const ALL: [Group; 3] = [Group::Local, Group::Server, Group::Streaming];
+    pub const ALL: [Group; 3] = [Group::Folders, Group::Server, Group::Streaming];
 
     pub fn heading(self) -> &'static str {
         match self {
-            Group::Local => "onboarding_group_local",
+            Group::Folders => "onboarding_group_local",
             Group::Server => "first_run_server",
             Group::Streaming => "first_run_streaming",
         }
@@ -103,7 +103,7 @@ impl Group {
 
     pub fn hint(self) -> Option<&'static str> {
         match self {
-            Group::Local => None,
+            Group::Folders => None,
             Group::Server => Some("first_run_server_hint"),
             Group::Streaming => Some("first_run_streaming_hint"),
         }
@@ -115,7 +115,7 @@ pub fn group_of(service: &ServiceInfo) -> Group {
     let has =
         |wanted: fn(&FieldKind) -> bool| service.fields.iter().any(|field| wanted(&field.kind));
     if has(|kind| matches!(kind, FieldKind::Directories)) {
-        Group::Local
+        Group::Folders
     } else if has(|kind| matches!(kind, FieldKind::Url)) {
         Group::Server
     } else {
@@ -358,7 +358,7 @@ mod tests {
         assert_eq!(
             order,
             vec![
-                (Group::Local, vec!["folders"]),
+                (Group::Folders, vec!["folders"]),
                 (Group::Server, vec!["jellyfin", "smb"]),
                 (Group::Streaming, vec!["yt"]),
             ]
