@@ -56,7 +56,11 @@ fn pin_rows(panel: &Panel, cx: &App) -> Vec<SettingRow> {
                 PinKind::Playlist => t("pinned_playlist"),
                 PinKind::Folder => t("pinned_folder"),
             };
-            let button = |name: &str, glyph: &'static str, enabled: bool, to: Option<usize>| {
+            let button = |name: &str,
+                          glyph: &'static str,
+                          tooltip: SharedString,
+                          enabled: bool,
+                          to: Option<usize>| {
                 let (kind, id) = (pin.kind, pin.id.clone());
                 Button::new(SharedString::from(format!(
                     "pin-{name}-{:?}-{}",
@@ -65,6 +69,7 @@ fn pin_rows(panel: &Panel, cx: &App) -> Vec<SettingRow> {
                 .small()
                 .custom(style::quiet_button(style::slate_400(cx), cx))
                 .icon(icons::icon(glyph))
+                .tooltip(tooltip)
                 .disabled(!enabled)
                 .on_click(move |_, _, cx| {
                     let id = id.clone();
@@ -86,16 +91,24 @@ fn pin_rows(panel: &Panel, cx: &App) -> Vec<SettingRow> {
                         .child(button(
                             "up",
                             icons::CHEVRON_UP,
+                            t("move_up"),
                             index > 0,
                             Some(index.saturating_sub(1)),
                         ))
                         .child(button(
                             "down",
                             icons::CHEVRON_DOWN,
+                            t("move_down"),
                             index + 1 < count,
                             Some(index + 2),
                         ))
-                        .child(button("remove", icons::CLOSE, true, None)),
+                        .child(button(
+                            "remove",
+                            icons::CLOSE,
+                            t("unpin_from_sidebar"),
+                            true,
+                            None,
+                        )),
                 )
                 .shown(cx)
         })
