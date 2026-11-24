@@ -53,7 +53,6 @@ pub fn setting_key_to_proto(value: config::SettingKey) -> SettingKey {
         },
         K::Lyrics(key) => match key {
             LyricsKey::PreferLocalLyrics => SettingKey::PreferLocalLyrics,
-            LyricsKey::EnableMusixmatchLyrics => SettingKey::EnableMusixmatchLyrics,
             LyricsKey::RomanizeLyrics => SettingKey::RomanizeLyrics,
             LyricsKey::LyricsOffsetMs => SettingKey::LyricsOffsetMs,
             LyricsKey::LyricsOffsetAuto => SettingKey::LyricsOffsetAuto,
@@ -131,7 +130,6 @@ pub fn setting_key_from_proto(value: i32) -> Option<config::SettingKey> {
         SettingKey::CoverArtBlur => K::Background(BackgroundKey::CoverArtBlur),
         SettingKey::CustomBackgroundPath => K::Background(BackgroundKey::CustomBackgroundPath),
         SettingKey::PreferLocalLyrics => K::Lyrics(LyricsKey::PreferLocalLyrics),
-        SettingKey::EnableMusixmatchLyrics => K::Lyrics(LyricsKey::EnableMusixmatchLyrics),
         SettingKey::RomanizeLyrics => K::Lyrics(LyricsKey::RomanizeLyrics),
         SettingKey::LyricsOffsetMs => K::Lyrics(LyricsKey::LyricsOffsetMs),
         SettingKey::LyricsOffsetAuto => K::Lyrics(LyricsKey::LyricsOffsetAuto),
@@ -226,7 +224,6 @@ pub fn config_edit_to_proto(value: &config::SettingsEdit) -> ConfigEdit {
         },
         Se::Lyrics(edit) => match edit {
             Ly::PreferLocalLyrics(value) => Edit::PreferLocalLyrics(value),
-            Ly::EnableMusixmatchLyrics(value) => Edit::EnableMusixmatchLyrics(value),
             Ly::RomanizeLyrics(value) => Edit::RomanizeLyrics(value),
             Ly::LyricsOffsetMs(value) => Edit::LyricsOffsetMs(value),
             Ly::LyricsOffsetAuto(value) => Edit::LyricsOffsetAuto(value),
@@ -350,7 +347,6 @@ pub fn config_edit_from_proto(value: &ConfigEdit) -> Option<config::SettingsEdit
         Edit::CoverArtBlur(value) => Se::Background(Bg::CoverArtBlur(byte(value))),
         Edit::CustomBackgroundPath(value) => Se::Background(Bg::CustomBackgroundPath(value)),
         Edit::PreferLocalLyrics(value) => Se::Lyrics(Ly::PreferLocalLyrics(value)),
-        Edit::EnableMusixmatchLyrics(value) => Se::Lyrics(Ly::EnableMusixmatchLyrics(value)),
         Edit::RomanizeLyrics(value) => Se::Lyrics(Ly::RomanizeLyrics(value)),
         Edit::LyricsOffsetMs(value) => Se::Lyrics(Ly::LyricsOffsetMs(value)),
         Edit::LyricsOffsetAuto(value) => Se::Lyrics(Ly::LyricsOffsetAuto(value)),

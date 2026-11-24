@@ -519,8 +519,7 @@ impl LibraryService {
             track.duration,
             track.id.uid(),
         )
-        .prefer_local(config.lyrics.prefer_local_lyrics)
-        .enable_musixmatch(config.lyrics.enable_musixmatch_lyrics);
+        .prefer_local(config.lyrics.prefer_local_lyrics);
         if let Some(server) = &sources.server {
             request = request.with_server(
                 Some(&server.url),

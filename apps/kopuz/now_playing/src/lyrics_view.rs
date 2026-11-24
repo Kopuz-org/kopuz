@@ -338,7 +338,6 @@ enum Lyrics {
 #[derive(Clone, Copy, PartialEq)]
 struct Ask {
     romanize: bool,
-    musixmatch: bool,
     prefer_local: bool,
 }
 
@@ -347,7 +346,6 @@ impl Ask {
         let lyrics = &config.config().lyrics;
         Self {
             romanize: lyrics.romanize_lyrics,
-            musixmatch: lyrics.enable_musixmatch_lyrics,
             prefer_local: lyrics.prefer_local_lyrics,
         }
     }

@@ -2010,7 +2010,6 @@ message ConfigEdit {
     uint32 cover_art_blur = 30;
     string custom_background_path = 31;
     bool prefer_local_lyrics = 63;
-    bool enable_musixmatch_lyrics = 64;
     bool romanize_lyrics = 89;
     int32 lyrics_offset_ms = 65;
     bool lyrics_offset_auto = 66;
@@ -2038,6 +2037,7 @@ message ConfigEdit {
     uint64 offline_cache_max_bytes = 85;
     string listen_address = 86;
   }
+  reserved 64; // was enable_musixmatch_lyrics: Musixmatch was dropped
 }
 
 // One member of custom_themes, by the name it is stored under.
@@ -2138,7 +2138,7 @@ enum SettingKey {
   SETTING_KEY_COVER_FETCH_STRATEGY = 60;
   SETTING_KEY_RADIO_REGISTRIES = 61;
   SETTING_KEY_PREFER_LOCAL_LYRICS = 63;
-  SETTING_KEY_ENABLE_MUSIXMATCH_LYRICS = 64;
+  reserved 64; // was SETTING_KEY_ENABLE_MUSIXMATCH_LYRICS: Musixmatch was dropped
   SETTING_KEY_ROMANIZE_LYRICS = 89;
   SETTING_KEY_LYRICS_OFFSET_MS = 65;
   SETTING_KEY_LYRICS_OFFSET_AUTO = 66;
@@ -2344,7 +2344,7 @@ message Config {
   FetchStrategy cover_fetch_strategy = 60;
   repeated RegistryEntry radio_registries = 61;
   bool prefer_local_lyrics = 63;
-  bool enable_musixmatch_lyrics = 64;
+  reserved 64; // was enable_musixmatch_lyrics: Musixmatch was dropped
   bool romanize_lyrics = 89;
   int32 lyrics_offset_ms = 65;
   bool lyrics_offset_auto = 66;

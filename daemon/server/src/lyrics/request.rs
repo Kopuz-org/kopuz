@@ -34,7 +34,6 @@ pub struct LyricsRequest {
     pub track_path: String,
     pub server: Option<LyricsServerAuth>,
     pub prefer_local: bool,
-    pub enable_musixmatch: bool,
     /// Optional Apple Music auth for the lyrics provider. When present and the
     /// track path starts with `applemusic:`, the lyrics chain fetches TTML
     /// directly from the amp-api instead of using the paxsenix proxy.
@@ -58,7 +57,6 @@ impl LyricsRequest {
             track_path: track_path.into(),
             server: None,
             prefer_local: false,
-            enable_musixmatch: false,
             apple_music_auth: None,
             youtube_music_auth: None,
         }
@@ -83,11 +81,6 @@ impl LyricsRequest {
         self
     }
 
-    pub fn enable_musixmatch(mut self, value: bool) -> Self {
-        self.enable_musixmatch = value;
-        self
-    }
-
     pub fn apple_music_auth(mut self, auth: AppleMusicLyricsAuth) -> Self {
         self.apple_music_auth = Some(auth);
         self
@@ -105,7 +98,6 @@ impl LyricsRequest {
             &self.album,
             self.duration,
             &self.track_path,
-            self.enable_musixmatch,
         )
     }
 }
