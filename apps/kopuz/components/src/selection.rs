@@ -53,6 +53,7 @@ pub struct SelectionBar {
     count: usize,
     verbs: Vec<Verb>,
     target: Option<Target>,
+    menu: Option<menus::Menu>,
     delete: Option<Run>,
     cancel: Option<Run>,
     lift: Rems,
@@ -65,6 +66,7 @@ impl SelectionBar {
             count,
             verbs: Vec::new(),
             target: None,
+            menu: None,
             delete: None,
             cancel: None,
             lift: rems(2.5),
@@ -79,6 +81,12 @@ impl SelectionBar {
     /// What the dots menu acts on, and what a delete's confirmation names.
     pub fn target(mut self, target: Target) -> Self {
         self.target = Some(target);
+        self
+    }
+
+    /// The dots menu, when its items must run some other way than straight on `target`.
+    pub fn menu(mut self, menu: menus::Menu) -> Self {
+        self.menu = Some(menu);
         self
     }
 
@@ -137,9 +145,9 @@ impl RenderOnce for SelectionBar {
             });
             verb("delete".into(), icons::TRASH, t("delete"), confirm)
         });
-        let more = self.target.map(|target| {
-            MenuButton::new(format!("{id}-more"), menus::menu_for(target))
-                .variant(MenuVariant::Bare(ink))
+        let menu = self.menu.or_else(|| self.target.map(menus::menu_for));
+        let more = menu.map(|menu| {
+            MenuButton::new(format!("{id}-more"), menu).variant(MenuVariant::Bare(ink))
         });
         let cancel = self.cancel;
         div()

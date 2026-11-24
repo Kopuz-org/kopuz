@@ -132,7 +132,19 @@ pub fn has_menu(target: &Target, cx: &App) -> bool {
         .any(|command| command.section != Section::Hidden && command.is_available(target, cx))
 }
 
-fn build_menu(target: Target, mut menu: PopupMenu, cx: &mut Context<PopupMenu>) -> PopupMenu {
+fn build_menu(target: Target, menu: PopupMenu, cx: &mut Context<PopupMenu>) -> PopupMenu {
+    build_menu_with(target, menu, None, cx)
+}
+
+/// A command a menu item hands back instead of performing it, for a target still to be resolved.
+type Runner = std::rc::Rc<dyn Fn(&'static Command, Target, &mut Window, &mut App)>;
+
+fn build_menu_with(
+    target: Target,
+    mut menu: PopupMenu,
+    run: Option<Runner>,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
     let mut previous: Option<Section> = None;
     for command in all() {
         if command.section == Section::Hidden || !command.is_available(&target, cx) {
@@ -142,17 +154,25 @@ fn build_menu(target: Target, mut menu: PopupMenu, cx: &mut Context<PopupMenu>) 
             menu = menu.separator();
         }
         previous = Some(command.section);
-        menu = menu.item(item(command, &target, cx));
+        menu = menu.item(item(command, &target, run.clone(), cx));
     }
     menu
 }
 
-fn item(command: &'static Command, target: &Target, cx: &App) -> PopupMenuItem {
+fn item(
+    command: &'static Command,
+    target: &Target,
+    run: Option<Runner>,
+    cx: &App,
+) -> PopupMenuItem {
     let target = target.clone();
     components::menus::menu_item(command.label(&target, cx), command.icon)
         // Taking something off disk should not look like the item above it.
         .danger(command.danger)
-        .on_click(move |_, window, cx| command.perform(target.clone(), window, cx))
+        .on_click(move |_, window, cx| match &run {
+            Some(run) => run(command, target.clone(), window, cx),
+            None => command.perform(target.clone(), window, cx),
+        })
         .build(cx)
 }
 
@@ -188,7 +208,7 @@ pub fn selection_bar(
     run: impl Fn(&'static Command, Target, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> components::SelectionBar {
-    let run = std::rc::Rc::new(run);
+    let run: Runner = std::rc::Rc::new(run);
     let verbs: Vec<components::Verb> = for_palette(&target, cx)
         .into_iter()
         .filter(|command| command.section == Section::Act)
@@ -205,9 +225,15 @@ pub fn selection_bar(
         })
         .take(SPELLED_OUT)
         .collect();
+    // The dots menu goes through `run` too: the target may stand for keys not fetched yet.
+    let menu_target = target.clone();
+    let menu: components::menus::Menu = std::rc::Rc::new(move |menu, _, cx| {
+        build_menu_with(menu_target.clone(), menu, Some(run.clone()), cx)
+    });
     components::SelectionBar::new(id, count)
         .verbs(verbs)
         .target(target)
+        .menu(menu)
 }
 
 fn group_rank(group: Group) -> u8 {
