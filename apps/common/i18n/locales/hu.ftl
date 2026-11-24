@@ -271,6 +271,7 @@ folder_playlists = Mappa lejátszási listák
 folder_playlist = Mappa
 featured_album = Kiemelt Album
 minimize = Minimalizálás
+restore_window = Restore window
 maximize = Maximalizálás
 close = Bezárás
 mini_player = Mini lejátszó

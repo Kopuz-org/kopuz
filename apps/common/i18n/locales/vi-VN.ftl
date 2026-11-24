@@ -200,6 +200,7 @@ remove_from_cache = Xóa khỏi bộ nhớ đệm
 create = Tạo
 save = Lưu
 minimize = Thu nhỏ
+restore_window = Restore window
 maximize = Phóng to
 close = Đóng
 mini_player = Trình phát thu nhỏ

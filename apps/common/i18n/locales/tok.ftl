@@ -271,6 +271,7 @@ folder_playlists = kulupu kalama pi poki mute
 folder_playlist = poki
 featured_album = lipu kalama suli
 minimize = suli lili
+restore_window = Restore window
 maximize = suli mute
 close = pini
 mini_player = ilo lili

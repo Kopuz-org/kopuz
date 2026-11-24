@@ -304,6 +304,7 @@ folder_playlists = Playlists de carpetas
 folder_playlist = Carpeta
 featured_album = Álbum destacado
 minimize = Minimizar
+restore_window = Restore window
 maximize = Maximizar
 close = Cerrar
 mini_player = Reproductor mini

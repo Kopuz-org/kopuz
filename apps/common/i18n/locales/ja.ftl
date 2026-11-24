@@ -271,6 +271,7 @@ folder_playlists = フォルダプレイリスト
 folder_playlist = フォルダ
 featured_album = 注目のアルバム
 minimize = 最小化
+restore_window = Restore window
 maximize = 最大化
 close = 閉じる
 mini_player = ミニプレーヤー

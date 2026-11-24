@@ -200,6 +200,7 @@ remove_from_cache = കാഷിൽ നിന്ന് നീക്കം ചെ
 create = സൃഷ്ടിക്കുക
 save = സംരക്ഷിക്കുക
 minimize = ചെറുതാക്കുക
+restore_window = Restore window
 maximize = വലുതാക്കുക
 close = അടയ്ക്കുക
 mini_player = മിനി പ്ലെയർ

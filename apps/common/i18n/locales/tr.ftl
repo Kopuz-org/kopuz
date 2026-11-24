@@ -271,6 +271,7 @@ folder_playlists = Klasör çalma listeleri
 folder_playlist = Klasör
 featured_album = Öne Çıkan Albüm
 minimize = Küçült
+restore_window = Restore window
 maximize = Büyüt
 close = Kapat
 mini_player = Mini oynatıcı

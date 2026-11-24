@@ -271,6 +271,7 @@ folder_playlists = 폴더 플레이리스트
 folder_playlist = 폴더
 featured_album = 추천 앨범
 minimize = 최소화
+restore_window = Restore window
 maximize = 최대화
 close = 닫기
 mini_player = 미니 플레이어

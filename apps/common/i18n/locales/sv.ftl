@@ -200,6 +200,7 @@ remove_from_cache = Ta bort från cache
 create = Skapa
 save = Spara
 minimize = Minimera
+restore_window = Restore window
 maximize = Maximera
 close = Stäng
 mini_player = Minispelare

@@ -121,9 +121,9 @@ pub fn titlebar(window: &Window, cx: &App) -> Option<AnyElement> {
     if !draws_titlebar(mode(cx)) {
         return None;
     }
-    let zoom_glyph = match window.is_maximized() {
-        true => icons::WINDOW_RESTORE,
-        false => icons::WINDOW_MAXIMIZE,
+    let (zoom_glyph, zoom_label) = match window.is_maximized() {
+        true => (icons::WINDOW_RESTORE, t("restore_window")),
+        false => (icons::WINDOW_MAXIMIZE, t("maximize")),
     };
     Some(
         h_flex()
@@ -164,7 +164,7 @@ pub fn titlebar(window: &Window, cx: &App) -> Option<AnyElement> {
                         window_button(
                             "titlebar-zoom",
                             zoom_glyph,
-                            t("maximize"),
+                            zoom_label,
                             style::white(style::RAISED, cx),
                             cx,
                         )

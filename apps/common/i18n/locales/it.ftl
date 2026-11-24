@@ -200,6 +200,7 @@ remove_from_cache = Rimuovi dalla cache
 create = Crea
 save = Salva
 minimize = Minimizza
+restore_window = Restore window
 maximize = Massimizza
 close = Chiudi
 mini_player = Mini lettore

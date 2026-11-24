@@ -319,6 +319,7 @@ folder_playlists = Playlisty folderów
 folder_playlist = Folder
 featured_album = Wyróżniony Album
 minimize = Zminimalizuj
+restore_window = Restore window
 maximize = Maksymalizuj
 close = Zamknij
 mini_player = Mini odtwarzacz
