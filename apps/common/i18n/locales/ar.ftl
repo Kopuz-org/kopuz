@@ -238,6 +238,7 @@ artist_not_found = Artist not found
 artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = لم يتم العثور على قائمة التشغيل
 no_playlists_found = لم يتم العثور على قوائم تشغيل
+playlist_folder_missing = This folder no longer exists.
 no_playlists_yet = لا توجد قوائم تشغيل بعد. أضف أغانٍ من مكتبتك!
 add_music_to_get_started = أضف موسيقى للبدء
 

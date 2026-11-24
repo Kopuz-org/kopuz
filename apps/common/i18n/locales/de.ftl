@@ -226,6 +226,7 @@ artist_not_found = Künstler nicht gefunden
 artist_load_failed = Künstler konnte nicht geladen werden: { $error }
 playlist_not_found = Playlist nicht gefunden
 no_playlists_found = Du hast keine Playlists
+playlist_folder_missing = This folder no longer exists.
 no_playlists_yet = Du hast noch keine Playlists. Füge Songs aus deiner Bibliothek hinzu!
 add_music_to_get_started = Füge Musik hinzu, um loszulegen
 

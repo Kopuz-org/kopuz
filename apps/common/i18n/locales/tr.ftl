@@ -218,6 +218,7 @@ artist_not_found = Sanatçı bulunamadı
 artist_load_failed = Sanatçı yüklenemedi: { $error }
 playlist_not_found = Çalma listesi bulunamadı
 no_playlists_found = Çalma listesi bulunamadı
+playlist_folder_missing = This folder no longer exists.
 no_playlists_yet = Henüz çalma listesi yok. Kütüphanenize şarkı ekleyin!
 add_music_to_get_started = Başlamak için müzik ekleyin
 

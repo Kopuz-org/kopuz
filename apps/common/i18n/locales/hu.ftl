@@ -218,6 +218,7 @@ artist_not_found = Artist not found
 artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = Lejátszási lista nem található
 no_playlists_found = Nem találhatók lejátszási listák
+playlist_folder_missing = This folder no longer exists.
 no_playlists_yet = Még nincsenek lejátszási listák. Adj hozzá dalokat a könyvtáradból!
 add_music_to_get_started = Adj hozzá zenét a kezdéshez
 

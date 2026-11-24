@@ -218,6 +218,7 @@ artist_not_found = Artist not found
 artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = プレイリストが見つかりません
 no_playlists_found = プレイリストが見つかりません
+playlist_folder_missing = This folder no longer exists.
 no_playlists_yet = プレイリストがまだありません。ライブラリから曲を追加してください！
 add_music_to_get_started = 開始するには音楽を追加してください
 

@@ -41,8 +41,11 @@ impl Render for PlaylistFolder {
         let playlists = model.read(cx).playlists().to_vec();
         let Some(folder) = folder else {
             return components::page().child(if loaded {
-                EmptyState::new(t("no_playlists_yet"))
+                EmptyState::new(t("playlist_folder_missing"))
                     .icon(icons::FOLDER)
+                    .action(t("playlists"), |_, _, cx| {
+                        Navigator::navigate(Route::Playlists, cx)
+                    })
                     .flex()
                     .into_any_element()
             } else {
@@ -88,6 +91,7 @@ fn breadcrumb(name: String, cx: &App) -> impl IntoElement {
             Button::new("folder-back")
                 .custom(style::quiet_button(style::slate_400(cx), cx))
                 .icon(icons::icon(icons::CHEVRON_LEFT))
+                .tooltip(t("go_back"))
                 .on_click(|_, _, cx| Navigator::navigate(Route::Playlists, cx)),
         )
         .child(

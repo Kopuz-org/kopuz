@@ -218,6 +218,7 @@ artist_not_found = Artist not found
 artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = kulupu kalama li lon ala
 no_playlists_found = kulupu kalama li lon ala
+playlist_folder_missing = This folder no longer exists.
 no_playlists_yet = kulupu kalama li lon ala. o pali!
 add_music_to_get_started = wile open la o pana e kalama
 
