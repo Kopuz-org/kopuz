@@ -124,7 +124,7 @@ fn smb_reads_lossless_tracks_stored_before_bit_depth_once() {
 }
 
 #[test]
-fn smb_cover_indexing_uses_one_track_per_album_and_preserves_manual_covers() {
+fn smb_cover_indexing_lists_each_albums_tracks_and_preserves_manual_covers() {
     let file = TaggedFile::new(FileType::Flac, FileProperties::default(), Vec::new());
     let first = metadata("Album/01.flac", &file, 0);
     let second = metadata("Album/02.flac", &file, 0);
@@ -133,7 +133,7 @@ fn smb_cover_indexing_uses_one_track_per_album_and_preserves_manual_covers() {
     let tracks = vec![first.track, second.track, manual.track];
     let candidates = cover_candidates(&[first.album, manual.album], &tracks);
     assert_eq!(candidates.len(), 1);
-    assert_eq!(candidates[0].1, "Album/01.flac");
+    assert_eq!(candidates[0].1, ["Album/01.flac", "Album/02.flac"]);
 }
 
 struct MeasuredStream {

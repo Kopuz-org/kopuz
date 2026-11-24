@@ -1,7 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-fn detect_image_extension(data: &[u8]) -> &'static str {
+/// The file extension an image's own bytes say it has; JPEG when they say nothing known.
+pub fn detect_image_extension(data: &[u8]) -> &'static str {
     if data.len() >= 12 && &data[..8] == b"\x89PNG\r\n\x1a\n" {
         "png"
     } else if data.len() >= 3 && data[..3] == [0xFF, 0xD8, 0xFF] {
@@ -27,6 +28,24 @@ fn remove_stale_cover_variants(album_id: &str, cache_dir: &Path, keep_path: &Pat
 }
 
 pub fn find_folder_cover(dir: &Path) -> Option<PathBuf> {
+    let files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+        .collect();
+    let names = files
+        .iter()
+        .filter_map(|path| path.file_name().and_then(|name| name.to_str()));
+    let chosen = folder_cover_name(names)?.to_string();
+    files
+        .into_iter()
+        .find(|path| path.file_name().and_then(|name| name.to_str()) == Some(chosen.as_str()))
+}
+
+/// The album art among a folder's file `names`: a `cover`, `folder` or similar image, or the
+/// folder's only other image when it has exactly one that is not plainly something else.
+pub fn folder_cover_name<'a>(names: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
     let candidates = [
         "cover",
         "folder",
@@ -39,17 +58,16 @@ pub fn find_folder_cover(dir: &Path) -> Option<PathBuf> {
     ];
     let extensions = ["jpg", "jpeg", "png", "webp"];
 
-    let entries = std::fs::read_dir(dir).ok()?;
     let mut fallback_image = None;
     let mut has_multiple_fallbacks = false;
-    let mut best_idx: Option<usize> = None;
-    let mut best_path = None;
+    let mut best: Option<(usize, &str)> = None;
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_file() {
+    for name in names {
+        // macOS writes `._name` metadata beside files on shares; it is not an image.
+        if name.starts_with("._") {
             continue;
         }
+        let path = Path::new(name);
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
@@ -59,21 +77,20 @@ pub fn find_folder_cover(dir: &Path) -> Option<PathBuf> {
 
         if extensions.iter().any(|e| e.eq_ignore_ascii_case(ext)) {
             if let Some(pos) = candidates.iter().position(|c| c.eq_ignore_ascii_case(stem)) {
-                if best_idx.is_none() || pos < best_idx.unwrap() {
-                    best_idx = Some(pos);
-                    best_path = Some(path);
+                if best.is_none_or(|(held, _)| pos < held) {
+                    best = Some((pos, name));
                 }
             } else if is_safe_fallback_cover(stem) {
                 if fallback_image.is_some() {
                     has_multiple_fallbacks = true;
                     fallback_image = None;
                 } else if !has_multiple_fallbacks {
-                    fallback_image = Some(path);
+                    fallback_image = Some(name);
                 }
             }
         }
     }
-    best_path.or(fallback_image)
+    best.map(|(_, name)| name).or(fallback_image)
 }
 
 fn is_safe_fallback_cover(stem: &str) -> bool {
@@ -145,6 +162,18 @@ pub fn save_cover(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_cover_is_chosen_by_name() {
+        assert_eq!(
+            folder_cover_name(["01.flac", "Front.PNG", "cover.jpg"]),
+            Some("cover.jpg")
+        );
+        assert_eq!(folder_cover_name(["01.flac", "scan.jpg"]), Some("scan.jpg"));
+        assert_eq!(folder_cover_name(["back.jpg", "01.flac"]), None);
+        assert_eq!(folder_cover_name(["a.jpg", "b.jpg"]), None);
+        assert_eq!(folder_cover_name(["._cover.jpg", "01.flac"]), None);
+    }
     use std::fs::File;
 
     #[test]

@@ -207,28 +207,13 @@ impl MediaSource for SmbSource {
         }
         let session = tokio::sync::Mutex::new(self.connect().await?);
         let mut scans = futures_util::stream::iter(candidates)
-            .map(|(mut album, path)| {
+            .map(|(mut album, paths)| {
                 let session = &session;
                 async move {
-                    let mut stream = session.lock().await.open(&path).await?;
-                    stream.limit_reads(32 * 1024 * 1024);
-                    let cover = tokio::task::spawn_blocking(move || {
-                        let tagged = lofty::probe::Probe::new(stream)
-                            .options(lofty::config::ParseOptions::new().read_properties(false))
-                            .guess_file_type()
-                            .map_err(lofty::error::LoftyError::from)
-                            .and_then(|probe| probe.read())
-                            .inspect_err(
-                                |error| tracing::debug!(path, %error, "SMB cover unavailable"),
-                            )
-                            .ok()?;
-                        let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
-                        reader::metadata::extract_embedded_cover(&tagged, tag)
-                            .and_then(cache_picture)
-                    })
-                    .await
-                    .map_err(|_| SourceError::Backend("SMB cover reader failed".into()))?;
-                    album.cover_path = cover;
+                    album.cover_path = match folder_cover(session, &paths).await? {
+                        Some(cover) => Some(cover),
+                        None => embedded_cover(session, &paths).await?,
+                    };
                     Ok::<_, SourceError>(album)
                 }
             })
@@ -325,29 +310,101 @@ fn always_has_bit_depth(path: &str) -> bool {
         })
 }
 
+/// Albums with no cover yet, each with its tracks' paths on the share.
 fn cover_candidates(
     albums: &[reader::Album],
     tracks: &[reader::Track],
-) -> Vec<(reader::Album, String)> {
+) -> Vec<(reader::Album, Vec<String>)> {
     let missing = reader::missing_cover_ids(&reader::Library {
         albums: albums.to_vec(),
         ..Default::default()
     });
-    let mut representatives = HashMap::new();
+    let mut paths: HashMap<&str, Vec<String>> = HashMap::new();
     for track in tracks {
-        representatives
-            .entry(&track.album_id)
-            .or_insert(track.id.key());
+        paths
+            .entry(track.album_id.as_str())
+            .or_default()
+            .push(track.id.key().into_owned());
     }
     albums
         .iter()
         .filter(|album| missing.contains(&album.id))
         .filter_map(|album| {
-            representatives
-                .get(&album.id)
-                .map(|path| (album.clone(), path.to_string()))
+            let mut held = paths.remove(album.id.as_str())?;
+            held.sort_unstable();
+            Some((album.clone(), held))
         })
         .collect()
+}
+
+/// How many of an album's tracks are opened for embedded art before giving up.
+const EMBEDDED_TRIES: usize = 3;
+/// The most a cover image read off the share may take.
+const COVER_READ_LIMIT: u64 = 32 * 1024 * 1024;
+
+/// A `cover.jpg`, `folder.png` or similar beside the album's first track, as a local library uses.
+async fn folder_cover(
+    session: &tokio::sync::Mutex<crate::smb::Session>,
+    paths: &[String],
+) -> Result<Option<PathBuf>, SourceError> {
+    let Some(first) = paths.first() else {
+        return Ok(None);
+    };
+    let dir = first.rsplit_once('/').map_or("", |(dir, _)| dir);
+    let entries = session.lock().await.list(dir).await?;
+    let files = entries
+        .iter()
+        .filter(|entry| !entry.is_directory)
+        .map(|entry| entry.name.as_str());
+    let Some(name) = reader::utils::folder_cover_name(files) else {
+        return Ok(None);
+    };
+    let path = match dir {
+        "" => name.to_string(),
+        dir => format!("{dir}/{name}"),
+    };
+    let mut stream = session.lock().await.open(&path).await?;
+    stream.limit_reads(COVER_READ_LIMIT);
+    tokio::task::spawn_blocking(move || {
+        let mut data = Vec::new();
+        std::io::Read::read_to_end(&mut stream, &mut data)
+            .inspect_err(|error| tracing::debug!(path, %error, "SMB folder cover unreadable"))
+            .ok()?;
+        cache_cover(&data)
+    })
+    .await
+    .map_err(|_| SourceError::Backend("SMB cover reader failed".into()))
+}
+
+/// The art embedded in one of the album's first few tracks; one track without it does not
+/// speak for the rest.
+async fn embedded_cover(
+    session: &tokio::sync::Mutex<crate::smb::Session>,
+    paths: &[String],
+) -> Result<Option<PathBuf>, SourceError> {
+    for path in paths.iter().take(EMBEDDED_TRIES) {
+        let mut stream = session.lock().await.open(path).await?;
+        let path = path.clone();
+        stream.limit_reads(COVER_READ_LIMIT);
+        let cover = tokio::task::spawn_blocking(move || {
+            let tagged = lofty::probe::Probe::new(stream)
+                .options(lofty::config::ParseOptions::new().read_properties(false))
+                .guess_file_type()
+                .map_err(lofty::error::LoftyError::from)
+                .and_then(|probe| probe.read())
+                .inspect_err(|error| tracing::debug!(path, %error, "SMB cover unavailable"))
+                .ok()?;
+            let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
+            reader::metadata::extract_embedded_cover(&tagged, tag)
+                .and_then(|picture| cache_cover(picture.data()))
+        })
+        .await
+        .map_err(|_| SourceError::Backend("SMB cover reader failed".into()))?;
+        if cover.is_some() {
+            return Ok(cover);
+        }
+    }
+    Ok(None)
 }
 
 fn scan_track(
@@ -421,22 +478,24 @@ fn remote_metadata(mut scanned: reader::ScannedTrack, path: &str) -> reader::Sca
     scanned
 }
 
-fn cache_picture(picture: &lofty::picture::Picture) -> Option<PathBuf> {
+/// Keep an image's bytes under their hash; the type comes from the bytes, since a tag's
+/// declared MIME type is often missing or wrong.
+fn cache_cover(data: &[u8]) -> Option<PathBuf> {
+    if data.is_empty() {
+        return None;
+    }
     #[cfg(target_os = "android")]
     let dir = db::config_dir().join("cache/smb-covers");
     #[cfg(not(target_os = "android"))]
     let dir = config::flavor::project_dirs()?
         .cache_dir()
         .join("smb-covers");
-    let extension = picture.mime_type()?.ext()?;
-    let path = dir.join(format!(
-        "{}.{extension}",
-        hex::encode(Sha256::digest(picture.data()))
-    ));
+    let extension = reader::utils::detect_image_extension(data);
+    let path = dir.join(format!("{}.{extension}", hex::encode(Sha256::digest(data))));
     if !path.is_file() {
         std::fs::create_dir_all(&dir).ok()?;
         let staging = dir.join(format!("{}.part", uuid::Uuid::new_v4()));
-        if std::fs::write(&staging, picture.data())
+        if std::fs::write(&staging, data)
             .and_then(|()| std::fs::rename(&staging, &path))
             .is_err()
         {
