@@ -110,6 +110,7 @@ impl Render for Albums {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _timing = profile::render("albums");
         let settled = self.albums.read(cx).is_settled();
+        let failure = self.albums.read(cx).error().map(store::human);
         let mode = match view_mode(cx) {
             AlbumViewMode::Grid => GridMode::Tiles,
             AlbumViewMode::List => GridMode::Rows,
@@ -133,10 +134,23 @@ impl Render for Albums {
                     .child(self.view_toggle(cx))
                     .child(self.sort_control(cx)),
             )
-            .child(div().flex_1().min_h_0().map(|body| match (bands, settled) {
-                (Some(bands), _) => body.child(bands),
-                (None, false) => body.child(Loading::new()),
-                (None, true) => body.child(EmptyState::new(t("no_albums_found")).icon(icons::DISC)),
+            .child(div().flex_1().min_h_0().map(|body| {
+                match (bands, settled, failure) {
+                    (Some(bands), _, _) => body.child(bands),
+                    (None, _, Some(reason)) => body.child(
+                        EmptyState::failed(
+                            t("library_read_failed"),
+                            cx.listener(|this, _, _, cx| {
+                                this.albums.update(cx, |query, cx| query.refresh(cx));
+                            }),
+                        )
+                        .detail(reason),
+                    ),
+                    (None, false, None) => body.child(Loading::new()),
+                    (None, true, None) => {
+                        body.child(EmptyState::new(t("no_albums_found")).icon(icons::DISC))
+                    }
+                }
             }))
     }
 }

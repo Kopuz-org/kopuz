@@ -82,7 +82,7 @@ impl AlbumDetail {
                 &[Table::Tracks],
                 move |api| {
                     let ids = ids.clone();
-                    async move { Ok(collect_album_tracks(api, ids).await) }
+                    async move { collect_album_tracks(api, ids).await }
                 },
                 cx,
             )
@@ -311,8 +311,18 @@ impl AlbumDetail {
             .font_weight(gpui_kit::FontWeight::BOLD)
     }
 
-    fn tracks_body(&self) -> AnyElement {
+    fn tracks_body(&self, cx: &mut Context<Self>) -> AnyElement {
         if self.rows.is_empty() {
+            if let Some(reason) = self.tracks.read(cx).error().map(store::human) {
+                return EmptyState::failed(
+                    t("library_read_failed"),
+                    cx.listener(|this, _, _, cx| {
+                        this.tracks.update(cx, |query, cx| query.refresh(cx));
+                    }),
+                )
+                .detail(reason)
+                .into_any_element();
+            }
             return EmptyState::new(t("no_tracks_found")).into_any_element();
         }
         div()
@@ -440,12 +450,17 @@ impl AlbumDetail {
             .pb_8()
             .overflow_hidden()
             .child(div().flex_shrink_0().mb_12().child(header))
-            .child(self.tracks_body())
+            .child(self.tracks_body(cx))
             .children(self.selection_bar(cx))
             .into_any_element()
     }
 
-    fn remote_detail(&self, view: RemoteView, _: &mut Window, _: &mut Context<Self>) -> AnyElement {
+    fn remote_detail(
+        &self,
+        view: RemoteView,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let cover = AlbumInfo {
             id: view.id.clone(),
             title: view.title.to_string(),
@@ -503,7 +518,7 @@ impl AlbumDetail {
                             .min_w_0()
                             .h_full()
                             .min_h_0()
-                            .child(self.tracks_body()),
+                            .child(self.tracks_body(cx)),
                     ),
             )
             .into_any_element()
@@ -526,6 +541,23 @@ impl Render for AlbumDetail {
             return self.remote_detail(view, window, cx);
         }
 
+        let failure = self
+            .album
+            .read(cx)
+            .error()
+            .filter(|error| error.code != api::ErrorCode::NotFound)
+            .map(store::human);
+        if let Some(reason) = failure {
+            return EmptyState::failed(
+                t("library_read_failed"),
+                cx.listener(|this, _, _, cx| {
+                    this.album.update(cx, |query, cx| query.refresh(cx));
+                    this.remote.update(cx, |query, cx| query.refresh(cx));
+                }),
+            )
+            .detail(reason)
+            .into_any_element();
+        }
         match self.album.read(cx).is_settled() && self.remote.read(cx).is_settled() {
             true => EmptyState::new(t("album_not_found"))
                 .icon(icons::DISC)
@@ -607,17 +639,26 @@ fn by_disc(rows: &[TrackInfo]) -> Vec<(Option<u32>, Vec<TrackInfo>)> {
     groups
 }
 
+/// Every edition's tracks; a read that fails only fails the page when nothing else came back.
 async fn collect_album_tracks(
     api: std::sync::Arc<dyn api::KopuzApi>,
     ids: Vec<String>,
-) -> Vec<TrackInfo> {
+) -> Result<Vec<TrackInfo>, api::ApiError> {
     let mut tracks = Vec::new();
+    let mut failure = None;
     for id in ids {
-        if let Ok(page) = api.album_tracks(id, store::all()).await {
-            tracks.extend(page.items);
+        match api.album_tracks(id, store::all()).await {
+            Ok(page) => tracks.extend(page.items),
+            Err(error) => {
+                tracing::warn!(%error, "could not read an edition's tracks");
+                failure.get_or_insert(error);
+            }
         }
     }
-    tracks
+    match failure {
+        Some(error) if tracks.is_empty() => Err(error),
+        _ => Ok(tracks),
+    }
 }
 
 fn point_tracks(query: &Entity<Query<Vec<TrackInfo>>>, ids: Vec<String>, cx: &mut App) {
@@ -625,7 +666,7 @@ fn point_tracks(query: &Entity<Query<Vec<TrackInfo>>>, ids: Vec<String>, cx: &mu
         query.set_fetch(
             move |api| {
                 let ids = ids.clone();
-                async move { Ok(collect_album_tracks(api, ids).await) }
+                async move { collect_album_tracks(api, ids).await }
             },
             cx,
         )
