@@ -730,7 +730,6 @@ volume_down = Volume Down
 toggle_mute = Mute
 toggle_fullscreen = Fullscreen Player
 command_palette = Command Palette
-filter_view = Filter
 go_back = Voltar
 go_forward = Forward
 keyboard_shortcuts = Keyboard Shortcuts
