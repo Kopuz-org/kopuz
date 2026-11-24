@@ -375,6 +375,8 @@ impl Render for QueueView {
         if count == 0 {
             return v_flex()
                 .size_full()
+                .id("empty-queue")
+                .on_drop::<TrackDrag>(|drag, _, cx| insert_at(0, drag.keys.to_vec(), cx))
                 .child(EmptyState::new(t("no_more_songs")).icon(icons::LIST))
                 .into_any_element();
         }
