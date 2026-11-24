@@ -17,6 +17,7 @@ i18n = { workspace = true }
 link = { workspace = true }
 store = { workspace = true }
 theme = { workspace = true }
+commands = { path = "../commands" }
 components = { path = "../components" }
 gpui-kit = { workspace = true }
 tracing = { workspace = true }

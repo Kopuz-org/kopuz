@@ -98,7 +98,8 @@ pub(crate) fn card(window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     )
                     .child(tip(
                         icons::SEARCH,
-                        Some(Keycap::new("ctrl-k").into_any_element()),
+                        commands::keystroke_for("app.palette", cx)
+                            .map(|keystroke| Keycap::new(&keystroke).into_any_element()),
                         "tips_search",
                         cx,
                     ))
