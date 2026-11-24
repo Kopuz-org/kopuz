@@ -9,6 +9,8 @@ use crate::notices::Notices;
 pub struct PlaylistsModel {
     catalog: PlaylistCatalog,
     loaded: bool,
+    /// Why the last read failed; cleared by the next one that lands.
+    error: Option<api::ApiError>,
     _fetch: Option<Task<()>>,
     _subscription: Subscription,
 }
@@ -28,6 +30,7 @@ impl PlaylistsModel {
         Self {
             catalog: PlaylistCatalog::default(),
             loaded: false,
+            error: None,
             _fetch: None,
             _subscription: subscription,
         }
@@ -36,10 +39,16 @@ impl PlaylistsModel {
     pub fn refetch(&mut self, cx: &mut Context<Self>) {
         let call = Link::global(cx).call(|api| async move { api.playlists().await });
         self._fetch = Some(cx.spawn(async move |this, cx| {
-            let Ok(catalog) = call.await else { return };
+            let result = call.await;
             this.update(cx, |this, cx| {
-                this.catalog = catalog;
-                this.loaded = true;
+                match result {
+                    Ok(catalog) => {
+                        this.catalog = catalog;
+                        this.loaded = true;
+                        this.error = None;
+                    }
+                    Err(error) => this.error = Some(error),
+                }
                 crate::notify(cx);
             })
             .ok();
@@ -48,6 +57,11 @@ impl PlaylistsModel {
 
     pub fn is_loaded(&self) -> bool {
         self.loaded
+    }
+
+    /// The last read failed, and this is why.
+    pub fn error(&self) -> Option<&api::ApiError> {
+        self.error.as_ref()
     }
 
     pub fn playlists(&self) -> &[PlaylistInfo] {

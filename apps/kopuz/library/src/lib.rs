@@ -1004,7 +1004,10 @@ impl Library {
             Facet::Tracks => self.tracks.read(cx).is_settled(),
             Facet::Albums => self.albums.read(cx).is_settled(),
             Facet::Artists => self.artists.read(cx).is_settled(),
-            Facet::Playlists => PlaylistsModel::global(cx).read(cx).is_loaded(),
+            Facet::Playlists => {
+                let playlists = PlaylistsModel::global(cx).read(cx);
+                playlists.is_loaded() || playlists.error().is_some()
+            }
         }
     }
 
@@ -1022,7 +1025,7 @@ impl Library {
             Facet::Tracks => self.tracks.read(cx).error().cloned(),
             Facet::Albums => self.albums.read(cx).error().cloned(),
             Facet::Artists => self.artists.read(cx).error().cloned(),
-            Facet::Playlists => None,
+            Facet::Playlists => PlaylistsModel::global(cx).read(cx).error().cloned(),
         }
     }
 
