@@ -6,7 +6,7 @@ use api::{ArtworkChange, TrackInfo, TrackMetadataPatch};
 use components::dialogs::{DialogSize, FormDialog, FormFooter};
 use components::format::{duration, t};
 use components::{
-    EditableCover, FactList, LabeledInput, Loading, TagFieldGrid, icons, motion, style,
+    EditableCover, EmptyState, FactList, LabeledInput, Loading, TagFieldGrid, icons, motion, style,
 };
 use gpui_kit::base::motion::{Easing, Presence, Transition};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -67,6 +67,7 @@ struct MetadataDialog {
     key: String,
     editable: bool,
     track: Option<TrackInfo>,
+    read_error: Option<SharedString>,
     editing: bool,
     saving: bool,
     // Why the last write did not land; the editor stays open holding it.
@@ -77,28 +78,36 @@ struct MetadataDialog {
     track_number: Entity<InputState>,
     disc_number: Entity<InputState>,
     cover: CoverEdit,
-    _fetch: Task<()>,
+    _fetch: Option<Task<()>>,
     _save: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl MetadataDialog {
-    fn new(key: String, editable: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let call = {
-            let key = key.clone();
-            Link::global(cx).call(move |api| async move { api.tracks_by_keys(vec![key]).await })
-        };
-        let fetch = cx.spawn_in(window, async move |this, cx| {
+    fn fetch(key: String, window: &mut Window, cx: &mut Context<Self>) -> Task<()> {
+        let call =
+            Link::global(cx).call(move |api| async move { api.tracks_by_keys(vec![key]).await });
+        cx.spawn_in(window, async move |this, cx| {
             let found = call.await;
             this.update_in(cx, |this, window, cx| match found {
                 Ok(rows) => match rows.into_iter().next() {
                     Some(track) => this.adopt(track, window, cx),
-                    None => tracing::warn!(key = %this.key, "the track has no row to show"),
+                    None => {
+                        this.read_error = Some(t("error_code_not_found"));
+                        cx.notify();
+                    }
                 },
-                Err(error) => Notices::failed(&error, cx),
+                Err(error) => {
+                    this.read_error = Some(store::human(&error));
+                    cx.notify();
+                }
             })
             .ok();
-        });
+        })
+    }
+
+    fn new(key: String, editable: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let fetch = Self::fetch(key.clone(), window, cx);
         let track_number = cx.new(|cx| InputState::new(window, cx));
         let disc_number = cx.new(|cx| InputState::new(window, cx));
         // A number that will not parse is flagged as it is typed, not when Save is pressed.
@@ -110,6 +119,7 @@ impl MetadataDialog {
             key,
             editable,
             track: None,
+            read_error: None,
             editing: false,
             saving: false,
             failure: None,
@@ -119,7 +129,7 @@ impl MetadataDialog {
             track_number,
             disc_number,
             cover: CoverEdit::Keep,
-            _fetch: fetch,
+            _fetch: Some(fetch),
             _save: None,
             _subscriptions: subscriptions,
         }
@@ -369,6 +379,19 @@ fn number(value: Option<u32>) -> String {
 impl Render for MetadataDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(track) = self.track.clone() else {
+            if let Some(error) = self.read_error.clone() {
+                return EmptyState::failed(
+                    t("metadata_read_failed"),
+                    cx.listener(|this, _, window, cx| {
+                        this.read_error = None;
+                        this._fetch = Some(Self::fetch(this.key.clone(), window, cx));
+                        cx.notify();
+                    }),
+                )
+                .detail(error)
+                .compact()
+                .into_any_element();
+            }
             return div()
                 .h(LOADING_HEIGHT)
                 .child(Loading::new())

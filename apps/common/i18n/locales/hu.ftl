@@ -458,6 +458,7 @@ player_bar_position = Lejátszó sáv pozíciója
 position_bottom = Lent
 position_top = Fent
 
+metadata_read_failed = Could not load track metadata
 metadata = Metaadatok
 auto_fetch_covers = Album borítók automatikus letöltése
 prefer_local_lyrics = Helyi dalszöveg előnyben (.lrc / beágyazott, nincs online tartalék)

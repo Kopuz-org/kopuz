@@ -458,6 +458,7 @@ player_bar_position = 플레이어 바 위치
 position_bottom = 아래
 position_top = 위
 
+metadata_read_failed = Could not load track metadata
 metadata = 메타데이터
 auto_fetch_covers = 앨범 커버 자동 가져오기
 prefer_local_lyrics = 로컬 가사 우선 (.lrc / 내장, 온라인 대체 없음)

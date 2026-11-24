@@ -458,6 +458,7 @@ player_bar_position = Oynatıcı çubuğu konumu
 position_bottom = Alt
 position_top = Üst
 
+metadata_read_failed = Could not load track metadata
 metadata = Meta veri
 auto_fetch_covers = Albüm kapaklarını otomatik getir
 prefer_local_lyrics = Yerel şarkı sözlerini tercih et (.lrc / gömülü, çevrimiçi yedek yok)

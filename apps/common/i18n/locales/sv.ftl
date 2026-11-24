@@ -549,6 +549,7 @@ back_behavior = Bakåtknappens beteende
 back_behavior_rewind = Spola, sedan föregående
 back_behavior_always_prev = Alltid föregående
 
+metadata_read_failed = Could not load track metadata
 metadata = Metadata
 auto_fetch_covers = Hämta albumomslag automatiskt
 prefer_local_lyrics = Föredra lokala låttexter (.lrc/inbäddade, ingen online-reservlösning)

@@ -491,6 +491,7 @@ player_bar_position = Posición de la barra del reproductor
 position_bottom = Abajo
 position_top = Arriba
 
+metadata_read_failed = Could not load track metadata
 metadata = Metadatos
 auto_fetch_covers = Obtener portadas automáticamente
 prefer_local_lyrics = Preferir letras locales (.lrc / incrustadas, sin recurso en línea)

@@ -490,6 +490,7 @@ player_bar_position = מיקום סרגל הנגן
 position_bottom = למטה
 position_top = למעלה
 
+metadata_read_failed = Could not load track metadata
 metadata = מטא-נתונים
 auto_fetch_covers = הבאה אוטומטית של עטיפות אלבומים
 prefer_local_lyrics = העדפת מילים מקומיות (.lrc / מוטמעות, ללא חלופה מקוונת)

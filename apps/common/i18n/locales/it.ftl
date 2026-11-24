@@ -493,6 +493,7 @@ back_behavior = Comportamento del pulsante indietro
 back_behavior_rewind = RIAVVOLGI → PRECEDENTE
 back_behavior_always_prev = SEMPRE PRECEDENTE
 
+metadata_read_failed = Could not load track metadata
 metadata = Metadati
 auto_fetch_covers = Cerca in automatico copertine album
 prefer_local_lyrics = Preferisci testi locali (.lrc / incorporati, nessun ripiego online)

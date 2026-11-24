@@ -498,6 +498,7 @@ player_bar_position = Poziție bară player
 position_bottom = Jos
 position_top = Sus
 
+metadata_read_failed = Could not load track metadata
 metadata = Metadate
 auto_fetch_covers = Preia automat coperțile albumelor
 prefer_local_lyrics = Preferă versurile locale (.lrc / încorporate, fără rezervă online)

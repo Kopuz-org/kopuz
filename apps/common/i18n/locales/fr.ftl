@@ -491,6 +491,7 @@ player_bar_position = Position de la barre du lecteur
 position_bottom = Bas
 position_top = Haut
 
+metadata_read_failed = Could not load track metadata
 metadata = Métadonnées
 auto_fetch_covers = Récupérer automatiquement les pochettes
 prefer_local_lyrics = Préférer les paroles locales (.lrc / intégrées, sans repli en ligne)

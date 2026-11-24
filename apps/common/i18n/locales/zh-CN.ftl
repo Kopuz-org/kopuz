@@ -458,6 +458,7 @@ player_bar_position = 播放栏位置
 position_bottom = 底部
 position_top = 顶部
 
+metadata_read_failed = Could not load track metadata
 metadata = 元数据
 auto_fetch_covers = 自动获取专辑封面
 prefer_local_lyrics = 优先使用本地歌词（.lrc / 内嵌，无在线回退）

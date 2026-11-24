@@ -464,6 +464,7 @@ player_bar_position = プレーヤーバーの位置
 position_bottom = 下
 position_top = 上
 
+metadata_read_failed = Could not load track metadata
 metadata = メタデータ
 auto_fetch_covers = アルバムカバーを自動取得
 prefer_local_lyrics = ローカル歌詞を優先（.lrc / 埋め込み、オンラインフォールバックなし）

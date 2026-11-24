@@ -575,6 +575,7 @@ back_behavior = Back Button Behavior
 back_behavior_rewind = Rewind, then previous
 back_behavior_always_prev = Always previous
 
+metadata_read_failed = Could not load track metadata
 metadata = Metadata
 auto_fetch_covers = Auto-fetch album covers
 prefer_local_lyrics = Prefer local lyrics (.lrc / embedded, no online fallback)

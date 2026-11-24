@@ -517,6 +517,7 @@ back_behavior = Hành vi nút Quay lại
 back_behavior_rewind = TUA LẠI → BÀI TRƯỚC
 back_behavior_always_prev = LUÔN VỀ BÀI TRƯỚC
 
+metadata_read_failed = Could not load track metadata
 metadata = Siêu dữ liệu
 auto_fetch_covers = Tự động tải bìa album
 prefer_local_lyrics = Ưu tiên lời bài hát cục bộ (.lrc / nhúng, không dùng nguồn trực tuyến dự phòng)

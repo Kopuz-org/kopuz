@@ -517,6 +517,7 @@ back_behavior = Tindakan Tombol Kembali
 back_behavior_rewind = MUNDUR → BERIKUTNYA
 back_behavior_always_prev = SELALU BERIKUTNYA
 
+metadata_read_failed = Could not load track metadata
 metadata = Metadata
 auto_fetch_covers = Otomatis mengambil sampul album
 prefer_local_lyrics = Prefer lirik lokal (.lrc / disematkan, bukan daring fallback)

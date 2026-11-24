@@ -458,6 +458,7 @@ player_bar_position = ma pi ilo kalama
 position_bottom = anpa
 position_top = sewi
 
+metadata_read_failed = Could not load track metadata
 metadata = ijo nanpa
 auto_fetch_covers = o kama e sitelen kulupu pi kalama sama
 prefer_local_lyrics = o wile e nimi kalama lon ilo (.lrc / lon insa, ala lon linja)

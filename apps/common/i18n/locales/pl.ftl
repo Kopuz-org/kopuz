@@ -506,6 +506,7 @@ player_bar_position = Pozycja paska odtwarzacza
 position_bottom = Dół
 position_top = Góra
 
+metadata_read_failed = Could not load track metadata
 metadata = Metadane
 auto_fetch_covers = Automatyczne pobieranie okładek albumów
 prefer_local_lyrics = Preferuj lokalne teksty (.lrc / osadzone, bez rezerwy online)
