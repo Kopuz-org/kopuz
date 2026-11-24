@@ -462,7 +462,6 @@ pub fn config_to_proto(value: &config::Settings) -> Config {
             .map(registry_entry_to_proto)
             .collect(),
         prefer_local_lyrics: lyrics.prefer_local_lyrics,
-        enable_musixmatch_lyrics: lyrics.enable_musixmatch_lyrics,
         romanize_lyrics: lyrics.romanize_lyrics,
         lyrics_offset_ms: lyrics.lyrics_offset_ms,
         lyrics_offset_auto: lyrics.lyrics_offset_auto,
@@ -527,7 +526,6 @@ pub fn config_from_proto(value: &Config) -> config::Settings {
         },
         lyrics: config::Lyrics {
             prefer_local_lyrics: value.prefer_local_lyrics,
-            enable_musixmatch_lyrics: value.enable_musixmatch_lyrics,
             romanize_lyrics: value.romanize_lyrics,
             lyrics_offset_ms: value.lyrics_offset_ms,
             lyrics_offset_auto: value.lyrics_offset_auto,

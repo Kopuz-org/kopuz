@@ -424,16 +424,6 @@ pub(super) fn MetadataSection(settings: Signal<Settings>) -> Element {
                 }
             }
             SettingItem {
-                title: i18n::t("enable_musixmatch_lyrics").to_string(),
-                config_key: "enable_musixmatch_lyrics",
-                control: rsx! {
-                    ToggleSetting {
-                        enabled: settings.read().lyrics.enable_musixmatch_lyrics,
-                        on_change: move |val| edits.edit(SettingsEdit::Lyrics(LyricsEdit::EnableMusixmatchLyrics(val))),
-                    }
-                }
-            }
-            SettingItem {
                 title: i18n::t("romanize_lyrics").to_string(),
                 config_key: "romanize_lyrics",
                 control: rsx! {
