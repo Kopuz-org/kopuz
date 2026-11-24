@@ -64,6 +64,8 @@ pub(crate) struct CatalogSearch {
     correction: Option<String>,
     loading: bool,
     paging: bool,
+    /// The cursor that just failed, kept so the reader can ask for it again.
+    stalled: Option<String>,
     error: Option<SharedString>,
     // An answer for a query or filter since left behind, or one landing after a freeze, is dropped.
     asks: Asks,
@@ -89,6 +91,7 @@ impl CatalogSearch {
             correction: None,
             loading: false,
             paging: false,
+            stalled: None,
             error: None,
             asks: Asks::default(),
             scroll: ScrollHandle::new(),
@@ -157,6 +160,7 @@ impl CatalogSearch {
             return;
         };
         self.continuation = None;
+        self.stalled = None;
         self.correction = None;
         self.error = None;
         self.paging = false;
@@ -262,8 +266,9 @@ impl CatalogSearch {
                     }
                     Err(error) => {
                         tracing::warn!(%error, "search continuation failed");
-                        // Stop asking: a failed cursor fails again on every scroll.
-                        this.continuation = None;
+                        // Stop asking on scroll: a failed cursor fails again every time. The
+                        // reader can still ask once more.
+                        this.stalled = this.continuation.take();
                     }
                 }
                 cx.notify();
@@ -361,6 +366,19 @@ impl Render for CatalogSearch {
                                     components::Loading::new()
                                         .label(t("discover_more_loading"))
                                         .compact(),
+                                )
+                            })
+                            .when(self.stalled.is_some() && !self.paging, |page| {
+                                page.child(
+                                    components::EmptyState::failed(
+                                        t("discover_more_failed"),
+                                        cx.listener(|this, _, _, cx| {
+                                            if let Some(token) = this.stalled.take() {
+                                                this.load_more(token, cx);
+                                            }
+                                        }),
+                                    )
+                                    .compact(),
                                 )
                             }),
                     ),
