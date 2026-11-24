@@ -64,9 +64,8 @@ impl ActivityList {
             .title(store::kind_label(finished.kind))
             .detail(detail, None);
         match finished.automatic {
-            // TODO(i18n): no "scheduled" key yet; "Automatic" is the nearest the locale has.
             true => row
-                .trailing(Badge::new(t("playback_browser_auto")).tone(BadgeTone::Neutral))
+                .trailing(Badge::new(t("job_scheduled")).tone(BadgeTone::Neutral))
                 .into_any_element(),
             false => row.into_any_element(),
         }

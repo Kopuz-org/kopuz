@@ -216,10 +216,9 @@ impl RenderOnce for JobLine {
         let phase = (!progress.phase.is_empty())
             .then(|| SharedString::from(progress.phase.clone()))
             .or(self.fallback);
-        // TODO(i18n): no "scheduled" key yet; "Automatic" is the nearest the locale has.
         let automatic = progress
             .automatic
-            .then(|| Badge::new(t("playback_browser_auto")).tone(BadgeTone::Neutral));
+            .then(|| Badge::new(t("job_scheduled")).tone(BadgeTone::Neutral));
         let stop = self.on_stop.map(|stop| {
             stop_control(
                 &progress.id,

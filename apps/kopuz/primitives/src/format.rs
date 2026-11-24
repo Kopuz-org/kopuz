@@ -43,9 +43,15 @@ pub fn known_duration(ms: Option<u64>) -> SharedString {
 pub fn total_duration(ms: u64) -> SharedString {
     let minutes = ms / 60_000;
     if minutes >= 60 {
-        format!("{} hr {} min", minutes / 60, minutes % 60).into()
+        t_with(
+            "duration_hours_minutes",
+            &[
+                ("hours", (minutes / 60).into()),
+                ("minutes", (minutes % 60).into()),
+            ],
+        )
     } else {
-        format!("{minutes} min").into()
+        t_with("duration_minutes", &[("minutes", minutes.into())])
     }
 }
 
