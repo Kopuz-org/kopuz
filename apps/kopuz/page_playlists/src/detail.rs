@@ -115,7 +115,7 @@ impl PlaylistDetail {
             list.set_actions(
                 TrackActions {
                     remove_from_playlist: capabilities.playlists != PlaylistCapability::None,
-                    delete: true,
+                    delete: capabilities.delete_from_disk,
                     reorder: capabilities.playlists == PlaylistCapability::Reorder,
                 },
                 cx,
