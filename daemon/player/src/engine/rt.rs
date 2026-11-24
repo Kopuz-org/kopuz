@@ -14,6 +14,7 @@ use std::sync::mpsc::{Receiver, Sender};
 
 use config::{ChannelMode, EqualizerSettings};
 
+use super::mix::MixStart;
 use crate::eq::Equalizer;
 use crate::meter::{AudioMeter, MeterTap};
 
@@ -77,16 +78,26 @@ impl GainRamp {
     }
 }
 
+/// How a swapped-in session takes over from the active one. The generation
+/// is echoed on `FadeComplete` so the actor can drop a completion that raced
+/// the start of a newer one.
+pub(crate) enum Blend {
+    /// Cross-mix with equal-power gains over `frames`.
+    Crossfade { frames: u64, generation: u64 },
+    /// Hold the new session unread until the outgoing one's `played` reaches
+    /// `start`, then sum both at unity until the outgoing one drains. Their
+    /// workers already applied the mix's faders, filters and speed.
+    Overlay { start: MixStart, generation: u64 },
+}
+
 pub(crate) enum RtCmd {
-    /// Install a new active session. `fade: Some((frames, generation))` demotes
-    /// the current active session to "fading" and cross-mixes over `frames`;
-    /// `None` replaces the active session outright and also drops any fading
-    /// session (a seek kills an in-flight crossfade). The generation is echoed
-    /// on `FadeComplete` so the actor can drop a completion that raced the
-    /// start of a newer fade.
+    /// Install a new active session. `fade: Some(blend)` demotes the current
+    /// active session to "fading" and blends it out; `None` replaces the
+    /// active session outright and also drops any fading session (a seek
+    /// kills an in-flight crossfade).
     Swap {
         session: RtSession,
-        fade: Option<(u64, u64)>,
+        fade: Option<Blend>,
     },
     /// Takes over on the same block the active one plays its last sample.
     Queue {
@@ -118,6 +129,11 @@ struct Fade {
     generation: u64,
 }
 
+struct Overlay {
+    start: MixStart,
+    generation: u64,
+}
+
 /// Frames of scratch capacity; blocks larger than this are processed in chunks
 /// so the fade path stays allocation-free regardless of device block size.
 const SCRATCH_FRAMES: usize = 4096;
@@ -128,6 +144,7 @@ pub(crate) struct RtState {
     active: Option<RtSession>,
     fading: Option<RtSession>,
     fade: Option<Fade>,
+    overlay: Option<Overlay>,
     next: Option<(RtSession, u64)>,
     /// Kept so a late `Unqueue` can still find a promoted session.
     promoted: Option<u64>,
@@ -168,6 +185,7 @@ impl RtState {
             active: None,
             fading: None,
             fade: None,
+            overlay: None,
             next: None,
             promoted: None,
             eq,
@@ -194,6 +212,8 @@ impl RtState {
         let ramp_frames = self.gain_ramp_frames;
         let read = if self.fade.is_some() && self.fading.is_some() {
             self.process_fade(data)
+        } else if self.overlay.is_some() && self.fading.is_some() {
+            self.process_overlay(data)
         } else {
             let mut read = self
                 .active
@@ -267,14 +287,19 @@ impl RtState {
                         let _ = self.retire_tx.send(Retired::Ring(old_fading.consumer));
                     }
                     self.fade = None;
+                    self.overlay = None;
                     match (fade, self.active.take()) {
-                        (Some((frames, generation)), Some(outgoing)) => {
+                        (Some(Blend::Crossfade { frames, generation }), Some(outgoing)) => {
                             self.fading = Some(outgoing);
                             self.fade = Some(Fade {
                                 total_frames: frames.max(1),
                                 progress_frames: 0,
                                 generation,
                             });
+                        }
+                        (Some(Blend::Overlay { start, generation }), Some(outgoing)) => {
+                            self.fading = Some(outgoing);
+                            self.overlay = Some(Overlay { start, generation });
                         }
                         (_, old_active) => {
                             if let Some(old_active) = old_active {
@@ -312,6 +337,7 @@ impl RtState {
                         let _ = self.retire_tx.send(Retired::Ring(active.consumer));
                     }
                     self.fade = None;
+                    self.overlay = None;
                 }
                 RtCmd::SetEqualizer(settings) => self.eq.set_settings(settings),
                 RtCmd::SetChannelMode(mode) => self.channel_mode = mode,
@@ -412,6 +438,104 @@ impl RtState {
 
         written
     }
+}
+
+impl RtState {
+    /// A planned mix: the outgoing session alone up to the mix start, then
+    /// both summed from that very sample, even mid-block. An outgoing session
+    /// that drains before the start lets the incoming one in on the next
+    /// sample instead of leaving a gap.
+    fn process_overlay(&mut self, data: &mut [f32]) -> usize {
+        let channels = self.channels;
+        let ramp_frames = self.gain_ramp_frames;
+        let (Some(overlay), Some(outgoing)) = (self.overlay.as_ref(), self.fading.as_mut()) else {
+            return 0;
+        };
+
+        let played = outgoing.played.load(Ordering::Relaxed);
+        let held = overlay.start.target().saturating_sub(played);
+        let held = held.min(data.len() as u64) as usize;
+        let written = read_plain(outgoing, &mut data[..held], channels, ramp_frames);
+        if written < held && !drained(outgoing) {
+            return written;
+        }
+
+        let written = written + self.sum_overlay(&mut data[written..]);
+        self.retire_overlay();
+        written
+    }
+
+    /// Outgoing plus incoming into `data`, chunked by scratch capacity.
+    fn sum_overlay(&mut self, data: &mut [f32]) -> usize {
+        let channels = self.channels;
+        let ramp_frames = self.gain_ramp_frames;
+        let chunk_capacity = SCRATCH_FRAMES * channels;
+        let mut written = 0;
+
+        while written < data.len() {
+            let chunk_len = (data.len() - written).min(chunk_capacity);
+            let outgoing = &mut self.scratch_fading[..chunk_len];
+            let incoming = &mut self.scratch_active[..chunk_len];
+            outgoing.fill(0.0);
+            incoming.fill(0.0);
+
+            let outgoing_read = self
+                .fading
+                .as_mut()
+                .map_or(0, |s| read_plain(s, outgoing, channels, ramp_frames));
+            let incoming_read = self
+                .active
+                .as_mut()
+                .map_or(0, |s| read_session(s, incoming, channels, ramp_frames));
+            let read = outgoing_read.max(incoming_read);
+            if read == 0 {
+                break;
+            }
+
+            let chunk = &mut data[written..written + read];
+            for ((out, a), b) in chunk.iter_mut().zip(outgoing.iter()).zip(incoming.iter()) {
+                *out = a + b;
+            }
+            written += read;
+            if read < chunk_len {
+                break;
+            }
+        }
+        written
+    }
+
+    /// The outgoing session played its last sample: the mix is over.
+    fn retire_overlay(&mut self) {
+        if !self.fading.as_ref().is_some_and(drained) {
+            return;
+        }
+        let (Some(overlay), Some(fading)) = (self.overlay.take(), self.fading.take()) else {
+            return;
+        };
+        let _ = self
+            .retire_tx
+            .send(Retired::FadeComplete(fading.consumer, overlay.generation));
+    }
+}
+
+/// The worker's end flag is read before the ring, so samples written before
+/// it are never mistaken for the end.
+fn drained(session: &RtSession) -> bool {
+    session.eof.load(Ordering::Acquire) && session.consumer.is_empty()
+}
+
+/// Reads a session that does not drive silence detection: the outgoing side
+/// of a blend.
+fn read_plain(
+    session: &mut RtSession,
+    out: &mut [f32],
+    channels: usize,
+    ramp_frames: f32,
+) -> usize {
+    let read = read_into(&mut session.consumer, out);
+    session.played.fetch_add(read as u64, Ordering::Relaxed);
+    apply_session_gain(session, &mut out[..read], channels, ramp_frames);
+    read
 }
 
 /// Extends or resets the session's run of silent samples. A block counts as
@@ -570,9 +694,116 @@ mod tests {
     use config::{ChannelMode, EqualizerSettings};
 
     use super::{
-        AudioMeter, GainRamp, Retired, RtCmd, RtSession, RtState, apply_gain, equal_power,
+        AudioMeter, Blend, GainRamp, Retired, RtCmd, RtSession, RtState, apply_gain, equal_power,
         soft_limit,
     };
+    use crate::engine::mix::MixStart;
+
+    fn unity_state() -> (mpsc::Sender<RtCmd>, mpsc::Receiver<Retired>, RtState) {
+        let (cmd_tx, cmd_rx) = mpsc::channel();
+        let (retire_tx, retire_rx) = mpsc::channel();
+        let state = RtState::new(
+            cmd_rx,
+            retire_tx,
+            Arc::new(AtomicU32::new(1.0_f32.to_bits())),
+            Arc::new(AtomicBool::new(false)),
+            2,
+            80,
+            EqualizerSettings::default(),
+            ChannelMode::Stereo,
+            AudioMeter::new(),
+        );
+        (cmd_tx, retire_rx, state)
+    }
+
+    /// A finished ring holding `len` copies of `value`.
+    fn filled(value: f32, len: usize) -> RtSession {
+        let (mut producer, consumer) = rtrb::RingBuffer::new(len);
+        for _ in 0..len {
+            producer.push(value).unwrap();
+        }
+        RtSession {
+            consumer,
+            played: Arc::new(AtomicU64::new(0)),
+            gain: Arc::new(AtomicU32::new(1.0_f32.to_bits())),
+            applied_gain: GainRamp::new(1.0),
+            eof: Arc::new(AtomicBool::new(true)),
+            starved: Arc::new(AtomicBool::new(false)),
+            quiet: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    fn overlay(cmd_tx: &mpsc::Sender<RtCmd>, outgoing: RtSession, incoming: RtSession) -> MixStart {
+        let start = MixStart::pending();
+        cmd_tx
+            .send(RtCmd::Swap {
+                session: outgoing,
+                fade: None,
+            })
+            .unwrap();
+        cmd_tx
+            .send(RtCmd::Swap {
+                session: incoming,
+                fade: Some(Blend::Overlay {
+                    start: start.clone(),
+                    generation: 7,
+                }),
+            })
+            .unwrap();
+        start
+    }
+
+    #[test]
+    fn an_overlay_starts_the_incoming_deck_mid_block_on_the_mix_start() {
+        let (cmd_tx, retire_rx, mut state) = unity_state();
+        let start = overlay(&cmd_tx, filled(1.0, 8), filled(0.5, 8));
+        start.set(4);
+
+        let mut samples = [0.0; 16];
+        state.process(&mut samples);
+
+        assert_eq!(
+            samples,
+            [
+                1.0, 1.0, 1.0, 1.0, 1.5, 1.5, 1.5, 1.5, 0.5, 0.5, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0,
+            ]
+        );
+        assert!(matches!(
+            retire_rx.try_recv(),
+            Ok(Retired::FadeComplete(_, 7))
+        ));
+    }
+
+    #[test]
+    fn an_overlay_holds_the_incoming_deck_while_the_start_is_pending() {
+        let (cmd_tx, _retire_rx, mut state) = unity_state();
+        let outgoing = filled(1.0, 16);
+        outgoing.eof.store(false, Ordering::Relaxed);
+        let incoming = filled(0.5, 8);
+        let incoming_played = incoming.played.clone();
+        overlay(&cmd_tx, outgoing, incoming);
+
+        let mut samples = [0.0; 8];
+        state.process(&mut samples);
+
+        assert_eq!(samples, [1.0; 8]);
+        assert_eq!(incoming_played.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn an_outgoing_deck_that_ends_early_lets_the_incoming_one_in() {
+        let (cmd_tx, retire_rx, mut state) = unity_state();
+        overlay(&cmd_tx, filled(1.0, 4), filled(0.5, 4));
+
+        let mut samples = [0.0; 10];
+        state.process(&mut samples);
+
+        assert_eq!(samples, [1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.5, 0.0, 0.0]);
+        assert!(matches!(
+            retire_rx.try_recv(),
+            Ok(Retired::FadeComplete(_, 7))
+        ));
+    }
 
     #[test]
     fn gapless_switch_preserves_each_tracks_gain_ramp() {
@@ -765,7 +996,10 @@ mod tests {
         cmd_tx
             .send(RtCmd::Swap {
                 session: loud(),
-                fade: Some((FRAMES as u64, 1)),
+                fade: Some(Blend::Crossfade {
+                    frames: FRAMES as u64,
+                    generation: 1,
+                }),
             })
             .unwrap();
 

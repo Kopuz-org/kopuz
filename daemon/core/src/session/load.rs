@@ -352,6 +352,7 @@ impl Session {
             start_at: prepared.start_at,
             album_context: self.album_context_for_token(prepared.token),
             service_replay_gain,
+            mix: None,
             reply: Some(reply_tx),
         });
         let token = prepared.token;
