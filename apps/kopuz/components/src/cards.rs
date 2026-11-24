@@ -4,6 +4,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use api::{AlbumInfo, ArtistInfo, ArtworkRef, CatalogItemKind, PlaylistInfo};
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -297,8 +298,10 @@ impl RenderOnce for Tile {
                     .when(self.round, |line| line.justify_center())
                     .child(
                         div()
+                            .id(SharedString::from(format!("{id}-title")))
                             .min_w_0()
                             .truncate()
+                            .tooltip(tip(self.title.clone()))
                             .when(self.round, |line| line.text_center())
                             .map(|line| match framed {
                                 true => line.font_weight(FontWeight::MEDIUM),
@@ -314,8 +317,10 @@ impl RenderOnce for Tile {
             .when_some(self.subtitle, |lines, subtitle| {
                 lines.child(
                     div()
+                        .id(SharedString::from(format!("{id}-subtitle")))
                         .w_full()
                         .truncate()
+                        .tooltip(tip(subtitle.clone()))
                         .text_sm()
                         .when(!framed, |line| line.font_weight(FontWeight::SEMIBOLD))
                         .when(self.round, |line| line.text_center())
@@ -726,4 +731,9 @@ pub fn playlist_tile(playlist: &PlaylistInfo) -> Tile {
 /// The wrapping grid every tile page lays its tiles out in.
 pub fn tile_grid() -> gpui_kit::Div {
     div().flex().flex_wrap().gap_6()
+}
+
+/// The full text of a line the card's width cuts short.
+fn tip(text: SharedString) -> impl Fn(&mut Window, &mut App) -> gpui_kit::AnyView + 'static {
+    move |window, cx| Tooltip::new(text.clone()).build(window, cx)
 }
