@@ -93,8 +93,6 @@ pub enum ErrorReason {
     SourceNameRequired,
     /// A folder source was given no folder at all.
     SourceFolderRequired,
-    /// A Spotify source was given no client id.
-    SpotifyClientIdRequired,
     /// An Apple Music source was given no storefront.
     AppleMusicStorefrontRequired,
     /// An Apple Music source signing in by token was given none.
@@ -110,7 +108,7 @@ pub enum ErrorReason {
 }
 
 impl ErrorReason {
-    pub const ALL: [ErrorReason; 24] = [
+    pub const ALL: [ErrorReason; 23] = [
         Self::SettingLocked,
         Self::ConnectNotOffered,
         Self::ApiKeyMissing,
@@ -127,7 +125,6 @@ impl ErrorReason {
         Self::EmptySourceFolder,
         Self::SourceNameRequired,
         Self::SourceFolderRequired,
-        Self::SpotifyClientIdRequired,
         Self::AppleMusicStorefrontRequired,
         Self::AppleMusicTokenRequired,
         Self::InvalidSmbUrl,
@@ -157,7 +154,6 @@ impl ErrorReason {
             Self::EmptySourceFolder => "error_empty_source_folder",
             Self::SourceNameRequired => "server_name_required",
             Self::SourceFolderRequired => "folder_required",
-            Self::SpotifyClientIdRequired => "spotify_client_id_required",
             Self::AppleMusicStorefrontRequired => "apple_music_storefront_required",
             Self::AppleMusicTokenRequired => "apple_music_token_required",
             Self::InvalidSmbUrl => "invalid_smb_url",

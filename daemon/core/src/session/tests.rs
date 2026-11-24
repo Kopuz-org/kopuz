@@ -155,9 +155,9 @@ fn test_track(key: &String) -> Track {
                 service: config::MusicService::YtMusic,
                 item_id: key.clone(),
             }
-        } else if let Some(item_id) = key.strip_prefix("spotify:") {
+        } else if let Some(item_id) = key.strip_prefix("plugin:") {
             reader::models::TrackId::Server {
-                service: config::MusicService::Spotify,
+                service: config::MusicService::Plugin,
                 item_id: item_id.to_string(),
             }
         } else if let Some(item_id) = key.strip_prefix("smb:") {
@@ -2386,7 +2386,7 @@ async fn radio_metadata_updates_the_displayed_track() {
 }
 
 /// Records what the daemon asked the integration to do, standing in for a
-/// Spotify Connect device.
+/// device the service plays on itself.
 #[derive(Default)]
 struct StubExternal {
     calls: Mutex<Vec<String>>,
@@ -2409,7 +2409,7 @@ impl crate::external::ExternalPlayer for StubExternal {
     }
 
     fn service(&self) -> config::MusicService {
-        config::MusicService::Spotify
+        config::MusicService::Plugin
     }
 
     async fn load(&self, track: &Track, _artwork: Option<String>) -> Result<(), ApiError> {
@@ -2446,7 +2446,7 @@ impl crate::external::ExternalPlayer for StubExternal {
 fn external_track(title: &str) -> Track {
     Track {
         id: reader::models::TrackId::Server {
-            service: config::MusicService::Spotify,
+            service: config::MusicService::Plugin,
             item_id: title.to_string(),
         },
         cover: None,
@@ -2787,7 +2787,7 @@ async fn playback_moves_between_the_engine_and_an_integration() {
 
     harness
         .api
-        .set_queue(replace(&["spotify:remote", "local.wav"]))
+        .set_queue(replace(&["plugin:remote", "local.wav"]))
         .await
         .expect("queue replaced");
 
@@ -2800,15 +2800,13 @@ async fn playback_moves_between_the_engine_and_an_integration() {
         Some("stub")
     );
     assert!(
-        stub.calls()
-            .iter()
-            .any(|call| call == "load:spotify:remote"),
+        stub.calls().iter().any(|call| call == "load:plugin:remote"),
         "the integration was asked to play the track, got {:?}",
         stub.calls()
     );
 
     harness.api.session.report_external(crate::ExternalReport {
-        track: Some(external_track("spotify:remote")),
+        track: Some(external_track("plugin:remote")),
         playing: true,
         completed: true,
         ..Default::default()
@@ -2824,8 +2822,8 @@ async fn playback_moves_between_the_engine_and_an_integration() {
     );
 }
 
-/// The Spotify tab's report carries no album id and sometimes no art, so the
-/// track kopuz queued keeps its library row while the tab is playing it.
+/// An integration's report can carry no album id and no art, so the track
+/// kopuz queued keeps its library row while the integration is playing it.
 #[tokio::test]
 async fn an_integration_playing_the_queued_track_shows_the_library_row() {
     let harness = harness(|_| {});
@@ -2833,7 +2831,7 @@ async fn an_integration_playing_the_queued_track_shows_the_library_row() {
     harness.api.session.set_external_sink(stub.clone());
     harness
         .api
-        .set_queue(replace(&["spotify:remote"]))
+        .set_queue(replace(&["plugin:remote"]))
         .await
         .expect("queue replaced");
     wait_state(&harness.api, "the integration took the track", |state| {
@@ -2853,8 +2851,8 @@ async fn an_integration_playing_the_queued_track_shows_the_library_row() {
     .await;
     assert_eq!(
         state.track.map(|track| track.title),
-        Some("spotify:remote".to_string()),
-        "the queued row, not the tab's bare copy"
+        Some("plugin:remote".to_string()),
+        "the queued row, not the integration's bare copy"
     );
 }
 

@@ -369,7 +369,6 @@ impl CoverRef {
             MusicService::YtMusic
             | MusicService::SoundCloud
             | MusicService::AppleMusic
-            | MusicService::Spotify
             | MusicService::Nextcloud
             | MusicService::Clippsly
             | MusicService::Smb
@@ -424,7 +423,6 @@ impl CoverRef {
             }
             MusicService::SoundCloud
             | MusicService::AppleMusic
-            | MusicService::Spotify
             | MusicService::Nextcloud
             | MusicService::Clippsly
             | MusicService::Smb

@@ -307,7 +307,6 @@ fn every_built_in_service_has_a_plugin() {
             service,
             MusicService::YtMusic
                 | MusicService::AppleMusic
-                | MusicService::Spotify
                 | MusicService::Nextcloud
                 | MusicService::Smb
                 | MusicService::AudioCd

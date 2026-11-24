@@ -60,7 +60,7 @@ pub(super) fn sample_state() -> api::PlayerState {
             },
         }),
         external: Some(api::ExternalPlayback {
-            kind: "spotify".into(),
+            kind: "plugin".into(),
             device: None,
         }),
         error: Some(api::ErrorBody {

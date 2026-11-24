@@ -55,7 +55,7 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
 ## Sources & covers (`daemon/server`, daemon-only)
 
 - Each backend implements the `MediaSource` trait (`source.rs`): Local, Jellyfin,
-  Subsonic/Custom, YtMusic, SoundCloud, Spotify, Apple Music, Nextcloud. The
+  Subsonic/Custom, YtMusic, SoundCloud, Apple Music, Nextcloud. The
   daemon owns them; a frontend asks `SourceApi` what the active one can do
   and never branches on a service name.
 - Cover resolution lives in `cover.rs` (`locate` / `track` / `from_path`);

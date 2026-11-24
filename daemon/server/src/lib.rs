@@ -20,7 +20,6 @@ pub mod smb;
 pub mod soundcloud;
 pub mod source;
 pub mod sources;
-pub mod spotify;
 pub mod stream;
 pub mod sync;
 pub mod youtube_download;

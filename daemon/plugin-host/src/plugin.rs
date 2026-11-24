@@ -229,11 +229,15 @@ impl Plugin {
         connection: wit::Connection,
         username: &str,
         password: &str,
+        browser: Option<crate::Opener>,
     ) -> Result<wit::AuthSession, wit::SourceError> {
         let mut instance = self
             .instantiate(&connection.url, &connection.folders)
             .await
             .map_err(PluginError::into_source_error)?;
+        if let Some(browser) = browser {
+            instance.store.data_mut().allow_sign_in(browser);
+        }
         let guest = self.guest_connection(&connection);
         let login = instance.bindings.kopuz_plugin_source().call_login(
             &mut instance.store,

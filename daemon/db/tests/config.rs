@@ -50,7 +50,6 @@ async fn webview_upgrade_removes_registered_sessions_and_keeps_cookie_sessions()
         ("yt-webview", "YtMusic", "SAPISID=keep; SID=session", true),
         ("sc-webview", "SoundCloud", "keep-sc-token", true),
         ("am-webview", "AppleMusic", "keep-am-token", true),
-        ("spotify", "Spotify", "access\nrefresh", true),
     ];
     for (id, service, token, _) in sessions {
         sqlx::query("INSERT INTO servers (id, name, url, service, access_token, user_id, auth_state) VALUES (?1, ?1, '', ?2, ?3, 'user', 'active')")
@@ -133,6 +132,56 @@ async fn webview_upgrade_after_server_split_keeps_current_credentials() {
             assert!(old.user_id.is_none());
         }
     }
+}
+
+#[tokio::test]
+async fn a_built_in_spotify_source_becomes_a_signed_out_plugin_source() {
+    let path = unique_db();
+    let db = db::init(&path).await.unwrap();
+    drop(db);
+    let pool = sqlx::SqlitePool::connect_with(SqliteConnectOptions::new().filename(&path))
+        .await
+        .unwrap();
+    sqlx::raw_sql(
+        "DELETE FROM _sqlx_migrations WHERE version = 20261124000000; \
+         INSERT INTO servers (id, name, url, service) VALUES ('sp', 'My Spotify', 'client-id', 'Spotify'), ('yt', 'Yt', '', 'YtMusic'); \
+         INSERT INTO server_credentials (server_id, access_token, user_id) VALUES ('sp', 'access\nrefresh', 'user'), ('yt', 'SAPISID=keep', 'yt-user'); \
+         INSERT INTO tracks (source, track_key, service) VALUES ('sp', 'spotify:track:1', 'Spotify'), ('yt', 'VID', 'YtMusic'); \
+         INSERT INTO queue_tracks (source, position, track_key, service, source_album_id, title, artist, album, khz, bitrate) \
+              VALUES ('sp', 0, 'spotify:track:1', 'Spotify', '', 't', 'a', 'b', 0, 0);",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let db = db::init(&path).await.unwrap();
+    let spotify = db.load_server("sp").await.unwrap().unwrap();
+    assert_eq!(spotify.service, MusicService::Plugin);
+    assert_eq!(spotify.plugin_service.as_deref(), Some("spotify"));
+    assert_eq!(spotify.name, "My Spotify");
+    assert!(spotify.access_token.is_none());
+    let yt = db.load_server("yt").await.unwrap().unwrap();
+    assert_eq!(yt.service, MusicService::YtMusic);
+    assert_eq!(yt.access_token.as_deref(), Some("SAPISID=keep"));
+    drop(db);
+
+    let mut connection = open(&path).await;
+    let left: i64 = sqlx::query_scalar(
+        "SELECT (SELECT count(*) FROM tracks WHERE service = 'Spotify') \
+              + (SELECT count(*) FROM queue_tracks WHERE service = 'Spotify')",
+    )
+    .fetch_one(&mut connection)
+    .await
+    .unwrap();
+    assert_eq!(left, 0);
+    let plugin_tracks: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM tracks WHERE source = 'sp' AND service = 'Plugin'",
+    )
+    .fetch_one(&mut connection)
+    .await
+    .unwrap();
+    assert_eq!(plugin_tracks, 1);
 }
 
 fn settings_path(db_path: &Path) -> PathBuf {

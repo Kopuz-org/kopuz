@@ -29,13 +29,13 @@ uuid = { workspace = true }
 md5 = { workspace = true }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
+aes = { workspace = true }
+ctr = { workspace = true }
 thiserror = { workspace = true }
 base64 = { workspace = true }
 httpdate = { workspace = true }
 hex = { workspace = true }
-webbrowser = { workspace = true }
 tokio = { workspace = true, features = ["fs", "process", "rt", "sync", "net", "io-util"] }
-tokio-tungstenite = { workspace = true }
 futures-util = { workspace = true }
 reader = { workspace = true }
 db = { workspace = true }

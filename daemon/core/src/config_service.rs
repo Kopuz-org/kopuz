@@ -301,7 +301,7 @@ fn file_stamps(settings_path: &Path) -> Vec<FileStamp> {
 mod tests {
     use super::*;
     #[cfg(unix)]
-    use config::{BackgroundEdit, LibraryEdit, SpotifyEdit};
+    use config::{BackgroundEdit, DownloadsEdit, LibraryEdit};
     use config::{PlaybackEdit, PlaybackKey, UiEdit, UiKey};
 
     async fn service(dir: &tempfile::TempDir) -> ConfigService {
@@ -337,7 +337,6 @@ mod tests {
             .await
             .expect("seed credential");
         let mut held = config::Settings::default();
-        held.spotify.spotify_browser = Some("brave".into());
         held.downloads.downloader_output_dir = "/downloads".into();
         let service = ConfigService::new(database, dir.path().join("settings.toml"), held.clone());
 
@@ -363,7 +362,7 @@ mod tests {
                 crossfade(6),
                 theme("other"),
                 SettingsEdit::Background(BackgroundEdit::CoverArtDarkening(99)),
-                SettingsEdit::Spotify(SpotifyEdit::SpotifyPreferActiveDevice(false)),
+                SettingsEdit::Downloads(DownloadsEdit::DownloaderOutputDir("/downloads".into())),
                 SettingsEdit::Library(LibraryEdit::LocalSources(Vec::new())),
                 SettingsEdit::Ui(UiEdit::ReduceAnimations(true)),
             ])
@@ -401,7 +400,7 @@ mod tests {
             held.background.cover_art_darkening,
             config::Background::default().cover_art_darkening
         );
-        assert!(held.spotify.spotify_prefer_active_device);
+        assert!(held.downloads.downloader_output_dir.is_empty());
         let reloaded = load_settings(&settings).expect("reload");
         assert_eq!(reloaded.playback.crossfade_seconds, 6);
     }

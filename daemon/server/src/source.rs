@@ -21,7 +21,6 @@ mod offline;
 mod plugin;
 mod search;
 mod smb;
-mod spotify;
 mod types;
 mod youtube_music;
 use apple_music::AppleMusicSource;
@@ -29,7 +28,6 @@ use local::LocalSource;
 use nextcloud::NextcloudSource;
 use offline::OfflineServerSource;
 use smb::SmbSource;
-use spotify::SpotifySource;
 pub use types::*;
 
 /// A plugin's error as a source error.
@@ -276,7 +274,7 @@ pub trait MediaSource: Send + Sync {
     }
 
     /// The track's canonical public web URL, when this source has shareable web
-    /// pages (e.g. a YouTube Music watch link or Spotify track link). `None` otherwise — callers fall
+    /// pages (e.g. a YouTube Music watch link). `None` otherwise; callers fall
     /// back to a metadata lookup (MusicBrainz). Sync: it's a pure id→URL mapping.
     fn web_url(&self, _track: &reader::Track) -> Option<String> {
         None

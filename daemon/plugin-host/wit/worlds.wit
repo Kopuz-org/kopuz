@@ -4,6 +4,9 @@ world source-plugin {
     import http;
     import log;
     import details;
+    import tcp;
+    import browser;
+    import decryption;
 
     export source;
 }

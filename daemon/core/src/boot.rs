@@ -338,11 +338,6 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let downloader =
         crate::UrlDownloadService::new(database.clone(), config_service.clone(), sources.clone());
     downloader.attach_rescan(library.clone(), jobs.clone());
-    // Spotify plays itself, so the session is told where to send a track it
-    // cannot decode. Nothing starts until one is actually queued.
-    let spotify = crate::SpotifySink::new(session.clone(), sources.clone());
-    session.set_external_sink(spotify.clone());
-    spotify.spawn_discovery();
     let api = Arc::new(
         LocalApi::new(session.clone())
             .with_library(library.clone())
@@ -358,7 +353,6 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .with_mutations(mutations)
             .with_sources(sources.clone())
             .with_downloader(downloader)
-            .with_spotify(spotify)
             .with_video(crate::VideoService::new(database.clone(), session.clone()))
             .with_integrations(crate::IntegrationService::new(
                 config_service_for_api,

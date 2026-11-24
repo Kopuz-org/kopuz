@@ -1,7 +1,7 @@
 //! Runs kopuz plugins: a `kopuz-plugin.toml` manifest plus a component built
 //! against `wit/` in this crate, or a native plugin whose code the host supplies. A
-//! component's only way out is the `http` import, checked against its
-//! manifest. This crate knows nothing of kopuz's models.
+//! component's only ways out are the `http` and `tcp` imports, checked against
+//! its manifest. This crate knows nothing of kopuz's models.
 
 pub mod folders;
 mod host;
@@ -11,6 +11,7 @@ mod plugin;
 mod registry;
 mod session;
 
+pub use host::{Decryption, Opener};
 pub use plugin::{Code, Origin, Plugin};
 pub use registry::{
     Bundled, COMPONENT_FILE, MANIFEST_FILE, Pending, Registry, host_set, plugin_dirs,

@@ -14,6 +14,7 @@ pub struct ProviderClient {
     plugin_service: Option<String>,
     server_url: String,
     device_id: String,
+    browser: Option<plugin_host::Opener>,
 }
 
 impl ProviderClient {
@@ -27,7 +28,14 @@ impl ProviderClient {
             plugin_service: None,
             server_url: server_url.into(),
             device_id: device_id.into(),
+            browser: None,
         }
+    }
+
+    /// Let a plugin whose service signs in through a browser open one.
+    pub fn with_browser(mut self, open: plugin_host::Opener) -> Self {
+        self.browser = Some(open);
+        self
     }
 
     /// Sign in to a plugin's own service rather than the built-in one.
@@ -60,7 +68,7 @@ impl ProviderClient {
                 folders: Vec::new(),
             };
             let session = plugin
-                .login(connection, username, password)
+                .login(connection, username, password, self.browser.clone())
                 .await
                 .map_err(crate::source::plugin_error)?;
             return Ok(AuthSession {
@@ -97,10 +105,7 @@ impl ProviderClient {
                     user_id: username.to_string(),
                 })
             }
-            MusicService::YtMusic
-            | MusicService::SoundCloud
-            | MusicService::AppleMusic
-            | MusicService::Spotify => {
+            MusicService::YtMusic | MusicService::SoundCloud | MusicService::AppleMusic => {
                 Err(SourceError::unsupported("username and password sign-in"))
             }
         }

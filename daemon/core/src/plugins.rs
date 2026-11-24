@@ -288,13 +288,8 @@ impl PluginService {
 
         let manifest_text = String::from_utf8(manifest_bytes)
             .map_err(|_| ApiError::invalid_input("the plugin's manifest is not text"))?;
-        let built_in: Vec<&str> = config::MusicService::ALL
-            .iter()
-            .map(|service| service.id())
-            .chain([config::MusicService::Plugin.id(), crate::services::FOLDERS])
-            .collect();
-        let manifest =
-            market::check_manifest(listing, &manifest_text, &built_in).map_err(market_error)?;
+        let manifest = market::check_manifest(listing, &manifest_text, &built_in_services())
+            .map_err(market_error)?;
 
         let candidate = plugin_host::Plugin::new(
             manifest,
@@ -515,6 +510,15 @@ fn listed(listing: &Listing) -> PluginInfo {
     }
 }
 
+/// The services kopuz serves itself, which no community plugin may claim.
+fn built_in_services() -> Vec<&'static str> {
+    config::MusicService::ALL
+        .iter()
+        .map(|service| service.id())
+        .chain([config::MusicService::Plugin.id(), crate::services::FOLDERS])
+        .collect()
+}
+
 /// Versions are free-form, so any other version or component counts; nothing
 /// says which of two is newer.
 fn differs(plugin: &plugin_host::Plugin, listing: &Listing) -> bool {
@@ -553,5 +557,47 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
 
         assert_ne!(before, after);
+    }
+}
+
+#[cfg(test)]
+mod market_tests {
+    use super::*;
+
+    #[test]
+    fn a_community_plugin_may_serve_spotify() {
+        const MANIFEST: &str = r#"
+            id = "spotify"
+            name = "Spotify"
+            version = "0.1.0"
+            api = "0.1"
+
+            [[service]]
+            id = "spotify"
+            name = "Spotify"
+        "#;
+        let listing = Listing {
+            id: "spotify".into(),
+            name: "Spotify".into(),
+            version: "0.1.0".into(),
+            api: "0.1".into(),
+            description: String::new(),
+            author: String::new(),
+            homepage: None,
+            services: vec!["spotify".into()],
+            network: vec![],
+            folders: plugin_host::manifest::FolderAccess::None,
+            manifest: market::Download {
+                url: "https://example.test/kopuz-plugin.toml".into(),
+                sha256: String::new(),
+            },
+            component: market::Download {
+                url: "https://example.test/plugin.wasm".into(),
+                sha256: String::new(),
+            },
+        };
+        assert!(!built_in_services().contains(&"spotify"));
+        assert!(market::check_listing(&listing, &server::plugins::official_ids()).is_ok());
+        assert!(market::check_manifest(&listing, MANIFEST, &built_in_services()).is_ok());
     }
 }

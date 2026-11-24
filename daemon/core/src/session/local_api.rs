@@ -22,7 +22,6 @@ pub struct LocalApi {
     pub(super) sources: Option<Arc<crate::sources::SourceService>>,
     pub(super) integrations: Option<Arc<crate::integrations::IntegrationService>>,
     pub(super) downloader: Option<Arc<crate::url_download::UrlDownloadService>>,
-    pub(super) spotify: Option<Arc<crate::spotify::SpotifySink>>,
     pub(super) video: Option<Arc<crate::video::VideoService>>,
     pub(super) plugins: Arc<crate::plugins::PluginService>,
 }
@@ -73,7 +72,6 @@ impl LocalApi {
             sources: None,
             integrations: None,
             downloader: None,
-            spotify: None,
             video: None,
             plugins: Arc::new(crate::plugins::PluginService::default()),
         }
@@ -243,18 +241,9 @@ impl LocalApi {
             .ok_or_else(|| ApiError::unsupported("this daemon runs without a downloader"))
     }
 
-    pub fn with_spotify(mut self, spotify: Arc<crate::spotify::SpotifySink>) -> Self {
-        self.spotify = Some(spotify);
-        self
-    }
-
-    /// The sink that plays for a source. Only Spotify plays itself today, so a
-    /// source that is not one is a client asking for something that is not
-    /// there -- which its capabilities already said.
-    async fn external_sink(
-        &self,
-        source_id: &str,
-    ) -> Result<&Arc<crate::spotify::SpotifySink>, ApiError> {
+    /// No source plays on devices of its own today. The capability says so,
+    /// and a client that asks anyway is told the same.
+    async fn external_sink(&self, source_id: &str) -> Result<(), ApiError> {
         let sources = self
             .sources
             .as_ref()
@@ -269,9 +258,9 @@ impl LocalApi {
                 "this source plays no devices of its own",
             ));
         }
-        self.spotify
-            .as_ref()
-            .ok_or_else(|| ApiError::unsupported("this daemon runs without Spotify playback"))
+        Err(ApiError::unsupported(
+            "this daemon runs without external playback",
+        ))
     }
 }
 
@@ -470,18 +459,15 @@ impl api::PlayerApi for LocalApi {
         &self,
         source_id: String,
     ) -> Result<Vec<api::ExternalDevice>, ApiError> {
-        self.external_sink(&source_id).await?.devices().await
+        self.external_sink(&source_id).await.map(|()| Vec::new())
     }
 
     async fn select_external_device(
         &self,
         source_id: String,
-        device_id: Option<String>,
+        _device_id: Option<String>,
     ) -> Result<(), ApiError> {
-        self.external_sink(&source_id)
-            .await?
-            .select_device(device_id)
-            .await
+        self.external_sink(&source_id).await
     }
 
     async fn output_devices(&self) -> Result<Vec<api::OutputDevice>, ApiError> {

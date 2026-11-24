@@ -1329,7 +1329,6 @@ async fn edit_config_touches_only_named_keys_across_transports() {
     let refused = vec![
         config::SettingsEdit::Playback(config::PlaybackEdit::CrossfadeSeconds(13)),
         config::SettingsEdit::Lyrics(config::LyricsEdit::LyricsDepthBlurStrength(5)),
-        config::SettingsEdit::Spotify(config::SpotifyEdit::SpotifyBrowser(Some("x".into()))),
         config::SettingsEdit::Downloads(config::DownloadsEdit::DownloaderOutputDir("/x".into())),
     ];
     let local = pair
@@ -3647,7 +3646,7 @@ async fn a_draft_is_checked_identically_across_transports() {
 
     let missing = api::SourceDraft {
         name: String::new(),
-        service: "spotify".into(),
+        service: "applemusic".into(),
         ..Default::default()
     };
     let local = pair
@@ -3666,8 +3665,8 @@ async fn a_draft_is_checked_identically_across_transports() {
         local
             .problems
             .iter()
-            .any(|problem| problem.field.as_deref() == Some("client_id")),
-        "a Spotify server needs its client id: {local:?}"
+            .any(|problem| problem.field.as_deref() == Some("storefront")),
+        "an Apple Music server needs a storefront: {local:?}"
     );
 
     let good = api::SourceDraft {

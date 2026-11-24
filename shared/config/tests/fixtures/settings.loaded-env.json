@@ -113,8 +113,6 @@
   "show_row_images": true,
   "show_source_toggle": true,
   "skip_explicit": false,
-  "spotify_browser": "brave",
-  "spotify_prefer_active_device": true,
   "stream_quality": "High",
   "sync_interval_minutes": 90,
   "theme": "gruvbox",

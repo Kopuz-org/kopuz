@@ -133,7 +133,6 @@ pub enum MusicService {
     YtMusic,
     AppleMusic,
     SoundCloud,
-    Spotify,
     Nextcloud,
     Clippsly,
     Smb,
@@ -151,7 +150,6 @@ impl MusicService {
         MusicService::YtMusic,
         MusicService::SoundCloud,
         MusicService::AppleMusic,
-        MusicService::Spotify,
         MusicService::Nextcloud,
         MusicService::Clippsly,
         MusicService::Smb,
@@ -168,7 +166,6 @@ impl MusicService {
             Self::YtMusic => "ytmusic",
             Self::AppleMusic => "applemusic",
             Self::SoundCloud => "soundcloud",
-            Self::Spotify => "spotify",
             Self::Nextcloud => "nextcloud",
             Self::Clippsly => "clippsly",
             Self::Smb => "smb",
@@ -189,7 +186,6 @@ impl MusicService {
             Self::YtMusic => "YouTube Music",
             Self::AppleMusic => "Apple Music",
             Self::SoundCloud => "SoundCloud",
-            Self::Spotify => "Spotify",
             Self::Nextcloud => "Nextcloud",
             Self::Clippsly => "Clippsly",
             Self::Smb => "SMB / NAS",
@@ -201,10 +197,7 @@ impl MusicService {
     /// Backends that authenticate via a browser sign-in window (OAuth/cookies)
     /// rather than a URL + username/password form.
     pub fn uses_browser_signin(&self) -> bool {
-        matches!(
-            self,
-            Self::YtMusic | Self::AppleMusic | Self::SoundCloud | Self::Spotify
-        )
+        matches!(self, Self::YtMusic | Self::AppleMusic | Self::SoundCloud)
     }
 }
 
@@ -358,18 +351,6 @@ impl Browser {
         Browser::LibreWolf,
         Browser::Zen,
         Browser::Floorp,
-    ];
-
-    /// The Chromium family, in the order an automatic choice should try it.
-    /// Spotify playback is limited to these: its Web Playback SDK has a
-    /// long-standing Firefox bug, so a Gecko browser is never offered there.
-    pub const CHROMIUM_FAMILY: &'static [Browser] = &[
-        Browser::Chrome,
-        Browser::Chromium,
-        Browser::Brave,
-        Browser::Edge,
-        Browser::Vivaldi,
-        Browser::Helium,
     ];
 
     /// The stable id used in URL routes, settings UI option values,

@@ -21,10 +21,7 @@ fn credential(service: MusicService, header: &str) -> Option<String> {
 }
 
 #[cfg(target_os = "android")]
-pub async fn sign_in(
-    service: MusicService,
-    client_id: String,
-) -> Result<(String, Option<String>), String> {
+pub async fn sign_in(service: MusicService) -> Result<(String, Option<String>), String> {
     static SIGNIN: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _lock = SIGNIN
         .try_lock()
@@ -36,17 +33,6 @@ pub async fn sign_in(
         }
     }
     let _close = CloseOnDrop;
-
-    if service == MusicService::Spotify {
-        let auth = tokio::select! {
-            result = server::spotify::auth::authorize_with(client_id, player::systemint::login_open) => result?,
-            error = wait_for_close() => return Err(error),
-        };
-        return Ok((
-            server::spotify::auth::pack_token(&auth.access_token, &auth.refresh_token),
-            Some(auth.user_id),
-        ));
-    }
 
     let (sign_in_url, cookie_url) = match service {
         MusicService::YtMusic => (
@@ -149,6 +135,5 @@ mod tests {
         );
         assert!(credential(MusicService::AppleMusic, "media-user-token=").is_none());
         assert!(credential(MusicService::SoundCloud, "not_oauth_token=other").is_none());
-        assert!(credential(MusicService::Spotify, header).is_none());
     }
 }

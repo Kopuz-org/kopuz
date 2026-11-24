@@ -9,8 +9,7 @@ use crate::{
     BackBehavior, Background, ChannelMode, CustomTheme, DeviceChangeBehavior, DownloaderOptions,
     Downloads, EqualizerSettings, FetchStrategy, Integrations, Library, Lyrics, OfflineQuality,
     Playback, PlayerBarPosition, RegistryEntry, ReplayGainSettings, SampleRateMode,
-    SavedLocalSource, Settings, SettingsLayout, Spotify, StreamQuality, System, TitlebarMode, Ui,
-    UiStyle,
+    SavedLocalSource, Settings, SettingsLayout, StreamQuality, System, TitlebarMode, Ui, UiStyle,
 };
 
 #[derive(Debug, Clone, PartialEq, EnumDiscriminants)]
@@ -132,14 +131,6 @@ pub enum DownloadsEdit {
 }
 
 #[derive(Debug, Clone, PartialEq, EnumDiscriminants)]
-#[strum_discriminants(name(SpotifyKey), derive(Hash, IntoStaticStr, EnumIter))]
-#[strum_discriminants(strum(serialize_all = "snake_case"))]
-pub enum SpotifyEdit {
-    SpotifyBrowser(Option<String>),
-    SpotifyPreferActiveDevice(bool),
-}
-
-#[derive(Debug, Clone, PartialEq, EnumDiscriminants)]
 #[strum_discriminants(name(SystemKey), derive(Hash, IntoStaticStr, EnumIter))]
 #[strum_discriminants(strum(serialize_all = "snake_case"))]
 pub enum SystemEdit {
@@ -160,7 +151,6 @@ pub enum SettingsEdit {
     Library(LibraryEdit),
     Integrations(IntegrationsEdit),
     Downloads(DownloadsEdit),
-    Spotify(SpotifyEdit),
     System(SystemEdit),
 }
 
@@ -174,7 +164,6 @@ pub enum SettingKey {
     Library(LibraryKey),
     Integrations(IntegrationsKey),
     Downloads(DownloadsKey),
-    Spotify(SpotifyKey),
     System(SystemKey),
 }
 
@@ -189,7 +178,6 @@ impl SettingKey {
             Self::Library(key) => key.into(),
             Self::Integrations(key) => key.into(),
             Self::Downloads(key) => key.into(),
-            Self::Spotify(key) => key.into(),
             Self::System(key) => key.into(),
         }
     }
@@ -203,7 +191,6 @@ impl SettingKey {
             SettingsEdit::Library(edit) => Self::Library(edit.into()),
             SettingsEdit::Integrations(edit) => Self::Integrations(edit.into()),
             SettingsEdit::Downloads(edit) => Self::Downloads(edit.into()),
-            SettingsEdit::Spotify(edit) => Self::Spotify(edit.into()),
             SettingsEdit::System(edit) => Self::System(edit.into()),
         }
     }
@@ -217,7 +204,6 @@ impl SettingKey {
             .chain(LibraryKey::iter().map(Self::Library))
             .chain(IntegrationsKey::iter().map(Self::Integrations))
             .chain(DownloadsKey::iter().map(Self::Downloads))
-            .chain(SpotifyKey::iter().map(Self::Spotify))
             .chain(SystemKey::iter().map(Self::System))
     }
 
@@ -249,7 +235,6 @@ impl SettingKey {
                 IntegrationsKey::RadioRegistries => None,
             },
             Self::Downloads(_) => Some("JobApi::set_downloader_settings"),
-            Self::Spotify(_) => Some("SourceApi::set_source_settings"),
             Self::Playback(_)
             | Self::Ui(_)
             | Self::Background(_)
@@ -305,7 +290,6 @@ impl Settings {
             SettingsEdit::Library(edit) => self.library.apply(edit),
             SettingsEdit::Integrations(edit) => self.integrations.apply(edit),
             SettingsEdit::Downloads(edit) => self.downloads.apply(edit),
-            SettingsEdit::Spotify(edit) => self.spotify.apply(edit),
             SettingsEdit::System(edit) => self.system.apply(edit),
         }
     }
@@ -323,7 +307,6 @@ impl Settings {
                 checked(&mut self.integrations, key, |s| s.apply(edit))
             }
             SettingsEdit::Downloads(edit) => checked(&mut self.downloads, key, |s| s.apply(edit)),
-            SettingsEdit::Spotify(edit) => checked(&mut self.spotify, key, |s| s.apply(edit)),
             SettingsEdit::System(edit) => checked(&mut self.system, key, |s| s.apply(edit)),
         }
     }
@@ -474,17 +457,6 @@ impl Downloads {
     }
 }
 
-impl Spotify {
-    fn apply(&mut self, edit: SpotifyEdit) {
-        match edit {
-            SpotifyEdit::SpotifyBrowser(value) => self.spotify_browser = value,
-            SpotifyEdit::SpotifyPreferActiveDevice(value) => {
-                self.spotify_prefer_active_device = value
-            }
-        }
-    }
-}
-
 impl System {
     fn apply(&mut self, edit: SystemEdit) {
         match edit {
@@ -602,8 +574,6 @@ pub fn edit_samples() -> Vec<SettingsEdit> {
             organize_by_album: false,
             overwrite_existing: true,
         })),
-        SettingsEdit::Spotify(SpotifyEdit::SpotifyBrowser(Some("brave".into()))),
-        SettingsEdit::Spotify(SpotifyEdit::SpotifyPreferActiveDevice(false)),
         SettingsEdit::System(SystemEdit::TracingEnabled(true)),
         SettingsEdit::System(SystemEdit::AutoCheckUpdates(false)),
         SettingsEdit::System(SystemEdit::MinimizeToTray(true)),
@@ -839,8 +809,6 @@ mod tests {
                 "discord_presence_listen_button",
                 "ytdlp_output_dir",
                 "ytdlp_options",
-                "spotify_browser",
-                "spotify_prefer_active_device",
             ]
         );
     }

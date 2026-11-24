@@ -1440,7 +1440,6 @@ fn service_str(s: config::MusicService) -> &'static str {
         config::MusicService::YtMusic => "YtMusic",
         config::MusicService::SoundCloud => "SoundCloud",
         config::MusicService::AppleMusic => "AppleMusic",
-        config::MusicService::Spotify => "Spotify",
         config::MusicService::Nextcloud => "Nextcloud",
         config::MusicService::Clippsly => "Clippsly",
         config::MusicService::Smb => "Smb",

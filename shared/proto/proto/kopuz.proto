@@ -1977,6 +1977,7 @@ message EditConfigRequest {
 
 // One change to one setting; a scalar's case keeps its Config field number.
 message ConfigEdit {
+  reserved 81, 82; // were the Spotify playback browser and Connect device preference
   oneof edit {
     float volume_scroll_step = 40;
     uint32 crossfade_seconds = 41;
@@ -2028,8 +2029,6 @@ message ConfigEdit {
     RadioRegistryOp radio_registries = 61;
     string downloader_output_dir = 76;
     DownloaderOptions downloader_options = 77;
-    OptionalString spotify_browser = 81;
-    bool spotify_prefer_active_device = 82;
     bool tracing_enabled = 33;
     bool auto_check_updates = 34;
     bool minimize_to_tray = 35;
@@ -2153,8 +2152,7 @@ enum SettingKey {
   SETTING_KEY_SYNC_INTERVAL_MINUTES = 78;
   SETTING_KEY_DISCORD_PRESENCE = 79;
   SETTING_KEY_DISCORD_PRESENCE_SOURCE = 80;
-  SETTING_KEY_SPOTIFY_BROWSER = 81;
-  SETTING_KEY_SPOTIFY_PREFER_ACTIVE_DEVICE = 82;
+  reserved 81, 82; // were the Spotify playback browser and Connect device preference
   SETTING_KEY_DOWNLOADER_OUTPUT_DIR = 76;
   SETTING_KEY_DOWNLOADER_OPTIONS = 77;
   SETTING_KEY_CONNECTIVITY_CHECK_URLS = 83;
@@ -2362,8 +2360,7 @@ message Config {
   optional bool discord_presence_source = 80;
   optional bool discord_presence_upload_cover = 87;
   optional bool discord_presence_listen_button = 88;
-  optional string spotify_browser = 81;
-  bool spotify_prefer_active_device = 82;
+  reserved 81, 82; // were the Spotify playback browser and Connect device preference
   string downloader_output_dir = 76;
   DownloaderOptions downloader_options = 77;
   // Absent from a peer that predates it, which must not read as an empty list (no check).
@@ -2611,7 +2608,7 @@ enum ErrorReason {
   ERROR_REASON_EMPTY_SOURCE_FOLDER = 14;
   ERROR_REASON_SOURCE_NAME_REQUIRED = 15;
   ERROR_REASON_SOURCE_FOLDER_REQUIRED = 16;
-  ERROR_REASON_SPOTIFY_CLIENT_ID_REQUIRED = 17;
+  reserved 17; // was a Spotify source saved without a client id
   ERROR_REASON_APPLE_MUSIC_STOREFRONT_REQUIRED = 18;
   ERROR_REASON_APPLE_MUSIC_TOKEN_REQUIRED = 19;
   ERROR_REASON_INVALID_SMB_URL = 20;
