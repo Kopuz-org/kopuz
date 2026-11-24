@@ -521,9 +521,14 @@ impl LyricsView {
                 this.lyrics = match answer {
                     Ok(view) => adopt(view),
                     Err(error) => {
-                        tracing::debug!(%error, "no lyrics for this track");
                         this.stranded = error.code == api::ErrorCode::DaemonGone;
-                        Lyrics::Plain(t("lyrics_not_found"))
+                        match error.code {
+                            api::ErrorCode::NotFound => Lyrics::Plain(t("lyrics_not_found")),
+                            _ => {
+                                tracing::warn!(%error, "lyrics could not be read");
+                                Lyrics::Plain(store::human(&error))
+                            }
+                        }
                     }
                 };
                 cx.notify();
