@@ -290,7 +290,7 @@ impl PlayerModel {
         self.command(PlayerCommand::Stop, cx);
     }
 
-    /// Send a transport command and, if it is refused, stop pretending it landed.
+    /// Send a command the model has already shown; a refusal reloads what the daemon really holds.
     fn command(&mut self, command: PlayerCommand, cx: &mut Context<Self>) {
         let call =
             Link::global(cx).call(move |api| async move { api.player_command(command).await });
@@ -298,6 +298,8 @@ impl PlayerModel {
             let Err(error) = call.await else { return };
             this.update(cx, |this, cx| {
                 this.optimistic_playing = None;
+                this.seeking = None;
+                this.refetch(cx);
                 crate::notify(cx);
             })
             .ok();
@@ -319,7 +321,7 @@ impl PlayerModel {
             playing: self.is_playing(),
         });
         crate::notify(cx);
-        send(PlayerCommand::Seek { position_ms }, cx);
+        self.command(PlayerCommand::Seek { position_ms }, cx);
     }
 
     /// `volume` is 0.0..=1.0; the daemon persists it, and setting a level unmutes.
@@ -330,7 +332,7 @@ impl PlayerModel {
     pub fn set_speed(&mut self, speed: f32, cx: &mut Context<Self>) {
         self.state.speed = speed.clamp(0.5, 2.0);
         crate::notify(cx);
-        send(
+        self.command(
             PlayerCommand::SetSpeed {
                 speed: self.state.speed,
             },
@@ -342,7 +344,7 @@ impl PlayerModel {
         self.state.volume = volume.clamp(0.0, 1.0);
         self.state.muted = false;
         crate::notify(cx);
-        send(
+        self.command(
             PlayerCommand::SetVolume {
                 volume: self.state.volume,
             },
@@ -359,7 +361,7 @@ impl PlayerModel {
         let muted = !self.state.muted;
         self.state.muted = muted;
         crate::notify(cx);
-        send(PlayerCommand::SetMuted { muted }, cx);
+        self.command(PlayerCommand::SetMuted { muted }, cx);
     }
 
     /// Nudge by `step`, for a wheel over a volume control.
@@ -370,7 +372,7 @@ impl PlayerModel {
     pub fn set_shuffle(&mut self, shuffle: bool, cx: &mut Context<Self>) {
         self.state.queue.shuffle = shuffle;
         crate::notify(cx);
-        send(
+        self.command(
             PlayerCommand::SetMode {
                 shuffle: Some(shuffle),
                 loop_mode: None,
@@ -383,7 +385,7 @@ impl PlayerModel {
         let loop_mode = self.state.queue.loop_mode.next();
         self.state.queue.loop_mode = loop_mode;
         crate::notify(cx);
-        send(
+        self.command(
             PlayerCommand::SetMode {
                 shuffle: None,
                 loop_mode: Some(loop_mode),
@@ -405,12 +407,6 @@ fn adopt_state(
     *revision = Some(incoming.rev);
     *current = incoming;
     true
-}
-
-fn send(command: PlayerCommand, cx: &App) {
-    Link::global(cx).fire(cx, "player command", move |api| async move {
-        api.player_command(command).await
-    });
 }
 
 /// Notifies a few times a second while playback runs; observe it (not [`PlayerModel`]) for anything that tracks the position.
