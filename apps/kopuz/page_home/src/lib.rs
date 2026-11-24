@@ -449,13 +449,20 @@ impl Render for Home {
             .into_iter()
             .filter(|row| row.shown || editing)
             .collect();
-        // The hero already offers the last session, so the resume banner would say it twice.
-        let featured = arranged.iter().any(|row| {
-            row.shown
-                && matches!(row.drawn, Some(Drawn::Shelf(index))
+        // A hero showing the album the queue was left in would offer that session twice; a hero
+        // for some other album leaves the banner the only way back to where playback stopped.
+        let resumed_album = shared
+            .resume
+            .as_ref()
+            .map(|resume| resume.track.album_id.as_str());
+        let featured = resumed_album.is_some()
+            && resumed_album == self.hero_album.as_deref()
+            && arranged.iter().any(|row| {
+                row.shown
+                    && matches!(row.drawn, Some(Drawn::Shelf(index))
                     if self.shelves[index].form == data::Form::Featured
                         && !self.shelves[index].tiles.is_empty())
-        });
+            });
         let banner = match featured {
             true => None,
             false => shared.resume.as_ref().map(resume::banner),
