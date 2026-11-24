@@ -28,6 +28,10 @@ fn sanitize_hex(value: &str) -> String {
     }
 }
 
+fn hex_digits(value: &str) -> usize {
+    value.trim().trim_start_matches('#').len()
+}
+
 /// `#abc` and `abcdef` both normalize to `#aabbcc` / `#abcdef`; anything else is not a colour yet.
 pub fn normalize_hex(value: &str) -> Option<String> {
     let sanitized = sanitize_hex(value);
@@ -93,13 +97,21 @@ impl ColorField {
                 &hex,
                 window,
                 |this, input, event: &InputEvent, window, cx| match event {
+                    // Three digits are a whole colour too, but while typing they are usually the start of six.
                     InputEvent::Change => {
+                        let typed = input.read(cx).value().to_string();
+                        if let Some(hex) = normalize_hex(&typed).filter(|_| hex_digits(&typed) == 6)
+                        {
+                            this.apply(hex, true, window, cx);
+                        }
+                    }
+                    InputEvent::Blur | InputEvent::PressEnter { .. } => {
                         let typed = input.read(cx).value().to_string();
                         if let Some(hex) = normalize_hex(&typed) {
                             this.apply(hex, true, window, cx);
                         }
+                        this.show_hex(window, cx);
                     }
-                    InputEvent::Blur => this.show_hex(window, cx),
                     _ => {}
                 },
             ),
