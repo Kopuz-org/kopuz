@@ -170,10 +170,17 @@ fn store(complete: bool, cx: &mut App) {
         key: KEY.into(),
         value: Some(complete.to_string()),
     };
-    Link::global(cx).fire(cx, "store setup_complete", move |api| async move {
+    let call = Link::global(cx).call(move |api| async move {
         api.set_frontend_prefs(FRONTEND.to_string(), vec![entry])
             .await
     });
+    // The guide is already down; a lost write would bring it back next start with no word why.
+    cx.spawn(async move |cx| {
+        if let Err(error) = call.await {
+            cx.update(|cx| crate::Notices::failed(&error, cx));
+        }
+    })
+    .detach();
 }
 
 #[cfg(test)]
