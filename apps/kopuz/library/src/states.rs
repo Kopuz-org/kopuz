@@ -120,6 +120,19 @@ pub fn no_favorites(active: &Active) -> EmptyState {
     {
         return EmptyState::new(t("source_anon_favorites")).icon(icons::HEART);
     }
+    // Signed out, the likes are on the service and only signing in brings them back.
+    if let Some(source) = active
+        .source
+        .clone()
+        .filter(|source| !source.authenticated && !source.anonymous)
+    {
+        return EmptyState::new(t("library_empty_signed_out"))
+            .icon(icons::SIGN_IN)
+            .detail(SharedString::from(source.name.clone()))
+            .action(t("library_sign_in"), move |_, window, cx| {
+                store::sign_in_again(&source, window, cx)
+            });
+    }
     EmptyState::new(t("no_favorites"))
         .icon(icons::HEART)
         .detail(t("heart_track_to_add"))
