@@ -90,9 +90,18 @@ impl Render for Artists {
         };
         let empty = self.entries.is_empty();
 
-        let body = match (settled, empty) {
-            (false, true) => Loading::new().into_any_element(),
-            (true, true) => EmptyState::new(t("artists"))
+        let failure = self.artists.read(cx).error().map(store::human);
+        let body = match (settled, empty, failure) {
+            (_, true, Some(reason)) => EmptyState::failed(
+                t("library_read_failed"),
+                cx.listener(|this, _, _, cx| {
+                    this.artists.update(cx, |query, cx| query.refresh(cx));
+                }),
+            )
+            .detail(reason)
+            .into_any_element(),
+            (false, true, None) => Loading::new().into_any_element(),
+            (true, true, None) => EmptyState::new(t("artists"))
                 .icon(icons::MIC)
                 .detail(t("no_tracks_found"))
                 .into_any_element(),
