@@ -214,7 +214,8 @@ fn heading(
     let sortable = sort.is_some_and(|sort| (sort.sortable)(spec.id));
     let active = sort.and_then(|sort| sort.active.filter(|(id, _)| *id == spec.id));
     let (hovered, pointer) = motion::hovered(key(spec, HOVER), window, cx);
-    let lit = active.is_some() || hovered;
+    let focus = crate::focus::handle(format!("track-header-{}", spec.id), window, cx);
+    let lit = active.is_some() || hovered || focus.is_focused(window);
     let ink = motion::color(
         key(spec, INK),
         match lit {
@@ -243,7 +244,16 @@ fn heading(
         .text_color(ink)
         .on_hover(motion::track(pointer))
         .when_some(on_sort, |cell, on_sort| {
+            // A tab stop too, so the table can be sorted without the pointer.
+            let keyed = on_sort.clone();
             cell.cursor_pointer()
+                .track_focus(&focus)
+                .tab_index(0)
+                .on_key_down(move |event: &gpui_kit::KeyDownEvent, window, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        keyed(spec.id, window, cx);
+                    }
+                })
                 .on_click(move |_, window, cx| on_sort(spec.id, window, cx))
         })
         .when_some(reorder, |cell, on_move| {
