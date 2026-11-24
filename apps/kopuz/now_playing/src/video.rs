@@ -130,7 +130,7 @@ impl NowPlaying {
         let chrome = Chrome::global(cx).read(cx);
         let shown = self.presentation == crate::Presentation::Sheet
             && sheet_shown(
-                chrome.is_sheet_open(),
+                self.detached || chrome.is_sheet_open(),
                 chrome.is_compact(),
                 Link::connection(cx).read(cx).is_connected(),
             );
