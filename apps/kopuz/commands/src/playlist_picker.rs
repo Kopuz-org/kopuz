@@ -7,6 +7,7 @@ use components::{PickItem, PickList, QuickCreate};
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::input::InputState;
 use gpui_kit::component::v_flex;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
     Window,
@@ -58,13 +59,21 @@ impl Render for PlaylistPicker {
                             .ok();
                     }),
             )
-            .child(PickList::new("playlist-list", items).raised(true).on_pick(
-                move |id, window, cx| {
-                    on_pick
-                        .update(cx, |this, cx| this.add(id.to_string(), window, cx))
-                        .ok();
-                },
-            ))
+            .map(|column| match items.is_empty() {
+                // Nothing to pick from: the name field above is the way in.
+                true => column.child(
+                    components::EmptyState::new(t("no_playlists_found"))
+                        .icon(icons::LIST)
+                        .compact(),
+                ),
+                false => column.child(PickList::new("playlist-list", items).raised(true).on_pick(
+                    move |id, window, cx| {
+                        on_pick
+                            .update(cx, |this, cx| this.add(id.to_string(), window, cx))
+                            .ok();
+                    },
+                )),
+            })
     }
 }
 
@@ -75,9 +84,12 @@ pub fn open(keys: Vec<String>, window: &mut Window, cx: &mut App) {
         name: cx.new(|cx| InputState::new(window, cx).placeholder(t("new_playlist_name"))),
     });
     let create = picker.clone();
+    let name = picker.read(cx).name.clone();
     FormDialog::new(t("add_to_playlist"))
         .closable(true)
         .footer(FormFooter::None)
         .on_submit(move |window, cx| create.update(cx, |this, cx| this.create(window, cx)))
         .open(picker, window, cx);
+    // Naming a new playlist is the one thing to type here, so the field is ready for it.
+    name.update(cx, |input, cx| input.focus(window, cx));
 }
