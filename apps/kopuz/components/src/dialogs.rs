@@ -37,6 +37,8 @@ pub enum ConfirmKind {
     Delete,
     /// Empty something that refills, such as a cache; the description should say how much goes.
     Clear,
+    /// Put settings back to their defaults; the description should say which.
+    Reset,
 }
 
 impl ConfirmKind {
@@ -45,6 +47,7 @@ impl ConfirmKind {
             ConfirmKind::Discard => t("discard_changes"),
             ConfirmKind::Delete => t("delete"),
             ConfirmKind::Clear => t("clear"),
+            ConfirmKind::Reset => t("reset_home"),
         }
     }
 }
