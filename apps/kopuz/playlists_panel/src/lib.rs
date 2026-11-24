@@ -119,6 +119,8 @@ pub struct PlaylistsPanel {
     shown: bool,
     merged: bool,
     pins: Vec<Pin>,
+    /// How many pinned rows lead the keyboard walk, before the playlists.
+    pinned_rows: usize,
     art: HashMap<(PinKind, String), ArtworkRef>,
     asked: HashSet<(PinKind, String)>,
     scroll: UniformListScrollHandle,
@@ -157,6 +159,7 @@ impl PlaylistsPanel {
             shown,
             merged: false,
             pins: Vec::new(),
+            pinned_rows: 0,
             art: HashMap::new(),
             asked: HashSet::new(),
             scroll: UniformListScrollHandle::new(),
@@ -232,8 +235,12 @@ impl PlaylistsPanel {
             })
             .collect();
         self.width = px(store::layout(cx).panel.width);
-        self.roving.set_len(self.rows.len());
         self.pins = store::layout(cx).panel.pins.clone();
+        self.pinned_rows = match store::layout(cx).panel.show_pins {
+            true => self.pins.len(),
+            false => 0,
+        };
+        self.roving.set_len(self.pinned_rows + self.rows.len());
     }
 
     fn artwork(&self, pin: &Pin, cx: &App) -> Option<ArtworkRef> {
@@ -284,7 +291,7 @@ impl PlaylistsPanel {
         }
     }
 
-    fn pinned(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn pinned(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         if self.pins.is_empty() || !store::layout(cx).panel.show_pins {
             return None;
         }
@@ -317,8 +324,12 @@ impl PlaylistsPanel {
             .subtitle(kind)
             .active(current == route)
             .collapsed(collapsed)
+            .focused(self.roving.is_active(index, window))
             .menu(pin.target())
-            .on_click(move |_, _, cx| Navigator::navigate(route.clone(), cx))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.roving.set_cursor(index);
+                Navigator::navigate(route.clone(), cx);
+            }))
             .drag(PinDrag {
                 kind: pin.kind,
                 id: pin.id.clone(),
@@ -363,11 +374,20 @@ impl PlaylistsPanel {
     fn key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
         match self.roving.walk(event) {
             Step::Moved(at) => {
-                self.scroll
-                    .scroll_to_item(at, gpui_kit::ScrollStrategy::Nearest);
+                if let Some(row) = at.checked_sub(self.pinned_rows) {
+                    self.scroll
+                        .scroll_to_item(row, gpui_kit::ScrollStrategy::Nearest);
+                }
                 cx.notify();
             }
-            Step::Activate(at) => self.open(at, cx),
+            Step::Activate(at) => match at.checked_sub(self.pinned_rows) {
+                Some(row) => self.open(row, cx),
+                None => {
+                    if let Some(pin) = self.pins.get(at) {
+                        Navigator::navigate(pin.route(), cx);
+                    }
+                }
+            },
             Step::Ignored => cx.propagate(),
         }
     }
@@ -416,10 +436,10 @@ impl PlaylistsPanel {
             .detail(row.detail.clone())
             .active(current == route)
             .collapsed(self.collapsed())
-            .focused(self.roving.is_active(index, window))
+            .focused(self.roving.is_active(self.pinned_rows + index, window))
             .menu(row.target())
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.roving.set_cursor(index);
+                this.roving.set_cursor(this.pinned_rows + index);
                 Navigator::navigate(route.clone(), cx);
             }))
             .drag(RowDrag {
@@ -462,7 +482,7 @@ impl Render for PlaylistsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _timing = profile::render("playlists-panel");
         components::scroll::smooth_list("playlists-panel-scroll", &self.scroll, window, cx);
-        let pinned = self.pinned(cx);
+        let pinned = self.pinned(window, cx);
         let count = self.rows.len();
         let collapsed = self.collapsed();
         let body = match count {
