@@ -17,3 +17,4 @@ components = { path = "../components" }
 gpui-kit = { workspace = true }
 fontdb = { version = "0.23", default-features = false }
 anyhow = { workspace = true }
+tracing = { workspace = true }
