@@ -92,6 +92,8 @@ pub struct NowPlaying {
     tab_drawn: Option<SheetTab>,
     tab_leaving: Option<SheetTab>,
     tab_fade: components::motion::Fade,
+    /// Why the last device read failed, so the popover does not pass it off as no devices.
+    devices_error: Option<gpui_kit::SharedString>,
     devices_open: bool,
     devices: Vec<api::ExternalDevice>,
     /// The cut asked for and the track it was asked on, shown pressed until the swap lands.
@@ -215,6 +217,7 @@ impl NowPlaying {
                 swap.follow(PlayerModel::global(cx).read(cx).track());
                 swap
             },
+            devices_error: None,
             devices_open: false,
             devices: Vec::new(),
             requested_version: None,

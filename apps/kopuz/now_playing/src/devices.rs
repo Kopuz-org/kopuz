@@ -6,8 +6,8 @@ use components::{DeviceRow, icons};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::{ActiveTheme as _, v_flex};
 use gpui_kit::{
-    Anchor, App, Context, Hsla, IntoElement, ParentElement as _, Styled, WeakEntity, Window, div,
-    px,
+    Anchor, App, Context, Hsla, IntoElement, ParentElement as _, SharedString, Styled, WeakEntity,
+    Window, div, px,
 };
 use store::{Chrome, Link, Notices, PlayerModel, SourcesModel};
 
@@ -35,6 +35,7 @@ impl NowPlaying {
             .external()
             .is_some_and(|external| external.device.is_some());
         let devices = self.devices.clone();
+        let failure = self.devices_error.clone();
         let owner = cx.entity().downgrade();
         let open = self.devices_open;
         let changed = cx.listener(|this, open: &bool, _, cx| this.set_devices_open(*open, cx));
@@ -51,7 +52,9 @@ impl NowPlaying {
                         .open(open)
                         .on_open_change(changed)
                         .trigger(button)
-                        .content(move |_, _, cx| device_list(devices.clone(), owner.clone(), cx))
+                        .content(move |_, _, cx| {
+                            device_list(devices.clone(), failure.clone(), owner.clone(), cx)
+                        })
                         .into_any_element()
                 }),
         )
@@ -72,6 +75,7 @@ impl NowPlaying {
         if device_source(cx).is_none() {
             self.devices_open = false;
             self.devices.clear();
+            self.devices_error = None;
         } else if self.devices_open {
             self.refresh_devices(cx);
         }
@@ -80,14 +84,24 @@ impl NowPlaying {
     fn refresh_devices(&mut self, cx: &mut Context<Self>) {
         let Some(source) = device_source(cx) else {
             self.devices.clear();
+            self.devices_error = None;
             return;
         };
         let call =
             Link::global(cx).call(move |api| async move { api.external_devices(source).await });
         self._devices_fetch = Some(cx.spawn(async move |this, cx| {
-            let devices = call.await.unwrap_or_default();
+            let result = call.await;
             this.update(cx, |this, cx| {
-                this.devices = devices;
+                match result {
+                    Ok(devices) => {
+                        this.devices = devices;
+                        this.devices_error = None;
+                    }
+                    Err(error) => {
+                        this.devices.clear();
+                        this.devices_error = Some(store::human(&error));
+                    }
+                }
                 cx.notify();
             })
             .ok();
@@ -112,6 +126,7 @@ impl NowPlaying {
 
 fn device_list(
     devices: Vec<ExternalDevice>,
+    failure: Option<SharedString>,
     owner: WeakEntity<NowPlaying>,
     cx: &mut App,
 ) -> impl IntoElement + use<> {
@@ -155,4 +170,12 @@ fn device_list(
                 .on_select(pick(None)),
         )
         .children(rows)
+        .children(failure.map(|reason| {
+            div()
+                .px_2()
+                .pt_1()
+                .text_xs()
+                .text_color(cx.theme().danger)
+                .child(reason)
+        }))
 }
