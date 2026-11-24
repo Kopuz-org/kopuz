@@ -126,6 +126,19 @@ pub fn keymap(cx: &mut App) {
 /// Every default binding, with `Layout::shortcuts` overriding a command's first keystroke.
 fn install(cx: &mut App) {
     let overrides = store::layout(cx).shortcuts.clone();
+    // A reinstall appends and the last binding wins, so every vacated key goes dead before
+    // any live binding, including a custom key the previous install bound.
+    let mut dead = Vec::new();
+    if let Some(Installed(previous)) = cx.try_global::<Installed>() {
+        for (id, keystroke) in previous {
+            let Some(first) = get(id).and_then(|command| command.keys.first()) else {
+                continue;
+            };
+            if overrides.get(id) != Some(keystroke) {
+                dead.extend(bind(keystroke, Box::new(NoAction), first.context));
+            }
+        }
+    }
     let mut bindings = Vec::new();
     for command in all() {
         let Some(action) = command.action else {
@@ -135,10 +148,9 @@ fn install(cx: &mut App) {
             continue;
         };
         match overrides.get(command.id) {
-            // The vacated default goes dead first: a reinstall appends, and the last binding wins.
             Some(keystroke) => {
                 for binding in command.keys.iter().filter(|b| b.keystroke != keystroke) {
-                    bindings.extend(bind(binding.keystroke, Box::new(NoAction), binding.context));
+                    dead.extend(bind(binding.keystroke, Box::new(NoAction), binding.context));
                 }
                 bindings.extend(bind(keystroke, action(), first.context));
             }
@@ -157,7 +169,8 @@ fn install(cx: &mut App) {
             bindings.extend(bind(keystroke, Box::new(NoAction), context));
         }
     }
-    cx.bind_keys(bindings);
+    dead.append(&mut bindings);
+    cx.bind_keys(dead);
     cx.set_global(Installed(overrides));
 }
 
