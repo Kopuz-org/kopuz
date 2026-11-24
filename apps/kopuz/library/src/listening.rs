@@ -20,6 +20,8 @@ const CHART_HEIGHT: f32 = 64.;
 pub struct ListeningPanel {
     days: Option<u32>,
     stats: Option<ListeningStats>,
+    /// Why the last read failed, shown while there are no stats to draw.
+    failed: Option<SharedString>,
     _load: Option<Task<()>>,
 }
 
@@ -28,6 +30,7 @@ impl ListeningPanel {
         let mut this = Self {
             days: Some(30),
             stats: None,
+            failed: None,
             _load: None,
         };
         this.load(cx);
@@ -48,8 +51,15 @@ impl ListeningPanel {
             let stats = call.await;
             this.update(cx, |this, cx| {
                 match stats {
-                    Ok(stats) => this.stats = Some(stats),
-                    Err(error) => tracing::debug!(%error, "no listening stats"),
+                    Ok(stats) => {
+                        this.stats = Some(stats);
+                        this.failed = None;
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "could not read the listening stats");
+                        this.stats = None;
+                        this.failed = Some(store::human(&error));
+                    }
                 }
                 cx.notify();
             })
@@ -196,6 +206,14 @@ impl Render for ListeningPanel {
             .border_color(style::white(style::BORDER_SOFT, cx))
             .bg(style::white(style::RAISED, cx))
             .child(ranges)
+            .children(self.failed.clone().map(|reason| {
+                components::EmptyState::failed(
+                    t("library_read_failed"),
+                    cx.listener(|this, _, _, cx| this.load(cx)),
+                )
+                .detail(reason)
+                .compact()
+            }))
             .children(body)
     }
 }
