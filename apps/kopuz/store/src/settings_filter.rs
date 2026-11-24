@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use gpui_kit::{App, Context, Entity, SharedString};
 
@@ -6,6 +6,8 @@ use gpui_kit::{App, Context, Entity, SharedString};
 pub struct SettingsFilter {
     query: Option<SharedString>,
     seen: RefCell<Vec<SharedString>>,
+    /// How many seen rows the last `nothing_matched` judged; rows noted later make it stale.
+    judged: Cell<usize>,
     highlight: Option<SharedString>,
 }
 
@@ -18,6 +20,7 @@ impl SettingsFilter {
         Self {
             query: None,
             seen: RefCell::new(Vec::new()),
+            judged: Cell::new(0),
             highlight: None,
         }
     }
@@ -67,7 +70,13 @@ impl SettingsFilter {
             return false;
         };
         let seen = self.seen.borrow();
+        self.judged.set(seen.len());
         !seen.is_empty() && !seen.iter().any(|held| hit(held, query))
+    }
+
+    /// Rows were noted after the last judgement, so the page that judged must look again.
+    pub fn is_misjudged(&self) -> bool {
+        self.query.is_some() && self.seen.borrow().len() != self.judged.get()
     }
 
     /// Mark one row by its title; the next jump, or typing in the filter, replaces it.
@@ -95,6 +104,7 @@ mod tests {
         SettingsFilter {
             query: Some(SharedString::from(query.to_string())),
             seen: RefCell::new(Vec::new()),
+            judged: Cell::new(0),
             highlight: None,
         }
     }
@@ -104,6 +114,7 @@ mod tests {
         let filter = SettingsFilter {
             query: None,
             seen: RefCell::new(Vec::new()),
+            judged: Cell::new(0),
             highlight: None,
         };
         assert!(filter.matches(&["Anything"]));
