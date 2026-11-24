@@ -124,7 +124,20 @@ pub async fn deciphered_url(base_js: &str, format: &Value) -> Result<String, Str
 /// doesn't read window.location (verified: decipher works without it).
 fn patched_core() -> String {
     CORE.replace("globalThis.location =", "globalThis.__kopuz_loc =")
+        .replace(PLAYER_FILTER, KEEP_INHERITS)
 }
+
+/// `modifyPlayer`'s filter, which drops every top-level call in the player,
+/// including its class inheritance calls such as `g.z(YD, g.Q)`. Players from
+/// November 2026 build a kept `new YD` that needs them, and fail with
+/// `a.addOnDisposeCallback is not a function`. Unfixed upstream as of 0.8.0
+/// (yt-dlp/ejs#79); drop this once a refreshed solver carries the fix.
+const PLAYER_FILTER: &str = r#"t.body=t.body.filter(e=>"ExpressionStatement"!==e.type||("AssignmentExpression"===e.expression.type||"Literal"===e.expression.type)),t.body}"#;
+
+/// The same filter, also keeping top-level calls to the inheritance helper,
+/// found by its shape (sets `X.prototype.constructor`) since its name changes
+/// between players. Ported from yt-dlp/ejs#80.
+const KEEP_INHERITS: &str = r#"t.body=function(){var k=function(x){return x&&"Identifier"===x.type?x.name:x&&"MemberExpression"===x.type&&!x.computed&&"Identifier"===x.property.type?k(x.object)+"."+x.property.name:null},h=null;for(var s of t.body){if("ExpressionStatement"!==s.type||"AssignmentExpression"!==s.expression.type||"="!==s.expression.operator||"FunctionExpression"!==s.expression.right.type||2!==s.expression.right.params.length)continue;if(s.expression.right.body.body.some(function(q){var l="ExpressionStatement"===q.type&&"AssignmentExpression"===q.expression.type&&q.expression.left;return l&&"MemberExpression"===l.type&&!l.computed&&"Identifier"===l.property.type&&"constructor"===l.property.name&&"MemberExpression"===l.object.type&&!l.object.computed&&"Identifier"===l.object.property.type&&"prototype"===l.object.property.name})&&(h=k(s.expression.left)))break}return t.body.filter(e=>"ExpressionStatement"!==e.type||("AssignmentExpression"===e.expression.type||null!==h&&"CallExpression"===e.expression.type&&k(e.expression.callee)===h||"Literal"===e.expression.type))}(),t.body}"#;
 
 /// The vendored solver itself (`lib` + `jsc`), with no player attached. A
 /// persistent engine runs this once at isolate boot; a subprocess engine gets
@@ -583,6 +596,15 @@ pub fn webview_channel() -> (Box<dyn JsEngine>, mpsc::UnboundedReceiver<SolveReq
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_inheritance_patch_still_finds_its_filter() {
+        // A refreshed solver that moved this line would silently drop the fix.
+        assert_eq!(CORE.matches(PLAYER_FILTER).count(), 1);
+        let core = patched_core();
+        assert!(!core.contains(PLAYER_FILTER));
+        assert_eq!(core.matches(KEEP_INHERITS).count(), 1);
+    }
 
     #[test]
     fn pct_roundtrip() {
