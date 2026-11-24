@@ -17,6 +17,9 @@ pub fn content_type_for(path: &Path) -> String {
     {
         Some("png") => "image/png",
         Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
+        Some("avif") => "image/avif",
+        Some("bmp") => "image/bmp",
         _ => "image/jpeg",
     }
     .to_string()
