@@ -7,6 +7,13 @@
 //! callback owns its own state and never takes a lock (see `rt.rs`).
 
 mod actor;
+// Wired into the worker and the callback by the planned-mix commit.
+#[allow(dead_code)]
+mod deck;
+#[allow(dead_code)]
+mod filter;
+#[allow(dead_code)]
+mod mix;
 mod rt;
 mod sink;
 #[cfg(test)]
@@ -15,6 +22,7 @@ mod worker;
 
 pub(crate) use actor::ActorMsg;
 pub use actor::EngineHandle;
+pub use mix::{DeckMix, IncomingMix, MixCurves, MixError, MixFilters};
 pub use sink::{
     AudioSink, CpalSink, DataCallback, DataCallbackFactory, NullSink, SinkConfig, SinkEvent,
 };
