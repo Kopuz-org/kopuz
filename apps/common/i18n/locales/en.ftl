@@ -389,6 +389,7 @@ yt_synced_total =
         [one] { $count } liked track synced
        *[other] { $count } liked tracks synced
     }
+refreshing_everything = Reading everything again
 refresh = Refresh
 discover = Discover
 discover_more_failed = Couldn't load more results

@@ -270,7 +270,9 @@ impl TopBar {
                     .tooltip(t("refresh"))
                     .on_click(|_, _, cx| {
                         store::Invalidation::global(cx)
-                            .update(cx, |tables, cx| tables.invalidate_all(cx))
+                            .update(cx, |tables, cx| tables.invalidate_all(cx));
+                        // Every page reads again in place, which on its own looks like nothing happened.
+                        store::Notices::info(t("refreshing_everything"), cx);
                     }),
             )
             .child(

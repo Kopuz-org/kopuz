@@ -363,6 +363,7 @@ yt_synced_total =
         [one] { $count } leuk gevonden nummer gesynchroniseerd
        *[other] { $count } leuk gevonden nummers gesynchroniseerd
     }
+refreshing_everything = Reading everything again
 refresh = Vernieuwen
 discover = Ontdekken
 discover_more_failed = Couldn't load more results

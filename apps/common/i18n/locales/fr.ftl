@@ -292,6 +292,7 @@ yt_synced_total =
         [one] { $count } piste aimée synchronisée
        *[other] { $count } pistes aimées synchronisées
     }
+refreshing_everything = Reading everything again
 refresh = Actualiser
 most_played_tracks = Votre tracks les plus écouter.
 no_more_songs = Plus aucun sons dans la liste.
