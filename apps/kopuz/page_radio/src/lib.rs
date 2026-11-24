@@ -213,6 +213,15 @@ impl Radio {
                     .collect()
             })
             .unwrap_or_default();
+        let stations = self.stations.read(cx);
+        let pinned_failure = stations.error().map(store::human);
+        // The pins are read with the stations, so a failed read cannot say whether there are any.
+        if let Some(reason) = pinned_failure.filter(|_| stations.value().is_none()) {
+            keys.push(SharedString::new_static("selected"));
+            lines.push(Line::SelectedHeading);
+            keys.push(SharedString::new_static("pinned-failed"));
+            lines.push(Line::PinnedFailed(reason));
+        }
         if !pinned.is_empty() {
             keys.push(SharedString::new_static("selected"));
             lines.push(Line::SelectedHeading);
@@ -324,6 +333,15 @@ impl Radio {
             )
             .detail(error)
             .into_any_element(),
+            Line::PinnedFailed(reason) => EmptyState::failed(
+                t("library_read_failed"),
+                cx.listener(|this, _, _, cx| {
+                    this.stations.update(cx, |query, cx| query.refresh(cx));
+                }),
+            )
+            .detail(reason)
+            .compact()
+            .into_any_element(),
             Line::Status(Status::Empty) => EmptyState::new(t("radio_no_stations_match"))
                 .icon(icons::RADIO)
                 .into_any_element(),
@@ -360,6 +378,8 @@ enum Line {
     Pinned(RadioStationInfo, bool),
     DirectoryHeading,
     Status(Status),
+    /// The pinned stations could not be read; they are still pinned, so the section says so.
+    PinnedFailed(SharedString),
     Station(RadioStationInfo),
 }
 
