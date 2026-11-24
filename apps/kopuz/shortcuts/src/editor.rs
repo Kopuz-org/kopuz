@@ -15,11 +15,13 @@ use gpui_kit::{
 struct Row {
     id: &'static str,
     label: SharedString,
-    group: Option<&'static str>,
+    group: &'static str,
 }
 
 pub(crate) struct Shortcuts {
     rows: Vec<Row>,
+    /// Indices into `rows` that pass the settings search, in order; the arrows walk only these.
+    shown: Vec<usize>,
     roving: Roving,
     recording: Option<usize>,
     refused: Option<SharedString>,
@@ -31,12 +33,11 @@ impl Shortcuts {
     pub(crate) fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut rows = Vec::new();
         for (title, entries) in crate::groups(cx) {
-            let mut heading = Some(title);
             for entry in entries {
                 rows.push(Row {
                     id: entry.id,
                     label: entry.label,
-                    group: heading.take(),
+                    group: title,
                 });
             }
         }
@@ -48,6 +49,7 @@ impl Shortcuts {
             Recorded::Cancelled => this.stop(cx),
         });
         Self {
+            shown: (0..rows.len()).collect(),
             rows,
             roving,
             recording: None,
@@ -113,24 +115,31 @@ impl Shortcuts {
         }
         match self.roving.walk(event) {
             Step::Moved(_) => cx.notify(),
-            Step::Activate(at) => self.record(at, cx),
+            Step::Activate(at) => {
+                if let Some(&index) = self.shown.get(at) {
+                    self.record(index, cx);
+                }
+            }
             Step::Ignored => cx.propagate(),
         }
     }
 
-    fn row(&self, index: usize, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn row(
+        &self,
+        position: usize,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let row = self.rows.get(index)?;
-        if !components::settings::matches(&[row.label.as_str()], cx) {
-            return None;
-        }
         Some(
             ShortcutRow::new(row.id, row.label.clone())
                 .keystroke(commands::keystroke_for(row.id, cx))
                 .recording(self.recording == Some(index))
                 .changed(store::layout(cx).shortcuts.contains_key(row.id))
-                .ringed(self.roving.is_active(index, window))
+                .ringed(self.roving.is_active(position, window))
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.roving.set_cursor(index);
+                    this.roving.set_cursor(position);
                     match this.recording == Some(index) {
                         true => this.stop(cx),
                         false => this.record(index, cx),
@@ -144,12 +153,18 @@ impl Shortcuts {
 
 impl Render for Shortcuts {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.shown = (0..self.rows.len())
+            .filter(|&index| components::settings::matches(&[self.rows[index].label.as_str()], cx))
+            .collect();
+        self.roving.set_len(self.shown.len());
         let mut blocks: Vec<AnyElement> = Vec::new();
-        for index in 0..self.rows.len() {
-            let Some(rendered) = self.row(index, window, cx) else {
+        let mut last_group = None;
+        for (position, &index) in self.shown.iter().enumerate() {
+            let Some(rendered) = self.row(position, index, window, cx) else {
                 continue;
             };
-            if let Some(title) = self.rows[index].group {
+            let title = self.rows[index].group;
+            if last_group.replace(title) != Some(title) {
                 blocks.push(
                     div()
                         .w_full()
