@@ -344,7 +344,7 @@ impl RenderOnce for TrackClock {
         let summary = self.side == Side::Summary;
         let scale = self.scale;
         let tint = self.tint.unwrap_or(match summary {
-            true => style::white(0.35, cx),
+            true => style::white(style::TEXT_MUTED, cx),
             false => style::slate_500(cx),
         });
         let clock = div()

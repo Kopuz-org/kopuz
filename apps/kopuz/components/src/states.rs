@@ -170,7 +170,7 @@ impl RenderOnce for EmptyState {
                     div()
                         .max_w(px(TEXT_WIDTH))
                         .when(!compact, |detail| detail.text_sm())
-                        .text_color(style::white(style::TEXT_DIM, cx))
+                        .text_color(style::white(style::TEXT_SUBTLE, cx))
                         .child(detail),
                 )
             })
