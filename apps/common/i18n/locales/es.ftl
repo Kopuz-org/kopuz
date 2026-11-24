@@ -168,6 +168,12 @@ loading_lyrics = Cargando letra...
 lyrics_not_found = Letra no encontrada
 instrumental_break = Instrumental
 no_previous_songs = No hay canciones anteriores
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count =
     { $count ->
         [one] { $count } pista

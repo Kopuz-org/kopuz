@@ -167,6 +167,12 @@ loading_lyrics = Завантажуємо текст...
 lyrics_not_found = Текст не знайдено
 instrumental_break = Інструментал
 no_previous_songs = Немає попередніх пісень
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count =
     { $count ->
         [one] { $count } трек

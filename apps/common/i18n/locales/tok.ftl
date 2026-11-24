@@ -167,6 +167,12 @@ loading_lyrics = mi kama jo e sitelen...
 lyrics_not_found = sitelen li lon ala
 instrumental_break = kalama musi taso
 no_previous_songs = kalama pini li lon ala
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count = kalama musi { $count }
 playlist_folder_count = kulupu kalama { $count }
 playlists_synced_count = kulupu kalama { $count } li sama

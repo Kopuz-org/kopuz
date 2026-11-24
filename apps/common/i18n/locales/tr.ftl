@@ -167,6 +167,12 @@ loading_lyrics = Sözler yükleniyor...
 lyrics_not_found = Sözler bulunamadı
 instrumental_break = Enstrümantal
 no_previous_songs = Önceki şarkı yok
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count = { $count } parça
 playlist_folder_count = { $count } çalma listesi
 playlists_synced_count = { $count } çalma listesi eşitlendi

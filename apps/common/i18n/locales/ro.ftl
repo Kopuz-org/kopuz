@@ -167,6 +167,12 @@ loading_lyrics = Se încarcă versurile...
 lyrics_not_found = Versurile nu au fost găsite
 instrumental_break = Instrumental
 no_previous_songs = Nu există piese anterioare
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count =
     { $count ->
         [one] { $count } piesă

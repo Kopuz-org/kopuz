@@ -167,6 +167,12 @@ loading_lyrics = 正在加载歌词...
 lyrics_not_found = 未找到歌词
 instrumental_break = 间奏
 no_previous_songs = 没有上一首歌曲
+playlist_tracks_added =
+    { $count ->
+        [one] Added { $count } track to { $playlist }
+       *[other] Added { $count } tracks to { $playlist }
+    }
+playlist_already_holds = { $playlist } already has these tracks
 playlist_track_count = { $count } 首曲目
 playlist_folder_count = { $count } 个播放列表
 playlists_synced_count = 已同步 { $count } 个播放列表
