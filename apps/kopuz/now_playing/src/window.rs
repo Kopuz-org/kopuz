@@ -5,10 +5,10 @@ use gpui_kit::component::{ActiveTheme as _, Root};
 #[cfg(target_os = "linux")]
 use gpui_kit::layer_shell::{Anchor, KeyboardInteractivity, Layer, LayerShellOptions};
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, Global,
-    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Pixels, Render, Size,
-    Styled, TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds, WindowControlArea,
-    WindowDecorations, WindowKind, WindowOptions, div, point, px, size,
+    AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, FocusHandle, Global,
+    InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, ParentElement as _, Pixels,
+    Render, Size, Styled, TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds,
+    WindowControlArea, WindowDecorations, WindowKind, WindowOptions, div, point, px, size,
 };
 use store::Chrome;
 
@@ -37,20 +37,35 @@ impl Global for MiniHandle {}
 pub struct MiniWindow {
     player: Entity<NowPlaying>,
     frameless: bool,
+    focus: FocusHandle,
 }
 
 impl MiniWindow {
     fn new(frameless: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus = cx.focus_handle();
+        focus.focus(window, cx);
         Self {
             player: cx.new(|cx| NowPlaying::mini(window, cx)),
             frameless,
+            focus,
         }
     }
 }
 
 impl Render for MiniWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The app-wide shortcuts are bound in the main window's context; wearing it here lets them
+        // reach their handlers from this window too.
         div()
+            .id("mini-window")
+            .track_focus(&self.focus)
+            .key_context("Shell")
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if event.keystroke.key == "space" && this.focus.is_focused(window) {
+                    store::PlayerModel::global(cx).update(cx, |player, cx| player.toggle(cx));
+                    cx.stop_propagation();
+                }
+            }))
             .relative()
             .size_full()
             .overflow_hidden()
