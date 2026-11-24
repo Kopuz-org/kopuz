@@ -219,7 +219,7 @@ impl MediaSource for YtSource {
     }
 
     async fn accounts(&self) -> Result<Vec<SourceAccount>, SourceError> {
-        let listed = self.client.accounts().await?;
+        let listed = self.client.accounts().await.map_err(session_error)?;
         let chosen = self.account.as_deref();
         Ok(listed
             .into_iter()

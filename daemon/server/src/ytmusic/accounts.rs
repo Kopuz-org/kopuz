@@ -38,6 +38,9 @@ pub async fn list(cookies: &str) -> Result<Vec<YtAccount>, String> {
 /// Items without a page id, other than the selected one, are other Google sessions
 /// in the cookie jar that a page id cannot reach, so they are dropped.
 pub fn parse(json: &Value) -> Result<Vec<YtAccount>, String> {
+    if innertube::answered_signed_out(json) {
+        return Err(innertube::SIGNED_OUT.to_string());
+    }
     let mut items = Vec::new();
     collect(&json["actions"], &mut items);
     if items.is_empty() {
@@ -163,6 +166,17 @@ mod tests {
         ]]});
         let names: Vec<String> = parse(&json).unwrap().into_iter().map(|a| a.name).collect();
         assert_eq!(names, ["Me", "Brand"]);
+    }
+
+    #[test]
+    fn a_signed_out_answer_is_an_expired_session() {
+        let json = json!({
+            "responseContext": { "serviceTrackingParams": [
+                { "service": "GFEEDBACK", "params": [{ "key": "logged_in", "value": "0" }] }
+            ]},
+            "actions": [],
+        });
+        assert_eq!(parse(&json).unwrap_err(), innertube::SIGNED_OUT);
     }
 
     #[test]

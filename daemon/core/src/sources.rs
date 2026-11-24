@@ -1501,10 +1501,7 @@ impl SourceService {
                 "this source has no accounts to switch between",
             ));
         }
-        let accounts = source
-            .accounts()
-            .await
-            .map_err(|error| ApiError::internal(error.to_string()))?;
+        let accounts = source.accounts().await.map_err(source_error)?;
         Ok(accounts
             .into_iter()
             .map(|account| api::SourceAccount {
