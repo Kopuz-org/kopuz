@@ -668,6 +668,7 @@ impl Library {
         cx: &mut Context<Self>,
     ) -> impl std::future::Future<Output = Result<Vec<SharedString>, api::ApiError>> + use<> {
         let filter = self.filters().track_filter(self.sort());
+        let folder = self.filters().folder.clone();
         let picked: Vec<String> = self.selection.picked().to_vec();
         let facet = self.filters().facet;
         let playlists: Vec<(String, Vec<String>)> = match facet {
@@ -687,9 +688,10 @@ impl Library {
         };
         let call = Link::global(cx).call(move |api| {
             let filter = filter.clone();
+            let folder = folder.clone();
             let picked = picked.clone();
             let playlists = playlists.clone();
-            async move { gather(api, facet, filter, picked, playlists).await }
+            async move { gather(api, facet, filter, folder, picked, playlists).await }
         });
         async move {
             call.await
@@ -703,12 +705,17 @@ async fn gather(
     api: std::sync::Arc<dyn api::KopuzApi>,
     facet: Facet,
     filter: TrackFilter,
+    folder: Option<String>,
     picked: Vec<String>,
     playlists: Vec<(String, Vec<String>)>,
 ) -> Result<Vec<String>, api::ApiError> {
     if picked.is_empty() {
-        // Select-all: the filtered listing entire, read once rather than held as keys.
-        let page = api.tracks(filter, store::all()).await?;
+        // Select-all: the listing entire, read once rather than held as keys; a folder chip is the
+        // listing the page draws.
+        let page = match folder {
+            Some(prefix) => api.folder_tracks(prefix, store::all()).await?,
+            None => api.tracks(filter, store::all()).await?,
+        };
         return Ok(page.items.into_iter().map(|track| track.key).collect());
     }
     let mut keys = Vec::new();
