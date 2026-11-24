@@ -536,7 +536,11 @@ impl LyricsView {
     fn seeker(cx: &Context<Self>) -> impl Fn(u64, &mut Window, &mut App) + Clone + 'static {
         let view = cx.entity().downgrade();
         move |ms, _, cx| {
-            PlayerModel::global(cx).update(cx, |player, cx| player.seek(ms, cx));
+            let player = PlayerModel::global(cx);
+            if player.read(cx).track().is_some_and(|track| !track.seekable) {
+                return;
+            }
+            player.update(cx, |player, cx| player.seek(ms, cx));
             view.update(cx, |this, cx| {
                 if !this.auto_sync {
                     this.auto_sync = true;
