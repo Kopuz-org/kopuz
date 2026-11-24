@@ -221,14 +221,41 @@ pub fn delete_playlist(target: &Target, cx: &mut App) {
     let Some(id) = playlist_id(target) else {
         return;
     };
-    actions::run(cx, move |api| async move { api.delete_playlist(id).await });
+    let sent = id.clone();
+    let call = Link::global(cx).call(move |api| async move { api.delete_playlist(sent).await });
+    leave_once_gone(
+        call,
+        move |route| matches!(route, Route::Playlist(at) if *at == id),
+        cx,
+    );
 }
 
 pub fn delete_folder(target: &Target, cx: &mut App) {
     let Some(id) = folder_id(target) else { return };
-    actions::run(cx, move |api| async move {
-        api.delete_playlist_folder(id).await
-    });
+    let sent = id.clone();
+    let call =
+        Link::global(cx).call(move |api| async move { api.delete_playlist_folder(sent).await });
+    leave_once_gone(
+        call,
+        move |route| matches!(route, Route::PlaylistFolder(at) if *at == id),
+        cx,
+    );
+}
+
+/// Once the delete lands, step back off the page that showed what is gone.
+fn leave_once_gone(call: link::Call<()>, showing: impl Fn(&Route) -> bool + 'static, cx: &mut App) {
+    cx.spawn(async move |cx| {
+        let result = call.await;
+        cx.update(|cx| match result {
+            Ok(()) => {
+                if showing(Navigator::global(cx).read(cx).current()) {
+                    Navigator::back_or(Route::Library, cx);
+                }
+            }
+            Err(error) => store::Notices::failed(&error, cx),
+        });
+    })
+    .detach();
 }
 
 pub fn rename_playlist(target: &Target, window: &mut Window, cx: &mut App) {
