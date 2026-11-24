@@ -1,10 +1,13 @@
 //! AudioMuse-AI picks, resolved against the active source's library.
 
+use std::sync::{Arc, Weak};
+
 use api::{ApiError, ErrorCode, ErrorReason};
-use server::audiomuse::{AudioMuse, AudioMuseError};
+use server::audiomuse::{AudioMuse, AudioMuseError, Score};
 use server::source::RadioPage;
 
 use super::{CatalogService, db_error};
+use crate::session::{MixAdvice, MixPlanner, MixRefusal};
 
 pub(super) mod sound;
 
@@ -79,6 +82,81 @@ impl CatalogService {
 
     async fn in_library(&self, ids: Vec<String>) -> Result<Vec<reader::Track>, ApiError> {
         in_library(&self.db, &self.session.sources().active, &ids).await
+    }
+}
+
+impl CatalogService {
+    /// The session's mix planner. Weak, because the catalog holds the session.
+    pub(crate) fn mix_planner(self: &Arc<Self>) -> Arc<dyn MixPlanner> {
+        Arc::new(AudioMuseMixes(Arc::downgrade(self)))
+    }
+}
+
+/// Smart-crossfade advice from AudioMuse-AI, with the login the catalog holds.
+struct AudioMuseMixes(Weak<CatalogService>);
+
+#[async_trait::async_trait]
+impl MixPlanner for AudioMuseMixes {
+    async fn advise(&self, from: &str, to: &str) -> Result<MixAdvice, MixRefusal> {
+        let client = self
+            .0
+            .upgrade()
+            .and_then(|catalog| catalog.audiomuse().ok())
+            .ok_or(MixRefusal::NotSetUp)?;
+
+        let (plan, from_score, to_score) = tokio::join!(
+            transition_plan(&client, from, to),
+            client.score(from),
+            client.score(to),
+        );
+        let tempos = tempo(from_score).zip(tempo(to_score));
+        Ok(MixAdvice {
+            plan: plan?,
+            tempos,
+        })
+    }
+}
+
+/// The transition AudioMuse-AI plans within the songs' fade points; none when a song has no points or no room.
+async fn transition_plan(
+    client: &AudioMuse,
+    from: &str,
+    to: &str,
+) -> Result<Option<server::audiomuse::TransitionPlan>, MixRefusal> {
+    let ids = [from.to_string(), to.to_string()];
+    let points = match client.smart_fade_points(&ids).await {
+        Err(AudioMuseError::NotOffered) => return Err(MixRefusal::NotOffered),
+        Err(error) => {
+            tracing::debug!(%error, "no fade points for the next mix");
+            return Ok(None);
+        }
+        Ok(points) => points,
+    };
+    let point = |id: &str| points.iter().find(|point| point.id == id);
+    let (Some(out), Some(r#in)) = (
+        point(from).and_then(|point| point.fade_out),
+        point(to).and_then(|point| point.fade_in),
+    ) else {
+        return Ok(None);
+    };
+
+    match client.transition(from, to, out, r#in).await {
+        Ok(plan) => Ok(Some(plan)),
+        Err(AudioMuseError::NotOffered) => Err(MixRefusal::NotOffered),
+        Err(error) => {
+            tracing::debug!(%error, "no transition for the next mix");
+            Ok(None)
+        }
+    }
+}
+
+fn tempo(score: Result<Option<Score>, AudioMuseError>) -> Option<f32> {
+    match score {
+        Ok(score) => score?.tempo,
+        Err(error) => {
+            tracing::debug!(%error, "no tempo for the next mix");
+            None
+        }
     }
 }
 

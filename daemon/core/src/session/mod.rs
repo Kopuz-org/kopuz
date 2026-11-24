@@ -12,7 +12,8 @@ use api::{
     QueueSummary, QueueWindow, SetQueueRequest,
 };
 use player::engine::{
-    Event as EngineEvent, LeadingSilence, Phase as EnginePhase, SourceFactory, Transition,
+    Event as EngineEvent, IncomingMix, LeadingSilence, Phase as EnginePhase, SourceFactory,
+    Transition,
 };
 use player::player::{LoadArgs, NowPlayingMeta, Player, PlayerInitError};
 use reader::Track;
@@ -25,6 +26,7 @@ use crate::playback::{NetworkStream, network_factory};
 use crate::queue_model::{NextOutcome, QueueModel};
 
 mod load;
+mod mix_plan;
 mod origin;
 mod radio_feed;
 mod reconciler;
@@ -34,6 +36,7 @@ mod versions;
 pub(crate) use stations::has_unrecorded_station;
 
 use load::{LoadFailure, LoadFinished, PreparedLoad};
+pub(crate) use mix_plan::{MixAdvice, MixPlanner, MixRefusal};
 use radio_feed::RadioFeed;
 
 /// Events buffered per subscriber before it is considered lagged.
@@ -293,6 +296,14 @@ enum SessionCmd {
         uid: String,
         counterpart: Box<reader::Counterpart>,
     },
+    /// Offered once at boot; consulted whenever the next track is known.
+    SetMixPlanner(Arc<dyn MixPlanner>),
+    /// What the planner advised for mixing `pair` while session `token` played.
+    MixAdvised {
+        token: u64,
+        pair: mix_plan::Pair,
+        result: Box<Result<MixAdvice, MixRefusal>>,
+    },
 }
 
 #[derive(Clone)]
@@ -404,6 +415,7 @@ impl SessionHandle {
             cmd_tx: cmd_tx.clone(),
             factory_override,
             counterparts: std::collections::HashMap::new(),
+            mixes: mix_plan::MixPlans::default(),
         };
         // A fresh start is not a clear, and must not wipe what another device saved before the boot adopt reads it.
         session.remote_loaded = Some(session.remote_mark());
@@ -513,6 +525,11 @@ impl SessionHandle {
     /// on every load, so a Spotify track in the queue reaches it.
     pub fn set_external_sink(&self, player: crate::external::SharedExternalPlayer) {
         let _ = self.cmd_tx.send(SessionCmd::SetExternalSink(player));
+    }
+
+    /// Offer the planner a smart crossfade asks how to mix into the next track.
+    pub(crate) fn set_mix_planner(&self, planner: Arc<dyn MixPlanner>) {
+        let _ = self.cmd_tx.send(SessionCmd::SetMixPlanner(planner));
     }
 
     /// Report what the attached integration is playing.
@@ -843,6 +860,7 @@ struct Session {
     factory_override: Option<FactoryOverride>,
     /// The source's answer per track, `None` included, so a requeued track is not asked twice.
     counterparts: std::collections::HashMap<String, Option<reader::Counterpart>>,
+    mixes: mix_plan::MixPlans,
 }
 
 impl Session {
@@ -939,7 +957,10 @@ impl Session {
                 settings,
                 changed,
                 revision,
-            } => self.apply_settings(*settings, changed, revision, state_tx),
+            } => {
+                self.mixes.wake();
+                self.apply_settings(*settings, changed, revision, state_tx);
+            }
             SessionCmd::SetSources { sources, adopted } => {
                 if sources.active != self.sources.active {
                     self.swap_queue(&sources, state_tx).await;
@@ -1063,6 +1084,12 @@ impl Session {
                     self.publish(state_tx, true);
                 }
             }
+            SessionCmd::SetMixPlanner(planner) => self.set_mix_planner(planner),
+            SessionCmd::MixAdvised {
+                token,
+                pair,
+                result,
+            } => self.handle_mix_advised(token, pair, *result, state_tx),
         }
     }
 
@@ -1583,6 +1610,7 @@ impl Session {
 
     /// Keep the song after this one in the offline cache ahead of time, in play order, so shuffle's.
     pub(super) fn prefetch_next(&mut self) {
+        self.prefetch_mix();
         let cache = self.offline.cache().clone();
         if !cache.enabled()
             || self.offline.offline_mode()
