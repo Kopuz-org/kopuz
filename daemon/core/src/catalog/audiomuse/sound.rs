@@ -367,6 +367,7 @@ mod tests {
         Score {
             tags: pairs(tags),
             moods: pairs(moods),
+            ..Default::default()
         }
     }
 

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use server::audiomuse::{AudioMuse, AudioMuseError, SimilarArtist};
+use server::audiomuse::{AudioMuse, AudioMuseError, SimilarArtist, TransitionKind};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 const TOKEN: &str = "test-token";
@@ -278,5 +278,95 @@ async fn a_sound_answer_of_another_shape_is_malformed() {
     assert!(matches!(
         client.score("a").await,
         Err(AudioMuseError::Malformed)
+    ));
+}
+
+const PLAN: &str = r#"{"type":"crossfade","start":10.0,"duration":2.0,"middle":1.0,"step":0.5,
+    "filters":{"high_hz":4000,"mid_hz":1000,"mid_q":0.7,"bass_hz":200},
+    "from":{"gain":1.0,"speed":[1,1],"volume":[1,0],"high_db":[0,0],"mid_db":[0,0],"bass_db":[0,0]},
+    "to":{"gain":1.0,"start":3.0,"speed":[1,1],"volume":[0,1],"high_db":[0,0],"mid_db":[0,0],"bass_db":[0,0],"highpass_hz":null,"continue_from":null}}"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fade_points_and_transitions_send_what_the_api_expects() {
+    let mut known = routes();
+    known.insert(
+        "/api/recording_search/smart_fade",
+        (
+            200,
+            r#"{"count":1,"results":[{"item_id":"a","fade_in_seconds":1.5,"fade_out_seconds":null,"duration_seconds":200.0}]}"#
+                .to_string(),
+        ),
+    );
+    known.insert("/api/recording_search/transition", (200, PLAN.to_string()));
+    let fake = FakeServer::start(known).await;
+    let client = AudioMuse::new(&fake.url, TOKEN).expect("client");
+
+    let fades = client
+        .smart_fade_points(&["a".to_string(), "b".to_string()])
+        .await
+        .expect("fades");
+    assert_eq!(fades[0].fade_in, Some(1.5));
+    assert_eq!(fades[0].fade_out, None);
+    let plan = client
+        .transition("a", "b c", 20.0, 8.5)
+        .await
+        .expect("plan");
+    assert_eq!(plan.kind, TransitionKind::Crossfade);
+    assert_eq!(plan.to.curves.volume, [0.0, 1.0]);
+
+    let requests = fake.requests();
+    assert!(
+        requests[0].starts_with("POST /api/recording_search/smart_fade HTTP/1.1"),
+        "{}",
+        requests[0]
+    );
+    assert!(
+        requests[0].contains(r#"{"item_ids":["a","b"],"keep_order":true}"#),
+        "{}",
+        requests[0]
+    );
+    assert_eq!(
+        requests[1].lines().next().unwrap_or_default(),
+        "GET /api/recording_search/transition?from_id=a&to_id=b+c&out=20.0&in=8.5 HTTP/1.1"
+    );
+    for request in &requests {
+        assert!(
+            request
+                .to_lowercase()
+                .contains(&format!("authorization: bearer {TOKEN}")),
+            "{request}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recording_search_statuses_map_to_their_errors() {
+    let ids = ["a".to_string()];
+    for status in [404, 503] {
+        let fake = FakeServer::start(HashMap::from([
+            ("/api/recording_search/smart_fade", (status, String::new())),
+            ("/api/recording_search/transition", (status, String::new())),
+        ]))
+        .await;
+        let client = AudioMuse::new(&fake.url, TOKEN).expect("client");
+        assert!(matches!(
+            client.smart_fade_points(&ids).await,
+            Err(AudioMuseError::NotOffered)
+        ));
+        assert!(matches!(
+            client.transition("a", "b", 1.0, 1.0).await,
+            Err(AudioMuseError::NotOffered)
+        ));
+    }
+
+    let fake = FakeServer::start(HashMap::from([(
+        "/api/recording_search/transition",
+        (400, r#"{"error":"no room"}"#.to_string()),
+    )]))
+    .await;
+    let client = AudioMuse::new(&fake.url, TOKEN).expect("client");
+    assert!(matches!(
+        client.transition("a", "b", 1.0, 1.0).await,
+        Err(AudioMuseError::NoTransition)
     ));
 }

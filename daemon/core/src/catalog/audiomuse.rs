@@ -25,7 +25,10 @@ fn audiomuse_error(error: AudioMuseError) -> ApiError {
         AudioMuseError::BadUrl => {
             ApiError::invalid_input(error.to_string()).because(ErrorReason::InvalidServerUrl)
         }
-        AudioMuseError::Status(_) | AudioMuseError::Malformed => {
+        AudioMuseError::Status(_)
+        | AudioMuseError::Malformed
+        | AudioMuseError::NotOffered
+        | AudioMuseError::NoTransition => {
             ApiError::internal(error.to_string()).because(ErrorReason::IntegrationFailed)
         }
     }
@@ -106,6 +109,8 @@ mod tests {
             AudioMuseError::BadUrl,
             AudioMuseError::Status(500),
             AudioMuseError::Malformed,
+            AudioMuseError::NotOffered,
+            AudioMuseError::NoTransition,
         ] {
             assert!(audiomuse_error(error).reason.is_some());
         }
