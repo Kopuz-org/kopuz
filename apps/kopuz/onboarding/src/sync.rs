@@ -213,6 +213,9 @@ impl FirstRun {
                     )
                     .child(div().text_sm().child(summary)),
             )
+            .when(!outcome.ok, |column| {
+                column.child(crate::ui::hint(t("onboarding_fill_failed"), cx))
+            })
             .when(empty, |column| {
                 column
                     .child(crate::ui::hint(t("onboarding_probe_empty"), cx))

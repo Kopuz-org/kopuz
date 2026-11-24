@@ -1134,6 +1134,7 @@ onboarding_privacy_title = Privacy
 onboarding_privacy_discord = Discord presence shows the song you're playing on your Discord profile.
 onboarding_privacy_updates = Update checks ask GitHub for the newest Kopuz release when the app starts.
 onboarding_privacy_watch_history = YouTube watch history adds the songs you play here to your YouTube history, which shapes its recommendations.
+onboarding_fill_failed = The library could not be filled. You can sync again from Settings, Sources.
 onboarding_ready_summary =
     { $tracks ->
         [one] { $tracks } track
