@@ -136,10 +136,12 @@ fn playlist_meta(service: &str, playlist: SubsonicPlaylist) -> PlaylistMeta {
 }
 
 /// `count` songs spread over the whole list, so a long playlist is not seeded by its opening alone.
-/// E.g. 10 songs, 3 seeds: indices 0, 3, 6.
+/// E.g. 10 songs, 3 seeds: indices 0, 3, 6; 4 songs, 3 seeds: 0, 1, 2.
 fn spread<T>(items: &[T], count: usize) -> Vec<&T> {
-    let step = items.len().div_ceil(count.max(1)).max(1);
-    items.iter().step_by(step).take(count).collect()
+    let seeds = count.min(items.len());
+    (0..seeds)
+        .map(|seed| &items[seed * items.len() / seeds])
+        .collect()
 }
 
 /// Each seed's neighbours interleaved by rank, without the playlist's own songs and without repeats.
@@ -541,6 +543,18 @@ impl Source for Subsonic {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spread_takes_as_many_seeds_as_it_can() {
+        let four = [0, 1, 2, 3];
+        let ten: Vec<usize> = (0..10).collect();
+
+        assert_eq!(spread(&four, 3), [&0, &1, &2]);
+        assert_eq!(spread(&ten, 3), [&0, &3, &6]);
+        assert_eq!(spread(&four[..2], 3), [&0, &1]);
+        assert!(spread(&four, 0).is_empty());
+        assert!(spread::<usize>(&[], 3).is_empty());
+    }
 
     fn song(id: &str, album_id: Option<&str>) -> SubsonicSong {
         serde_json::from_value(serde_json::json!({
