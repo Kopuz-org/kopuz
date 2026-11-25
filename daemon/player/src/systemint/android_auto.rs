@@ -1,7 +1,6 @@
 //! Android Auto's side of the JNI bridge. `KopuzBrowserService` asks for the
-//! rows of a browse screen, a play by media id or a voice search; the frontend
-//! registers the handler that answers from the library, since only it holds
-//! the API handle.
+//! rows of a browse screen, a play by media id or a voice search; the daemon
+//! core registers the handler that answers from the library.
 
 use jni::JNIEnv;
 use jni::objects::{JClass, JString};
@@ -56,21 +55,14 @@ pub fn set_car_handler(handler_fn: impl Fn(CarRequest) + Send + Sync + 'static) 
 
 /// False when nothing is registered yet.
 fn send(request: CarRequest) -> bool {
-    let sent = match handler().lock() {
-        Ok(guard) => match guard.as_ref() {
-            Some(handle) => {
-                handle(request);
-                true
-            }
-            None => false,
-        },
-        Err(_) => false,
-    };
-    if sent {
-        super::android::wake_tokio();
-        super::android::wake_run_loop();
+    let guard = handler().lock().unwrap_or_else(|e| e.into_inner());
+    match guard.as_ref() {
+        Some(handle) => {
+            handle(request);
+            true
+        }
+        None => false,
     }
-    sent
 }
 
 fn ask(make: impl FnOnce(Sender<Vec<BrowseItem>>) -> CarRequest) -> Option<Vec<BrowseItem>> {

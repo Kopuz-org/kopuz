@@ -165,7 +165,7 @@ pub fn set_tokio_waker(waker: impl Fn() + Send + Sync + 'static) {
     *guard = Some(Box::new(waker));
 }
 
-pub(super) fn wake_tokio() {
+fn wake_tokio() {
     if let Ok(guard) = get_tokio_waker().lock()
         && let Some(ref waker) = *guard
     {

@@ -3,8 +3,9 @@ package moe.kopuz.kopuz
 import android.media.MediaDescription
 import android.media.browse.MediaBrowser.MediaItem
 import android.os.Bundle
-import android.os.Process
 import android.service.media.MediaBrowserService
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * What Android Auto (and Android Automotive's media center) talks to: it lists
@@ -17,14 +18,23 @@ import android.service.media.MediaBrowserService
  */
 class KopuzBrowserService : MediaBrowserService() {
 
+    private lateinit var callers: CallerValidator
+
+    // Browsing waits on the library, never on the main thread; a pool rather
+    // than a thread per screen, since the car asks for several at once.
+    private val loader: ExecutorService = Executors.newCachedThreadPool { task ->
+        Thread(task, "kopuz-car-browse").apply { isDaemon = true }
+    }
+
     override fun onCreate() {
         super.onCreate()
+        callers = CallerValidator(this)
         MediaSessionHelper.init(this)
         MediaSessionHelper.token()?.let { sessionToken = it }
     }
 
     override fun onGetRoot(clientPackageName: String, clientUid: Int, rootHints: Bundle?): BrowserRoot? {
-        if (!isTrusted(clientPackageName, clientUid)) return null
+        if (!callers.isTrusted(clientPackageName, clientUid)) return null
         val extras = Bundle().apply {
             putInt(CONTENT_STYLE_BROWSABLE, CONTENT_STYLE_LIST)
             putInt(CONTENT_STYLE_PLAYABLE, CONTENT_STYLE_LIST)
@@ -33,11 +43,13 @@ class KopuzBrowserService : MediaBrowserService() {
     }
 
     override fun onLoadChildren(parentId: String, result: Result<MutableList<MediaItem>>) {
-        // The answer waits on the library, which must not block the main thread.
         result.detach()
-        Thread {
-            result.sendResult(load { nativeChildren(parentId) })
-        }.apply { isDaemon = true }.start()
+        loader.execute { result.sendResult(load { nativeChildren(parentId) }) }
+    }
+
+    override fun onDestroy() {
+        loader.shutdown()
+        super.onDestroy()
     }
 
     private fun load(fetch: () -> String?): MutableList<MediaItem> {
@@ -55,11 +67,6 @@ class KopuzBrowserService : MediaBrowserService() {
         return decode(encoded)
     }
 
-    private fun isTrusted(packageName: String, uid: Int): Boolean =
-        uid == Process.myUid() ||
-            uid == Process.SYSTEM_UID ||
-            packageName in TRUSTED_CALLERS
-
     companion object {
         private const val ROOT = "root"
 
@@ -71,14 +78,6 @@ class KopuzBrowserService : MediaBrowserService() {
 
         private const val FIELD_SEP = '\u001f'
         private const val RECORD_SEP = '\u001e'
-
-        /** Android Auto, Automotive's media center, and the assistant's voice search. */
-        private val TRUSTED_CALLERS = setOf(
-            "com.google.android.projection.gearhead",
-            "com.android.car.media",
-            "com.google.android.carassistant",
-            "com.google.android.googlequicksearchbox",
-        )
 
         /** Rows as encoded by `android_auto.rs`: id, title, subtitle, flags. */
         private fun decode(encoded: String): MutableList<MediaItem> {

@@ -367,6 +367,8 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             )),
     );
     api.watch_plugins();
+    #[cfg(target_os = "android")]
+    crate::android_auto::spawn(api.clone());
 
     Ok(Core {
         api,

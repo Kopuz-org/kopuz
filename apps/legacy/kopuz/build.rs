@@ -109,38 +109,65 @@ const MEDIA_ICONS: &[MediaIcon] = &[
     },
 ];
 
-/// `<service>` + `<receiver>` injected just inside `</application>`. The
-/// browser service is exported because Android Auto binds it from its own
-/// process; it checks who is calling in `onGetRoot`.
-const INSIDE_APPLICATION: &str = r#"        <service
+/// Entries injected just inside `</application>`, each with the text that
+/// shows it is already there. Checked one by one, so a manifest an older build
+/// patched still gains the entries added since. The browser service is
+/// exported because Android Auto binds it from its own process; it checks who
+/// is calling in `onGetRoot`.
+const INSIDE_APPLICATION: &[(&str, &str)] = &[
+    (
+        "moe.kopuz.kopuz.MusicService",
+        r#"        <service
             android:name="moe.kopuz.kopuz.MusicService"
             android:foregroundServiceType="mediaPlayback"
             android:stopWithTask="false"
             android:exported="false" />
-        <service
+"#,
+    ),
+    (
+        "moe.kopuz.kopuz.KopuzBrowserService",
+        r#"        <service
             android:name="moe.kopuz.kopuz.KopuzBrowserService"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
-        <meta-data
+"#,
+    ),
+    (
+        "com.google.android.gms.car.application",
+        r#"        <meta-data
             android:name="com.google.android.gms.car.application"
             android:resource="@xml/automotive_app_desc" />
-        <meta-data
+"#,
+    ),
+    (
+        "com.google.android.gms.car.notification.SmallIcon",
+        r#"        <meta-data
             android:name="com.google.android.gms.car.notification.SmallIcon"
             android:resource="@drawable/kopuz_ic_notification" />
-        <receiver
+"#,
+    ),
+    (
+        "moe.kopuz.kopuz.MediaReceiver",
+        r#"        <receiver
             android:name="moe.kopuz.kopuz.MediaReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="moe.kopuz.kopuz.ACTION_MEDIA" />
             </intent-filter>
         </receiver>
-        <activity
+"#,
+    ),
+    (
+        "moe.kopuz.kopuz.LoginActivity",
+        r#"        <activity
             android:name="moe.kopuz.kopuz.LoginActivity"
             android:exported="false" />
-"#;
+"#,
+    ),
+];
 
 /// Tells Android Auto this is a media app, which is what lists it in the car.
 const AUTOMOTIVE_APP_DESC: &str = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -767,12 +794,14 @@ fn patch_manifest(path: &Path) {
         content.replace_range(start..end, &activity);
     }
 
-    if !content.contains("MusicService") {
-        content = content.replacen(
-            "    </application>",
-            &format!("{INSIDE_APPLICATION}    </application>"),
-            1,
-        );
+    for (marker, entry) in INSIDE_APPLICATION {
+        if !content.contains(&format!("android:name=\"{marker}\"")) {
+            content = content.replacen(
+                "    </application>",
+                &format!("{entry}    </application>"),
+                1,
+            );
+        }
     }
 
     if content != original
