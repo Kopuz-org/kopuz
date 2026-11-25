@@ -1,0 +1,9 @@
+/// How to read a stream the service encrypts, told to the host while
+/// `resolve-stream` runs. A new import rather than a new field of
+/// `stream-info`, so plugins built before it still load.
+interface decryption {
+    /// The file at `url` is AES-128 in CTR mode with a big-endian counter
+    /// that starts at `iv`, and its first `skip` bytes, once decrypted, are
+    /// not audio. `key` and `iv` are 16 bytes each.
+    aes-ctr: func(url: string, key: list<u8>, iv: list<u8>, skip: u32);
+}

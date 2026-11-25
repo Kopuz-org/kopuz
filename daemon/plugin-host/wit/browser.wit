@@ -1,0 +1,17 @@
+/// A sign-in the person finishes in their own browser. Answers only while
+/// `login` runs, so nothing else a plugin does can open a page.
+interface browser {
+    variant sign-in-error {
+        /// No browser could be opened, or the call was made outside `login`.
+        unavailable(string),
+        denied(string),
+        timeout,
+        other(string),
+    }
+
+    /// Open `authorize-url`, which must be on one of the manifest's hosts,
+    /// and wait for the browser to be sent back to
+    /// `http://127.0.0.1:<port><path>`. Returns that request's path and
+    /// query, which carry what the service answered.
+    sign-in: func(authorize-url: string, port: u16, path: string) -> result<string, sign-in-error>;
+}

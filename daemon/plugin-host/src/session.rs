@@ -23,6 +23,9 @@ static RUNNING: Semaphore = Semaphore::const_new(MAX_RUNNING);
 
 const MAX_BIT_DEPTHS: usize = 1_000_000;
 
+/// CDN URLs are signed per resolve, so old entries are never asked for again.
+const MAX_DECRYPTIONS: usize = 256;
+
 /// Requests time out on their own; this stops a plugin that never returns.
 /// A first sync of a large library is one call.
 pub(crate) const CALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
@@ -41,6 +44,8 @@ pub struct Session {
     slots: Semaphore,
     /// Every bit depth a call reported, kept for whichever later read converts its track.
     bit_depths: std::sync::Mutex<HashMap<String, u8>>,
+    /// How to decrypt the streams a call resolved, by URL, until each is opened.
+    decryptions: std::sync::Mutex<HashMap<String, crate::Decryption>>,
 }
 
 impl std::fmt::Debug for Session {
@@ -60,6 +65,7 @@ impl Session {
             idle: Mutex::new(Vec::new()),
             slots: Semaphore::new(MAX_INSTANCES),
             bit_depths: std::sync::Mutex::default(),
+            decryptions: std::sync::Mutex::default(),
         }
     }
 
@@ -73,7 +79,28 @@ impl Session {
             .unwrap_or(0)
     }
 
+    /// How to decrypt the stream at `url`, if the plugin said it is encrypted.
+    /// Kept for further reads of the same URL.
+    pub fn decryption(&self, url: &str) -> Option<crate::Decryption> {
+        self.decryptions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(url)
+            .copied()
+    }
+
     fn keep_details(&self, live: &mut Live) {
+        let decryptions = std::mem::take(&mut live.instance.store.data_mut().decryptions);
+        if !decryptions.is_empty() {
+            let mut kept = self
+                .decryptions
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if kept.len() >= MAX_DECRYPTIONS {
+                kept.clear();
+            }
+            kept.extend(decryptions);
+        }
         let reported = std::mem::take(&mut live.instance.store.data_mut().bit_depths);
         if reported.is_empty() {
             return;

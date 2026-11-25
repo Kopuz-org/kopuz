@@ -674,6 +674,7 @@ fn draft_sign_in(
             .map(|own| own.service.sign_in)
         {
             Some(plugin_host::manifest::SignIn::Password) => SignInKind::Password,
+            Some(plugin_host::manifest::SignIn::Browser) => SignInKind::Browser,
             Some(plugin_host::manifest::SignIn::None) | None => SignInKind::None,
         }
     } else if service.uses_browser_signin() {

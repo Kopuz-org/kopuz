@@ -5,8 +5,9 @@ the WIT package in [`daemon/plugin-host/wit/`](../daemon/plugin-host/wit), plus 
 says what it is, which services it serves, what each of them supports and
 which hosts it may reach. The daemon runs it in a sandbox: no files (except
 the read-only folders a plugin [may ask for](#reading-folders)), no
-sockets, no environment. Its only way out is the `http` import, and every
-request and every redirect is checked against the hosts its manifest lists.
+sockets of its own, no environment. Its only ways out are the `http` and
+[`tcp`](#beyond-http) imports, and every request, redirect and connection is
+checked against the hosts its manifest lists.
 The database stays on the daemon's side; a plugin answers for the remote
 service and the daemon caches what it returns.
 
@@ -89,7 +90,7 @@ is a complete community plugin that adds a service of its own.
 id = "internet-archive"      # unique; also its directory name
 name = "Internet Archive"
 version = "0.1.0"
-api = "0.1"                  # the plugin API it was built against
+api = "0.1"                  # the plugin API it was built against; "0.2" for the imports under Beyond HTTP
 description = "Albums and live recordings from archive.org."
 
 [permissions]
@@ -103,7 +104,7 @@ name = "Internet Archive"    # how a new service is shown in the picker
 summary = "Freely licensed albums and live recordings"
 icon = "M12 2L2 7..."        # optional SVG path in a 24x24 box
 accent = "#428bca"           # optional
-sign-in = "none"             # or "password", which the plugin's `login` exchanges
+sign-in = "none"             # or "password", which the plugin's `login` exchanges, or "browser"
 # url = "https://..."        # a hosted service's one address; leave out to ask for one
 capabilities = { sync = true, downloads = true }
 ```
@@ -120,6 +121,32 @@ A `network` entry is a host name, not an address. A name is checked where it
 resolves; an address listed there would reach whatever it names without that
 check, so the manifest is refused. `$server` covers the configured server,
 whatever its address.
+
+### Beyond HTTP
+
+API `0.2` adds three imports for a service that does more than answer HTTP
+requests. A plugin that uses none of them stays on `0.1` and runs unchanged.
+
+- **`tcp`** (`kopuz_plugin_sdk::tcp::Stream`) is a TCP connection for a
+  protocol of the service's own. It is held to the `network` list exactly as
+  a request is: the host must be listed, and a name may not lead to this
+  machine or its network unless it is the configured server. The stream
+  implements `Read` and `Write`, and closes when dropped or when its instance
+  is.
+- **`browser`** (`kopuz_plugin_sdk::browser::sign_in`) is for a service whose
+  sign-in the person finishes in their own browser, such as OAuth with a
+  loopback redirect. A service with `sign-in = "browser"` gets a Sign in
+  button instead of a form; the plugin's `login` then runs with an empty
+  username and password, opens its authorize URL (on one of its `network`
+  hosts, over HTTPS) and waits for the browser to come back to
+  `http://127.0.0.1:<port><path>`. The call answers with the path and query of
+  that redirect. Outside `login` it is refused, so nothing else a plugin does
+  can open a page.
+- **`decryption`** (`kopuz_plugin_sdk::report_stream_key`) tells the host
+  that the stream `resolve_stream` returns is AES-128-CTR encrypted, with its
+  key, its counter block and how many leading bytes are not audio. The host
+  fetches the URL in ranges and decrypts as it reads, so the track seeks like
+  any other. Such a stream is never downloaded or cached.
 
 ### Reading folders
 

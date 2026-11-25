@@ -1,0 +1,19 @@
+/// A TCP connection, for a service that speaks a protocol of its own. Held
+/// to the manifest's hosts as `http` is. A connection is closed when its
+/// instance is dropped.
+interface tcp {
+    variant tcp-error {
+        denied(string),
+        connect(string),
+        timeout,
+        /// The other end closed the connection.
+        closed,
+        other(string),
+    }
+
+    connect: func(host: string, port: u16, timeout-ms: option<u32>) -> result<u32, tcp-error>;
+    write: func(connection: u32, bytes: list<u8>) -> result<_, tcp-error>;
+    /// Waits for at least one byte and returns no more than `max`.
+    read: func(connection: u32, max: u32, timeout-ms: option<u32>) -> result<list<u8>, tcp-error>;
+    close: func(connection: u32);
+}

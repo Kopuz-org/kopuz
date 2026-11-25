@@ -3,7 +3,9 @@
 
 use serde::Deserialize;
 
-pub const SUPPORTED_API: &[&str] = &["0.1"];
+/// 0.2 added the `tcp`, `browser` and `decryption` imports and the browser
+/// sign-in; a 0.1 plugin runs unchanged.
+pub const SUPPORTED_API: &[&str] = &["0.1", "0.2"];
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -73,6 +75,9 @@ pub enum SignIn {
     None,
     /// Exchanged by the plugin's `login`.
     Password,
+    /// The plugin's `login` runs with the `browser` import answering, and
+    /// with no username or password.
+    Browser,
 }
 
 /// Every flag defaults to off.
@@ -189,6 +194,11 @@ impl Manifest {
         Ok(manifest)
     }
 
+    /// Whether a stream this plugin resolves may be one the host decrypts.
+    pub fn may_encrypt_streams(&self) -> bool {
+        self.api != "0.1"
+    }
+
     pub fn service(&self, id: &str) -> Option<&Service> {
         self.services.iter().find(|service| service.id == id)
     }
@@ -266,6 +276,16 @@ mod tests {
         assert_eq!(custom.capabilities, Capabilities::default());
         assert_eq!(custom.sign_in, SignIn::Password);
         assert_eq!(subsonic.sign_in, SignIn::None);
+        assert!(!manifest.may_encrypt_streams());
+        let newer = SUBSONIC
+            .replace("api = \"0.1\"", "api = \"0.2\"")
+            .replace("sign-in = \"password\"", "sign-in = \"browser\"");
+        let newer = Manifest::parse(&newer).expect("valid manifest");
+        assert!(newer.may_encrypt_streams());
+        assert_eq!(
+            newer.service("custom").map(|custom| custom.sign_in),
+            Some(SignIn::Browser)
+        );
         assert!(!manifest.permissions.reads_folders());
     }
 

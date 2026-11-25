@@ -29,6 +29,8 @@ uuid = { workspace = true }
 md5 = { workspace = true }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
+aes = { workspace = true }
+ctr = { workspace = true }
 thiserror = { workspace = true }
 base64 = { workspace = true }
 httpdate = { workspace = true }

@@ -53,6 +53,18 @@ impl PluginSource {
         })
     }
 
+    /// The host fetches a stream outside the sandbox, so a URL off the
+    /// plugin's hosts would carry whatever it wrote into it to anyone.
+    fn fetchable(&self, url: &str) -> Result<(), SourceError> {
+        if self.artwork().allows(url) {
+            return Ok(());
+        }
+        tracing::warn!(service = %self.session.service(), "plugin stream refused: not on its hosts");
+        Err(SourceError::Backend(
+            "the plugin's stream is on a host its manifest does not allow".into(),
+        ))
+    }
+
     fn artwork(&self) -> crate::plugins::Reach {
         crate::plugins::Reach::new(&self.session.plugin(), &self.server_url, &self.folders)
     }
@@ -379,13 +391,10 @@ impl MediaSource for PluginSource {
                 .resolve_stream(item_id, quality_of(quality))
                 .await,
         )?;
-        // The host fetches it outside the sandbox, so a URL off the plugin's
-        // hosts would carry whatever it wrote into it to anyone.
-        if !self.artwork().allows(&stream.url) {
-            tracing::warn!(service = %self.session.service(), "plugin stream refused: not on its hosts");
-            return Err(SourceError::Backend(
-                "the plugin's stream is on a host its manifest does not allow".into(),
-            ));
+        self.fetchable(&stream.url)?;
+        // What a caller fetches from the URL would be ciphertext.
+        if self.session.decryption(&stream.url).is_some() {
+            return Err(SourceError::unsupported("fetching an encrypted stream"));
         }
         Ok(StreamInfo {
             guard: self.artwork().stream_guard(),
@@ -404,13 +413,16 @@ impl MediaSource for PluginSource {
     }
 
     /// A plugin that reads the source's folders streams a file in them, which
-    /// is opened here rather than fetched.
+    /// is opened here rather than fetched, and a stream the plugin said is
+    /// encrypted is decrypted as it is read.
     async fn open_stream(
         &self,
         item_id: &str,
-        _progress: Option<crate::stream::stream_buffer::BufferProgressCallback>,
+        progress: Option<crate::stream::stream_buffer::BufferProgressCallback>,
     ) -> Result<Option<Box<dyn symphonia::core::io::MediaSource>>, SourceError> {
-        if !self.session.plugin().manifest().permissions.reads_folders() {
+        let plugin = self.session.plugin();
+        let reads_folders = plugin.manifest().permissions.reads_folders();
+        if !reads_folders && !plugin.manifest().may_encrypt_streams() {
             return Ok(None);
         }
         let stream = answer(
@@ -418,13 +430,33 @@ impl MediaSource for PluginSource {
                 .resolve_stream(item_id, wit::StreamQuality::High)
                 .await,
         )?;
-        let Some(path) = self.artwork().local_file(&stream.url) else {
+        if reads_folders && let Some(path) = self.artwork().local_file(&stream.url) {
+            let file = std::fs::File::open(&path).map_err(|error| {
+                SourceError::Backend(format!("could not open {}: {error}", path.display()))
+            })?;
+            return Ok(Some(Box::new(file)));
+        }
+        let Some(decryption) = self.session.decryption(&stream.url) else {
             return Ok(None);
         };
-        let file = std::fs::File::open(&path).map_err(|error| {
-            SourceError::Backend(format!("could not open {}: {error}", path.display()))
-        })?;
-        Ok(Some(Box::new(file)))
+        self.fetchable(&stream.url)?;
+        let guard = self.artwork().stream_guard();
+        // The range source's client is a blocking one.
+        let opened = tokio::task::spawn_blocking(move || {
+            use crate::stream::{aes_ctr::AesCtrStream, range_source::RangeStreamSource};
+            let range = RangeStreamSource::new_with_progress(
+                stream.url,
+                stream.user_agent,
+                progress,
+                guard,
+            )?;
+            let total = range.total_size();
+            AesCtrStream::new(range, total, decryption.key, decryption.iv, decryption.skip)
+        })
+        .await
+        .map_err(|error| SourceError::Backend(error.to_string()))?
+        .map_err(|error| SourceError::Backend(format!("could not open the stream: {error}")))?;
+        Ok(Some(Box::new(opened)))
     }
 
     async fn download_track(

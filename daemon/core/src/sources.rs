@@ -1290,6 +1290,9 @@ impl SourceService {
                 .map_err(db_error)?
                 .ok_or_else(|| ApiError::not_found("no such server"))?;
 
+            if server.service == config::MusicService::Plugin {
+                return self.authenticate_plugin_source(server).await;
+            }
             let browser = server::cookies::resolve_browser(server.yt_browser).await;
             // Kept when an existing session resumed, so the next expiry can
             // still re-read the imported profile.
@@ -1361,6 +1364,33 @@ impl SourceService {
             )
             .await
         }
+    }
+
+    /// A plugin's own browser sign-in: its `login` opens the service's page
+    /// and answers with what to store.
+    #[cfg(not(target_os = "android"))]
+    async fn authenticate_plugin_source(
+        &self,
+        server: config::MusicServer,
+    ) -> Result<SourceInfo, ApiError> {
+        let server_id = server
+            .id
+            .ok_or_else(|| ApiError::not_found("no such server"))?;
+        let device_id = self.snapshot().await.device_id.clone();
+        let open = |url: &str| webbrowser::open(url).map_err(|error| error.to_string());
+        let auth = server::provider::ProviderClient::new(server.service, server.url, device_id)
+            .with_plugin_service(server.plugin_service)
+            .with_browser(std::sync::Arc::new(open))
+            .login("", "")
+            .await
+            .map_err(source_error)?;
+        self.provision_credentials(CredentialProvision {
+            server_id,
+            secret: auth.access_token,
+            user_id: Some(auth.user_id),
+            browser: None,
+        })
+        .await
     }
 
     pub async fn browser_sessions(&self, service: &str) -> Result<Vec<BrowserSession>, ApiError> {

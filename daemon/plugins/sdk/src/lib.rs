@@ -2,9 +2,11 @@
 //! [`export_source!`], then build for `wasm32-wasip2`. The crate builds
 //! natively too, so a plugin's own logic can be unit tested.
 
+pub mod browser;
 pub mod cover;
 pub mod http;
 pub mod log;
+pub mod tcp;
 
 #[doc(hidden)]
 pub mod bindings {
@@ -35,6 +37,18 @@ pub fn report_bit_depth(item_id: &str, bits: u8) {
     }
     #[cfg(not(target_arch = "wasm32"))]
     let _ = (item_id, bits);
+}
+
+/// Tell the host the stream at `url` is AES-128-CTR encrypted, with a
+/// big-endian counter starting at `iv`, and that its first `skip` decrypted
+/// bytes are not audio. Call it from
+/// [`resolve_stream`](Source::resolve_stream) for the URL it returns; the host
+/// then decrypts as it reads, and never downloads or caches such a stream.
+pub fn report_stream_key(url: &str, key: &[u8; 16], iv: &[u8; 16], skip: u32) {
+    #[cfg(target_arch = "wasm32")]
+    bindings::kopuz::plugin::decryption::aes_ctr(url, key, iv, skip);
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = (url, key, iv, skip);
 }
 
 impl SourceError {
@@ -179,6 +193,8 @@ impl Check {
 /// stream has the host's own default; the host never asks for one whose
 /// capability the manifest leaves off.
 pub trait Source: Sized + 'static {
+    /// For `sign-in = "browser"` both are empty, and [`browser::sign_in`]
+    /// answers.
     fn login(connection: Connection, username: &str, password: &str) -> Result<AuthSession> {
         let _ = (connection, username, password);
         Err(SourceError::unsupported("username and password sign-in"))

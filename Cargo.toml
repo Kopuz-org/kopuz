@@ -85,6 +85,8 @@ ctrlc = "3.5"
 webbrowser = "1.2.1"
 base64 = "0.22"
 aes-gcm = "0.11"
+aes = "0.8"
+ctr = "0.9"
 async-trait = "0.1"
 sqlx = { version = "0.8", default-features = false }
 arc-swap = "1.7"
