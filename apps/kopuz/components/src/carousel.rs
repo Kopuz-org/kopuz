@@ -1,13 +1,13 @@
-//! The one sideways shelf: its heading, arrows, fades at its ends, and only the tiles in view built.
+//! The one sideways shelf: its heading, arrows, and only the tiles in view built.
 
 use std::rc::Rc;
 
-use gpui_kit::component::{ActiveTheme as _, Icon, h_flex, v_flex};
+use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, RenderOnce,
     ScrollHandle, ScrollWheelEvent, SharedString, StatefulInteractiveElement as _, Styled, Window,
-    div, linear_color_stop, linear_gradient, px,
+    div, px,
 };
 
 use crate::heading::{Heading, SectionHeading};
@@ -17,8 +17,6 @@ use crate::{icons, motion, scroll, style};
 const ROOT: u64 = 0;
 const HOVER: u64 = 1;
 const ARROWS: u64 = 2;
-const LEFT: u64 = 3;
-const RIGHT: u64 = 4;
 const BACK: u64 = 5;
 const FORWARD: u64 = 6;
 const HANDLE: u64 = 7;
@@ -29,8 +27,6 @@ const GLIDE: u64 = 40;
 const ARROW_HOVER: u64 = 10;
 const ARROW_SIZE: u64 = 20;
 
-/// How wide the fade at each end is.
-const FADE: f32 = 48.;
 /// `hover:scale-105` on an arrow that grows.
 const ARROW_GROWTH: f32 = 1.05;
 
@@ -228,9 +224,7 @@ impl RenderOnce for Carousel {
                             .on_scroll_wheel(wheel(handle.clone()))
                             .track_scroll(&handle)
                             .children(cells),
-                    )
-                    .child(fade(&id, LEFT, true, back, window, cx))
-                    .child(fade(&id, RIGHT, false, forward, window, cx)),
+                    ),
             )
     }
 }
@@ -340,46 +334,5 @@ fn arrow(
                 scroll::nudge_x(&handle, by);
             }
         })
-        .into_any_element()
-}
-
-/// The page colour bled over the tiles at an end that has more behind it.
-fn fade(
-    id: &SharedString,
-    channel: u64,
-    left: bool,
-    shown: bool,
-    window: &mut Window,
-    cx: &mut App,
-) -> AnyElement {
-    let amount = motion::amount(
-        motion::channel(id, channel),
-        match shown {
-            true => 1.,
-            false => 0.,
-        },
-        motion::FAST,
-        window,
-        cx,
-    );
-    let background = cx.theme().background;
-    div()
-        .absolute()
-        .top_0()
-        .bottom_0()
-        .w(px(FADE))
-        .map(|edge| match left {
-            true => edge.left_0(),
-            false => edge.right_0(),
-        })
-        .opacity(amount)
-        .bg(linear_gradient(
-            match left {
-                true => 90.,
-                false => 270.,
-            },
-            linear_color_stop(background, 0.),
-            linear_color_stop(background.opacity(0.), 1.),
-        ))
         .into_any_element()
 }
