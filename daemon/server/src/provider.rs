@@ -105,7 +105,10 @@ impl ProviderClient {
                     user_id: username.to_string(),
                 })
             }
-            MusicService::YtMusic | MusicService::SoundCloud | MusicService::AppleMusic => {
+            MusicService::YtMusic
+            | MusicService::SoundCloud
+            | MusicService::AppleMusic
+            | MusicService::Spotify => {
                 Err(SourceError::unsupported("username and password sign-in"))
             }
         }

@@ -581,7 +581,7 @@ impl SourceService {
                 info.detail = crate::services::detail(&view);
                 info.anonymous = server.yt_anonymous;
                 if !info.temporary {
-                    info.settings = crate::services::settings(&view);
+                    info.settings = crate::services::settings(&view, &current);
                 }
                 let signed_in = server
                     .access_token
@@ -998,7 +998,7 @@ impl SourceService {
         self.source_info(&id).await
     }
 
-    /// Answer a source's own options, leaving absent keys alone.
+    /// Answer a source's own options, leaving absent keys alone; the Spotify ones are settings, so they go through the config first.
     pub async fn set_source_settings(
         &self,
         id: &str,
@@ -1011,9 +1011,11 @@ impl SourceService {
             return self.set_folder_settings(id, &values).await;
         }
         let current = self.snapshot().await;
-        if current.find_saved_server(id).is_none() {
+        let Some(existing) = current.find_saved_server(id) else {
             return Err(ApiError::not_found("no such server"));
-        }
+        };
+        let config_keys = crate::services::config_keys(existing, &values);
+        let service = existing.service;
         let folders = api::schema::value_of(&values, crate::services::DIRECTORIES)
             .map(api::schema::decode_directories);
         if let Some(folders) = &folders
@@ -1023,6 +1025,15 @@ impl SourceService {
                 ApiError::invalid_input("a source directory cannot be empty")
                     .because(ErrorReason::EmptySourceFolder),
             );
+        }
+        self.config.ensure_unlocked(&config_keys).await?;
+        if !config_keys.is_empty() {
+            let answers = values.clone();
+            self.config
+                .mutate_state(&config_keys, move |config| {
+                    crate::services::apply_config_settings(service, &answers, config);
+                })
+                .await?;
         }
         let target = id.to_string();
         self.mutate(move |sources| {
@@ -1259,7 +1270,7 @@ impl SourceService {
                 .await
                 .map_err(db_error)?
                 .ok_or_else(|| ApiError::not_found("no such server"))?;
-            let (secret, user_id) = crate::android_signin::sign_in(source.service)
+            let (secret, user_id) = crate::android_signin::sign_in(source.service, source.url)
                 .await
                 .map_err(ApiError::internal)?;
             self.provision_credentials(CredentialProvision {
@@ -1325,6 +1336,16 @@ impl SourceService {
                     .await
                     .map_err(ApiError::internal)?;
                     (secret, "me".to_string())
+                }
+
+                config::MusicService::Spotify => {
+                    let auth = server::spotify::auth::launch_signin_and_extract(server.url)
+                        .await
+                        .map_err(ApiError::internal)?;
+                    (
+                        server::spotify::auth::pack_token(&auth.access_token, &auth.refresh_token),
+                        auth.user_id,
+                    )
                 }
                 _ => {
                     return Err(ApiError::unsupported(
@@ -2026,12 +2047,13 @@ impl SourceService {
     }
 
     /// Keep a source signed in without anyone asking. YouTube rotates its
-    /// cookies, and a frontend that had to do this was a frontend that had to
-    /// hold the credential.
+    /// cookies and Spotify's tokens expire, and a frontend that had to do
+    /// this was a frontend that had to hold the credential.
     pub fn spawn_credential_upkeep(self: &Arc<Self>) {
         let service = self.clone();
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(Duration::from_secs(300));
+            let mut since_spotify = 0u32;
             let mut since_client_version = 0u32;
             loop {
                 ticker.tick().await;
@@ -2043,6 +2065,11 @@ impl SourceService {
                 }
                 since_client_version = (since_client_version + 1) % 12;
                 service.rotate_ytmusic().await;
+                since_spotify += 1;
+                if since_spotify >= 6 {
+                    since_spotify = 0;
+                    service.refresh_spotify().await;
+                }
             }
         });
     }
@@ -2077,6 +2104,40 @@ impl SourceService {
             }
             Ok(None) => {}
             Err(error) => tracing::debug!(%error, "YouTube Music keepalive failed"),
+        }
+    }
+
+    async fn refresh_spotify(&self) {
+        let sources = self.snapshot().await;
+        let Some(server) = sources
+            .server
+            .as_ref()
+            .filter(|server| server.service == config::MusicService::Spotify)
+        else {
+            return;
+        };
+        let (Some(packed), Some(id)) = (
+            server.access_token.clone(),
+            sources.active.server_id().map(str::to_string),
+        ) else {
+            return;
+        };
+        match server::spotify::auth::refresh_packed(&packed, server.url.clone()).await {
+            Ok(refreshed) if refreshed != packed => {
+                if let Err(error) = self
+                    .provision_credentials(CredentialProvision {
+                        server_id: id,
+                        secret: refreshed,
+                        user_id: server.user_id.clone(),
+                        browser: None,
+                    })
+                    .await
+                {
+                    tracing::warn!(%error, "storing the refreshed Spotify token failed");
+                }
+            }
+            Ok(_) => {}
+            Err(error) => tracing::debug!(%error, "Spotify token refresh failed"),
         }
     }
 }

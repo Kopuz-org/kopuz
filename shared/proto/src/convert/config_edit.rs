@@ -7,7 +7,7 @@ use config::{
     BackgroundEdit as Bg, BackgroundKey, CustomThemeOp as ThemeOp, DownloadsEdit as Dl,
     DownloadsKey, IntegrationsEdit as In, IntegrationsKey, LibraryEdit as Li, LibraryKey,
     LyricsEdit as Ly, LyricsKey, PlaybackEdit as Pb, PlaybackKey, RadioRegistryOp as RegistryOp,
-    SettingsEdit as Se, SystemEdit as Sy, SystemKey, UiEdit, UiKey,
+    SettingsEdit as Se, SpotifyEdit as Sp, SpotifyKey, SystemEdit as Sy, SystemKey, UiEdit, UiKey,
 };
 use config_edit::Edit;
 
@@ -79,6 +79,10 @@ pub fn setting_key_to_proto(value: config::SettingKey) -> SettingKey {
         K::Downloads(key) => match key {
             DownloadsKey::DownloaderOutputDir => SettingKey::DownloaderOutputDir,
             DownloadsKey::DownloaderOptions => SettingKey::DownloaderOptions,
+        },
+        K::Spotify(key) => match key {
+            SpotifyKey::SpotifyBrowser => SettingKey::SpotifyBrowser,
+            SpotifyKey::SpotifyPreferActiveDevice => SettingKey::SpotifyPreferActiveDevice,
         },
         K::System(key) => match key {
             SystemKey::TracingEnabled => SettingKey::TracingEnabled,
@@ -153,6 +157,8 @@ pub fn setting_key_from_proto(value: i32) -> Option<config::SettingKey> {
         SettingKey::RadioRegistries => K::Integrations(IntegrationsKey::RadioRegistries),
         SettingKey::DownloaderOutputDir => K::Downloads(DownloadsKey::DownloaderOutputDir),
         SettingKey::DownloaderOptions => K::Downloads(DownloadsKey::DownloaderOptions),
+        SettingKey::SpotifyBrowser => K::Spotify(SpotifyKey::SpotifyBrowser),
+        SettingKey::SpotifyPreferActiveDevice => K::Spotify(SpotifyKey::SpotifyPreferActiveDevice),
         SettingKey::TracingEnabled => K::System(SystemKey::TracingEnabled),
         SettingKey::AutoCheckUpdates => K::System(SystemKey::AutoCheckUpdates),
         SettingKey::MinimizeToTray => K::System(SystemKey::MinimizeToTray),
@@ -267,6 +273,10 @@ pub fn config_edit_to_proto(value: &config::SettingsEdit) -> ConfigEdit {
             Dl::DownloaderOptions(value) => {
                 Edit::DownloaderOptions(downloader_options_to_proto(&value))
             }
+        },
+        Se::Spotify(edit) => match edit {
+            Sp::SpotifyBrowser(value) => Edit::SpotifyBrowser(OptionalString { value }),
+            Sp::SpotifyPreferActiveDevice(value) => Edit::SpotifyPreferActiveDevice(value),
         },
         Se::System(edit) => match edit {
             Sy::TracingEnabled(value) => Edit::TracingEnabled(value),
@@ -383,6 +393,8 @@ pub fn config_edit_from_proto(value: &ConfigEdit) -> Option<config::SettingsEdit
         Edit::DownloaderOptions(value) => Se::Downloads(Dl::DownloaderOptions(
             downloader_options_from_proto(Some(&value)),
         )),
+        Edit::SpotifyBrowser(value) => Se::Spotify(Sp::SpotifyBrowser(value.value)),
+        Edit::SpotifyPreferActiveDevice(value) => Se::Spotify(Sp::SpotifyPreferActiveDevice(value)),
         Edit::TracingEnabled(value) => Se::System(Sy::TracingEnabled(value)),
         Edit::AutoCheckUpdates(value) => Se::System(Sy::AutoCheckUpdates(value)),
         Edit::MinimizeToTray(value) => Se::System(Sy::MinimizeToTray(value)),

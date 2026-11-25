@@ -632,7 +632,7 @@ fn is_remote_track(track_path: &str) -> bool {
         "applemusic:",
         "ytmusic:",
         "soundcloud:",
-        "plugin:",
+        "spotify:",
         "nextcloud:",
     ]
     .iter()
@@ -1054,7 +1054,7 @@ mod tests {
     fn every_streaming_service_counts_as_remote() {
         for path in [
             "ytmusic:r9jGBwgzEzA",
-            "plugin:4uLU6hMCjMI75M1A2tKUQC",
+            "spotify:4uLU6hMCjMI75M1A2tKUQC",
             "soundcloud:123",
             "nextcloud:files/song.mp3",
             "jellyfin:abc",

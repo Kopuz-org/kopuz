@@ -35,6 +35,7 @@ impl ServerConn {
         let user_id = match server.service {
             MusicService::YtMusic
             | MusicService::AppleMusic
+            | MusicService::Spotify
             | MusicService::AudioCd
             | MusicService::Clippsly
             // A plugin's service may need no account; its plugin says so on use.

@@ -17,10 +17,11 @@ Every source is a plugin, of one of three kinds:
   built into Kopuz: Subsonic (and custom Subsonic-compatible servers),
   Jellyfin, Clippsly and SoundCloud. They update with Kopuz and cannot be
   removed.
-- **Official native plugins** are YouTube Music, Apple Music, Nextcloud, SMB
-  and local folders. They need what the sandbox does not give (V8 for
-  YouTube's signatures and PoTokens, a Widevine CDM, SMB's own sockets, the
-  filesystem), so their code is compiled into Kopuz and runs in-process. They register in the same plugin registry
+- **Official native plugins** are YouTube Music, Apple Music, Spotify,
+  Nextcloud, SMB and local folders. They need what the sandbox does not give
+  (V8 for YouTube's signatures and PoTokens, a Widevine CDM, a browser for
+  Spotify's playback, raw sockets, the filesystem), so their code is compiled
+  into Kopuz and runs in-process. They register in the same plugin registry
   with a manifest, and a sandboxed plugin installed with one's id replaces it.
 - **Community plugins** live in their authors' repositories and are installed
   from the marketplace under **Settings → Library → Plugins** with one click.
@@ -265,7 +266,7 @@ does.
 An installed plugin shows Update when the index lists another version, or the
 same version with a component whose hash differs from the one installed.
 
-Only sandboxed plugins swap this way. YouTube Music, Apple Music,
+Only sandboxed plugins swap this way. YouTube Music, Apple Music, Spotify,
 Nextcloud, SMB and folders are native code inside the daemon, so a fix to
 any of them ships with a new Kopuz build.
 

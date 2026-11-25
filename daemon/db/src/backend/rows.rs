@@ -222,6 +222,7 @@ pub fn parse_service(s: &str) -> config::MusicService {
         "YtMusic" => config::MusicService::YtMusic,
         "SoundCloud" => config::MusicService::SoundCloud,
         "AppleMusic" => config::MusicService::AppleMusic,
+        "Spotify" => config::MusicService::Spotify,
         "Nextcloud" => config::MusicService::Nextcloud,
         "Clippsly" => config::MusicService::Clippsly,
         "Smb" => config::MusicService::Smb,
@@ -240,8 +241,8 @@ mod tests {
         use config::MusicService::*;
 
         for service in [
-            Jellyfin, Subsonic, Custom, YtMusic, AppleMusic, SoundCloud, Nextcloud, Clippsly, Smb,
-            AudioCd,
+            Jellyfin, Subsonic, Custom, YtMusic, AppleMusic, SoundCloud, Spotify, Nextcloud,
+            Clippsly, Smb, AudioCd,
         ] {
             let stored = crate::backend::writes::service_str(service);
             assert_eq!(parse_service(stored), service, "{stored} did not survive");
