@@ -168,6 +168,8 @@ pub struct Residents {
     // When each cover was first drawn, while that is recent enough to still be fading in.
     arrived: HashMap<ArtworkKey, Instant>,
     clock: u64,
+    // A sweep is waiting for its redraw, so the next heartbeat does not start another.
+    sweeping: bool,
 }
 
 struct Resident {
@@ -255,25 +257,29 @@ impl Residents {
             .record(key, image, Instant::now())
     }
 
-    /// Releases the least recently drawn covers until the budget is met.
+    /// Redraws every view, cached ones too, then releases the oldest covers that frame did not draw.
     pub fn sweep(window: &mut Window, cx: &mut App) {
-        let held = cx.default_global::<Self>().live.len();
+        let residents = cx.default_global::<Self>();
+        let held = residents.live.len();
         profile::artwork::tracked(held);
-        let over = held.saturating_sub(budget());
-        if over == 0 {
+        if held <= budget() || std::mem::replace(&mut residents.sweeping, true) {
             return;
         }
-        // Oldest drawn first, which leaves the screenful at the young end untouched so long as the
-        // budget stays well above it. Do not filter by "drawn recently": under a continuous scroll
-        // every cover was drawn recently, and the sweep stops exactly when it is needed most.
+        window.refresh();
+        // A next-frame callback runs before its frame draws, so release one frame after the mark.
+        window.on_next_frame(|window, cx| {
+            let mark = cx.default_global::<Self>().clock;
+            window.on_next_frame(move |window, cx| Self::release(mark, window, cx));
+        });
+    }
+
+    fn release(mark: u64, window: &mut Window, cx: &mut App) {
         let residents = cx.default_global::<Self>();
-        let mut ages: Vec<(u64, ArtworkKey)> = residents
-            .live
-            .iter()
-            .map(|(key, resident)| (resident.used, key.clone()))
-            .collect();
-        ages.sort_unstable_by_key(|(used, _)| *used);
-        let doomed: Vec<ArtworkKey> = ages.into_iter().take(over).map(|(_, key)| key).collect();
+        residents.sweeping = false;
+        let doomed = residents.doomed(mark, budget());
+        if doomed.is_empty() {
+            return;
+        }
         for key in doomed {
             let Some(resident) = cx.default_global::<Self>().forget(&key) else {
                 continue;
@@ -286,6 +292,21 @@ impl Residents {
             cx.remove_asset::<ArtworkBytes>(&key);
             profile::artwork::released();
         }
+        // A cached view replaying the old scene would draw a released atlas tile and panic.
+        window.refresh();
+    }
+
+    /// The oldest covers past `budget`, never one drawn after `mark`.
+    fn doomed(&self, mark: u64, budget: usize) -> Vec<ArtworkKey> {
+        let over = self.live.len().saturating_sub(budget);
+        let mut ages: Vec<(u64, ArtworkKey)> = self
+            .live
+            .iter()
+            .filter(|(_, resident)| resident.used <= mark)
+            .map(|(key, resident)| (resident.used, key.clone()))
+            .collect();
+        ages.sort_unstable_by_key(|(used, _)| *used);
+        ages.into_iter().take(over).map(|(_, key)| key).collect()
     }
 }
 
@@ -313,6 +334,24 @@ mod tests {
 
     fn image(byte: u8) -> Arc<Image> {
         Arc::new(Image::from_bytes(ImageFormat::Png, vec![byte]))
+    }
+
+    #[test]
+    fn a_sweep_never_releases_a_cover_drawn_after_its_mark() {
+        let mut residents = Residents::default();
+        let now = Instant::now();
+        for id in ["a", "b", "c"] {
+            residents.record(&key(id, 1, false), &image(1), now);
+        }
+        let mark = residents.clock;
+        // A cached view's cover, old by its clock, drawn again by the sweep's redraw.
+        residents.record(&key("a", 1, false), &image(1), now);
+        residents.record(&key("d", 1, false), &image(1), now);
+        assert_eq!(
+            residents.doomed(mark, 2),
+            vec![key("b", 1, false), key("c", 1, false)]
+        );
+        assert_eq!(residents.doomed(mark, 4), Vec::<ArtworkKey>::new());
     }
 
     #[test]
