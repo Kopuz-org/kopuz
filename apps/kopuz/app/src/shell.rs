@@ -19,6 +19,21 @@ const TOAST_GAP: gpui_kit::Pixels = gpui_kit::px(16.);
 /// Material's surface-container-low: the text colour at 4% over the window.
 const PANE_TINT: f32 = 0.04;
 
+/// The narrowest the page is squeezed to before the playlists column steps aside for it.
+const PAGE_FLOOR: gpui_kit::Pixels = gpui_kit::px(400.);
+
+/// Whether the open playlists column fits beside the page in `width`, with the queue column
+/// taking `queue` of it. The queue is what plays and was opened on purpose, so it always keeps
+/// its room and the playlists step aside instead. They stay open and come back once the window
+/// is wide enough again.
+fn playlists_fit(
+    width: gpui_kit::Pixels,
+    playlists: gpui_kit::Pixels,
+    queue: Option<gpui_kit::Pixels>,
+) -> bool {
+    width - queue.unwrap_or_default() - playlists >= PAGE_FLOOR
+}
+
 /// How dark the scrim under a dialog gets.
 const MODAL_SCRIM: f32 = 0.8;
 
@@ -608,9 +623,23 @@ impl Render for Shell {
             false => pane,
         };
 
+        // What is left beside the rail, the pane gaps included, is what the columns and the page share.
+        let rail_room = match nav_left && !rail_hidden {
+            true => chrome_metrics.rail_width,
+            false => gpui_kit::px(0.),
+        };
+        let gaps = match paned {
+            true => skin.pane_gap * 4.,
+            false => gpui_kit::px(0.),
+        };
+        let playlists_fit = playlists_fit(
+            window.viewport_size().width - rail_room - gaps,
+            playlists_width,
+            (panel_open && connected).then_some(panel_width),
+        );
         let playlists_side = store::layout(cx).panel.side;
         let queue_side = store::layout(cx).interface.queue_side;
-        let playlists_column = (playlists_open && !in_rail).then(|| {
+        let playlists_column = (playlists_open && !in_rail && playlists_fit).then(|| {
             div()
                 .w(playlists_width)
                 .flex_shrink_0()
@@ -788,4 +817,28 @@ fn framed(
         .children(drag)
         .children(handles)
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui_kit::px;
+
+    #[test]
+    fn a_wide_window_keeps_the_playlists_beside_the_queue() {
+        assert!(playlists_fit(px(1400.), px(260.), Some(px(320.))));
+    }
+
+    #[test]
+    fn the_playlists_step_aside_when_the_page_would_drop_under_its_floor() {
+        // 960 - 320 - 260 leaves 380 for the page.
+        assert!(!playlists_fit(px(960.), px(260.), Some(px(320.))));
+        // The same window without the queue open keeps them.
+        assert!(playlists_fit(px(960.), px(260.), None));
+    }
+
+    #[test]
+    fn a_narrower_playlists_column_holds_on_longer() {
+        assert!(playlists_fit(px(960.), px(200.), Some(px(320.))));
+    }
 }
