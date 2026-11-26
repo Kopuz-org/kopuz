@@ -6,6 +6,14 @@ use kopuz_plugin_sdk::{ReplayGain, SourceError};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+/// File-based playlists (e.g. `.m3u`) are indexed by Jellyfin with `MediaType` `Unknown` rather than `Audio`.
+const PLAYLIST_QUERY: &[(&str, &str)] = &[
+    ("IncludeItemTypes", "Playlist"),
+    ("Recursive", "true"),
+    ("Fields", "DateCreated,DateLastMediaAdded,ImageTags"),
+    ("MediaTypes", "Audio,Unknown"),
+];
+
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Fields every track listing asks for.
@@ -359,13 +367,7 @@ impl JellyfinClient {
 
     pub fn get_playlists(&self) -> Result<Vec<Item>, SourceError> {
         let path = format!("/Users/{}/Items", self.user_id()?);
-        let query = [
-            ("IncludeItemTypes", "Playlist"),
-            ("Recursive", "true"),
-            ("Fields", "DateCreated,DateLastMediaAdded,ImageTags"),
-            ("MediaTypes", "Audio"),
-        ];
-        Ok(self.get::<ItemsResponse>(&path, &query)?.items)
+        Ok(self.get::<ItemsResponse>(&path, PLAYLIST_QUERY)?.items)
     }
 
     pub fn get_playlist_items(&self, playlist_id: &str) -> Result<Vec<Item>, SourceError> {
@@ -606,5 +608,17 @@ mod tests {
             anonymous.stream_url("i1"),
             "https://jf.test/Audio/i1/stream?static=true"
         );
+    }
+
+    #[test]
+    fn playlist_query_includes_file_based_unknown_media_type() {
+        let media_types = PLAYLIST_QUERY
+            .iter()
+            .find_map(|(k, v)| (*k == "MediaTypes").then_some(*v))
+            .expect("MediaTypes query param");
+        let types: Vec<&str> = media_types.split(',').collect();
+        assert!(types.contains(&"Audio"));
+        assert!(types.contains(&"Unknown"));
+        assert!(!types.contains(&"Video"));
     }
 }
