@@ -110,6 +110,17 @@ impl State {
         self.bridge = Some(bridge);
     }
 
+    /// The bridge, if the manifest lets this plugin read the library.
+    fn library(&self) -> Result<std::sync::Arc<dyn crate::Bridge>, String> {
+        if !self.permissions.reads_library() {
+            tracing::warn!(plugin = %self.plugin_id, "plugin library read refused: its manifest does not ask for it");
+            return Err("the plugin's manifest does not ask to read the library".into());
+        }
+        self.bridge
+            .clone()
+            .ok_or_else(|| "the library cannot be read from here".into())
+    }
+
     /// The bridge, if the manifest lets this plugin control playback.
     fn playback(&self) -> Result<&std::sync::Arc<dyn crate::Bridge>, String> {
         if !self.permissions.controls_playback() {
@@ -528,6 +539,53 @@ async fn redirected(listener: &tokio::net::TcpListener, path: &str) -> std::io::
 }
 
 impl crate::bindings::kopuz::plugin::types::Host for State {}
+
+impl crate::integration_bindings::kopuz::plugin::library::Host for State {
+    async fn search(
+        &mut self,
+        query: String,
+        limit: u32,
+    ) -> Result<Vec<crate::wit::library::Track>, String> {
+        self.library()?
+            .search(query, limit.min(crate::MAX_PAGE))
+            .await
+    }
+
+    async fn tracks(
+        &mut self,
+        keys: Vec<String>,
+    ) -> Result<Vec<crate::wit::library::Track>, String> {
+        if keys.len() > crate::MAX_PAGE as usize {
+            return Err(format!("at most {} keys a call", crate::MAX_PAGE));
+        }
+        self.library()?.tracks(keys).await
+    }
+
+    async fn album_tracks(
+        &mut self,
+        album_id: String,
+    ) -> Result<Vec<crate::wit::library::Track>, String> {
+        self.library()?.album_tracks(album_id).await
+    }
+
+    async fn tracks_page(
+        &mut self,
+        offset: u32,
+        limit: u32,
+    ) -> Result<crate::wit::library::TrackPage, String> {
+        self.library()?
+            .tracks_page(offset, limit.min(crate::MAX_PAGE))
+            .await
+    }
+
+    async fn playlists(&mut self) -> Result<Vec<crate::wit::library::Playlist>, String> {
+        self.library()?.playlists().await
+    }
+
+    async fn favorites(&mut self) -> Result<Vec<String>, String> {
+        self.library()?.favorites().await
+    }
+}
 
 impl crate::integration_bindings::kopuz::plugin::playback::Host for State {
     async fn control(&mut self, command: crate::wit::playback::Command) -> Result<(), String> {

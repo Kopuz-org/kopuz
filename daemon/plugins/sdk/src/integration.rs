@@ -80,6 +80,79 @@ pub trait Integration: Sized + 'static {
     fn on_tick(&self) {}
 }
 
+/// Read the library, for a manifest with `library = "read"` under
+/// `[permissions]`; any other plugin's calls are refused. Tracks are named by
+/// the keys playback events carry and [`playback::queue`] takes.
+pub mod library {
+    pub use super::bindings::kopuz::plugin::library::{Playlist, Track, TrackPage};
+
+    #[cfg(target_arch = "wasm32")]
+    use super::bindings::kopuz::plugin::library as host;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn no_host<T>() -> Result<T, String> {
+        Err("there is no host outside wasm".into())
+    }
+
+    /// The active source's library, as its search box searches it; at most 500.
+    pub fn search(query: &str, limit: u32) -> Result<Vec<Track>, String> {
+        #[cfg(target_arch = "wasm32")]
+        return host::search(query, limit);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = (query, limit);
+            no_host()
+        }
+    }
+
+    /// The tracks with these keys, in that order; at most 500 keys.
+    pub fn tracks(keys: &[String]) -> Result<Vec<Track>, String> {
+        #[cfg(target_arch = "wasm32")]
+        return host::tracks(keys);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = keys;
+            no_host()
+        }
+    }
+
+    pub fn album_tracks(album_id: &str) -> Result<Vec<Track>, String> {
+        #[cfg(target_arch = "wasm32")]
+        return host::album_tracks(album_id);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = album_id;
+            no_host()
+        }
+    }
+
+    /// Every track, a page at a time; at most 500 a page.
+    pub fn tracks_page(offset: u32, limit: u32) -> Result<TrackPage, String> {
+        #[cfg(target_arch = "wasm32")]
+        return host::tracks_page(offset, limit);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = (offset, limit);
+            no_host()
+        }
+    }
+
+    pub fn playlists() -> Result<Vec<Playlist>, String> {
+        #[cfg(target_arch = "wasm32")]
+        return host::playlists();
+        #[cfg(not(target_arch = "wasm32"))]
+        no_host()
+    }
+
+    /// The keys of the tracks marked favorite.
+    pub fn favorites() -> Result<Vec<String>, String> {
+        #[cfg(target_arch = "wasm32")]
+        return host::favorites();
+        #[cfg(not(target_arch = "wasm32"))]
+        no_host()
+    }
+}
+
 /// Steer what plays, for a manifest with `playback = "control"` under
 /// `[permissions]`; any other plugin's calls are refused.
 pub mod playback {

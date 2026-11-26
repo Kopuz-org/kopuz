@@ -304,9 +304,25 @@ before it is installed. It then calls `kopuz_plugin_sdk::integration::playback`:
 library track keys, the ones playback events carry. Without the permission
 every call is refused, and a source may not ask for it.
 
+### Reading the library
+
+An integration that asks for it may read the library:
+
+```toml
+[permissions]
+library = "read"
+```
+
+Its listing says so with `"library": "read"`, and the Plugins page warns
+before it is installed. `kopuz_plugin_sdk::integration::library` then has
+`search(query, limit)`, `tracks(&keys)`, `album_tracks(id)`,
+`tracks_page(offset, limit)` to walk every track, `playlists()` with each
+one's track keys, and `favorites()`. A call hands back at most 500 tracks.
+Without the permission every call is refused, and a source may not ask for it.
+
 [`daemon/plugins/examples/remote`](../daemon/plugins/examples/remote) asks an
 address for commands on each tick and carries them out, so a phone shortcut or
-a script can work kopuz.
+a script can work kopuz; `find <words>` plays what a library search finds.
 
 [`daemon/plugins/examples/webhook`](../daemon/plugins/examples/webhook) is a
 complete one: it posts each playback event to an address as JSON, and each

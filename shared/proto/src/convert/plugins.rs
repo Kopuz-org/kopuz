@@ -20,6 +20,7 @@ pub fn plugin_info_to_proto(value: &api::PluginInfo) -> PluginInfo {
         reads_folders: value.reads_folders,
         integration: value.integration,
         controls_playback: value.controls_playback,
+        reads_library: value.reads_library,
         update: value.update.as_ref().map(|update| PluginUpdate {
             version: update.version.clone(),
             network: update.network.clone(),
@@ -49,6 +50,7 @@ pub fn plugin_info_from_proto(value: &PluginInfo) -> api::PluginInfo {
         reads_folders: value.reads_folders,
         integration: value.integration,
         controls_playback: value.controls_playback,
+        reads_library: value.reads_library,
         update: value.update.as_ref().map(|update| api::PluginUpdate {
             version: update.version.clone(),
             network: update.network.clone(),
@@ -105,6 +107,7 @@ mod tests {
                     reads_folders: true,
                     integration: false,
                     controls_playback: false,
+                    reads_library: false,
                 },
                 api::PluginInfo {
                     id: "webhook".into(),
@@ -114,6 +117,7 @@ mod tests {
                     network: vec!["$server".into()],
                     integration: true,
                     controls_playback: true,
+                    reads_library: true,
                     ..Default::default()
                 },
                 api::PluginInfo {

@@ -1199,6 +1199,7 @@ plugin_integration = Integration
 plugin_integration_hint = Adds an integration rather than a source. Turn it on under Connectivity.
 plugin_set_up = Set up
 plugin_controls_playback = Can play, pause, skip and change what is queued. Only install it if you trust it.
+plugin_reads_library = Can see your library, playlists and favorites. Only install it if you trust it.
 library_empty_offline = Henüz çevrimdışı kullanılabilen bir şey yok
 library_empty_offline_detail = Şarkıları indir ya da çevrimiçiyken çal, çevrimdışı dinlemek için saklansınlar.
 

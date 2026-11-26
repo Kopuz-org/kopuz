@@ -1,0 +1,41 @@
+/// The library, read by an integration whose manifest asks for
+/// `library = "read"`. Any other plugin is refused every call. Tracks are
+/// named by the library's keys, the ones playback events carry and the
+/// `playback` interface queues.
+interface library {
+    record track {
+        key: string,
+        title: string,
+        artist: string,
+        album: string,
+        album-id: string,
+        duration-ms: option<u64>,
+        track-number: option<u32>,
+        disc-number: option<u32>,
+        musicbrainz-recording-id: option<string>,
+        musicbrainz-release-id: option<string>,
+    }
+
+    record track-page {
+        /// Every track there is, not only this page's.
+        total: u32,
+        tracks: list<track>,
+    }
+
+    record playlist {
+        id: string,
+        name: string,
+        track-keys: list<string>,
+    }
+
+    /// The active source's library, as its search box searches it.
+    search: func(query: string, limit: u32) -> result<list<track>, string>;
+    /// The tracks with these keys, in that order; a key nothing has is left out.
+    tracks: func(keys: list<string>) -> result<list<track>, string>;
+    album-tracks: func(album-id: string) -> result<list<track>, string>;
+    /// Every track, a page at a time; at most 500 a page.
+    tracks-page: func(offset: u32, limit: u32) -> result<track-page, string>;
+    playlists: func() -> result<list<playlist>, string>;
+    /// The keys of the tracks marked favorite.
+    favorites: func() -> result<list<string>, string>;
+}

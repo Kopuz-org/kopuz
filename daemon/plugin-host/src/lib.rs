@@ -15,12 +15,13 @@ mod plugin;
 mod registry;
 mod session;
 
-pub use bridge::{Answer, Bridge};
+pub use bridge::{Answer, Bridge, MAX_PAGE};
 pub use host::{Decryption, Opener};
 pub use integration::Integration;
 pub use plugin::{Code, Origin, Plugin};
 pub use registry::{
-    Bundled, COMPONENT_FILE, MANIFEST_FILE, Pending, Registry, host_set, plugin_dirs,
+    Bundled, COMPONENT_FILE, LIBRARY_GRANT, MANIFEST_FILE, PLAYBACK_GRANT, Pending, Registry,
+    grants, host_set, plugin_dirs,
 };
 pub use session::Session;
 
@@ -58,6 +59,10 @@ pub mod wit {
 
     pub mod playback {
         pub use crate::integration_bindings::kopuz::plugin::playback::{Command, QueueMode};
+    }
+
+    pub mod library {
+        pub use crate::integration_bindings::kopuz::plugin::library::{Playlist, Track, TrackPage};
     }
 }
 

@@ -150,7 +150,7 @@ impl PluginService {
                                 info.update = Some(PluginUpdate {
                                     version: listing.version.clone(),
                                     network: listing.network.clone(),
-                                    added_hosts: added(&info.network, &listing.network),
+                                    added_hosts: added_grants(info, listing),
                                 });
                             }
                             if info.homepage.is_none() {
@@ -208,6 +208,7 @@ impl PluginService {
                     reads_folders: manifest.permissions.reads_folders(),
                     integration: manifest.is_integration(),
                     controls_playback: manifest.permissions.controls_playback(),
+                    reads_library: manifest.permissions.reads_library(),
                 }),
             }
         }
@@ -401,9 +402,24 @@ fn installed() -> Vec<PluginInfo> {
                 reads_folders: manifest.permissions.reads_folders(),
                 integration: manifest.is_integration(),
                 controls_playback: manifest.permissions.controls_playback(),
+                reads_library: manifest.permissions.reads_library(),
             }
         })
         .collect()
+}
+
+/// What a listed update reaches or may do that the installed copy does not.
+fn added_grants(installed: &PluginInfo, listing: &plugin_host::market::Listing) -> Vec<String> {
+    let mut added = added(&installed.network, &listing.network);
+    if listing.playback == plugin_host::manifest::PlaybackAccess::Control
+        && !installed.controls_playback
+    {
+        added.push(plugin_host::PLAYBACK_GRANT.to_string());
+    }
+    if listing.library == plugin_host::manifest::LibraryAccess::Read && !installed.reads_library {
+        added.push(plugin_host::LIBRARY_GRANT.to_string());
+    }
+    added
 }
 
 fn added(installed: &[String], update: &[String]) -> Vec<String> {
@@ -518,6 +534,7 @@ fn listed(listing: &Listing) -> PluginInfo {
         reads_folders: listing.folders == plugin_host::manifest::FolderAccess::Read,
         integration: listing.integration,
         controls_playback: listing.playback == plugin_host::manifest::PlaybackAccess::Control,
+        reads_library: listing.library == plugin_host::manifest::LibraryAccess::Read,
     }
 }
 
@@ -533,6 +550,12 @@ fn differs(plugin: &plugin_host::Plugin, listing: &Listing) -> bool {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_wire_names_the_grants_as_the_registry_records_them() {
+        assert_eq!(api::PLAYBACK_GRANT, plugin_host::PLAYBACK_GRANT);
+        assert_eq!(api::LIBRARY_GRANT, plugin_host::LIBRARY_GRANT);
+    }
 
     #[test]
     fn a_same_sized_replacement_keeping_its_modification_time_is_noticed() {

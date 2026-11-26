@@ -58,7 +58,9 @@ pub use playlists::{
     ExternalPlaylist, PlaylistCatalog, PlaylistEdit, PlaylistFolderInfo, PlaylistImport,
     PlaylistInfo, PlaylistPrivacy, PlaylistReorder,
 };
-pub use plugins::{PluginCatalog, PluginInfo, PluginOrigin, PluginUpdate};
+pub use plugins::{
+    LIBRARY_GRANT, PLAYBACK_GRANT, PluginCatalog, PluginInfo, PluginOrigin, PluginUpdate,
+};
 pub use prefs::{
     FrontendPref, MAX_PREF_ENTRIES_PER_CALL, MAX_PREF_FRONTEND_BYTES, MAX_PREF_KEY_BYTES,
     MAX_PREF_TOTAL_BYTES, MAX_PREF_VALUE_BYTES, PrefEntry,
