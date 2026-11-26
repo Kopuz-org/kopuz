@@ -1,9 +1,9 @@
 [workspace]
-members = ["shared/*", "daemon/*", "daemon/plugins/sdk", "daemon/plugins/subsonic", "daemon/plugins/jellyfin", "daemon/plugins/clippsly", "daemon/plugins/soundcloud", "daemon/plugins/examples/internet-archive", "daemon/plugins/examples/webhook", "apps/common/*", "apps/cli", "apps/legacy/*", "apps/kopuz/*"]
+members = ["shared/*", "daemon/*", "daemon/plugins/sdk", "daemon/plugins/subsonic", "daemon/plugins/jellyfin", "daemon/plugins/clippsly", "daemon/plugins/soundcloud", "daemon/plugins/examples/internet-archive", "daemon/plugins/examples/webhook", "daemon/plugins/examples/remote", "apps/common/*", "apps/cli", "apps/legacy/*", "apps/kopuz/*"]
 # daemon/plugins holds crates but is not one; its crates are listed by name.
 exclude = ["vendor/*", "daemon/plugins", "apps/kopuz/.claude", "apps/kopuz/docs", "apps/kopuz/scripts"]
 # A bare `cargo build` skips the legacy Dioxus app; build it with `just build` or `-p kopuz-legacy`.
-default-members = ["shared/*", "daemon/*", "daemon/plugins/sdk", "daemon/plugins/subsonic", "daemon/plugins/jellyfin", "daemon/plugins/clippsly", "daemon/plugins/soundcloud", "daemon/plugins/examples/internet-archive", "daemon/plugins/examples/webhook", "apps/common/*", "apps/cli", "apps/kopuz/*"]
+default-members = ["shared/*", "daemon/*", "daemon/plugins/sdk", "daemon/plugins/subsonic", "daemon/plugins/jellyfin", "daemon/plugins/clippsly", "daemon/plugins/soundcloud", "daemon/plugins/examples/internet-archive", "daemon/plugins/examples/webhook", "daemon/plugins/examples/remote", "apps/common/*", "apps/cli", "apps/kopuz/*"]
 resolver = "3"
 
 [workspace.package]

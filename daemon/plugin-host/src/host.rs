@@ -58,6 +58,8 @@ pub(crate) struct State {
     next_connection: u32,
     /// Set only for `login`.
     opener: Option<Opener>,
+    /// Set only for an integration the host runs.
+    bridge: Option<std::sync::Arc<dyn crate::Bridge>>,
 }
 
 impl State {
@@ -96,11 +98,27 @@ impl State {
             connections: HashMap::new(),
             next_connection: 0,
             opener: None,
+            bridge: None,
         }
     }
 
     pub(crate) fn allow_sign_in(&mut self, opener: Opener) {
         self.opener = Some(opener);
+    }
+
+    pub(crate) fn bridge_to(&mut self, bridge: std::sync::Arc<dyn crate::Bridge>) {
+        self.bridge = Some(bridge);
+    }
+
+    /// The bridge, if the manifest lets this plugin control playback.
+    fn playback(&self) -> Result<&std::sync::Arc<dyn crate::Bridge>, String> {
+        if !self.permissions.controls_playback() {
+            tracing::warn!(plugin = %self.plugin_id, "plugin playback control refused: its manifest does not ask for it");
+            return Err("the plugin's manifest does not ask to control playback".into());
+        }
+        self.bridge
+            .as_ref()
+            .ok_or_else(|| "playback cannot be controlled from here".into())
     }
 
     fn reaches(&self, host: &str) -> bool {
@@ -510,6 +528,28 @@ async fn redirected(listener: &tokio::net::TcpListener, path: &str) -> std::io::
 }
 
 impl crate::bindings::kopuz::plugin::types::Host for State {}
+
+impl crate::integration_bindings::kopuz::plugin::playback::Host for State {
+    async fn control(&mut self, command: crate::wit::playback::Command) -> Result<(), String> {
+        let bridge = std::sync::Arc::clone(self.playback()?);
+        // A volume that is not a number passes any clamp and would be stored as the volume.
+        if let crate::wit::playback::Command::Volume(volume) = command
+            && !volume.is_finite()
+        {
+            return Err("a volume has to be a number".into());
+        }
+        bridge.control(command).await
+    }
+
+    async fn queue(
+        &mut self,
+        keys: Vec<String>,
+        mode: crate::wit::playback::QueueMode,
+    ) -> Result<(), String> {
+        let bridge = std::sync::Arc::clone(self.playback()?);
+        bridge.queue(keys, mode).await
+    }
+}
 
 #[cfg(test)]
 mod tests {

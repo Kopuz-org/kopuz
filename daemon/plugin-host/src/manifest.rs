@@ -27,7 +27,7 @@ pub struct Manifest {
 }
 
 /// A plugin that is not a source, set up from the fields it lists.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Integration {
     /// The `url` field whose host `$server` names. Like a source's server, it
@@ -40,6 +40,9 @@ pub struct Integration {
     /// What the host tells it as it happens; nothing it does not list.
     #[serde(default)]
     pub listens: Vec<Listen>,
+    /// How often a plugin that listens to `tick` is called, in milliseconds.
+    #[serde(default = "default_tick_ms")]
+    pub tick_ms: u32,
     #[serde(default, rename = "field")]
     pub fields: Vec<Field>,
 }
@@ -51,6 +54,27 @@ pub enum Listen {
     Playback,
     /// How loud the music is and where its beats fall, many times a second.
     Audio,
+    /// A call every `tick-ms`, to look for what the plugin waits on.
+    Tick,
+}
+
+/// The shortest `tick-ms` a manifest may ask for.
+pub const MIN_TICK_MS: u32 = 100;
+
+fn default_tick_ms() -> u32 {
+    1_000
+}
+
+impl Default for Integration {
+    fn default() -> Self {
+        Self {
+            server: None,
+            icon: None,
+            listens: Vec::new(),
+            tick_ms: default_tick_ms(),
+            fields: Vec::new(),
+        }
+    }
 }
 
 /// One thing the person fills in, in the order the settings page shows it.
@@ -105,6 +129,18 @@ pub struct Permissions {
     /// warns before such a plugin is installed.
     #[serde(default)]
     pub folders: FolderAccess,
+    /// Whether an integration may play, pause, skip and queue. The Plugins
+    /// page says so before it is installed.
+    #[serde(default)]
+    pub playback: PlaybackAccess,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlaybackAccess {
+    #[default]
+    None,
+    Control,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -266,6 +302,10 @@ pub enum ManifestError {
     IntegrationReadsFolders,
     #[error("the manifest reaches `$server`, but its integration names no server field")]
     NoServer,
+    #[error("the integration ticks every {0} ms; the shortest is {MIN_TICK_MS}")]
+    TickTooShort(u32),
+    #[error("only an integration may control playback")]
+    SourceControlsPlayback,
 }
 
 impl Manifest {
@@ -314,6 +354,8 @@ impl Manifest {
             {
                 return Err(ManifestError::NoServer);
             }
+        } else if manifest.permissions.controls_playback() {
+            return Err(ManifestError::SourceControlsPlayback);
         }
         Ok(manifest)
     }
@@ -334,6 +376,9 @@ impl Manifest {
 
 impl Integration {
     fn check(&self) -> Result<(), ManifestError> {
+        if self.tick_ms < MIN_TICK_MS {
+            return Err(ManifestError::TickTooShort(self.tick_ms));
+        }
         let mut seen = std::collections::HashSet::new();
         for field in &self.fields {
             if field.key.starts_with('$') {
@@ -422,6 +467,10 @@ fn address_literal(host: &str) -> Option<String> {
 impl Permissions {
     pub fn reads_folders(&self) -> bool {
         self.folders == FolderAccess::Read
+    }
+
+    pub fn controls_playback(&self) -> bool {
+        self.playback == PlaybackAccess::Control
     }
 
     pub fn allows(&self, host: &str, server_host: Option<&str>) -> bool {
@@ -605,6 +654,14 @@ mod tests {
         assert_eq!(integration.fields.len(), 2);
         assert!(integration.listens_to(Listen::Playback));
         assert!(integration.listens_to(Listen::Audio));
+        assert_eq!(integration.tick_ms, 1_000, "a second unless it says");
+        assert!(!manifest.permissions.controls_playback());
+        let remote = Manifest::parse(&LIGHTS.replace(
+            "network = [\"$server\"]",
+            "network = [\"$server\"]\nplayback = \"control\"",
+        ))
+        .expect("an integration may ask to control playback");
+        assert!(remote.permissions.controls_playback());
         assert_eq!(integration.fields[0].kind, FieldKind::Url);
         assert_eq!(integration.fields[1].options[1].value, "level");
         let answers = vec![
@@ -648,6 +705,19 @@ mod tests {
         assert!(matches!(
             Manifest::parse(&no_options),
             Err(ManifestError::NoOptions(key)) if key == "mode"
+        ));
+        let fast = LIGHTS.replace("server = \"url\"", "server = \"url\"\ntick-ms = 20");
+        assert!(matches!(
+            Manifest::parse(&fast),
+            Err(ManifestError::TickTooShort(20))
+        ));
+        let source_driving = SUBSONIC.replace(
+            "network = [\"$server\"]",
+            "network = [\"$server\"]\nplayback = \"control\"",
+        );
+        assert!(matches!(
+            Manifest::parse(&source_driving),
+            Err(ManifestError::SourceControlsPlayback)
         ));
         let reserved = LIGHTS.replace("key = \"mode\"", "key = \"$enabled\"");
         assert!(matches!(

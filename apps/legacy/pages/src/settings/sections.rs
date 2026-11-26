@@ -996,6 +996,12 @@ fn PluginRow(
                 if plugin.integration {
                     p { class: "text-xs text-white/60", "{i18n::t(\"plugin_integration_hint\")}" }
                 }
+                if plugin.controls_playback {
+                    p { class: "text-xs text-white/60",
+                        i { class: "fa-solid fa-triangle-exclamation mr-1" }
+                        "{i18n::t(\"plugin_controls_playback\")}"
+                    }
+                }
                 if plugin.reads_folders {
                     p { class: "text-xs text-white/60",
                         i { class: "fa-solid fa-triangle-exclamation mr-1" }

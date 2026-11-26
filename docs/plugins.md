@@ -282,6 +282,32 @@ An integration hears only what its `listens` list names:
   rather than hearing them late. A device that pulses to the music needs
   nothing more than this.
 
+- **`tick`** calls `on_tick` every `tick-ms` (a second unless the
+  `[integration]` table says, and no less than 100), for a plugin that has to
+  look for something itself, such as a button pressed on a remote. A tick
+  still running when the next is due makes that one skip.
+
+### Controlling playback
+
+An integration that asks for it may play, pause, skip, seek, set the volume
+and queue tracks:
+
+```toml
+[permissions]
+playback = "control"
+```
+
+Its listing says so with `"playback": "control"`, and the Plugins page warns
+before it is installed. It then calls `kopuz_plugin_sdk::integration::playback`:
+`control(Command::Next)`, `control(Command::Seek(30_000))`,
+`control(Command::Volume(0.5))`, or `queue(&keys, QueueMode::Replace)` with
+library track keys, the ones playback events carry. Without the permission
+every call is refused, and a source may not ask for it.
+
+[`daemon/plugins/examples/remote`](../daemon/plugins/examples/remote) asks an
+address for commands on each tick and carries them out, so a phone shortcut or
+a script can work kopuz.
+
 [`daemon/plugins/examples/webhook`](../daemon/plugins/examples/webhook) is a
 complete one: it posts each playback event to an address as JSON, and each
 beat too when its **Post beats** toggle is on. An integration plugin is listed in the marketplace like any

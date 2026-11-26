@@ -47,6 +47,9 @@ pub struct Listing {
     /// Shown before install: an integration rather than a source.
     #[serde(default)]
     pub integration: bool,
+    /// Shown before install: whether it may play, pause, skip and queue.
+    #[serde(default)]
+    pub playback: crate::manifest::PlaybackAccess,
     pub manifest: Download,
     pub component: Download,
 }
@@ -199,6 +202,7 @@ pub fn check_manifest(
         || services != listed_services
         || manifest.permissions.folders != listing.folders
         || manifest.is_integration() != listing.integration
+        || manifest.permissions.playback != listing.playback
     {
         return Err(MarketError::PermissionsDiffer);
     }
@@ -330,6 +334,7 @@ mod tests {
             network: vec!["*.bandcamp.com".into()],
             folders: FolderAccess::None,
             integration: false,
+            playback: crate::manifest::PlaybackAccess::None,
             manifest: Download {
                 url: "https://example.test/kopuz-plugin.toml".into(),
                 sha256: sha(MANIFEST.as_bytes()),

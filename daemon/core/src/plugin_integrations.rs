@@ -253,6 +253,8 @@ pub struct PluginIntegrations {
     /// copy being swapped, so two edits at once cannot interleave and leave
     /// one's copy running on the other's answers.
     edits: tokio::sync::Mutex<()>,
+    /// How an integration reaches kopuz, once the session exists.
+    bridge: std::sync::RwLock<Option<Arc<dyn plugin_host::Bridge>>>,
 }
 
 impl PluginIntegrations {
@@ -261,7 +263,29 @@ impl PluginIntegrations {
             credentials,
             running: Mutex::new(HashMap::new()),
             edits: tokio::sync::Mutex::new(()),
+            bridge: std::sync::RwLock::new(None),
         })
+    }
+
+    /// Let every integration opened from now on reach kopuz through `bridge`,
+    /// as far as its manifest allows; the running ones reopen with it.
+    pub fn attach_bridge(&self, bridge: Arc<dyn plugin_host::Bridge>) {
+        *self.bridge.write().unwrap_or_else(PoisonError::into_inner) = Some(bridge);
+        let retired: Vec<_> = self.lock().drain().map(|(_, live)| live).collect();
+        retire(retired);
+    }
+
+    fn open(&self, plugin: Arc<Plugin>, settings: Vec<(String, String)>) -> Integration {
+        let integration = Integration::new(plugin, settings);
+        match self
+            .bridge
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+        {
+            Some(bridge) => integration.with_bridge(bridge),
+            None => integration,
+        }
     }
 
     /// Answer a plugin's fields. Once the answers leave it turned on with
@@ -282,7 +306,7 @@ impl PluginIntegrations {
             if let Some(old) = old {
                 old.close().await;
             }
-            let check = Arc::new(Integration::new(Arc::clone(&plugin), wanted));
+            let check = Arc::new(self.open(Arc::clone(&plugin), wanted));
             match check.validate().await {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => return Err(rejected(&error)),
@@ -356,7 +380,7 @@ impl PluginIntegrations {
                 }
                 old => {
                     retired.extend(old);
-                    Arc::new(Integration::new(Arc::clone(&plugin), wanted))
+                    Arc::new(self.open(Arc::clone(&plugin), wanted))
                 }
             };
             kept.insert(plugin.id().to_string(), live);

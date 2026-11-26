@@ -1,0 +1,18 @@
+[package]
+name = "kopuz-plugin-remote"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "An example integration plugin: takes playback commands from an address of your choice."
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+kopuz-plugin-sdk = { path = "../../sdk" }

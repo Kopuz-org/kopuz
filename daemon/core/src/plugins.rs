@@ -207,6 +207,7 @@ impl PluginService {
                     update: Some(update),
                     reads_folders: manifest.permissions.reads_folders(),
                     integration: manifest.is_integration(),
+                    controls_playback: manifest.permissions.controls_playback(),
                 }),
             }
         }
@@ -399,6 +400,7 @@ fn installed() -> Vec<PluginInfo> {
                 update: None,
                 reads_folders: manifest.permissions.reads_folders(),
                 integration: manifest.is_integration(),
+                controls_playback: manifest.permissions.controls_playback(),
             }
         })
         .collect()
@@ -515,6 +517,7 @@ fn listed(listing: &Listing) -> PluginInfo {
         update: None,
         reads_folders: listing.folders == plugin_host::manifest::FolderAccess::Read,
         integration: listing.integration,
+        controls_playback: listing.playback == plugin_host::manifest::PlaybackAccess::Control,
     }
 }
 

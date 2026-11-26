@@ -1,0 +1,22 @@
+id = "remote"
+name = "Remote"
+version = "0.1.0"
+api = "0.2"
+description = "Plays, pauses and skips when an address of your choice says so, for a phone shortcut, a button or a script."
+
+[permissions]
+network = ["$server"]
+playback = "control"
+
+[integration]
+server = "url"
+listens = ["tick"]
+tick-ms = 500
+
+[[integration.field]]
+key = "url"
+label = "Address"
+kind = "url"
+placeholder = "http://192.168.1.20:8000/kopuz"
+help = "Answers each request with commands, one a line: play, pause, toggle, next, previous, stop, seek 30, volume 50, play <track key> or queue <track key>. An empty answer does nothing."
+required = true

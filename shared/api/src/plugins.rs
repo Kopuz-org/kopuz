@@ -33,6 +33,8 @@ pub struct PluginInfo {
     pub reads_folders: bool,
     /// Adds an integration, turned on under Connectivity, instead of a source.
     pub integration: bool,
+    /// May play, pause, skip and change what is queued.
+    pub controls_playback: bool,
 }
 
 /// A different build of an installed plugin: the marketplace lists another

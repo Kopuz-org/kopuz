@@ -347,6 +347,12 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         crate::IntegrationService::new(config_service_for_api, credentials, presence_pause);
     crate::plugin_listeners::spawn(&session, Arc::clone(integrations.plugins()));
     crate::plugin_audio::spawn(session.audio_meter(), Arc::clone(integrations.plugins()));
+    crate::plugin_ticks::spawn(Arc::clone(integrations.plugins()));
+    integrations
+        .plugins()
+        .attach_bridge(Arc::new(crate::plugin_bridge::SessionBridge::new(
+            session.clone(),
+        )));
     let api = Arc::new(
         LocalApi::new(session.clone())
             .with_library(library.clone())
