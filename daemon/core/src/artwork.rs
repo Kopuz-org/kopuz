@@ -536,12 +536,24 @@ impl ArtworkService {
 
 /// A body that is an API answer rather than a picture. Subsonic servers
 /// report a bad `getCoverArt` id with HTTP 200 and a JSON or XML error.
+/// The bytes win over the header: a picture sent as `text/plain` is kept.
 fn is_error_body(content_type: Option<&str>, bytes: &[u8]) -> bool {
     const ERROR_TYPES: [&str; 3] = ["application/json", "text/", "application/xml"];
+    const SUBSONIC_XML: &[u8] = b"<subsonic-response";
 
+    if image::guess_format(bytes).is_ok() {
+        return false;
+    }
     let declared =
         content_type.is_some_and(|value| ERROR_TYPES.iter().any(|kind| value.starts_with(kind)));
-    declared || bytes.starts_with(b"{")
+
+    // E.g. `{"subsonic-response":…}` or `<?xml …?><subsonic-response …>`, after any whitespace.
+    let body = bytes.trim_ascii_start();
+    let subsonic_xml = body
+        .windows(SUBSONIC_XML.len())
+        .take(64)
+        .any(|w| w == SUBSONIC_XML);
+    declared || body.starts_with(b"{") || subsonic_xml
 }
 
 /// A client that follows no redirect, for a fetch that checks each hop itself.
@@ -763,6 +775,23 @@ mod tests {
         ));
         assert!(!is_error_body(Some("image/jpeg"), &jpeg_of(4)));
         assert!(!is_error_body(None, &jpeg_of(4)));
+    }
+
+    #[test]
+    fn the_body_decides_over_a_wrong_or_missing_header() {
+        assert!(
+            !is_error_body(Some("text/plain"), &jpeg_of(4)),
+            "a picture sent as text is still a picture"
+        );
+        assert!(is_error_body(
+            None,
+            br#"<?xml version="1.0"?><subsonic-response status="failed"/>"#
+        ));
+        assert!(is_error_body(
+            None,
+            b"<subsonic-response status=\"failed\"/>"
+        ));
+        assert!(is_error_body(None, b"\n  {\"error\":1}"));
     }
 
     #[tokio::test]
