@@ -15,6 +15,7 @@ use gpui_kit::{
 use settings_appearance::AppearanceSettings;
 use settings_interface::InterfaceSettings;
 use settings_playback::PlaybackSettings;
+use settings_plugins::Plugins;
 use settings_sources::SourceSettings;
 use store::ConfigModel;
 
@@ -32,6 +33,7 @@ pub enum Category {
     Interface,
     Library,
     Connectivity,
+    Plugins,
     Offline,
     Metadata,
     Player,
@@ -45,6 +47,7 @@ impl Category {
         Category::Interface,
         Category::Library,
         Category::Connectivity,
+        Category::Plugins,
         Category::Offline,
         Category::Metadata,
         Category::Player,
@@ -59,6 +62,7 @@ impl Category {
             Category::Interface => "interface",
             Category::Library => "library",
             Category::Connectivity => "connectivity",
+            Category::Plugins => "plugins",
             Category::Offline => "offline",
             Category::Metadata => "metadata",
             Category::Player => "player",
@@ -80,6 +84,7 @@ impl Category {
             Category::Interface => "settings_interface",
             Category::Library => "settings_library",
             Category::Connectivity => "settings_connectivity",
+            Category::Plugins => "plugins",
             Category::Offline => "settings_offline",
             Category::Metadata => "settings_metadata",
             Category::Player => "settings_player",
@@ -94,6 +99,7 @@ impl Category {
             Category::Interface => icons::ROWS,
             Category::Library => icons::LIBRARY,
             Category::Connectivity => icons::SPEAKER,
+            Category::Plugins => icons::GEARS,
             Category::Offline => icons::DOWNLOAD,
             Category::Metadata => icons::EDIT,
             Category::Player => icons::PLAY,
@@ -110,6 +116,7 @@ pub struct Settings {
     appearance: Entity<AppearanceSettings>,
     interface: Entity<InterfaceSettings>,
     sources: Entity<SourceSettings>,
+    plugins: Entity<Plugins>,
     playback: Entity<PlaybackSettings>,
     _subscriptions: Vec<Subscription>,
 }
@@ -139,6 +146,7 @@ impl Settings {
             appearance: cx.new(|cx| AppearanceSettings::new(window, cx)),
             interface: cx.new(|cx| InterfaceSettings::new(window, cx)),
             sources: cx.new(|cx| SourceSettings::new(window, cx)),
+            plugins: cx.new(|cx| Plugins::new(window, cx)),
             playback: cx.new(|cx| PlaybackSettings::new(window, cx)),
             _subscriptions: subscriptions,
         };
@@ -173,8 +181,8 @@ impl Settings {
             Category::General | Category::Appearance => self
                 .appearance
                 .update(cx, |panel, cx| panel.show(section, cx)),
-            // The Interface panel draws whatever registered itself; it has no sections to pick.
-            Category::Interface => {}
+            // Neither panel has sections to pick.
+            Category::Interface | Category::Plugins => {}
             Category::Library | Category::Connectivity => {
                 self.sources.update(cx, |panel, cx| panel.show(section, cx))
             }
@@ -204,6 +212,7 @@ impl Settings {
                 .child(self.appearance.clone())
                 .child(self.interface.clone())
                 .child(self.sources.clone())
+                .child(self.plugins.clone())
                 .child(self.playback.clone())
                 .into_any_element();
         }
@@ -211,6 +220,7 @@ impl Settings {
             Category::Appearance | Category::General => self.appearance.clone().into_any_element(),
             Category::Interface => self.interface.clone().into_any_element(),
             Category::Library | Category::Connectivity => self.sources.clone().into_any_element(),
+            Category::Plugins => self.plugins.clone().into_any_element(),
             Category::Offline | Category::Metadata | Category::Player | Category::Tools => {
                 self.playback.clone().into_any_element()
             }
