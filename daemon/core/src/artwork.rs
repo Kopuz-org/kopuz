@@ -458,7 +458,7 @@ impl ArtworkService {
             "remote_{}_{cache_name}",
             if hq { "hq" } else { "thumb" },
         ));
-        let cached = tokio::fs::read(&cache_path).await.ok();
+        let cached = read_cached(&cache_path).await;
         let fresh = tokio::fs::metadata(&cache_path)
             .await
             .and_then(|meta| meta.modified())
@@ -532,6 +532,13 @@ impl ArtworkService {
             content_type,
         }
     }
+}
+
+/// A cached remote cover. An error answer cached before `is_error_body`
+/// existed counts as no cover, so it is neither served nor kept as fallback.
+async fn read_cached(path: &std::path::Path) -> Option<Vec<u8>> {
+    let bytes = tokio::fs::read(path).await.ok()?;
+    (!is_error_body(None, &bytes)).then_some(bytes)
 }
 
 /// A body that is an API answer rather than a picture. Subsonic servers
@@ -775,6 +782,19 @@ mod tests {
         ));
         assert!(!is_error_body(Some("image/jpeg"), &jpeg_of(4)));
         assert!(!is_error_body(None, &jpeg_of(4)));
+    }
+
+    #[tokio::test]
+    async fn an_error_answer_cached_before_the_check_is_no_cover() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = dir.path().join("remote_thumb_error");
+        let cover = dir.path().join("remote_thumb_cover");
+        std::fs::write(&error, br#"{"subsonic-response":{"status":"failed"}}"#).unwrap();
+        std::fs::write(&cover, jpeg_of(4)).unwrap();
+
+        assert_eq!(read_cached(&error).await, None);
+        assert_eq!(read_cached(&cover).await, Some(jpeg_of(4)));
+        assert_eq!(read_cached(&dir.path().join("missing")).await, None);
     }
 
     #[test]
