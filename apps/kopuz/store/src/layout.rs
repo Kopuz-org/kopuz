@@ -107,6 +107,8 @@ pub enum SheetTab {
     Queue,
     Lyrics,
     Related,
+    /// A tab a plugin adds; which one is kept by the view, not here.
+    Plugin,
 }
 
 /// How a listing is drawn.

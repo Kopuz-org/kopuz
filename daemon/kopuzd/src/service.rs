@@ -1618,7 +1618,7 @@ impl Kopuz for KopuzGrpc {
     ) -> Result<Response<proto::PanelBlockList>, Status> {
         let (plugin, id, target) = convert::render_plugin_panel_from_proto(request.into_inner())
             .ok_or_else(|| {
-                Status::invalid_argument("a panel is drawn for an album or an artist")
+                Status::invalid_argument("a panel is drawn for an album, an artist or a track")
             })?;
         let blocks = self
             .0

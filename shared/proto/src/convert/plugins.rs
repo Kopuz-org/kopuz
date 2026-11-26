@@ -171,6 +171,7 @@ fn panel_place_from_proto(place: i32) -> Option<api::PanelPlace> {
     match PanelPlace::try_from(place).ok()? {
         PanelPlace::Album => Some(api::PanelPlace::Album),
         PanelPlace::Artist => Some(api::PanelPlace::Artist),
+        PanelPlace::NowPlaying => Some(api::PanelPlace::NowPlaying),
         PanelPlace::Unspecified => None,
     }
 }
@@ -189,6 +190,7 @@ pub fn plugin_panels_to_proto(panels: &[api::PluginPanel]) -> PluginPanelList {
                     .map(|place| match place {
                         api::PanelPlace::Album => PanelPlace::Album as i32,
                         api::PanelPlace::Artist => PanelPlace::Artist as i32,
+                        api::PanelPlace::NowPlaying => PanelPlace::NowPlaying as i32,
                     })
                     .collect(),
             })
@@ -225,6 +227,7 @@ pub fn render_plugin_panel_to_proto(
             api::PanelTarget::Artist(artist) => {
                 render_plugin_panel_request::Target::ArtistKey(artist)
             }
+            api::PanelTarget::Track(track) => render_plugin_panel_request::Target::TrackKey(track),
         }),
     }
 }
@@ -236,6 +239,7 @@ pub fn render_plugin_panel_from_proto(
     let target = match request.target? {
         render_plugin_panel_request::Target::AlbumId(album) => api::PanelTarget::Album(album),
         render_plugin_panel_request::Target::ArtistKey(artist) => api::PanelTarget::Artist(artist),
+        render_plugin_panel_request::Target::TrackKey(track) => api::PanelTarget::Track(track),
     };
     Some((request.plugin, request.id, target))
 }
@@ -291,7 +295,11 @@ mod tests {
             plugin: "remote".into(),
             id: "more".into(),
             title: "More by this artist".into(),
-            places: vec![api::PanelPlace::Album, api::PanelPlace::Artist],
+            places: vec![
+                api::PanelPlace::Album,
+                api::PanelPlace::Artist,
+                api::PanelPlace::NowPlaying,
+            ],
         }];
         assert_eq!(
             plugin_panels_from_proto(&plugin_panels_to_proto(&panels)),
@@ -300,6 +308,7 @@ mod tests {
         for target in [
             api::PanelTarget::Album("al-1".into()),
             api::PanelTarget::Artist("miles davis".into()),
+            api::PanelTarget::Track("tr-9".into()),
         ] {
             let request =
                 render_plugin_panel_to_proto("remote".into(), "more".into(), target.clone());

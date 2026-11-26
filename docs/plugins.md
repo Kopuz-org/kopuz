@@ -316,18 +316,22 @@ offers it.
 
 ### Panels
 
-An integration can also draw a small panel on an album's or an artist's page:
+An integration can also draw a small panel on an album's or an artist's page,
+or as a tab beside the queue and the lyrics:
 
 ```toml
 [[integration.panel]]
 id = "more-by-artist"
 title = "More by this artist"
-places = ["album", "artist"]
+places = ["album", "artist", "now-playing"]
 ```
 
 On an album the panel sits under the tracks; on an artist it is a button
-under the header that opens it. Either way kopuz calls `render_panel(id,
-target)` with `PanelTarget::Album(id)` or `PanelTarget::Artist(key)` and draws
+under the header that opens it. As a `now-playing` tab its title is the tab's
+name, in the docked column and in the full player alike, and it is drawn again
+for each track that starts. kopuz calls `render_panel(id, target)` with
+`PanelTarget::Album(id)`, `PanelTarget::Artist(key)` or `PanelTarget::Track(key)`
+for the track playing, and draws
 the `Block`s it returns, in order: a `Heading`, a line of `Text`, `Tracks`
 (library keys, shown as rows that play from the one clicked) and an `Action`
 button that runs one of the plugin's own actions on the same target. The

@@ -6,6 +6,8 @@ pub enum SidePanel {
     Queue,
     Lyrics,
     Devices,
+    /// A plugin's tab beside the queue and the lyrics.
+    Plugin,
 }
 
 /// Window chrome state shared by the shell and the pieces that toggle it.
