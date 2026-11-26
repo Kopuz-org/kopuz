@@ -136,6 +136,8 @@ service Kopuz {
   rpc GetPlugins(GetPluginsRequest) returns (PluginCatalog);
   rpc InstallPlugin(InstallPluginRequest) returns (PluginInfo);
   rpc UninstallPlugin(PluginId) returns (Unit);
+  rpc GetPluginActions(GetPluginActionsRequest) returns (PluginActionList);
+  rpc RunPluginAction(RunPluginActionRequest) returns (PluginActionAnswer);
 
   rpc GetSources(GetSourcesRequest) returns (SourceList);
   rpc GetServices(GetServicesRequest) returns (ServiceList);
@@ -2223,6 +2225,40 @@ enum PluginOrigin {
   PLUGIN_ORIGIN_UNSPECIFIED = 0;
   PLUGIN_ORIGIN_OFFICIAL = 1;
   PLUGIN_ORIGIN_COMMUNITY = 2;
+}
+
+enum ActionPlace {
+  ACTION_PLACE_UNSPECIFIED = 0;
+  ACTION_PLACE_PALETTE = 1;
+  ACTION_PLACE_TRACK = 2;
+  ACTION_PLACE_ALBUM = 3;
+}
+
+message GetPluginActionsRequest {}
+
+message PluginAction {
+  string plugin = 1;
+  string id = 2;
+  string label = 3;
+  repeated ActionPlace places = 4;
+  optional string ask = 5;
+}
+
+message PluginActionList {
+  repeated PluginAction actions = 1;
+}
+
+message RunPluginActionRequest {
+  string plugin = 1;
+  string id = 2;
+  // Set for an action run on tracks; `album_id` for one run on an album; neither for the palette.
+  repeated string track_keys = 3;
+  optional string album_id = 4;
+  optional string input = 5;
+}
+
+message PluginActionAnswer {
+  optional string message = 1;
 }
 
 // One plugin, as installed, as the marketplace lists it, or both.

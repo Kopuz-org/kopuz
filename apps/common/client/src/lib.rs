@@ -992,6 +992,32 @@ impl api::PluginApi for GrpcApi {
             .map_err(wire_error)?;
         Ok(())
     }
+
+    async fn plugin_actions(&self) -> Result<Vec<api::PluginAction>, ApiError> {
+        let list = self
+            .client()
+            .get_plugin_actions(Request::new(proto::GetPluginActionsRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::plugin_actions_from_proto(list.get_ref()))
+    }
+
+    async fn run_plugin_action(
+        &self,
+        plugin: String,
+        id: String,
+        target: api::ActionTarget,
+        input: Option<String>,
+    ) -> Result<Option<String>, ApiError> {
+        let answer = self
+            .client()
+            .run_plugin_action(Request::new(convert::run_plugin_action_to_proto(
+                plugin, id, target, input,
+            )))
+            .await
+            .map_err(wire_error)?;
+        Ok(answer.into_inner().message)
+    }
 }
 
 #[async_trait::async_trait]

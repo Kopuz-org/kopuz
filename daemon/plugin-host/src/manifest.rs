@@ -45,6 +45,33 @@ pub struct Integration {
     pub tick_ms: u32,
     #[serde(default, rename = "field")]
     pub fields: Vec<Field>,
+    /// Buttons the app shows for it, in the order listed.
+    #[serde(default, rename = "action")]
+    pub actions: Vec<Action>,
+}
+
+/// Something the person can choose to run, where the app offers it.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Action {
+    pub id: String,
+    pub label: String,
+    pub places: Vec<ActionPlace>,
+    /// Asked of the person before it runs, such as "Describe the music";
+    /// their answer is the action's input.
+    #[serde(default)]
+    pub ask: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ActionPlace {
+    /// The command palette, run on nothing in particular.
+    Palette,
+    /// A track's menu and a selection's, run on their tracks.
+    Track,
+    /// An album's menu, run on the album.
+    Album,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -73,6 +100,7 @@ impl Default for Integration {
             listens: Vec::new(),
             tick_ms: default_tick_ms(),
             fields: Vec::new(),
+            actions: Vec::new(),
         }
     }
 }
@@ -320,6 +348,12 @@ pub enum ManifestError {
     SourceControlsPlayback,
     #[error("only an integration may read the library")]
     SourceReadsLibrary,
+    #[error("the integration lists action `{0}` twice")]
+    DuplicateAction(String),
+    #[error("the integration's action `{0}` is offered nowhere")]
+    ActionWithoutPlace(String),
+    #[error("the action `{0}` has a blank id, label or question")]
+    BlankAction(String),
 }
 
 impl Manifest {
@@ -432,6 +466,22 @@ impl Integration {
                 if !fits {
                     return Err(ManifestError::BadDefault(field.key.clone()));
                 }
+            }
+        }
+        let mut actions = std::collections::HashSet::new();
+        for action in &self.actions {
+            if !actions.insert(action.id.as_str()) {
+                return Err(ManifestError::DuplicateAction(action.id.clone()));
+            }
+            if action.places.is_empty() {
+                return Err(ManifestError::ActionWithoutPlace(action.id.clone()));
+            }
+            if [Some(&action.id), Some(&action.label), action.ask.as_ref()]
+                .into_iter()
+                .flatten()
+                .any(|text| text.trim().is_empty())
+            {
+                return Err(ManifestError::BlankAction(action.id.clone()));
             }
         }
         if let Some(server) = &self.server
@@ -732,6 +782,29 @@ mod tests {
         assert!(matches!(
             Manifest::parse(&no_options),
             Err(ManifestError::NoOptions(key)) if key == "mode"
+        ));
+        let actions = format!(
+            "{LIGHTS}\n[[integration.action]]\nid = \"party\"\nlabel = \"Party\"\nplaces = [\"palette\"]\n"
+        );
+        let parsed = Manifest::parse(&actions).expect("an action");
+        let party = &parsed.integration.expect("integration").actions[0];
+        assert_eq!(party.places, [ActionPlace::Palette]);
+        assert_eq!(party.ask, None);
+        let twice = format!(
+            "{actions}\n[[integration.action]]\nid = \"party\"\nlabel = \"Again\"\nplaces = [\"track\"]\n"
+        );
+        assert!(matches!(
+            Manifest::parse(&twice),
+            Err(ManifestError::DuplicateAction(id)) if id == "party"
+        ));
+        let nowhere = actions.replace("places = [\"palette\"]", "places = []");
+        assert!(matches!(
+            Manifest::parse(&nowhere),
+            Err(ManifestError::ActionWithoutPlace(id)) if id == "party"
+        ));
+        assert!(matches!(
+            Manifest::parse(&format!("{actions}\n[[integration.action]]\nid = \"quiet\"\nlabel = \" \"\nplaces = [\"palette\"]\n")),
+            Err(ManifestError::BlankAction(id)) if id == "quiet"
         ));
         let fast = LIGHTS.replace("server = \"url\"", "server = \"url\"\ntick-ms = 20");
         assert!(matches!(

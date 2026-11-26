@@ -80,6 +80,38 @@ pub struct PluginCatalog {
     pub marketplace_error: Option<String>,
 }
 
+/// Where the app offers a plugin's action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionPlace {
+    /// The command palette, run on nothing in particular.
+    Palette,
+    /// A track's menu and a selection's, run on their tracks.
+    Track,
+    /// An album's menu, run on the album.
+    Album,
+}
+
+/// Something an integration plugin that is turned on offers to run.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PluginAction {
+    pub plugin: String,
+    pub id: String,
+    /// In the plugin's own words.
+    pub label: String,
+    pub places: Vec<ActionPlace>,
+    /// Asked of the person before it runs; their answer is its input.
+    pub ask: Option<String>,
+}
+
+/// What an action is run on.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ActionTarget {
+    #[default]
+    None,
+    Tracks(Vec<String>),
+    Album(String),
+}
+
 #[cfg(test)]
 mod update_tests {
     use super::*;

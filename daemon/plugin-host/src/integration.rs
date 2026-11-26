@@ -195,4 +195,11 @@ calls! {
     fn on_audio => call_on_audio(frames: &[wit::AudioFrame] => frames) -> ();
 
     fn on_tick => call_on_tick() -> ();
+
+    /// Run one of the manifest's actions on `target`.
+    fn run_action => call_run_action(
+        id: &str => id,
+        target: &wit::ActionTarget => target,
+        input: Option<&str> => input
+    ) -> Result<Option<String>, String>;
 }

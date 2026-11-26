@@ -21,3 +21,14 @@ kind = "url"
 placeholder = "http://192.168.1.20:8000/kopuz"
 help = "Answers each request with commands, one a line: play, pause, toggle, next, previous, stop, seek 30, volume 50, play <track key>, queue <track key> or find <words>, which plays what a library search finds. An empty answer does nothing."
 required = true
+
+[[integration.action]]
+id = "find"
+label = "Play what the library finds for…"
+places = ["palette"]
+ask = "Words to search the library for"
+
+[[integration.action]]
+id = "more-by-artist"
+label = "Play more by this artist"
+places = ["track"]

@@ -130,6 +130,51 @@ pub fn has_menu(target: &Target, cx: &App) -> bool {
     all()
         .iter()
         .any(|command| command.section != Section::Hidden && command.is_available(target, cx))
+        || plugin_place(target).is_some_and(|(place, _)| {
+            !store::plugin_actions::PluginActions::global(cx)
+                .read(cx)
+                .at(place, cx)
+                .is_empty()
+        })
+}
+
+/// Where a plugin's action for `target` is offered, and what it is run on.
+fn plugin_place(target: &Target) -> Option<(api::ActionPlace, api::ActionTarget)> {
+    match target {
+        Target::Tracks { keys, .. } => Some((
+            api::ActionPlace::Track,
+            api::ActionTarget::Tracks(keys.iter().map(|key| key.to_string()).collect()),
+        )),
+        Target::Album { id, .. } => Some((
+            api::ActionPlace::Album,
+            api::ActionTarget::Album(id.to_string()),
+        )),
+        _ => None,
+    }
+}
+
+/// Run a plugin's action, asking its question first when it has one.
+pub fn run_plugin_action(
+    action: api::PluginAction,
+    target: api::ActionTarget,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    match action.ask.clone() {
+        // On the next frame, so a palette closing in this one does not take the prompt's focus back.
+        Some(question) => window.defer(cx, move |window, cx| {
+            components::dialogs::open_rename(
+                question,
+                "",
+                move |answer, cx| {
+                    store::plugin_actions::run(&action, target.clone(), Some(answer), cx)
+                },
+                window,
+                cx,
+            )
+        }),
+        None => store::plugin_actions::run(&action, target, None, cx),
+    }
 }
 
 fn build_menu(target: Target, menu: PopupMenu, cx: &mut Context<PopupMenu>) -> PopupMenu {
@@ -155,6 +200,30 @@ fn build_menu_with(
         }
         previous = Some(command.section);
         menu = menu.item(item(command, &target, run.clone(), cx));
+    }
+    // A plugin's own verbs come last, apart from kopuz's. A selection whose tracks are not
+    // fetched yet has no keys to hand over, so it offers none rather than an empty target.
+    let unfetched = matches!(
+        plugin_place(&target),
+        Some((_, api::ActionTarget::Tracks(ref keys))) if keys.is_empty()
+    );
+    if let Some((place, on)) = plugin_place(&target).filter(|_| !unfetched) {
+        let actions = store::plugin_actions::PluginActions::global(cx)
+            .read(cx)
+            .at(place, cx);
+        if !actions.is_empty() && previous.is_some() {
+            menu = menu.separator();
+        }
+        for action in actions {
+            let on = on.clone();
+            menu = menu.item(
+                components::menus::menu_item(SharedString::from(action.label.clone()), None)
+                    .on_click(move |_, window, cx| {
+                        run_plugin_action(action.clone(), on.clone(), window, cx)
+                    })
+                    .build(cx),
+            );
+        }
     }
     menu
 }

@@ -23,7 +23,7 @@ pub mod bindings {
 }
 
 pub use bindings::exports::kopuz::plugin::integration::{
-    AudioFrame, NowPlaying, PlaybackEvent, Setting, Started,
+    ActionTarget, AudioFrame, NowPlaying, PlaybackEvent, Setting, Started,
 };
 
 use crate::Result;
@@ -78,6 +78,19 @@ pub trait Integration: Sized + 'static {
     /// Every `tick-ms`, for a manifest that lists `"tick"` in `listens`: the
     /// place to look for what the plugin waits on, such as a remote's button.
     fn on_tick(&self) {}
+
+    /// One of the manifest's `[[integration.action]]` entries, chosen by the
+    /// person; `input` is their answer when it has an `ask`. `Ok(Some(text))`
+    /// is shown to them as a notice, `Err` as a failure.
+    fn run_action(
+        &self,
+        id: &str,
+        target: ActionTarget,
+        input: Option<String>,
+    ) -> std::result::Result<Option<String>, String> {
+        let _ = (target, input);
+        Err(format!("this plugin has no action {id}"))
+    }
 }
 
 /// Read the library, for a manifest with `library = "read"` under
@@ -214,6 +227,17 @@ macro_rules! export_integration {
             }
             fn on_tick(&self) {
                 $crate::integration::Integration::on_tick(&self.0)
+            }
+            fn run_action(
+                &self,
+                id: ::std::string::String,
+                target: $crate::integration::ActionTarget,
+                input: ::std::option::Option<::std::string::String>,
+            ) -> ::std::result::Result<
+                ::std::option::Option<::std::string::String>,
+                ::std::string::String,
+            > {
+                $crate::integration::Integration::run_action(&self.0, &id, target, input)
             }
         }
 

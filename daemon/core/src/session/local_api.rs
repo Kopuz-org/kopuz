@@ -903,6 +903,23 @@ impl api::PluginApi for LocalApi {
         self.plugins_changed().await;
         Ok(())
     }
+
+    async fn plugin_actions(&self) -> Result<Vec<api::PluginAction>, ApiError> {
+        Ok(self.integrations()?.plugins().actions())
+    }
+
+    async fn run_plugin_action(
+        &self,
+        plugin: String,
+        id: String,
+        target: api::ActionTarget,
+        input: Option<String>,
+    ) -> Result<Option<String>, ApiError> {
+        self.integrations()?
+            .plugins()
+            .run_action(&plugin, &id, target, input)
+            .await
+    }
 }
 
 impl LocalApi {
@@ -1250,11 +1267,22 @@ impl api::SourceApi for LocalApi {
         id: String,
         values: Vec<api::FieldValue>,
     ) -> Result<api::IntegrationInfo, ApiError> {
-        self.integrations()?.set_settings(&id, values).await
+        let plugin = id.starts_with(crate::plugin_integrations::ID_PREFIX);
+        let info = self.integrations()?.set_settings(&id, values).await?;
+        // Turning an integration plugin on or off adds or takes away its actions.
+        if plugin {
+            self.session.invalidate(api::Table::Plugins);
+        }
+        Ok(info)
     }
 
     async fn clear_integration(&self, id: String) -> Result<(), ApiError> {
-        self.integrations()?.clear(&id).await
+        let plugin = id.starts_with(crate::plugin_integrations::ID_PREFIX);
+        self.integrations()?.clear(&id).await?;
+        if plugin {
+            self.session.invalidate(api::Table::Plugins);
+        }
+        Ok(())
     }
 
     async fn authenticate_integration(&self, id: String) -> Result<api::IntegrationInfo, ApiError> {
