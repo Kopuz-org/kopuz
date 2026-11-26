@@ -17,7 +17,8 @@ use crate::motion;
 /// enough that the list still feels bolted to the pointer.
 pub const GLIDE: Duration = Duration::from_millis(140);
 
-/// How close the drawn offset has to be to the target before a row is allowed to settle on a tile.
+/// How close the drawn offset has to be to the target before a row is allowed to settle on a tile;
+/// the drawn offset is on a device pixel, so up to half of one off the target is at rest.
 const SETTLED: Pixels = px(0.5);
 
 thread_local! {
@@ -68,7 +69,7 @@ pub fn smooth(id: impl Into<ElementId>, handle: &ScrollHandle, window: &mut Wind
     // Offsets run negative going down, and `max_offset` is a magnitude.
     target = target.clamp(-limit, px(0.));
 
-    let drawn = follow(id, target, window, cx);
+    let drawn = on_pixel(follow(id, target, window, cx), window.scale_factor(), limit);
     handle.set_offset(point(offset.x, drawn));
     record(state, target, drawn, cx);
 }
@@ -94,11 +95,11 @@ pub fn smooth_x(
         false => offset.x,
     };
     target = target.clamp(-limit, px(0.));
-    if step > px(0.) && !PRECISE.get() && (target - state.1.drawn).abs() < SETTLED {
+    if step > px(0.) && !PRECISE.get() && (target - state.1.drawn).abs() <= SETTLED {
         target = settle(target, step, limit);
     }
 
-    let drawn = follow(id, target, window, cx);
+    let drawn = on_pixel(follow(id, target, window, cx), window.scale_factor(), limit);
     handle.set_offset(point(drawn, offset.y));
     record(state, target, drawn, cx);
 }
@@ -203,6 +204,14 @@ fn settle(offset: Pixels, step: Pixels, limit: Pixels) -> Pixels {
     px(-((-offset.as_f32() / step).round() * step)).clamp(px(-limit), px(0.))
 }
 
+/// `offset` on the nearest device pixel, inside the scroller's ends. Text and covers drawn at a
+/// fraction of a pixel are resampled each frame, which reads as shimmer while a glide runs. The
+/// target keeps the fraction, so a run of small touchpad deltas still adds up.
+fn on_pixel(offset: Pixels, scale: f32, limit: Pixels) -> Pixels {
+    let scale = if scale > 0. { scale } else { 1. };
+    px((offset.as_f32() * scale).round() / scale).clamp(-limit, px(0.))
+}
+
 /// The glide this scroller left behind last frame, keyed off the element's own id.
 fn held(
     id: &ElementId,
@@ -263,6 +272,16 @@ mod tests {
             aim(px(-500.), px(-100.), px(-100.), view, px(660.), px(40.)),
             None
         );
+    }
+
+    #[test]
+    fn a_drawn_offset_lands_on_a_device_pixel() {
+        assert_eq!(on_pixel(px(-10.3), 1., px(100.)), px(-10.));
+        assert_eq!(on_pixel(px(-10.3), 2., px(100.)), px(-10.5));
+        assert_eq!(on_pixel(px(-10.2), 1.5, px(100.)), px(-10.));
+        // Never past either end, even when the end itself sits between pixels.
+        assert_eq!(on_pixel(px(-99.9), 1., px(99.6)), px(-99.6));
+        assert_eq!(on_pixel(px(0.2), 1., px(100.)), px(0.));
     }
 
     #[test]
