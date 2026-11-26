@@ -38,6 +38,7 @@ mod integration_bindings {
         world: "integration-plugin",
         imports: { default: async },
         exports: { default: async },
+        additional_derives: [PartialEq],
         with: {
             "kopuz:plugin/types": crate::bindings::kopuz::plugin::types,
             "kopuz:plugin/http": crate::bindings::kopuz::plugin::http,
@@ -49,7 +50,9 @@ mod integration_bindings {
 
 pub mod wit {
     pub use crate::bindings::kopuz::plugin::types::*;
-    pub use crate::integration_bindings::exports::kopuz::plugin::integration::Setting;
+    pub use crate::integration_bindings::exports::kopuz::plugin::integration::{
+        NowPlaying, PlaybackEvent, Setting, Started,
+    };
 }
 
 #[derive(Debug, Clone, thiserror::Error)]

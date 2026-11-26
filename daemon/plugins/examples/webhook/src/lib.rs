@@ -2,7 +2,7 @@
 
 use kopuz_plugin_sdk::SourceError;
 use kopuz_plugin_sdk::http::Client;
-use kopuz_plugin_sdk::integration::{Integration, Settings};
+use kopuz_plugin_sdk::integration::{Integration, NowPlaying, PlaybackEvent, Settings};
 
 pub struct Webhook {
     http: Client,
@@ -40,6 +40,38 @@ impl Integration for Webhook {
             ));
         }
         self.post(&serde_json::json!({ "event": "hello" }))
+    }
+
+    fn on_playback(&self, event: PlaybackEvent) {
+        if let Err(error) = self.post(&body(&event)) {
+            kopuz_plugin_sdk::warn!("the webhook was not told: {}", error.message());
+        }
+    }
+}
+
+fn track(track: &NowPlaying) -> serde_json::Value {
+    serde_json::json!({
+        "key": track.key,
+        "title": track.title,
+        "artist": track.artist,
+        "album": track.album,
+        "duration_ms": track.duration_ms,
+        "musicbrainz_recording_id": track.musicbrainz_recording_id,
+        "musicbrainz_release_id": track.musicbrainz_release_id,
+    })
+}
+
+fn body(event: &PlaybackEvent) -> serde_json::Value {
+    match event {
+        PlaybackEvent::Started(started) => serde_json::json!({
+            "event": "started",
+            "track": track(&started.track),
+            "position_ms": started.position_ms,
+        }),
+        PlaybackEvent::Paused(at) => serde_json::json!({ "event": "paused", "position_ms": at }),
+        PlaybackEvent::Resumed(at) => serde_json::json!({ "event": "resumed", "position_ms": at }),
+        PlaybackEvent::Seeked(at) => serde_json::json!({ "event": "seeked", "position_ms": at }),
+        PlaybackEvent::Stopped => serde_json::json!({ "event": "stopped" }),
     }
 }
 

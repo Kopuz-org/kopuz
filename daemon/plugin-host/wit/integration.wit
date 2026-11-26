@@ -12,11 +12,45 @@ interface integration {
         value: string,
     }
 
+    /// The track playing, as the library knows it.
+    record now-playing {
+        /// The library's key for it, the same across restarts.
+        key: string,
+        title: string,
+        artist: string,
+        album: string,
+        duration-ms: option<u64>,
+        musicbrainz-recording-id: option<string>,
+        musicbrainz-release-id: option<string>,
+    }
+
+    record started {
+        track: now-playing,
+        /// Where in it playback began, in milliseconds.
+        position-ms: u64,
+    }
+
+    /// What playback just did. Positions are milliseconds into the track.
+    variant playback-event {
+        /// A track began playing, from its start or wherever it was resumed.
+        started(started),
+        paused(u64),
+        resumed(u64),
+        /// The person moved within the track that is playing.
+        seeked(u64),
+        /// Nothing plays any more.
+        stopped,
+    }
+
     resource instance {
         constructor(settings: list<setting>);
 
         /// Whether the settings work, asked when they are saved; an error
         /// keeps them from being kept.
         validate: func() -> result<_, source-error>;
+
+        /// Asked only of an integration whose manifest listens to
+        /// `playback`, in the order things happened.
+        on-playback: func(event: playback-event);
     }
 }
