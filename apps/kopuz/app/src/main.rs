@@ -106,27 +106,45 @@ fn main() -> anyhow::Result<()> {
 
     let (address, start_own) = daemon_address()?;
     let args = args::Args::parse(std::env::args_os().skip(1));
-    let _instance = match (instance::claim(&address), &args.link) {
-        (Err(instance::Elsewhere::Running), Some(link)) => {
-            // The daemon plays a listen link; any other is the open window's to show.
-            match store::deep_link::is_listen(link) {
-                true => instance::hand_off(&address, link.clone()),
-                false => links::hand_off(&address, link),
+    let mut initial = Vec::new();
+    let mut listen_link = None;
+    if let Some(link) = &args.link {
+        if store::deep_link::is_listen(link) {
+            listen_link = Some(link.clone());
+        } else {
+            initial.push(link.clone());
+        }
+    }
+    initial.extend(args.files.iter().filter_map(|path| args::file_url(path)));
+    let _instance = match (instance::claim(&address), &listen_link, initial.is_empty()) {
+        (Err(instance::Elsewhere::Running), listen, empty) if listen.is_some() || !empty => {
+            if let Some(link) = listen {
+                instance::hand_off(&address, link.clone());
+            }
+            if !empty {
+                links::hand_off(&address, &initial);
             }
             return Ok(());
         }
-        (claimed, _) => claimed.ok(),
+        (claimed, _, _) => claimed.ok(),
     };
+    if let Some(link) = listen_link {
+        initial.insert(0, link);
+    }
 
     let application = gpui_kit::application().with_assets(gpui_kit::assets::AllAssets);
-    // macOS hands a link to the running app here rather than on a command line.
-    let (opened_tx, opened) = futures::channel::mpsc::unbounded::<String>();
+    // macOS hands a link or file to the running app here rather than on a command line.
+    let (opened_tx, opened) = futures::channel::mpsc::unbounded::<Vec<String>>();
     let relay = link::relay::path(&address);
     let relayed = opened_tx.clone();
     let (booted, boot) = futures::channel::oneshot::channel();
     application.on_open_urls(move |urls| {
-        for url in urls.into_iter().filter(|url| args::is_link(url)) {
-            let _ = opened_tx.unbounded_send(url);
+        let items: Vec<String> = urls
+            .into_iter()
+            .filter(|url| args::is_link(url) || args::file_url_path(url).is_some())
+            .collect();
+        if !items.is_empty() {
+            let _ = opened_tx.unbounded_send(items);
         }
     });
     // A window closed to the tray, or with the red button, comes back from the Dock icon.
@@ -170,7 +188,7 @@ fn main() -> anyhow::Result<()> {
         if let Some(path) = relay {
             link::relay::listen(path, relayed, cx);
         }
-        links::follow(args.link, opened, boot, cx);
+        links::follow(initial, opened, boot, cx);
         metadata_dialog::register(cx);
         settings_sources::register(cx);
         settings_interface::init(cx);

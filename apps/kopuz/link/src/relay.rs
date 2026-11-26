@@ -1,4 +1,4 @@
-//! One app per daemon socket takes `kopuz://` links: a later launch hands its links to it and exits.
+//! One app per daemon socket takes links and files: a later launch hands them over and exits.
 
 use std::path::{Path, PathBuf};
 
@@ -39,10 +39,10 @@ pub fn send(path: &Path, links: &[String]) -> bool {
     })
 }
 
-/// Take the links later launches send, unless another app at `path` already does.
-pub fn listen(path: PathBuf, links: UnboundedSender<String>, cx: &App) {
+/// Take each later launch's batch of links or file URLs, unless another app at `path` already does.
+pub fn listen(path: PathBuf, batches: UnboundedSender<Vec<String>>, cx: &App) {
     Link::global(cx).runtime.spawn(async move {
-        if let Err(error) = serve(&path, links).await {
+        if let Err(error) = serve(&path, batches).await {
             tracing::warn!(%error, path = %path.display(), "not taking links from later launches");
         }
     });
@@ -59,7 +59,7 @@ async fn connect(path: &Path) -> std::io::Result<tokio::net::windows::named_pipe
 }
 
 #[cfg(unix)]
-async fn serve(path: &Path, links: UnboundedSender<String>) -> std::io::Result<()> {
+async fn serve(path: &Path, batches: UnboundedSender<Vec<String>>) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
 
     if connect(path).await.is_ok() {
@@ -77,30 +77,33 @@ async fn serve(path: &Path, links: UnboundedSender<String>) -> std::io::Result<(
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     loop {
         let (stream, _) = listener.accept().await?;
-        tokio::spawn(read(stream, links.clone()));
+        tokio::spawn(read(stream, batches.clone()));
     }
 }
 
 #[cfg(windows)]
-async fn serve(path: &Path, links: UnboundedSender<String>) -> std::io::Result<()> {
+async fn serve(path: &Path, batches: UnboundedSender<Vec<String>>) -> std::io::Result<()> {
     use futures::StreamExt as _;
 
     let incoming = proto::pipe::Listener::bind(path)?.incoming();
     futures::pin_mut!(incoming);
     while let Some(stream) = incoming.next().await {
-        tokio::spawn(read(stream?, links.clone()));
+        tokio::spawn(read(stream?, batches.clone()));
     }
     Ok(())
 }
 
-async fn read(stream: impl AsyncRead + Unpin, links: UnboundedSender<String>) {
+async fn read(stream: impl AsyncRead + Unpin, batches: UnboundedSender<Vec<String>>) {
     let mut text = Vec::new();
     // A pipe reports its writer closing as an error, after the bytes it wrote.
     let _ = stream.take(MAX_BYTES).read_to_end(&mut text).await;
-    for link in String::from_utf8_lossy(&text).lines() {
-        if !link.is_empty() {
-            let _ = links.unbounded_send(link.to_string());
-        }
+    let items: Vec<String> = String::from_utf8_lossy(&text)
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect();
+    if !items.is_empty() {
+        let _ = batches.unbounded_send(items);
     }
 }
 
@@ -121,20 +124,20 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
-        let (links, mut taken) = futures::channel::mpsc::unbounded();
+        let (batches, mut taken) = futures::channel::mpsc::unbounded();
         let served = path.clone();
-        runtime.spawn(async move { serve(&served, links).await });
+        runtime.spawn(async move { serve(&served, batches).await });
         while !path.exists() {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
-        let sent = [
+        let sent = vec![
             "kopuz://open/home".to_string(),
             "kopuz://search?q=one".to_string(),
         ];
         assert!(send(&path, &sent));
-        let got = runtime.block_on(async { (taken.next().await, taken.next().await) });
-        assert_eq!(got, (Some(sent[0].clone()), Some(sent[1].clone())));
+        let got = runtime.block_on(async { taken.next().await });
+        assert_eq!(got, Some(sent));
 
         // A second listener leaves the first in place, links and all.
         let (other, _kept) = futures::channel::mpsc::unbounded();

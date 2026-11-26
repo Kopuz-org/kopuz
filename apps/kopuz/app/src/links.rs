@@ -1,47 +1,65 @@
-//! `kopuz://` links from the command line, the system or a later launch: a listen link goes to the daemon, any other opens in the window.
+//! Links and local files from the command line, the system or a later launch.
 
 use std::time::Instant;
 
 use futures::StreamExt as _;
 use futures::channel::mpsc::UnboundedReceiver;
 use futures::channel::oneshot;
-use gpui_kit::{App, AppContext as _, AsyncApp};
+use gpui_kit::component::Root;
+use gpui_kit::{App, AppContext as _, AsyncApp, WindowHandle};
 
-use crate::instance;
+use crate::{args, instance};
 
-/// Give `link` to the app whose window is open, from a launch that opens none.
-pub fn hand_off(address: &link::Address, link: &str) {
-    let sent = link::relay::path(address)
-        .is_some_and(|path| link::relay::send(&path, &[link.to_string()]));
+enum Action {
+    Link(String),
+    Files(Vec<String>),
+}
+
+/// Give `items` to the app whose window is open, from a launch that opens none.
+pub fn hand_off(address: &link::Address, items: &[String]) {
+    let sent = link::relay::path(address).is_some_and(|path| link::relay::send(&path, items));
     if !sent {
-        tracing::warn!("could not hand the link to the open window");
+        tracing::warn!("could not hand items to the open window");
     }
 }
 
-/// Open `first` and then each link as it arrives; a page link waits for `boot`, when there is a window to show it.
+/// Open `first` and then each batch as it arrives; window actions wait for `boot`.
 pub fn follow(
-    first: Option<String>,
-    links: UnboundedReceiver<String>,
+    first: Vec<String>,
+    batches: UnboundedReceiver<Vec<String>>,
     boot: oneshot::Receiver<()>,
     cx: &mut App,
 ) {
     // Apart from the listen links, so one of those never waits behind a page that is waiting for the window.
-    let (pages, mut held) = futures::channel::mpsc::unbounded();
+    let (actions, mut held) = futures::channel::mpsc::unbounded();
     cx.spawn(async move |cx| {
-        let mut links = futures::stream::iter(first).chain(links);
-        while let Some(link) = links.next().await {
-            match store::deep_link::is_listen(&link) {
-                true => cx.update(|cx| instance::open(link, cx)),
-                false => drop(pages.unbounded_send(link)),
+        let initial = (!first.is_empty()).then_some(first);
+        let mut incoming = futures::stream::iter(initial).chain(batches);
+        while let Some(batch) = incoming.next().await {
+            let mut files = Vec::new();
+            for item in batch {
+                if store::deep_link::is_listen(&item) {
+                    cx.update(|cx| instance::open(item, cx));
+                } else if let Some(path) = args::file_url_path(&item) {
+                    files.push(path);
+                } else {
+                    let _ = actions.unbounded_send(Action::Link(item));
+                }
+            }
+            if !files.is_empty() {
+                let _ = actions.unbounded_send(Action::Files(files));
             }
         }
     })
     .detach();
     cx.spawn(async move |cx| {
         let _ = boot.await;
-        while let Some(link) = held.next().await {
+        while let Some(action) = held.next().await {
             attached(cx).await;
-            cx.update(|cx| open(&link, cx));
+            cx.update(|cx| match action {
+                Action::Link(link) => open(&link, cx),
+                Action::Files(files) => open_files(files, cx),
+            });
         }
     })
     .detach();
@@ -70,19 +88,33 @@ async fn attached(cx: &mut AsyncApp) {
     }
 }
 
-fn open(text: &str, cx: &mut App) {
-    // A link is somebody asking for the app, so it comes forward even from the tray.
+/// Bring the main window forward, reopening it if it was hidden to the tray.
+fn focus_window(cx: &mut App) -> Option<WindowHandle<Root>> {
     if crate::main_window(cx).is_none() {
         crate::open_main_window(Instant::now(), None, cx);
     }
     cx.activate(true);
+    crate::main_window(cx)
+}
+
+fn open_files(files: Vec<String>, cx: &mut App) {
+    if let Some(window) = focus_window(cx) {
+        let _ = cx.update_window(window.into(), |_, window, _| {
+            window.activate_window();
+        });
+    }
+    store::actions::play_tracks(files, Some(0), cx);
+}
+
+fn open(text: &str, cx: &mut App) {
+    let window = focus_window(cx);
     let Some(link) = store::deep_link::parse(text) else {
         // Up to the query only: what follows it may be a password.
         let link = text.split('?').next().unwrap_or_default();
         tracing::warn!(link, "not a link this app opens");
         return store::Notices::error(i18n::t("link_unknown"), cx);
     };
-    let Some(window) = crate::main_window(cx) else {
+    let Some(window) = window else {
         return;
     };
     // Through the untyped handle: the typed one holds the root, which opening a dialog needs.
