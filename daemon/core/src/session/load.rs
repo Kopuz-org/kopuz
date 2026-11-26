@@ -38,6 +38,14 @@ impl Session {
             } else {
                 Transition::Immediate
             };
+        // A planned mix crossfades for its own length if the engine cannot play it.
+        let staged = self
+            .mixes
+            .take_staged(&track.id.key())
+            .filter(|_| matches!(transition, Transition::Crossfade(_)));
+        let transition = staged
+            .as_ref()
+            .map_or(transition, |staged| Transition::Crossfade(staged.length));
         let deferred = transition != Transition::Immediate;
         let item_ref = PlaybackItemRef::from_id(&track.id);
         let is_radio = item_ref.is_radio();
@@ -183,6 +191,16 @@ impl Session {
         }
         let from_token = self.intent.token();
         let token = self.allocate_token();
+        let entry = staged.as_ref().map(|staged| staged.entry);
+        self.mixes.incoming = staged.map(|staged| {
+            (
+                token,
+                IncomingMix {
+                    mix: staged.deck,
+                    from_token,
+                },
+            )
+        });
         self.set_intent(PlaybackIntent::Loading {
             token,
             idx,
@@ -268,7 +286,7 @@ impl Session {
             stream_quality: self.settings.playback.stream_quality,
             artwork,
             transition,
-            start_at: restore_seek.filter(|position| !position.is_zero()),
+            start_at: entry.or(restore_seek.filter(|position| !position.is_zero())),
             clear_pending_resume,
             cmd_tx: self.cmd_tx.clone(),
         };
@@ -337,6 +355,12 @@ impl Session {
             });
         let (reply_tx, reply_rx) = oneshot::channel();
         let service_replay_gain = prepared.track.replay_gain;
+        // The plan places the incoming track itself, dead air included.
+        let mix = self.mixes.take_incoming(prepared.token);
+        let leading_silence = match mix {
+            Some(_) => LeadingSilence::Keep,
+            None => self.leading_silence_for(prepared.transition),
+        };
         self.player.load(LoadArgs {
             token: prepared.token,
             factory: prepared.factory,
@@ -348,11 +372,11 @@ impl Session {
                 artwork: prepared.artwork,
             },
             transition: prepared.transition,
-            leading_silence: self.leading_silence_for(prepared.transition),
+            leading_silence,
             start_at: prepared.start_at,
             album_context: self.album_context_for_token(prepared.token),
             service_replay_gain,
-            mix: None,
+            mix,
             reply: Some(reply_tx),
         });
         let token = prepared.token;

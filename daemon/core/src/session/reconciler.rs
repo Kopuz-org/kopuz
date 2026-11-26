@@ -7,6 +7,8 @@ use api::{Phase as ApiPhase, PlayerState};
 use player::engine::{Event as EngineEvent, Phase as EnginePhase};
 use tokio::sync::watch;
 
+use super::mix_plan::StagedMix;
+use super::smart_fade::{self, MixArming, PlannedMix};
 use super::state::engine_phase;
 use super::{PlaybackIntent, Session, TransitionStage};
 use crate::queue_model::NextOutcome;
@@ -162,6 +164,11 @@ impl Session {
                 }
             }
             EngineEvent::Position { token, position }
+                if token == self.intent.token() && self.try_arm_mix(position) =>
+            {
+                self.publish(state_tx, false);
+            }
+            EngineEvent::Position { token, position }
                 if token == self.intent.token() && self.should_arm_transition(position) =>
             {
                 self.arm_transition();
@@ -172,6 +179,11 @@ impl Session {
             {
                 self.arm_transition();
                 self.publish(state_tx, false);
+            }
+            EngineEvent::MixMissed { token } => {
+                // A load already sent falls back to its crossfade in the engine.
+                tracing::debug!(token, "the planned mix will not play");
+                self.mixes.missed = Some(token);
             }
             _ => {}
         }
@@ -207,6 +219,10 @@ impl Session {
         if !self.settings.playback.smart_crossfade || !self.can_arm_transition() {
             return false;
         }
+        // A planned mix already places the fade.
+        if self.pending_mix().is_some() {
+            return false;
+        }
         let next = self.peek_next_index();
         let next = next.and_then(|idx| self.model.track_at(idx));
         if !self.should_crossfade(next) {
@@ -221,6 +237,10 @@ impl Session {
 
     pub(super) fn should_arm_transition(&mut self, position: Duration) -> bool {
         if !self.can_arm_transition() {
+            return false;
+        }
+        // A planned mix arms itself, ahead of the crossfade window.
+        if self.pending_mix().is_some() {
             return false;
         }
         let next = self.peek_next_index();
@@ -247,6 +267,68 @@ impl Session {
         let duration = Duration::from_secs(track.duration);
         let remaining = duration.saturating_sub(position);
         !duration.is_zero() && position < duration && remaining <= window
+    }
+
+    /// The plan for mixing into the next track, while it can still be armed.
+    fn pending_mix(&mut self) -> Option<(usize, PlannedMix)> {
+        if !self.can_arm_transition() || self.mixes.missed == Some(self.intent.token()) {
+            return None;
+        }
+        let (idx, pair) = self.mix_pair()?;
+        if !self.should_crossfade(self.model.track_at(idx)) {
+            return None;
+        }
+        let mix = self.mixes.plan(&pair)?.clone();
+        Some((idx, mix))
+    }
+
+    /// Arm the planned mix once its preload is reached; true when it was armed.
+    /// A plan too late to install is dropped, and the crossfade window takes over.
+    pub(super) fn try_arm_mix(&mut self, position: Duration) -> bool {
+        let Some((idx, mix)) = self.pending_mix() else {
+            return false;
+        };
+        match smart_fade::plan_arming(position, mix.start) {
+            MixArming::Wait => false,
+            MixArming::Drop => {
+                tracing::debug!(?position, start = ?mix.start, "the planned mix came too late");
+                self.mixes.missed = Some(self.intent.token());
+                false
+            }
+            MixArming::Arm => self.arm_mix(idx, mix),
+        }
+    }
+
+    /// Load the next track carrying the incoming deck, then plan the outgoing one.
+    /// The plan ends this track, so it is only installed once that load is on its way.
+    fn arm_mix(&mut self, idx: usize, mix: PlannedMix) -> bool {
+        let Some(key) = self
+            .model
+            .track_at(idx)
+            .map(|track| track.id.key().into_owned())
+        else {
+            return false;
+        };
+        let from_token = self.intent.token();
+        self.mixes.staged = Some(StagedMix {
+            key,
+            entry: mix.entry,
+            length: mix.length,
+            deck: mix.incoming,
+        });
+        let loading = self.start_load(idx, true);
+        self.mixes.staged = None;
+
+        let carried = self
+            .mixes
+            .incoming
+            .as_ref()
+            .is_some_and(|(token, _)| *token == self.intent.token());
+        if loading && carried {
+            self.player
+                .plan_outgoing(from_token, mix.start, mix.outgoing);
+        }
+        loading
     }
 
     pub(super) fn arm_transition(&mut self) {

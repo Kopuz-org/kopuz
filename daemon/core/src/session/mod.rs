@@ -12,7 +12,8 @@ use api::{
     QueueSummary, QueueWindow, SetQueueRequest,
 };
 use player::engine::{
-    Event as EngineEvent, LeadingSilence, Phase as EnginePhase, SourceFactory, Transition,
+    Event as EngineEvent, IncomingMix, LeadingSilence, Phase as EnginePhase, SourceFactory,
+    Transition,
 };
 use player::player::{LoadArgs, NowPlayingMeta, Player, PlayerInitError};
 use reader::Track;
@@ -25,6 +26,7 @@ use crate::playback::{NetworkStream, network_factory};
 use crate::queue_model::{NextOutcome, QueueModel};
 
 mod load;
+mod mix_plan;
 mod origin;
 mod radio_feed;
 mod reconciler;
@@ -313,6 +315,12 @@ enum SessionCmd {
         uid: String,
         counterpart: Box<reader::Counterpart>,
     },
+    /// What the transition plugins planned for mixing `pair` while session `token` played.
+    MixPlanned {
+        token: u64,
+        pair: mix_plan::Pair,
+        plan: Option<Box<crate::transition::TransitionPlan>>,
+    },
 }
 
 #[derive(Clone)]
@@ -426,6 +434,7 @@ impl SessionHandle {
             cmd_tx: cmd_tx.clone(),
             factory_override,
             counterparts: std::collections::HashMap::new(),
+            mixes: mix_plan::MixPlans::default(),
         };
         // A fresh start is not a clear, and must not wipe what another device saved before the boot adopt reads it.
         session.remote_loaded = Some(session.remote_mark());
@@ -871,6 +880,7 @@ struct Session {
     factory_override: Option<FactoryOverride>,
     /// The source's answer per track, `None` included, so a requeued track is not asked twice.
     counterparts: std::collections::HashMap<String, Option<reader::Counterpart>>,
+    mixes: mix_plan::MixPlans,
 }
 
 impl Session {
@@ -1090,6 +1100,9 @@ impl Session {
                 if self.learn_counterpart(&uid, *counterpart) {
                     self.publish(state_tx, true);
                 }
+            }
+            SessionCmd::MixPlanned { token, pair, plan } => {
+                self.handle_mix_planned(token, pair, plan.map(|plan| *plan), state_tx)
             }
         }
     }
@@ -1611,6 +1624,7 @@ impl Session {
 
     /// Keep the song after this one in the offline cache ahead of time, in play order, so shuffle's.
     pub(super) fn prefetch_next(&mut self) {
+        self.prefetch_mix();
         let cache = self.offline.cache().clone();
         if !cache.enabled()
             || self.offline.offline_mode()
