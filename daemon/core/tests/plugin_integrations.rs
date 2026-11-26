@@ -70,13 +70,18 @@ fn install_webhook(dir: &std::path::Path) {
 
 /// An example plugin's files, written where an installed plugin goes.
 fn install_example(dir: &std::path::Path, id: &str) {
+    install_example_as(dir, id, |manifest| manifest.to_string());
+}
+
+/// Install the example `id` with its manifest passed through `edit`.
+fn install_example_as(dir: &std::path::Path, id: &str, edit: impl Fn(&str) -> String) {
     let example = bundled_plugins::examples()
         .iter()
         .find(|example| example.manifest.contains(&format!("id = \"{id}\"")))
         .expect("the examples are built with the examples feature");
     let at = dir.join(id);
     std::fs::create_dir_all(&at).unwrap();
-    std::fs::write(at.join(plugin_host::MANIFEST_FILE), example.manifest).unwrap();
+    std::fs::write(at.join(plugin_host::MANIFEST_FILE), edit(example.manifest)).unwrap();
     std::fs::write(
         at.join(plugin_host::COMPONENT_FILE),
         example.wasm.expect("a component"),
@@ -101,7 +106,10 @@ async fn an_integration_plugin_is_set_up_from_its_own_fields() {
     let dir = tempfile::tempdir().expect("tempdir");
     let plugins = dir.path().join("plugins");
     install_webhook(&plugins);
-    install_example(&plugins, "remote");
+    // Its panel narrowed to albums, so a page it does not name can be refused.
+    install_example_as(&plugins, "remote", |manifest| {
+        manifest.replace("places = [\"album\", \"artist\"]", "places = [\"album\"]")
+    });
     server::plugins::init(Some(plugins), Vec::new()).await;
 
     let database = db::init(&dir.path().join("kopuz.db")).await.expect("db");
@@ -282,4 +290,37 @@ async fn an_integration_plugin_is_set_up_from_its_own_fields() {
         .await
         .expect_err("nothing to search");
     assert!(refused.message.contains("library"), "{refused:?}");
+
+    // Panels are listed like actions, and drawn only where the manifest puts them.
+    let panels = service.plugins().panels();
+    assert_eq!(panels.len(), 1);
+    assert_eq!(panels[0].id, "more-by-artist");
+    assert_eq!(panels[0].places, [api::PanelPlace::Album]);
+    let not_here = service
+        .plugins()
+        .render_panel(
+            "remote",
+            "more-by-artist",
+            api::PanelTarget::Artist("key".into()),
+        )
+        .await
+        .expect_err("the panel is only drawn on albums");
+    assert_eq!(not_here.code, ErrorCode::InvalidInput);
+    assert!(not_here.message.contains("not drawn there"), "{not_here:?}");
+    let undrawn = service
+        .plugins()
+        .render_panel("remote", "nothing", api::PanelTarget::Album("al".into()))
+        .await
+        .expect_err("no such panel");
+    assert_eq!(undrawn.code, ErrorCode::NotFound);
+    let unread = service
+        .plugins()
+        .render_panel(
+            "remote",
+            "more-by-artist",
+            api::PanelTarget::Album("al".into()),
+        )
+        .await
+        .expect_err("no bridge, so the library read is refused");
+    assert!(unread.message.contains("library"), "{unread:?}");
 }

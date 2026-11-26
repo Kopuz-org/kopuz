@@ -16,6 +16,7 @@ pub trait Bridge: Send + Sync + 'static {
     fn search(&self, query: String, limit: u32) -> Answer<Vec<library::Track>>;
     fn tracks(&self, keys: Vec<String>) -> Answer<Vec<library::Track>>;
     fn album_tracks(&self, album_id: String) -> Answer<Vec<library::Track>>;
+    fn artist_tracks(&self, artist_key: String) -> Answer<Vec<library::Track>>;
     fn tracks_page(&self, offset: u32, limit: u32) -> Answer<library::TrackPage>;
     fn playlists(&self) -> Answer<Vec<library::Playlist>>;
     fn favorites(&self) -> Answer<Vec<String>>;

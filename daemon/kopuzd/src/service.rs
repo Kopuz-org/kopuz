@@ -1604,6 +1604,31 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::PluginActionAnswer { message }))
     }
 
+    async fn get_plugin_panels(
+        &self,
+        _request: Request<proto::GetPluginPanelsRequest>,
+    ) -> Result<Response<proto::PluginPanelList>, Status> {
+        let panels = self.0.api.plugin_panels().await.map_err(failed)?;
+        Ok(Response::new(convert::plugin_panels_to_proto(&panels)))
+    }
+
+    async fn render_plugin_panel(
+        &self,
+        request: Request<proto::RenderPluginPanelRequest>,
+    ) -> Result<Response<proto::PanelBlockList>, Status> {
+        let (plugin, id, target) = convert::render_plugin_panel_from_proto(request.into_inner())
+            .ok_or_else(|| {
+                Status::invalid_argument("a panel is drawn for an album or an artist")
+            })?;
+        let blocks = self
+            .0
+            .api
+            .render_plugin_panel(plugin, id, target)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::panel_blocks_to_proto(&blocks)))
+    }
+
     async fn preview_equalizer(
         &self,
         request: Request<proto::EqualizerSettings>,

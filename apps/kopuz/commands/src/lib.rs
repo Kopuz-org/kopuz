@@ -149,6 +149,10 @@ fn plugin_place(target: &Target) -> Option<(api::ActionPlace, api::ActionTarget)
             api::ActionPlace::Album,
             api::ActionTarget::Album(id.to_string()),
         )),
+        Target::Artist { key, .. } => Some((
+            api::ActionPlace::Artist,
+            api::ActionTarget::Artist(key.clone()),
+        )),
         _ => None,
     }
 }
@@ -160,21 +164,7 @@ pub fn run_plugin_action(
     window: &mut Window,
     cx: &mut App,
 ) {
-    match action.ask.clone() {
-        // On the next frame, so a palette closing in this one does not take the prompt's focus back.
-        Some(question) => window.defer(cx, move |window, cx| {
-            components::dialogs::open_rename(
-                question,
-                "",
-                move |answer, cx| {
-                    store::plugin_actions::run(&action, target.clone(), Some(answer), cx)
-                },
-                window,
-                cx,
-            )
-        }),
-        None => store::plugin_actions::run(&action, target, None, cx),
-    }
+    components::plugin_ui::run_action(action, target, window, cx)
 }
 
 fn build_menu(target: Target, menu: PopupMenu, cx: &mut Context<PopupMenu>) -> PopupMenu {

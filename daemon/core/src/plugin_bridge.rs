@@ -167,6 +167,17 @@ where
         })
     }
 
+    fn artist_tracks(&self, artist_key: String) -> Answer<Vec<library::Track>> {
+        let api = self.api();
+        Box::pin(async move {
+            let found = api?
+                .artist_tracks(artist_key, page(0, plugin_host::MAX_PAGE))
+                .await
+                .map_err(|error| error.message)?;
+            Ok(found.items.into_iter().map(track).collect())
+        })
+    }
+
     fn tracks_page(&self, offset: u32, limit: u32) -> Answer<library::TrackPage> {
         let api = self.api();
         Box::pin(async move {

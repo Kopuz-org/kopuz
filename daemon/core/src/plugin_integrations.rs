@@ -196,6 +196,35 @@ fn place_of(place: manifest::ActionPlace) -> api::ActionPlace {
         manifest::ActionPlace::Palette => api::ActionPlace::Palette,
         manifest::ActionPlace::Track => api::ActionPlace::Track,
         manifest::ActionPlace::Album => api::ActionPlace::Album,
+        manifest::ActionPlace::Artist => api::ActionPlace::Artist,
+    }
+}
+
+/// The most of a panel a plugin can have drawn, so one that answers with too
+/// much costs the page no more than this.
+const MAX_BLOCKS: usize = 50;
+const MAX_TEXT: usize = 2_000;
+const MAX_TRACKS: usize = 100;
+
+/// `text` cut to [`MAX_TEXT`] characters.
+fn capped(text: String) -> String {
+    match text.char_indices().nth(MAX_TEXT) {
+        Some((end, _)) => text[..end].to_string(),
+        None => text,
+    }
+}
+
+fn block_of(block: wit::Block) -> api::PanelBlock {
+    match block {
+        wit::Block::Heading(text) => api::PanelBlock::Heading(capped(text)),
+        wit::Block::Text(text) => api::PanelBlock::Text(capped(text)),
+        wit::Block::Tracks(keys) => {
+            api::PanelBlock::Tracks(keys.into_iter().take(MAX_TRACKS).collect())
+        }
+        wit::Block::Action(button) => api::PanelBlock::Action {
+            label: capped(button.label),
+            action: button.action,
+        },
     }
 }
 
@@ -385,6 +414,7 @@ impl PluginIntegrations {
             api::ActionTarget::None => manifest::ActionPlace::Palette,
             api::ActionTarget::Tracks(_) => manifest::ActionPlace::Track,
             api::ActionTarget::Album(_) => manifest::ActionPlace::Album,
+            api::ActionTarget::Artist(_) => manifest::ActionPlace::Artist,
         };
         if !action.places.contains(&wanted) {
             return Err(ApiError::invalid_input("the action is not offered there"));
@@ -393,9 +423,77 @@ impl PluginIntegrations {
             api::ActionTarget::None => wit::ActionTarget::None,
             api::ActionTarget::Tracks(keys) => wit::ActionTarget::Tracks(keys),
             api::ActionTarget::Album(album) => wit::ActionTarget::Album(album),
+            api::ActionTarget::Artist(artist) => wit::ActionTarget::Artist(artist),
         };
         match integration.run_action(id, &target, input.as_deref()).await {
             Ok(Ok(message)) => Ok(message),
+            Ok(Err(message)) => Err(ApiError::invalid_input(message)),
+            Err(error) => Err(ApiError::internal(error.to_string())),
+        }
+    }
+
+    /// What the plugins turned on draw, in their manifests' order.
+    pub fn panels(&self) -> Vec<api::PluginPanel> {
+        let mut running = self.running();
+        running.sort_by(|a, b| a.plugin().id().cmp(b.plugin().id()));
+        running
+            .iter()
+            .flat_map(|integration| {
+                let plugin = integration.plugin();
+                spec(plugin.manifest())
+                    .panels
+                    .iter()
+                    .map(|panel| api::PluginPanel {
+                        plugin: plugin.id().to_string(),
+                        id: panel.id.clone(),
+                        title: panel.title.clone(),
+                        places: panel
+                            .places
+                            .iter()
+                            .map(|place| match place {
+                                manifest::PanelPlace::Album => api::PanelPlace::Album,
+                                manifest::PanelPlace::Artist => api::PanelPlace::Artist,
+                            })
+                            .collect(),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    /// Ask `plugin` to draw its panel `id` for `target`, if it is turned on
+    /// and draws that panel on that kind of page.
+    pub async fn render_panel(
+        &self,
+        plugin: &str,
+        id: &str,
+        target: api::PanelTarget,
+    ) -> Result<Vec<api::PanelBlock>, ApiError> {
+        let integration = self
+            .running()
+            .into_iter()
+            .find(|integration| integration.plugin().id() == plugin)
+            .ok_or_else(|| ApiError::not_found("that plugin is not turned on"))?;
+        let owner = integration.plugin();
+        let panel = spec(owner.manifest())
+            .panels
+            .iter()
+            .find(|panel| panel.id == id)
+            .ok_or_else(|| ApiError::not_found("the plugin has no such panel"))?;
+        let (wanted, target) = match target {
+            api::PanelTarget::Album(album) => {
+                (manifest::PanelPlace::Album, wit::PanelTarget::Album(album))
+            }
+            api::PanelTarget::Artist(artist) => (
+                manifest::PanelPlace::Artist,
+                wit::PanelTarget::Artist(artist),
+            ),
+        };
+        if !panel.places.contains(&wanted) {
+            return Err(ApiError::invalid_input("the panel is not drawn there"));
+        }
+        match integration.render_panel(id, &target).await {
+            Ok(Ok(blocks)) => Ok(blocks.into_iter().take(MAX_BLOCKS).map(block_of).collect()),
             Ok(Err(message)) => Err(ApiError::invalid_input(message)),
             Err(error) => Err(ApiError::internal(error.to_string())),
         }

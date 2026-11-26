@@ -89,6 +89,8 @@ pub enum ActionPlace {
     Track,
     /// An album's menu, run on the album.
     Album,
+    /// An artist's menu, run on the artist.
+    Artist,
 }
 
 /// Something an integration plugin that is turned on offers to run.
@@ -110,6 +112,47 @@ pub enum ActionTarget {
     None,
     Tracks(Vec<String>),
     Album(String),
+    /// An artist's library key.
+    Artist(String),
+}
+
+/// Where a plugin's panel is drawn: at the bottom of these pages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelPlace {
+    Album,
+    Artist,
+}
+
+/// A section an integration plugin that is turned on fills.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PluginPanel {
+    pub plugin: String,
+    pub id: String,
+    /// In the plugin's own words.
+    pub title: String,
+    pub places: Vec<PanelPlace>,
+}
+
+/// What a panel is drawn for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PanelTarget {
+    Album(String),
+    /// An artist's library key.
+    Artist(String),
+}
+
+/// One piece of a panel, drawn by the app in its own style.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PanelBlock {
+    Heading(String),
+    Text(String),
+    /// Library track keys, drawn as rows that play from where they are clicked.
+    Tracks(Vec<String>),
+    /// A button that runs the plugin's action `action` on what the panel is for.
+    Action {
+        label: String,
+        action: String,
+    },
 }
 
 #[cfg(test)]

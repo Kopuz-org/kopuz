@@ -59,8 +59,8 @@ pub use playlists::{
     PlaylistInfo, PlaylistPrivacy, PlaylistReorder,
 };
 pub use plugins::{
-    ActionPlace, ActionTarget, LIBRARY_GRANT, PLAYBACK_GRANT, PluginAction, PluginCatalog,
-    PluginInfo, PluginOrigin, PluginUpdate,
+    ActionPlace, ActionTarget, LIBRARY_GRANT, PLAYBACK_GRANT, PanelBlock, PanelPlace, PanelTarget,
+    PluginAction, PluginCatalog, PluginInfo, PluginOrigin, PluginPanel, PluginUpdate,
 };
 pub use prefs::{
     FrontendPref, MAX_PREF_ENTRIES_PER_CALL, MAX_PREF_FRONTEND_BYTES, MAX_PREF_KEY_BYTES,
@@ -745,6 +745,19 @@ pub trait PluginApi: Send + Sync {
         target: ActionTarget,
         input: Option<String>,
     ) -> Result<Option<String>, ApiError>;
+
+    /// The sections the integration plugins turned on fill, in the order
+    /// their manifests list them. Changes with `Table::Plugins`.
+    async fn plugin_panels(&self) -> Result<Vec<PluginPanel>, ApiError>;
+
+    /// What one of [`Self::plugin_panels`] shows for `target` now; nothing to
+    /// show is an empty list.
+    async fn render_plugin_panel(
+        &self,
+        plugin: String,
+        id: String,
+        target: PanelTarget,
+    ) -> Result<Vec<PanelBlock>, ApiError>;
 }
 
 /// Subscribe to the state stream. Every subscriber gets every event from the

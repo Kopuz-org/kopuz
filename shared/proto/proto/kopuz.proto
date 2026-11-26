@@ -138,6 +138,8 @@ service Kopuz {
   rpc UninstallPlugin(PluginId) returns (Unit);
   rpc GetPluginActions(GetPluginActionsRequest) returns (PluginActionList);
   rpc RunPluginAction(RunPluginActionRequest) returns (PluginActionAnswer);
+  rpc GetPluginPanels(GetPluginPanelsRequest) returns (PluginPanelList);
+  rpc RenderPluginPanel(RenderPluginPanelRequest) returns (PanelBlockList);
 
   rpc GetSources(GetSourcesRequest) returns (SourceList);
   rpc GetServices(GetServicesRequest) returns (ServiceList);
@@ -2232,6 +2234,7 @@ enum ActionPlace {
   ACTION_PLACE_PALETTE = 1;
   ACTION_PLACE_TRACK = 2;
   ACTION_PLACE_ALBUM = 3;
+  ACTION_PLACE_ARTIST = 4;
 }
 
 message GetPluginActionsRequest {}
@@ -2255,10 +2258,62 @@ message RunPluginActionRequest {
   repeated string track_keys = 3;
   optional string album_id = 4;
   optional string input = 5;
+  // Set for an action run on an artist.
+  optional string artist_key = 6;
 }
 
 message PluginActionAnswer {
   optional string message = 1;
+}
+
+enum PanelPlace {
+  PANEL_PLACE_UNSPECIFIED = 0;
+  PANEL_PLACE_ALBUM = 1;
+  PANEL_PLACE_ARTIST = 2;
+}
+
+message GetPluginPanelsRequest {}
+
+message PluginPanel {
+  string plugin = 1;
+  string id = 2;
+  string title = 3;
+  repeated PanelPlace places = 4;
+}
+
+message PluginPanelList {
+  repeated PluginPanel panels = 1;
+}
+
+message RenderPluginPanelRequest {
+  string plugin = 1;
+  string id = 2;
+  oneof target {
+    string album_id = 3;
+    string artist_key = 4;
+  }
+}
+
+message PanelTracks {
+  repeated string keys = 1;
+}
+
+message PanelActionButton {
+  string label = 1;
+  string action = 2;
+}
+
+message PanelBlock {
+  oneof kind {
+    string heading = 1;
+    string text = 2;
+    PanelTracks tracks = 3;
+    PanelActionButton action = 4;
+  }
+}
+
+message PanelBlockList {
+  repeated PanelBlock blocks = 1;
 }
 
 // One plugin, as installed, as the marketplace lists it, or both.

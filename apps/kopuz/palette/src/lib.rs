@@ -642,6 +642,10 @@ impl Palette {
                 api::ActionPlace::Album,
                 api::ActionTarget::Album(id.to_string()),
             ),
+            Target::Artist { key, .. } => (
+                api::ActionPlace::Artist,
+                api::ActionTarget::Artist(key.clone()),
+            ),
             _ => return Vec::new(),
         };
         store::plugin_actions::PluginActions::global(cx)

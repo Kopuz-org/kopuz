@@ -40,6 +40,7 @@ pub mod page;
 pub mod panel;
 pub mod pick_list;
 pub mod playlist_details;
+pub mod plugin_ui;
 pub mod queue_row;
 pub mod ranked;
 pub mod reorder;

@@ -1018,6 +1018,31 @@ impl api::PluginApi for GrpcApi {
             .map_err(wire_error)?;
         Ok(answer.into_inner().message)
     }
+
+    async fn plugin_panels(&self) -> Result<Vec<api::PluginPanel>, ApiError> {
+        let list = self
+            .client()
+            .get_plugin_panels(Request::new(proto::GetPluginPanelsRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::plugin_panels_from_proto(list.get_ref()))
+    }
+
+    async fn render_plugin_panel(
+        &self,
+        plugin: String,
+        id: String,
+        target: api::PanelTarget,
+    ) -> Result<Vec<api::PanelBlock>, ApiError> {
+        let blocks = self
+            .client()
+            .render_plugin_panel(Request::new(convert::render_plugin_panel_to_proto(
+                plugin, id, target,
+            )))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::panel_blocks_from_proto(blocks.get_ref()))
+    }
 }
 
 #[async_trait::async_trait]

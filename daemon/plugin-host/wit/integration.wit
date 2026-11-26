@@ -70,6 +70,31 @@ interface integration {
         tracks(list<string>),
         /// An album id, from an album's menu.
         album(string),
+        /// An artist's library key, from an artist's menu.
+        artist(string),
+    }
+
+    /// What a panel is drawn for.
+    variant panel-target {
+        album(string),
+        /// An artist's library key.
+        artist(string),
+    }
+
+    /// One piece of a panel, drawn by the app in its own style.
+    variant block {
+        heading(string),
+        text(string),
+        /// Library track keys, drawn as rows that play from where they are clicked.
+        tracks(list<string>),
+        /// A button that runs one of the manifest's actions on what the panel is for.
+        action(panel-action),
+    }
+
+    record panel-action {
+        label: string,
+        /// The id of one of the manifest's `[[integration.action]]` entries.
+        action: string,
     }
 
     resource instance {
@@ -99,5 +124,9 @@ interface integration {
         /// the person. `input` is what they typed when the action has an
         /// `ask`. An answer is shown to them as a notice; an error as a failure.
         run-action: func(id: string, target: action-target, input: option<string>) -> result<option<string>, string>;
+
+        /// One of the manifest's `[[integration.panel]]` entries, for the
+        /// album or artist page it is drawn on. Nothing to show is an empty list.
+        render-panel: func(id: string, target: panel-target) -> result<list<block>, string>;
     }
 }
