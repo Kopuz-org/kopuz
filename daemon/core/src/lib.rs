@@ -33,6 +33,7 @@ pub mod persistence;
 mod playback;
 pub mod playlist_import;
 pub mod playlists;
+pub mod plugin_audio;
 pub mod plugin_integrations;
 pub mod plugin_listeners;
 pub mod plugins;

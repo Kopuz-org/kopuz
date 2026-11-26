@@ -4,6 +4,7 @@
 pub mod decoder;
 pub mod engine;
 pub mod eq;
+pub mod meter;
 pub mod output;
 pub mod player;
 pub(crate) mod replaygain;

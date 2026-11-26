@@ -271,9 +271,20 @@ An integration hears only what its `listens` list names:
   milliseconds, and `Stopped`. An integration turned on partway through a track
   hears it start first. Events come one at a time, in order; one the plugin is
   too far behind on is dropped rather than held for it.
+- **`audio`** calls `on_audio` about twenty times a second while music
+  plays, with `AudioFrame`s: the mix's `level` and `peak`, the `low`
+  (below about 200 Hz), `mid` and `high` (above about 2 kHz) bands, an
+  `onset` that is high on a drum hit and near zero on a held note, and `beat`,
+  set on an onset that stands out from the last second and comes at least a
+  quarter second after the last beat. Levels are measured before the volume,
+  so turning kopuz down does not quiet them. Nothing is measured while no
+  plugin listens or nothing plays, and a plugin that falls behind misses frames
+  rather than hearing them late. A device that pulses to the music needs
+  nothing more than this.
 
 [`daemon/plugins/examples/webhook`](../daemon/plugins/examples/webhook) is a
-complete one: it posts each playback event to an address as JSON. An integration plugin is listed in the marketplace like any
+complete one: it posts each playback event to an address as JSON, and each
+beat too when its **Post beats** toggle is on. An integration plugin is listed in the marketplace like any
 other, with an empty `services` list.
 
 ## Installing by hand

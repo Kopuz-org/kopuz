@@ -42,6 +42,26 @@ interface integration {
         stopped,
     }
 
+    /// What the music sounds like over the last twentieth of a second (50 ms),
+    /// measured before the volume, so turning it down does not quiet it. Each
+    /// level is an RMS from 0 (silence) towards 1 (full scale).
+    record audio-frame {
+        level: f32,
+        /// The largest sample, from 0 to 1.
+        peak: f32,
+        /// Below about 200 Hz: kick drums and bass.
+        low: f32,
+        mid: f32,
+        /// Above about 2 kHz: cymbals and hi-hats.
+        high: f32,
+        /// How much louder this frame got than the ones before it, from 0;
+        /// a drum hit is high, a held note is near 0.
+        onset: f32,
+        /// An onset well above the recent ones, at least a quarter second
+        /// after the last: a likely beat.
+        beat: bool,
+    }
+
     resource instance {
         constructor(settings: list<setting>);
 
@@ -52,5 +72,11 @@ interface integration {
         /// Asked only of an integration whose manifest listens to
         /// `playback`, in the order things happened.
         on-playback: func(event: playback-event);
+
+        /// Asked only of an integration whose manifest listens to `audio`,
+        /// about twenty times a second while music plays, with the frames
+        /// since the last call. One that falls behind misses frames rather
+        /// than hearing them late.
+        on-audio: func(frames: list<audio-frame>);
     }
 }

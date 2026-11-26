@@ -294,6 +294,7 @@ pub struct SessionHandle {
     events: broadcast::Sender<ApiEvent>,
     materializer: Arc<dyn QueueMaterializer>,
     offline: crate::offline::OfflineIndex,
+    meter: Arc<player::meter::AudioMeter>,
 }
 
 impl SessionHandle {
@@ -325,6 +326,7 @@ impl SessionHandle {
         let (settings_tx, settings_rx) = watch::channel(services.settings.clone());
         let (sources_tx, sources_rx) = watch::channel(services.sources.clone());
         let engine_events = player.subscribe();
+        let meter = player.audio_meter();
         let volume = services.volume.clamp(0.0, 1.0);
         player.set_volume(if services.muted { 0.0 } else { volume });
         player.set_channel_mode(services.settings.playback.channel_mode);
@@ -407,7 +409,13 @@ impl SessionHandle {
             events,
             materializer,
             offline: services.offline,
+            meter,
         }
+    }
+
+    /// What the output plays, measured while something wants it.
+    pub fn audio_meter(&self) -> Arc<player::meter::AudioMeter> {
+        Arc::clone(&self.meter)
     }
 
     /// Test and diagnostic seam: every load resolves through the given

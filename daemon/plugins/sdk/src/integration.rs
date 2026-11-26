@@ -23,7 +23,7 @@ pub mod bindings {
 }
 
 pub use bindings::exports::kopuz::plugin::integration::{
-    NowPlaying, PlaybackEvent, Setting, Started,
+    AudioFrame, NowPlaying, PlaybackEvent, Setting, Started,
 };
 
 use crate::Result;
@@ -67,6 +67,13 @@ pub trait Integration: Sized + 'static {
     fn on_playback(&self, event: PlaybackEvent) {
         let _ = event;
     }
+
+    /// How the music sounds, about twenty times a second while it plays, for
+    /// a manifest that lists `"audio"` in `listens`. A slow answer misses
+    /// frames rather than hearing them late.
+    fn on_audio(&self, frames: Vec<AudioFrame>) {
+        let _ = frames;
+    }
 }
 
 #[macro_export]
@@ -97,6 +104,9 @@ macro_rules! export_integration {
             }
             fn on_playback(&self, event: $crate::integration::PlaybackEvent) {
                 $crate::integration::Integration::on_playback(&self.0, event)
+            }
+            fn on_audio(&self, frames: ::std::vec::Vec<$crate::integration::AudioFrame>) {
+                $crate::integration::Integration::on_audio(&self.0, frames)
             }
         }
 

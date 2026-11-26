@@ -181,4 +181,6 @@ calls! {
     fn validate => call_validate() -> Fallible<()>;
 
     fn on_playback => call_on_playback(event: &wit::PlaybackEvent => event) -> ();
+
+    fn on_audio => call_on_audio(frames: &[wit::AudioFrame] => frames) -> ();
 }
