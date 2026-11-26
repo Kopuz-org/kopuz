@@ -129,6 +129,9 @@ impl EngineHandle {
 /// How far ahead of playback a planned entrance must lie when the incoming
 /// load is ready, so the callback cannot play past it before the swap lands.
 const MIX_LEAD: Duration = Duration::from_millis(200);
+/// How long a probed incoming load waits for the outgoing worker to answer
+/// its plan before it starts with the transition instead.
+const MIX_ANSWER_WAIT: Duration = Duration::from_secs(1);
 
 impl Drop for EngineHandle {
     fn drop(&mut self) {
@@ -190,6 +193,15 @@ struct StartPlan {
 struct Pending {
     plan: StartPlan,
     reply: Option<LoadReply>,
+    /// The probe's result, kept while the load waits on a plan's answer.
+    probed: Option<Probed>,
+}
+
+struct Probed {
+    source_sample_rate: Option<u32>,
+    seekable: bool,
+    replay_gain: ReplayGainInfo,
+    at: Instant,
 }
 
 /// Producer/consumer halves of a fresh session ring plus its counters.
@@ -546,6 +558,7 @@ impl Actor {
                 }
             };
         self.pending = Some(Pending {
+            probed: None,
             plan: StartPlan {
                 token,
                 worker,
@@ -577,8 +590,16 @@ impl Actor {
                     // gone, so the worker exits by itself.
                     return;
                 }
-                let pending = self.pending.take().expect("checked above");
-                self.start_session(pending, source_sample_rate, seekable, replay_gain);
+                let Some(pending) = self.pending.as_mut() else {
+                    return;
+                };
+                pending.probed = Some(Probed {
+                    source_sample_rate,
+                    seekable,
+                    replay_gain,
+                    at: Instant::now(),
+                });
+                self.start_probed();
             }
             WorkerMsg::Eof { token, epoch } => {
                 // A short queued track can finish decoding before it is heard.
@@ -637,15 +658,50 @@ impl Actor {
         }
     }
 
+    /// Starts the probed pending load, unless it mixes into a plan the
+    /// outgoing worker has not answered yet: then it waits, on each tick, up
+    /// to `MIX_ANSWER_WAIT`.
+    fn start_probed(&mut self) {
+        let Some(pending) = self.pending.as_ref() else {
+            return;
+        };
+        let Some(probed) = pending.probed.as_ref() else {
+            return;
+        };
+        if self.plan_unanswered(&pending.plan) && probed.at.elapsed() < MIX_ANSWER_WAIT {
+            return;
+        }
+        let Some(mut pending) = self.pending.take() else {
+            return;
+        };
+        let Some(probed) = pending.probed.take() else {
+            return;
+        };
+        self.start_session(pending, probed);
+    }
+
+    /// The live session `plan` mixes from has a plan its worker has not
+    /// armed or refused yet.
+    fn plan_unanswered(&self, plan: &StartPlan) -> bool {
+        let Some(mix) = plan.mix.as_ref() else {
+            return false;
+        };
+        self.current
+            .as_ref()
+            .filter(|current| current.token == mix.from_token)
+            .and_then(|current| current.mix_start.as_ref())
+            .is_some_and(|start| start.mark() == MixMark::Pending)
+    }
+
     /// A probed source is ready: decide crossfade vs immediate and start it.
-    fn start_session(
-        &mut self,
-        pending: Pending,
-        source_sample_rate: Option<u32>,
-        seekable: bool,
-        replay_gain: ReplayGainInfo,
-    ) {
-        let Pending { plan, reply } = pending;
+    fn start_session(&mut self, pending: Pending, probed: Probed) {
+        let Probed {
+            source_sample_rate,
+            seekable,
+            replay_gain,
+            ..
+        } = probed;
+        let Pending { plan, reply, .. } = pending;
         let token = plan.token;
 
         match self.try_start_session(plan, source_sample_rate, seekable, replay_gain) {
@@ -1176,6 +1232,7 @@ impl Actor {
             self.handle_device_error(device_lost);
         }
         self.reap_rt_retired();
+        self.start_probed();
         self.latch_drain_complete();
         self.report_stall();
         self.report_silence();

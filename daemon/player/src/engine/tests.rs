@@ -2619,13 +2619,12 @@ impl std::io::Seek for HeldReader {
     }
 }
 
-#[test]
-fn a_plan_the_worker_has_not_armed_does_not_take_the_outgoing_track() {
+/// Loads B as the incoming deck while A's worker is held in a read, so the
+/// plan stays unanswered until the gate opens after `answer_after`.
+fn mixed_while_unanswered(answer_after: Duration) -> LoadOutcome {
     let (_sink, engine) = spawn_engine();
     let gate = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-    // A's worker blocks in a read after one second of audio and cannot
-    // answer the plan before B is ready.
     let (factory_a, duration_a) = held_factory(30.0, TEST_AUDIO_BYTES_PER_SEC, gate.clone());
     load(&engine, 1, factory_a, duration_a);
     wait_until("phase Playing", || engine.status().phase == Phase::Playing);
@@ -2636,11 +2635,28 @@ fn a_plan_the_worker_has_not_armed_does_not_take_the_outgoing_track() {
         mix: flat_mix(Duration::from_millis(500)),
     });
 
+    let opener = gate.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(answer_after);
+        opener.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
     let (factory_b, duration_b) = wav_factory(10.0);
     let outcome = load_mixed(&engine, 2, factory_b, duration_b, 1);
     gate.store(true, std::sync::atomic::Ordering::Relaxed);
-    assert!(!outcome.mixed && outcome.crossfaded, "{outcome:?}");
     engine.shutdown();
+    outcome
+}
+
+#[test]
+fn a_ready_load_waits_for_the_worker_to_answer_the_plan() {
+    let outcome = mixed_while_unanswered(Duration::from_millis(300));
+    assert!(outcome.mixed, "{outcome:?}");
+}
+
+#[test]
+fn a_plan_left_unanswered_falls_back_to_the_transition() {
+    let outcome = mixed_while_unanswered(Duration::from_secs(5));
+    assert!(!outcome.mixed && outcome.crossfaded, "{outcome:?}");
 }
 
 #[test]
