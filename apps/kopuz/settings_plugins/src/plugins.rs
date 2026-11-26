@@ -12,7 +12,7 @@ use gpui_kit::{
     Subscription, Task, Window, div,
 };
 use link::Link;
-use store::{Invalidation, Notices, TablesChanged};
+use store::{Invalidation, Navigator, Notices, Route, TablesChanged};
 
 use crate::ui;
 
@@ -183,6 +183,28 @@ impl Plugins {
                     })),
                 );
         }
+        // Its fields live under Connectivity, which this is the way to.
+        if plugin.integration && plugin.installed_version.is_some() {
+            actions = actions.child(
+                self.button(
+                    format!("plugin-set-up-{id}"),
+                    t("plugin_set_up"),
+                    false,
+                    true,
+                    cx,
+                )
+                .on_click(|_, _, cx| {
+                    Navigator::navigate(
+                        Route::Settings {
+                            section: Some("connectivity".into()),
+                        },
+                        cx,
+                    );
+                    // The route may already say Connectivity, with Plugins picked from the rail since.
+                    store::ask_settings_section("connectivity", cx);
+                }),
+            );
+        }
         // A package manager's plugin is its own to remove.
         if community && !plugin.system && on_disk(plugin) {
             actions = actions.child(
@@ -217,6 +239,11 @@ impl Plugins {
                             .when(!plugin.sandboxed, |line| {
                                 line.child(Badge::new(t("plugin_native")).tone(BadgeTone::Neutral))
                             })
+                            .when(plugin.integration, |line| {
+                                line.child(
+                                    Badge::new(t("plugin_integration")).tone(BadgeTone::Neutral),
+                                )
+                            })
                             .child(ui::hint(version.into(), cx)),
                     )
                     .children(byline.map(|byline| ui::hint(byline, cx)))
@@ -224,6 +251,9 @@ impl Plugins {
                         text.child(ui::hint(plugin.description.clone().into(), cx))
                     })
                     .children(reaches.map(|reaches| ui::hint(reaches, cx)))
+                    .when(plugin.integration, |text| {
+                        text.child(ui::hint(t("plugin_integration_hint"), cx))
+                    })
                     .when(plugin.reads_folders, |text| {
                         text.child(
                             h_flex()

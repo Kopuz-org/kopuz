@@ -31,6 +31,8 @@ pub struct PluginInfo {
     pub update: Option<PluginUpdate>,
     /// Reads the files in the folders picked for each of its sources.
     pub reads_folders: bool,
+    /// Adds an integration, turned on under Connectivity, instead of a source.
+    pub integration: bool,
 }
 
 /// A different build of an installed plugin: the marketplace lists another

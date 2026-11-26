@@ -206,6 +206,7 @@ impl PluginService {
                     network: Vec::new(),
                     update: Some(update),
                     reads_folders: manifest.permissions.reads_folders(),
+                    integration: manifest.is_integration(),
                 }),
             }
         }
@@ -397,6 +398,7 @@ fn installed() -> Vec<PluginInfo> {
                 network: manifest.permissions.network.clone(),
                 update: None,
                 reads_folders: manifest.permissions.reads_folders(),
+                integration: manifest.is_integration(),
             }
         })
         .collect()
@@ -512,6 +514,7 @@ fn listed(listing: &Listing) -> PluginInfo {
         network: listing.network.clone(),
         update: None,
         reads_folders: listing.folders == plugin_host::manifest::FolderAccess::Read,
+        integration: listing.integration,
     }
 }
 

@@ -912,6 +912,9 @@ fn PluginRow(
     busy: Signal<Option<String>>,
     changed: Signal<u64>,
 ) -> Element {
+    let super::OpenCategory(mut open) = use_context();
+    // Its fields live under Connectivity, which this is the way to.
+    let set_up = plugin.integration && plugin.installed_version.is_some();
     let community = plugin.origin == api::PluginOrigin::Community;
     let working = busy().is_some_and(|id| id == plugin.id);
     let idle = busy().is_none();
@@ -973,6 +976,9 @@ fn PluginRow(
                     if !plugin.sandboxed {
                         span { class: "text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/10 text-white/60", "{i18n::t(\"plugin_native\")}" }
                     }
+                    if plugin.integration {
+                        span { class: "text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/10 text-white/60", "{i18n::t(\"plugin_integration\")}" }
+                    }
                     span { class: "text-xs text-white/40", "{version}" }
                 }
                 if let Some(byline) = byline {
@@ -987,6 +993,9 @@ fn PluginRow(
                         "{reaches}"
                     }
                 }
+                if plugin.integration {
+                    p { class: "text-xs text-white/60", "{i18n::t(\"plugin_integration_hint\")}" }
+                }
                 if plugin.reads_folders {
                     p { class: "text-xs text-white/60",
                         i { class: "fa-solid fa-triangle-exclamation mr-1" }
@@ -998,6 +1007,13 @@ fn PluginRow(
                         i { class: "fa-solid fa-triangle-exclamation mr-1" }
                         "{update_reaches}"
                     }
+                }
+            }
+            if set_up {
+                button {
+                    class: "{button} shrink-0",
+                    onclick: move |_| open.set(super::navigation::SettingsCategory::Connectivity),
+                    "{i18n::t(\"plugin_set_up\")}"
                 }
             }
             // An update waiting for its hosts can replace an official plugin

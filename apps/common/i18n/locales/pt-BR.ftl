@@ -1237,6 +1237,9 @@ plugin_install = Install
 plugin_update = Update
 plugin_remove = Remove
 plugin_working = Working…
+plugin_integration = Integration
+plugin_integration_hint = Adds an integration rather than a source. Turn it on under Connectivity.
+plugin_set_up = Set up
 library_empty_offline = Nothing is available offline yet
 library_empty_offline_detail = Download songs, or play them while online, to keep them for offline listening.
 

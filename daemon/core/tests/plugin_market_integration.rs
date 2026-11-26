@@ -40,6 +40,7 @@ fn marketplace(dir: &std::path::Path) -> String {
             "author": "tests",
             "services": [],
             "network": ["$server"],
+            "integration": true,
             "manifest": { "url": format!("file://{}", manifest_path.display()), "sha256": sha(example.manifest.as_bytes()) },
             "component": { "url": format!("file://{}", component_path.display()), "sha256": sha(wasm) },
         }],
@@ -77,12 +78,14 @@ async fn an_integration_plugin_installs_from_the_marketplace() {
         .find(|plugin| plugin.id == "webhook")
         .expect("listed");
     assert!(listing.services.is_empty());
+    assert!(listing.integration, "marked before it is installed");
 
     let installed = market
         .install("webhook", &["$server".to_string()])
         .await
         .expect("installed");
     assert_eq!(installed.installed_version.as_deref(), Some("0.1.0"));
+    assert!(installed.integration);
     assert!(plugins.join("webhook").join("plugin.wasm").is_file());
     assert!(
         offered(&integrations.list().await),

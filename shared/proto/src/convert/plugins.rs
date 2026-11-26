@@ -18,6 +18,7 @@ pub fn plugin_info_to_proto(value: &api::PluginInfo) -> PluginInfo {
         sandboxed: value.sandboxed,
         system: value.system,
         reads_folders: value.reads_folders,
+        integration: value.integration,
         update: value.update.as_ref().map(|update| PluginUpdate {
             version: update.version.clone(),
             network: update.network.clone(),
@@ -45,6 +46,7 @@ pub fn plugin_info_from_proto(value: &PluginInfo) -> api::PluginInfo {
         sandboxed: value.sandboxed,
         system: value.system,
         reads_folders: value.reads_folders,
+        integration: value.integration,
         update: value.update.as_ref().map(|update| api::PluginUpdate {
             version: update.version.clone(),
             network: update.network.clone(),
@@ -99,6 +101,16 @@ mod tests {
                     update: None,
                     system: false,
                     reads_folders: true,
+                    integration: false,
+                },
+                api::PluginInfo {
+                    id: "webhook".into(),
+                    origin: api::PluginOrigin::Community,
+                    sandboxed: true,
+                    available_version: Some("0.1.0".into()),
+                    network: vec!["$server".into()],
+                    integration: true,
+                    ..Default::default()
                 },
                 api::PluginInfo {
                     id: "radio".into(),
