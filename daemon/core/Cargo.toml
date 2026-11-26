@@ -47,6 +47,6 @@ tempfile = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
-bundled-plugins = { workspace = true }
+bundled-plugins = { workspace = true, features = ["examples"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["net", "test-util", "rt-multi-thread"] }
