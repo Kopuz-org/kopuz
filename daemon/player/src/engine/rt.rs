@@ -370,8 +370,10 @@ impl RtState {
                 let (gain, fade_out_gain) = equal_power(progress);
                 for ch in 0..channels {
                     let index = frame_idx * channels + ch;
-                    chunk[index] =
-                        active_scratch[index] * gain + fading_scratch[index] * fade_out_gain;
+                    // Equal power lifts in-phase peaks by up to 3 dB; limit the sum.
+                    chunk[index] = soft_limit(
+                        active_scratch[index] * gain + fading_scratch[index] * fade_out_gain,
+                    );
                 }
                 progress += step;
             }
@@ -688,5 +690,54 @@ mod tests {
         assert_eq!(equal_power(0.0), (0.0, 1.0));
         let (incoming, outgoing) = equal_power(1.0);
         assert!((incoming - 1.0).abs() < 1e-6 && outgoing.abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_crossfade_of_two_loud_tracks_stays_within_full_scale() {
+        const FRAMES: usize = 100;
+        let loud = || {
+            let (mut producer, consumer) = rtrb::RingBuffer::new(FRAMES * 2);
+            for _ in 0..FRAMES * 2 {
+                producer.push(0.95).unwrap();
+            }
+            RtSession {
+                consumer,
+                played: Arc::new(AtomicU64::new(0)),
+                gain: Arc::new(AtomicU32::new(1.0_f32.to_bits())),
+                applied_gain: GainRamp::new(1.0),
+                eof: Arc::new(AtomicBool::new(true)),
+                starved: Arc::new(AtomicBool::new(false)),
+            }
+        };
+        let (cmd_tx, cmd_rx) = mpsc::channel();
+        let (retire_tx, _retire_rx) = mpsc::channel();
+        let mut state = RtState::new(
+            cmd_rx,
+            retire_tx,
+            Arc::new(AtomicU32::new(1.0_f32.to_bits())),
+            Arc::new(AtomicBool::new(false)),
+            2,
+            44_100,
+            EqualizerSettings::default(),
+            ChannelMode::Stereo,
+        );
+        cmd_tx
+            .send(RtCmd::Swap {
+                session: loud(),
+                fade: None,
+            })
+            .unwrap();
+        cmd_tx
+            .send(RtCmd::Swap {
+                session: loud(),
+                fade: Some((FRAMES as u64, 1)),
+            })
+            .unwrap();
+
+        let mut out = [0.0; FRAMES * 2];
+        state.process(&mut out);
+
+        let peak = out.iter().fold(0.0_f32, |peak, s| peak.max(s.abs()));
+        assert!(peak <= 1.0, "peak {peak}");
     }
 }
