@@ -265,13 +265,36 @@ fn convertible(format: cpal::SampleFormat) -> bool {
     )
 }
 
+/// cpal's WASAPI backend opens streams in shared mode and validates with
+/// `IsFormatSupported(AUDCLNT_SHAREMODE_SHARED)`, which rejects any rate or
+/// format other than the device's mix format even though `supported_output_configs`
+/// lists wider ranges. Keeping `default` lets the worker resample instead of failing.
+const SHARED_MODE_ONLY: bool = cfg!(target_os = "windows");
+
 /// The config to open: the default's channels, f32 when the device takes it
 /// (else its own format, converted), at the rate nearest `desired_sample_rate`.
 fn choose_config(
     caps: &DeviceCaps,
     desired_sample_rate: Option<u32>,
 ) -> Result<cpal::SupportedStreamConfig, String> {
+    choose_config_for(caps, desired_sample_rate, SHARED_MODE_ONLY)
+}
+
+fn choose_config_for(
+    caps: &DeviceCaps,
+    desired_sample_rate: Option<u32>,
+    shared_mode_only: bool,
+) -> Result<cpal::SupportedStreamConfig, String> {
     let default = caps.default;
+    if shared_mode_only {
+        if !convertible(default.sample_format()) {
+            return Err(format!(
+                "output device only takes {} samples",
+                default.sample_format()
+            ));
+        }
+        return Ok(default);
+    }
     let channels = default.channels();
     let format = if caps.ranges.iter().any(|range| {
         range.channels() == channels && range.sample_format() == cpal::SampleFormat::F32
@@ -550,8 +573,8 @@ mod tests {
             cpal::SampleFormat::F32,
             vec![range(2, 8_000, 192_000, cpal::SampleFormat::F32)],
         );
-        assert_eq!(choose_config(&caps, None).unwrap(), caps.default);
-        let at_source = choose_config(&caps, Some(44_100)).unwrap();
+        assert_eq!(choose_config_for(&caps, None, false).unwrap(), caps.default);
+        let at_source = choose_config_for(&caps, Some(44_100), false).unwrap();
         assert_eq!(at_source.sample_rate(), 44_100);
         assert_eq!(at_source.sample_format(), cpal::SampleFormat::F32);
     }
@@ -568,12 +591,42 @@ mod tests {
                 range(2, 96_000, 96_000, cpal::SampleFormat::I32),
             ],
         );
-        let chosen = choose_config(&caps, Some(96_000)).unwrap();
+        let chosen = choose_config_for(&caps, Some(96_000), false).unwrap();
         assert_eq!(chosen.sample_format(), cpal::SampleFormat::I32);
         assert_eq!(chosen.sample_rate(), 96_000);
         assert_eq!(
-            choose_config(&caps, Some(88_200)).unwrap().sample_rate(),
+            choose_config_for(&caps, Some(88_200), false)
+                .unwrap()
+                .sample_rate(),
             96_000
+        );
+    }
+
+    #[test]
+    fn shared_mode_keeps_the_default_rate_and_format() {
+        let float_caps = caps(
+            cpal::SampleFormat::F32,
+            vec![range(2, 8_000, 384_000, cpal::SampleFormat::F32)],
+        );
+        assert_eq!(
+            choose_config_for(&float_caps, Some(96_000), true).unwrap(),
+            float_caps.default
+        );
+        assert_eq!(
+            choose_config_for(&float_caps, Some(44_100), true).unwrap(),
+            float_caps.default
+        );
+
+        let pcm_caps = caps(
+            cpal::SampleFormat::I16,
+            vec![
+                range(2, 48_000, 48_000, cpal::SampleFormat::I16),
+                range(2, 48_000, 48_000, cpal::SampleFormat::F32),
+            ],
+        );
+        assert_eq!(
+            choose_config_for(&pcm_caps, None, true).unwrap(),
+            pcm_caps.default
         );
     }
 
@@ -583,6 +636,7 @@ mod tests {
             cpal::SampleFormat::DsdU32,
             vec![range(2, 44_100, 44_100, cpal::SampleFormat::DsdU32)],
         );
-        assert!(choose_config(&caps, None).is_err());
+        assert!(choose_config_for(&caps, None, false).is_err());
+        assert!(choose_config_for(&caps, None, true).is_err());
     }
 }
