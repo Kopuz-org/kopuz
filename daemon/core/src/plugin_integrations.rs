@@ -290,6 +290,8 @@ pub struct PluginIntegrations {
     /// copy being swapped, so two edits at once cannot interleave and leave
     /// one's copy running on the other's answers.
     edits: tokio::sync::Mutex<()>,
+    /// Lyrics plugins found this session, by track key.
+    lyrics_found: Mutex<HashMap<String, server::lyrics::Lyrics>>,
     /// How an integration reaches kopuz, once the session exists.
     bridge: std::sync::RwLock<Option<Arc<dyn plugin_host::Bridge>>>,
 }
@@ -300,6 +302,7 @@ impl PluginIntegrations {
             credentials,
             running: Mutex::new(HashMap::new()),
             edits: tokio::sync::Mutex::new(()),
+            lyrics_found: Mutex::new(HashMap::new()),
             bridge: std::sync::RwLock::new(None),
         })
     }
@@ -359,6 +362,7 @@ impl PluginIntegrations {
             })
             .await
             .map_err(|error| ApiError::internal(format!("database error: {error}")))?;
+        self.forget_found();
         // The copy that checked stays connected and runs from here.
         if let Some(check) = checked {
             self.lock().insert(plugin.id().to_string(), check);
@@ -514,6 +518,14 @@ impl PluginIntegrations {
         self.forget(plugin.id()).await
     }
 
+    /// Drop what plugins found, once one is set up anew or turned off.
+    fn forget_found(&self) {
+        self.lyrics_found
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
+    }
+
     /// Forget every answer for the plugin `id`, loaded or not, so an
     /// uninstalled plugin leaves no secret behind and a reinstall starts
     /// turned off.
@@ -526,8 +538,58 @@ impl PluginIntegrations {
             })
             .await
             .map_err(|error| ApiError::internal(format!("database error: {error}")))?;
+        self.forget_found();
         self.running();
         Ok(())
+    }
+
+    /// Words for `track` from the first plugin that provides lyrics and has
+    /// some, asked one after another. A plugin that fails, is too slow or
+    /// answers with nothing usable is passed over. What is found is kept until
+    /// any plugin's answers change, so a plugin turned off takes its words with it.
+    pub async fn lyrics(&self, track: &wit::Song) -> Option<server::lyrics::Lyrics> {
+        if let Some(kept) = self
+            .lyrics_found
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&track.key)
+        {
+            return Some(kept.clone());
+        }
+        let providers = self.running().into_iter().filter(|integration| {
+            spec(integration.plugin().manifest()).provides(manifest::Provide::Lyrics)
+        });
+        for integration in providers {
+            let plugin = integration.plugin().id().to_string();
+            // The host gives up on a slow one itself, and drops the instance it left mid-call.
+            let found = match integration.lyrics(track).await {
+                Ok(Ok(found)) => found,
+                Ok(Err(message)) => {
+                    tracing::warn!(%plugin, %message, "a lyrics plugin failed");
+                    continue;
+                }
+                Err(error) => {
+                    tracing::warn!(%plugin, %error, "a lyrics plugin failed");
+                    continue;
+                }
+            };
+            let usable = found.and_then(|found| match found {
+                wit::FoundLyrics::Plain(text) => {
+                    let text = text.trim();
+                    (!text.is_empty()).then(|| server::lyrics::Lyrics::Plain(text.to_string()))
+                }
+                wit::FoundLyrics::Lrc(text) => server::lyrics::from_lrc(&text),
+            });
+            if let Some(lyrics) = usable {
+                tracing::debug!(%plugin, "lyrics from a plugin");
+                self.lyrics_found
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .insert(track.key.clone(), lyrics.clone());
+                return Some(lyrics);
+            }
+        }
+        None
     }
 
     /// The running integrations, brought in step with the registry and the

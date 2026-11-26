@@ -491,7 +491,11 @@ impl LibraryService {
     /// Lyrics for one library track, through the app's full provider chain
     /// (local .lrc, server lyrics API, synced fallbacks, lrclib) with its
     /// process cache. Radio has no lyrics by construction.
-    pub async fn lyrics(&self, key: &str) -> Result<api::LyricsView, ApiError> {
+    pub async fn lyrics(
+        &self,
+        key: &str,
+        plugins: Option<&crate::plugin_integrations::PluginIntegrations>,
+    ) -> Result<api::LyricsView, ApiError> {
         let config = self.current_config();
         let sources = self.current_sources();
         let track = match self
@@ -574,6 +578,21 @@ impl LibraryService {
         if stored && config.lyrics.prefer_word_synced_lyrics && !self.offline().offline_mode() {
             self.upgrade_to_word_sync(&cache_key, request.clone(), lyrics.as_ref());
         }
+        // Plugins only fill a gap, and their words are kept with them rather than in the lyrics
+        // cache, so one turned off takes its words with it.
+        let lyrics = match (lyrics, plugins) {
+            (None, Some(plugins)) if !self.offline().offline_mode() => {
+                let asked = plugin_host::wit::Song {
+                    key: key.to_string(),
+                    title: track.title.clone(),
+                    artist: track.artist.clone(),
+                    album: track.album.clone(),
+                    duration_ms: (track.duration > 0).then_some(track.duration * 1_000),
+                };
+                plugins.lyrics(&asked).await
+            }
+            (lyrics, _) => lyrics,
+        };
         lyrics
             .map(|lyrics| lyrics_view(lyrics, config.lyrics.romanize_lyrics))
             .ok_or_else(|| ApiError::not_found("no lyrics found"))

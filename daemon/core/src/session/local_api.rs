@@ -764,7 +764,15 @@ impl api::LibraryApi for LocalApi {
 
     async fn lyrics(&self, key: String) -> Result<api::LyricsView, ApiError> {
         match &self.library {
-            Some(library) => library.lyrics(&key).await,
+            Some(library) => {
+                let plugins = self
+                    .integrations()
+                    .ok()
+                    .map(|integrations| integrations.plugins());
+                library
+                    .lyrics(&key, plugins.map(|plugins| &**plugins))
+                    .await
+            }
             None => Err(ApiError::unsupported("no library service")),
         }
     }

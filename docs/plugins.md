@@ -339,6 +339,29 @@ plugin says what goes in the panel, never how it looks, so it matches the
 rest of the app. A panel that returns no blocks or an `Err` is left out. It is drawn again when the page opens and when the
 library changes.
 
+### Lyrics
+
+An integration can fill in lyrics kopuz's own sources have none for:
+
+```toml
+[integration]
+provides = ["lyrics"]
+```
+
+When the local files, the server and the built-in lyric services all come up
+empty, kopuz calls `lyrics(track)` on each plugin that provides them, in turn,
+with the track's key, title, artist, album and length. The first
+`Ok(Some(FoundLyrics::Lrc(text)))` or `Ok(Some(FoundLyrics::Plain(text)))`
+is shown in the lyrics tab: LRC with `[mm:ss.xx]` line tags syncs line by
+line, and `<mm:ss.xx>` word tags sync word by word. `Ok(None)` passes to the
+next plugin. One that fails or takes longer than eight seconds is passed over.
+Lyrics a plugin finds are kept for as long as kopuz runs, never stored, so
+turning the plugin off takes them with it.
+
+[`daemon/plugins/examples/lyrics-server`](../daemon/plugins/examples/lyrics-server)
+asks an address of your choice, with the artist, title, album and length in
+the query, and hands back whatever it answers.
+
 ### Controlling playback
 
 An integration that asks for it may play, pause, skip, seek, set the volume
