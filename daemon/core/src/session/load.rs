@@ -598,7 +598,10 @@ pub(super) async fn fetch_cover_to_temp(
             .ok()?
             .error_for_status()
             .ok()?;
-        response.bytes().await.ok()
+        let bytes = response.bytes().await.ok()?;
+
+        // A Subsonic error answer arrives as 200; written here it would be reused as the cover.
+        image::guess_format(&bytes).is_ok().then_some(bytes)
     };
     let bytes = tokio::time::timeout(Duration::from_secs(30), fetch)
         .await
@@ -893,4 +896,38 @@ pub(super) struct LoadFinished {
     token: u64,
     result: Option<Result<player::engine::LoadOutcome, player::engine::Failure>>,
     clear_pending_resume: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fetch_cover_to_temp;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Answers every request with 200 and `body`, as Subsonic does for a bad cover id.
+    async fn serve(body: &'static str) -> String {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("address");
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let mut request = vec![0u8; 4096];
+                let _ = stream.read(&mut request).await;
+                let reply = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(reply.as_bytes()).await;
+            }
+        });
+        format!("http://{address}/cover")
+    }
+
+    #[tokio::test]
+    async fn an_error_answer_is_no_cover_file() {
+        let url = serve(r#"{"subsonic-response":{"status":"failed"}}"#).await;
+        let key = format!("error-answer-{url}");
+
+        assert_eq!(fetch_cover_to_temp(&url, &key, None).await, None);
+    }
 }

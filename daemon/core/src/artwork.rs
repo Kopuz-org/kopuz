@@ -534,11 +534,12 @@ impl ArtworkService {
     }
 }
 
-/// A cached remote cover. An error answer cached before `is_error_body`
-/// existed counts as no cover, so it is neither served nor kept as fallback.
+/// A cached remote cover. Bytes that are no picture, e.g. an error answer
+/// cached before `is_error_body` existed, count as no cover, so they are
+/// neither served nor kept as fallback.
 async fn read_cached(path: &std::path::Path) -> Option<Vec<u8>> {
     let bytes = tokio::fs::read(path).await.ok()?;
-    (!is_error_body(None, &bytes)).then_some(bytes)
+    image::guess_format(&bytes).is_ok().then_some(bytes)
 }
 
 /// A body that is an API answer rather than a picture. Subsonic servers
@@ -795,6 +796,15 @@ mod tests {
         assert_eq!(read_cached(&error).await, None);
         assert_eq!(read_cached(&cover).await, Some(jpeg_of(4)));
         assert_eq!(read_cached(&dir.path().join("missing")).await, None);
+    }
+
+    #[tokio::test]
+    async fn a_cached_body_that_is_no_picture_is_no_cover() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = dir.path().join("remote_thumb_text");
+        std::fs::write(&text, b"Internal server error").unwrap();
+
+        assert_eq!(read_cached(&text).await, None, "plain text is not artwork");
     }
 
     #[test]
