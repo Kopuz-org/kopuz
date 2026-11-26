@@ -118,6 +118,8 @@ pub enum Provide {
     Lyrics,
     /// What plays when the queue runs out, with autoplay on.
     Radio,
+    /// How one track goes into the next.
+    Transitions,
 }
 
 /// The shortest `tick-ms` a manifest may ask for.

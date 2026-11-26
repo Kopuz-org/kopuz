@@ -108,6 +108,44 @@ interface integration {
         duration-ms: option<u64>,
     }
 
+    /// Where a transition's three equalizer bands sit.
+    record bands {
+        high-hz: f32,
+        mid-hz: f32,
+        mid-q: f32,
+        bass-hz: f32,
+    }
+
+    /// One deck through a transition, each curve sampled every `step`
+    /// seconds from its start, all of one length; past its last sample a
+    /// curve holds that value.
+    record deck-curves {
+        /// Linear gain, 1 for as recorded.
+        volume: list<f32>,
+        /// Playback rate, 1 for as recorded.
+        speed: list<f32>,
+        /// Each band's cut or boost in dB, 0 for flat.
+        high-db: list<f32>,
+        mid-db: list<f32>,
+        bass-db: list<f32>,
+        /// A high-pass corner in Hz, for a deck that brings its bass in late.
+        highpass-hz: option<list<f32>>,
+    }
+
+    /// How to go from one track into the next, in seconds.
+    record transition-plan {
+        /// Into the outgoing track, where the transition begins.
+        start: f64,
+        length: f64,
+        /// Into the incoming track, where it starts playing.
+        entry: f64,
+        /// Between curve samples; above 0.
+        step: f64,
+        bands: bands,
+        outgoing: deck-curves,
+        incoming: deck-curves,
+    }
+
     /// Lyrics a plugin found.
     variant found-lyrics {
         /// Words with no timing.
@@ -160,5 +198,10 @@ interface integration {
         /// of the queue so far, newest last, so it can leave them out. An
         /// empty list lets kopuz's own radio go on instead.
         radio: func(seed: song, recent: list<string>) -> result<list<string>, string>;
+
+        /// Asked only of an integration whose manifest provides
+        /// `transitions`, once the track after `outgoing` is known: how to go
+        /// into `incoming`. Nothing is `none`, and kopuz's own crossfade plays.
+        transition: func(outgoing: song, incoming: song) -> result<option<transition-plan>, string>;
     }
 }

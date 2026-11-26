@@ -6,7 +6,8 @@ use kopuz_plugin_sdk::http::Client;
 use kopuz_plugin_sdk::integration::library;
 use kopuz_plugin_sdk::integration::playback::{self, Command, QueueMode};
 use kopuz_plugin_sdk::integration::{
-    ActionTarget, Block, Integration, PanelAction, PanelTarget, Settings, Song,
+    ActionTarget, Bands, Block, DeckCurves, Integration, PanelAction, PanelTarget, Settings, Song,
+    TransitionPlan,
 };
 
 pub struct Remote {
@@ -28,6 +29,58 @@ const FOUND: u32 = 50;
 
 /// How many tracks one radio answer adds.
 const RADIO: usize = 10;
+
+/// How long a transition between albums runs, and how finely it is sampled.
+const FADE_SECONDS: f64 = 8.;
+const FADE_STEP: f64 = 0.1;
+
+/// How far the bass of the deck that gives way is cut.
+const BASS_CUT_DB: f32 = -24.;
+
+/// An equal-power fade starting `start` seconds into the outgoing track, its
+/// bass handed from one deck to the other at the midpoint.
+fn bass_swap(start: f64) -> TransitionPlan {
+    let samples = (FADE_SECONDS / FADE_STEP).round() as usize + 1;
+    let at = |index: usize| index as f32 / (samples - 1) as f32;
+    let quarter = std::f32::consts::FRAC_PI_2;
+    let deck = |volume: Vec<f32>, bass_db: Vec<f32>| DeckCurves {
+        volume,
+        speed: vec![1.; samples],
+        high_db: vec![0.; samples],
+        mid_db: vec![0.; samples],
+        bass_db,
+        highpass_hz: None,
+    };
+    let first_half = |index: usize| at(index) < 0.5;
+    TransitionPlan {
+        start,
+        length: FADE_SECONDS,
+        entry: 0.,
+        step: FADE_STEP,
+        bands: Bands {
+            high_hz: 4_000.,
+            mid_hz: 1_000.,
+            mid_q: 0.7,
+            bass_hz: 150.,
+        },
+        outgoing: deck(
+            (0..samples)
+                .map(|index| (at(index) * quarter).cos())
+                .collect(),
+            (0..samples)
+                .map(|index| if first_half(index) { 0. } else { BASS_CUT_DB })
+                .collect(),
+        ),
+        incoming: deck(
+            (0..samples)
+                .map(|index| (at(index) * quarter).sin())
+                .collect(),
+            (0..samples)
+                .map(|index| if first_half(index) { BASS_CUT_DB } else { 0. })
+                .collect(),
+        ),
+    }
+}
 
 fn order(line: &str) -> Option<Order> {
     let line = line.trim();
@@ -131,6 +184,22 @@ impl Integration for Remote {
                 .collect();
         }
         Ok(picks.into_iter().take(RADIO).collect())
+    }
+
+    /// Between albums, an equal-power fade that swaps the bass halfway, so the
+    /// two bass lines never play over each other. Within an album, nothing:
+    /// its tracks are meant to run into each other as they are.
+    fn transition(&self, outgoing: Song, incoming: Song) -> Result<Option<TransitionPlan>, String> {
+        if !outgoing.album.is_empty() && outgoing.album == incoming.album {
+            return Ok(None);
+        }
+        let Some(duration) = outgoing.duration_ms.map(|ms| ms as f64 / 1_000.) else {
+            return Ok(None);
+        };
+        if duration < 2. * FADE_SECONDS {
+            return Ok(None);
+        }
+        Ok(Some(bass_swap(duration - FADE_SECONDS)))
     }
 
     fn render_panel(&self, id: &str, target: PanelTarget) -> Result<Vec<Block>, String> {

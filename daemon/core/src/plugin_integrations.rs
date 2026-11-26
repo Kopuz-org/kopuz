@@ -622,6 +622,36 @@ impl PluginIntegrations {
         Vec::new()
     }
 
+    /// How to go from `outgoing` into `incoming`, from the first plugin that
+    /// provides transitions and has a whole plan, asked one after another. A
+    /// plan that fails the host's checks is passed over like a failure.
+    pub async fn transition(
+        &self,
+        outgoing: &wit::Song,
+        incoming: &wit::Song,
+    ) -> Option<wit::TransitionPlan> {
+        let providers = self.running().into_iter().filter(|integration| {
+            spec(integration.plugin().manifest()).provides(manifest::Provide::Transitions)
+        });
+        for integration in providers {
+            let plugin = integration.plugin().id().to_string();
+            match integration.transition(outgoing, incoming).await {
+                Ok(Ok(Some(plan))) => match plugin_host::transition::check(&plan) {
+                    Ok(()) => return Some(plan),
+                    Err(error) => {
+                        tracing::warn!(%plugin, %error, "a transition plugin's plan was not whole")
+                    }
+                },
+                Ok(Ok(None)) => {}
+                Ok(Err(message)) => {
+                    tracing::warn!(%plugin, %message, "a transition plugin failed")
+                }
+                Err(error) => tracing::warn!(%plugin, %error, "a transition plugin failed"),
+            }
+        }
+        None
+    }
+
     /// The running integrations, brought in step with the registry and the
     /// answers first: a new build of a plugin is swapped in, changed answers
     /// reopen it, and one turned off or no longer loaded is closed.

@@ -638,3 +638,42 @@ async fn a_radio_plugin_picks_from_the_library_and_leaves_out_the_queue() {
         "nothing new: an empty answer lets kopuz's own radio go on"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transition_plugin_plans_between_albums_and_leaves_one_album_alone() {
+    let orders = Hook::answering(200, "").await;
+    let integration = Integration::new(remote(&[]), vec![("url".into(), orders.url.clone())]);
+    let song = |key: &str, album: &str| wit::Song {
+        key: key.into(),
+        title: key.into(),
+        artist: "Miles Davis".into(),
+        album: album.into(),
+        duration_ms: Some(200_000),
+    };
+    let plan = integration
+        .transition(&song("a", "Kind of Blue"), &song("b", "Sketches of Spain"))
+        .await
+        .expect("ran")
+        .expect("answered")
+        .expect("a plan between albums");
+    assert_eq!(
+        plugin_host::transition::check(&plan),
+        Ok(()),
+        "the host takes it whole"
+    );
+    assert_eq!(plan.start, 192.0, "it ends with the outgoing track");
+    assert_eq!(plan.outgoing.volume.first(), Some(&1.0));
+    assert_eq!(plan.incoming.volume.first(), Some(&0.0));
+    assert!(plan.incoming.bass_db[0] < 0.0, "the incoming bass waits");
+    assert_eq!(plan.incoming.bass_db.last(), Some(&0.0));
+
+    let same = integration
+        .transition(&song("a", "Kind of Blue"), &song("c", "Kind of Blue"))
+        .await
+        .expect("ran");
+    assert_eq!(
+        same,
+        Ok(None),
+        "an album's tracks run into each other as they are"
+    );
+}
