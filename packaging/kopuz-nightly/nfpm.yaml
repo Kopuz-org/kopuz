@@ -9,7 +9,7 @@ priority: optional
 maintainer: temidaradev <temidaradev@proton.me>
 description: A modern, lightweight music player, with the kopuzd daemon it runs on, built from the latest development code.
 vendor: Kopuz
-homepage: https://github.com/Kopuz-org/kopuz
+homepage: https://kopuz.moe
 license: EUPL-1.2
 
 contents:

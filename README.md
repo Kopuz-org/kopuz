@@ -7,6 +7,7 @@
     and the Dioxus framework. It provides a clean and responsive interface
     for managing and enjoying your local music collection.
   </p>
+  <p><a href="https://kopuz.moe">kopuz.moe</a></p>
   <a href="https://discord.gg/K6Bmzw2E4M">
     <img src="https://img.shields.io/badge/Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord">
   </a>

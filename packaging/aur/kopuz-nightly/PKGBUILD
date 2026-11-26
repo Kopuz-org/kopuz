@@ -6,7 +6,7 @@ pkgver=0.0.0_nightly.0
 pkgrel=1
 pkgdesc="A modern music player, built nightly from the latest development code"
 arch=('x86_64')
-url="https://github.com/Kopuz-org/kopuz"
+url="https://kopuz.moe"
 license=('EUPL-1.2')
 depends=(
     'ca-certificates'

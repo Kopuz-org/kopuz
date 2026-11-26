@@ -4,7 +4,7 @@ pkgver=0.22.0
 pkgrel=1
 pkgdesc="The legacy Dioxus interface of the Kopuz music player, with the daemon built in"
 arch=('x86_64')
-url="https://github.com/Kopuz-org/kopuz"
+url="https://kopuz.moe"
 license=('EUPL-1.2')
 depends=(
     'webkit2gtk-4.1'
