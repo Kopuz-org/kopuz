@@ -21,6 +21,65 @@ pub struct Manifest {
     pub permissions: Permissions,
     #[serde(default, rename = "service")]
     pub services: Vec<Service>,
+    /// What a plugin that is not a source adds. A plugin is one or the other.
+    #[serde(default)]
+    pub integration: Option<Integration>,
+}
+
+/// A plugin that is not a source, set up from the fields it lists.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Integration {
+    /// The `url` field whose host `$server` names. Like a source's server, it
+    /// may be on this machine or its network, since the person typed it.
+    #[serde(default)]
+    pub server: Option<String>,
+    /// An SVG path in a 24x24 box.
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default, rename = "field")]
+    pub fields: Vec<Field>,
+}
+
+/// One thing the person fills in, in the order the settings page shows it.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Field {
+    pub key: String,
+    pub label: String,
+    #[serde(default)]
+    pub kind: FieldKind,
+    #[serde(default)]
+    pub help: Option<String>,
+    #[serde(default)]
+    pub placeholder: Option<String>,
+    /// What a new setup starts with; never shown for a secret.
+    #[serde(default)]
+    pub default: Option<String>,
+    #[serde(default)]
+    pub required: bool,
+    /// The values a `choice` field takes.
+    #[serde(default)]
+    pub options: Vec<FieldOption>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum FieldKind {
+    #[default]
+    Text,
+    /// Kept with the daemon's credentials and never sent back out.
+    Secret,
+    Url,
+    Toggle,
+    Choice,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct FieldOption {
+    pub value: String,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
@@ -169,6 +228,14 @@ pub enum ManifestError {
         "the manifest lists `{0}` as a host, but it is an address; name the configured server as `$server`"
     )]
     NamesAddress(String),
+    #[error("a plugin is a source or an integration, and this manifest lists both")]
+    SourceAndIntegration,
+    #[error("the integration lists field `{0}` twice")]
+    DuplicateField(String),
+    #[error("the integration's server is `{0}`, which is not one of its url fields")]
+    NoServerField(String),
+    #[error("the integration's choice field `{0}` has no options")]
+    NoOptions(String),
 }
 
 impl Manifest {
@@ -191,7 +258,17 @@ impl Manifest {
                 return Err(ManifestError::DuplicateService(service.id.clone()));
             }
         }
+        if let Some(integration) = &manifest.integration {
+            if !manifest.services.is_empty() {
+                return Err(ManifestError::SourceAndIntegration);
+            }
+            integration.check()?;
+        }
         Ok(manifest)
+    }
+
+    pub fn is_integration(&self) -> bool {
+        self.integration.is_some()
     }
 
     /// Whether a stream this plugin resolves may be one the host decrypts.
@@ -201,6 +278,45 @@ impl Manifest {
 
     pub fn service(&self, id: &str) -> Option<&Service> {
         self.services.iter().find(|service| service.id == id)
+    }
+}
+
+impl Integration {
+    fn check(&self) -> Result<(), ManifestError> {
+        let mut seen = std::collections::HashSet::new();
+        for field in &self.fields {
+            if !seen.insert(field.key.as_str()) {
+                return Err(ManifestError::DuplicateField(field.key.clone()));
+            }
+            if field.kind == FieldKind::Choice && field.options.is_empty() {
+                return Err(ManifestError::NoOptions(field.key.clone()));
+            }
+        }
+        if let Some(server) = &self.server
+            && self
+                .field(server)
+                .is_none_or(|field| field.kind != FieldKind::Url)
+        {
+            return Err(ManifestError::NoServerField(server.clone()));
+        }
+        Ok(())
+    }
+
+    pub fn field(&self, key: &str) -> Option<&Field> {
+        self.fields.iter().find(|field| field.key == key)
+    }
+
+    /// The address `$server` names for these answers, if the integration has one.
+    pub fn server_url<'a>(&self, settings: &'a [(String, String)]) -> &'a str {
+        self.server
+            .as_deref()
+            .and_then(|server| {
+                settings
+                    .iter()
+                    .find(|(key, _)| key == server)
+                    .map(|(_, value)| value.as_str())
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -367,5 +483,88 @@ mod tests {
             "network = [\"$server\", \"*.sndcdn.com\"]",
         );
         assert!(Manifest::parse(&named).is_ok());
+    }
+
+    const LIGHTS: &str = r#"
+        id = "lights"
+        name = "Lights"
+        version = "0.1.0"
+        api = "0.2"
+
+        [permissions]
+        network = ["$server"]
+
+        [integration]
+        server = "url"
+
+        [[integration.field]]
+        key = "url"
+        label = "Address"
+        kind = "url"
+        default = "ws://127.0.0.1:12345"
+        required = true
+
+        [[integration.field]]
+        key = "mode"
+        label = "Follow"
+        kind = "choice"
+        options = [{ value = "beat", label = "The beat" }, { value = "level", label = "The loudness" }]
+    "#;
+
+    #[test]
+    fn an_integration_reads_its_fields_and_names_its_server() {
+        let manifest = Manifest::parse(LIGHTS).expect("an integration manifest");
+        assert!(manifest.is_integration());
+        let integration = manifest.integration.expect("integration");
+        assert_eq!(integration.fields.len(), 2);
+        assert_eq!(integration.fields[0].kind, FieldKind::Url);
+        assert_eq!(integration.fields[1].options[1].value, "level");
+        let answers = vec![
+            ("mode".to_string(), "beat".to_string()),
+            ("url".to_string(), "ws://127.0.0.1:12345".to_string()),
+        ];
+        assert_eq!(integration.server_url(&answers), "ws://127.0.0.1:12345");
+        assert_eq!(integration.server_url(&[]), "");
+    }
+
+    #[test]
+    fn a_source_manifest_is_no_integration() {
+        assert!(
+            !Manifest::parse(SUBSONIC)
+                .expect("subsonic")
+                .is_integration()
+        );
+    }
+
+    #[test]
+    fn an_integration_is_refused_where_its_fields_do_not_add_up() {
+        let both = format!("{LIGHTS}\n[[service]]\nid = \"lights\"\n");
+        assert!(matches!(
+            Manifest::parse(&both),
+            Err(ManifestError::SourceAndIntegration)
+        ));
+        let twice = LIGHTS.replace("key = \"mode\"", "key = \"url\"");
+        assert!(matches!(
+            Manifest::parse(&twice),
+            Err(ManifestError::DuplicateField(key)) if key == "url"
+        ));
+        let no_server = LIGHTS.replace("server = \"url\"", "server = \"mode\"");
+        assert!(matches!(
+            Manifest::parse(&no_server),
+            Err(ManifestError::NoServerField(key)) if key == "mode"
+        ));
+        let no_options = LIGHTS.replace(
+            "options = [{ value = \"beat\", label = \"The beat\" }, { value = \"level\", label = \"The loudness\" }]",
+            "",
+        );
+        assert!(matches!(
+            Manifest::parse(&no_options),
+            Err(ManifestError::NoOptions(key)) if key == "mode"
+        ));
+        let unknown = LIGHTS.replace("required = true", "required = true\nsecret = true");
+        assert!(matches!(
+            Manifest::parse(&unknown),
+            Err(ManifestError::Parse(_))
+        ));
     }
 }

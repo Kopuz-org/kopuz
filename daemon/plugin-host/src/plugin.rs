@@ -9,6 +9,7 @@ use wasmtime::{Config, Engine, Store};
 
 use crate::bindings::SourcePlugin;
 use crate::host::State;
+use crate::integration_bindings::IntegrationPlugin;
 use crate::manifest::{Manifest, Permissions};
 use crate::{PluginError, wit};
 
@@ -57,14 +58,15 @@ impl std::fmt::Debug for Plugin {
     }
 }
 
-pub(crate) struct Instance {
+pub(crate) struct Instance<B = SourcePlugin> {
     pub(crate) store: Store<State>,
-    pub(crate) bindings: SourcePlugin,
+    pub(crate) bindings: B,
 }
 
 struct Runtime {
     engine: Engine,
     linker: Linker<State>,
+    integration_linker: Linker<State>,
 }
 
 fn runtime() -> Result<&'static Runtime, PluginError> {
@@ -79,7 +81,17 @@ fn runtime() -> Result<&'static Runtime, PluginError> {
                 let mut linker = Linker::new(&engine);
                 wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
                 SourcePlugin::add_to_linker::<_, HasSelf<_>>(&mut linker, |state| state)?;
-                Ok(Runtime { engine, linker })
+                let mut integration_linker = Linker::new(&engine);
+                wasmtime_wasi::p2::add_to_linker_async(&mut integration_linker)?;
+                IntegrationPlugin::add_to_linker::<_, HasSelf<_>>(
+                    &mut integration_linker,
+                    |state| state,
+                )?;
+                Ok(Runtime {
+                    engine,
+                    linker,
+                    integration_linker,
+                })
             };
             build().map_err(|error| error.to_string())
         })
@@ -190,6 +202,46 @@ impl Plugin {
     ) -> Result<Instance, PluginError> {
         let component = self.component().await?;
         let runtime = runtime()?;
+        let mut store = self.store(runtime, server_url, folders);
+        let started = self
+            .starting(
+                "instantiating",
+                SourcePlugin::instantiate_async(&mut store, component, &runtime.linker),
+            )
+            .await?;
+        let bindings = started.map_err(|error| self.trapped(error))?;
+        Ok(Instance { store, bindings })
+    }
+
+    /// A fresh instance of an integration, whose network is scoped to `server_url`.
+    pub(crate) async fn instantiate_integration(
+        &self,
+        server_url: &str,
+    ) -> Result<Instance<IntegrationPlugin>, PluginError> {
+        if !self.manifest.is_integration() {
+            return Err(PluginError::Invalid(format!(
+                "{} is a source, not an integration",
+                self.id
+            )));
+        }
+        let component = self.component().await?;
+        let runtime = runtime()?;
+        let mut store = self.store(runtime, server_url, &[]);
+        let started = self
+            .starting(
+                "instantiating",
+                IntegrationPlugin::instantiate_async(
+                    &mut store,
+                    component,
+                    &runtime.integration_linker,
+                ),
+            )
+            .await?;
+        let bindings = started.map_err(|error| self.trapped(error))?;
+        Ok(Instance { store, bindings })
+    }
+
+    fn store(&self, runtime: &Runtime, server_url: &str, folders: &[String]) -> Store<State> {
         let state = State::new(
             Arc::clone(&self.id),
             Arc::clone(&self.permissions),
@@ -200,14 +252,7 @@ impl Plugin {
         store.limiter(|state| &mut state.limits);
         store.set_epoch_deadline(1);
         store.epoch_deadline_async_yield_and_update(1);
-        let started = self
-            .starting(
-                "instantiating",
-                SourcePlugin::instantiate_async(&mut store, component, &runtime.linker),
-            )
-            .await?;
-        let bindings = started.map_err(|error| self.trapped(error))?;
-        Ok(Instance { store, bindings })
+        store
     }
 
     /// `connection` as the plugin sees it: a plugin reading folders gets them

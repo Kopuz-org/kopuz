@@ -10,3 +10,11 @@ world source-plugin {
 
     export source;
 }
+
+world integration-plugin {
+    import http;
+    import log;
+    import tcp;
+
+    export integration;
+}

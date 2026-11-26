@@ -1,0 +1,22 @@
+/// A plugin that adds something to kopuz other than a source: a device that
+/// follows the music, a service told what plays, a smarter mix. The host opens
+/// it once the person has filled in its fields and keeps one instance of it
+/// running until they clear them, so a connection it holds stays open.
+interface integration {
+    use types.{source-error};
+
+    /// One answered field of the manifest's `[[integration.field]]` list. A
+    /// toggle is `"true"` or `"false"`.
+    record setting {
+        key: string,
+        value: string,
+    }
+
+    resource instance {
+        constructor(settings: list<setting>);
+
+        /// Whether the settings work, asked when they are saved; an error
+        /// keeps them from being kept.
+        validate: func() -> result<_, source-error>;
+    }
+}

@@ -1,0 +1,24 @@
+id = "webhook"
+name = "Webhook"
+version = "0.1.0"
+api = "0.2"
+description = "Tells an address of your choice what kopuz is doing, for a home automation server or a script of your own."
+
+[permissions]
+network = ["$server"]
+
+[integration]
+server = "url"
+
+[[integration.field]]
+key = "url"
+label = "Address"
+kind = "url"
+placeholder = "http://homeassistant.local:8123/api/webhook/kopuz"
+required = true
+
+[[integration.field]]
+key = "token"
+label = "Token"
+kind = "secret"
+help = "Sent as a bearer token, for an address that asks for one."
