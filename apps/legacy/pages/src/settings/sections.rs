@@ -576,15 +576,14 @@ pub(super) fn PlayerSection(settings: Signal<Settings>) -> Element {
                     }
                 }
             }
-            if caps.track_radio {
-                SettingItem {
-                    title: i18n::t("autoplay_radio").to_string(),
-                    config_key: "autoplay_radio",
-                    control: rsx! {
-                        ToggleSetting {
-                            enabled: settings.read().playback.autoplay_radio,
-                            on_change: move |val| edits.edit(SettingsEdit::Playback(PlaybackEdit::AutoplayRadio(val))),
-                        }
+            // Shown for every source: a radio plugin can go on where the source has no radio.
+            SettingItem {
+                title: i18n::t("autoplay_radio").to_string(),
+                config_key: "autoplay_radio",
+                control: rsx! {
+                    ToggleSetting {
+                        enabled: settings.read().playback.autoplay_radio,
+                        on_change: move |val| edits.edit(SettingsEdit::Playback(PlaybackEdit::AutoplayRadio(val))),
                     }
                 }
             }

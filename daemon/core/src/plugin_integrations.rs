@@ -22,6 +22,9 @@ pub const ID_PREFIX: &str = "plugin:";
 /// name a field with a `$`.
 const ENABLED: &str = "$enabled";
 
+/// The most tracks one radio answer adds; the next is asked when they run out.
+const RADIO_MAX: usize = 100;
+
 const FALLBACK_ICON: &str = "fa-solid fa-puzzle-piece";
 
 /// The plugin an integration id names, if one is loaded.
@@ -590,6 +593,33 @@ impl PluginIntegrations {
             }
         }
         None
+    }
+
+    /// Library keys to play after `seed` from the first plugin that provides
+    /// radio and has some, asked one after another, `recent` left out.
+    pub async fn radio(&self, seed: &wit::Song, recent: &[String]) -> Vec<String> {
+        let providers = self.running().into_iter().filter(|integration| {
+            spec(integration.plugin().manifest()).provides(manifest::Provide::Radio)
+        });
+        for integration in providers {
+            let plugin = integration.plugin().id().to_string();
+            match integration.radio(seed, recent).await {
+                Ok(Ok(keys)) => {
+                    let keys: Vec<String> = keys
+                        .into_iter()
+                        .filter(|key| !key.is_empty() && *key != seed.key && !recent.contains(key))
+                        .take(RADIO_MAX)
+                        .collect();
+                    if !keys.is_empty() {
+                        tracing::debug!(%plugin, tracks = keys.len(), "radio from a plugin");
+                        return keys;
+                    }
+                }
+                Ok(Err(message)) => tracing::warn!(%plugin, %message, "a radio plugin failed"),
+                Err(error) => tracing::warn!(%plugin, %error, "a radio plugin failed"),
+            }
+        }
+        Vec::new()
     }
 
     /// The running integrations, brought in step with the registry and the

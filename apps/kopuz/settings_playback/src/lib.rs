@@ -382,20 +382,19 @@ impl PlaybackSettings {
                     )
                     .shown(cx),
             )
-            .when(caps.track_radio, |section| {
-                section.children(
-                    toggle_row(
-                        "autoplay_radio",
-                        t("autoplay_radio"),
-                        autoplay_radio,
-                        ConfigModel::writer(|on| {
-                            SettingsEdit::Playback(PlaybackEdit::AutoplayRadio(on))
-                        }),
-                    )
-                    .bind("autoplay_radio", cx)
-                    .shown(cx),
+            // Shown for every source: a radio plugin can go on where the source has no radio.
+            .children(
+                toggle_row(
+                    "autoplay_radio",
+                    t("autoplay_radio"),
+                    autoplay_radio,
+                    ConfigModel::writer(|on| {
+                        SettingsEdit::Playback(PlaybackEdit::AutoplayRadio(on))
+                    }),
                 )
-            })
+                .bind("autoplay_radio", cx)
+                .shown(cx),
+            )
             .when(caps.explicit_flags, |section| {
                 section.children(
                     toggle_row(

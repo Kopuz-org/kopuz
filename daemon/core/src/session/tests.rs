@@ -4656,6 +4656,83 @@ async fn a_run_out_queue_stops_without_autoplay_or_without_track_radio() {
     }
 }
 
+/// A library with no track radio of its own, where a plugin provides one.
+#[derive(Default)]
+struct PluginRadioLibrary {
+    asked: std::sync::Mutex<Vec<(String, Vec<String>)>>,
+}
+
+#[async_trait::async_trait]
+impl QueueMaterializer for PluginRadioLibrary {
+    async fn materialize(&self, context: &QueueContext) -> Result<Vec<Track>, ApiError> {
+        StubLibrary.materialize(context).await
+    }
+
+    async fn plugin_radio(&self, seed: &str, recent: &[String]) -> Vec<Track> {
+        self.asked
+            .lock()
+            .expect("asked lock")
+            .push((seed.to_string(), recent.to_vec()));
+        let picks: Vec<String> = ["short-p1", "short-p2"]
+            .into_iter()
+            .filter(|key| !recent.iter().any(|seen| seen == key))
+            .map(str::to_string)
+            .collect();
+        StubLibrary
+            .materialize(&QueueContext::Tracks { keys: picks })
+            .await
+            .unwrap_or_default()
+    }
+}
+
+#[tokio::test]
+async fn a_run_out_queue_goes_on_with_what_a_radio_plugin_picks() {
+    let library = Arc::new(PluginRadioLibrary::default());
+    let sink = FakeSinkHandle::default();
+    let player =
+        Player::try_with_sink(Box::new(FakeSink(sink.clone()))).expect("headless player starts");
+    let engine_events = player.subscribe();
+    let mut services = PlaybackServices::default();
+    services.settings.playback.crossfade_seconds = 0;
+    services.settings.playback.autoplay_radio = true;
+    let session = SessionHandle::spawn_with_factory(
+        library.clone(),
+        player,
+        services,
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+    let harness = Harness {
+        api: LocalApi::new(session),
+        sink,
+        engine_events,
+    };
+    harness
+        .api
+        .set_queue(replace(&["short-seed"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+
+    let state = drive_until(&harness, "the plugin's pick after the seed", |state| {
+        state.queue.index == Some(1) && matches!(state.intent, Intent::Committed { .. })
+    })
+    .await;
+    assert_eq!(
+        state.track.map(|track| track.title),
+        Some("short-p1".to_string()),
+        "a source with no track radio still goes on"
+    );
+    assert_eq!(
+        queue_titles(&harness.api).await,
+        ["short-seed", "short-p1", "short-p2"]
+    );
+    let asked = library.asked.lock().expect("asked lock").clone();
+    assert_eq!(
+        asked.first(),
+        Some(&("short-seed".to_string(), vec!["short-seed".to_string()]))
+    );
+}
+
 fn album(id: &str) -> QueueContext {
     QueueContext::Album { id: id.into() }
 }

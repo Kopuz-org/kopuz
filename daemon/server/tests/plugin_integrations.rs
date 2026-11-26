@@ -610,3 +610,31 @@ async fn a_lyrics_plugin_answers_with_lrc_plain_words_or_nothing() {
     let integration = Integration::new(lyrics_server(), vec![("url".into(), broken.url.clone())]);
     assert!(integration.lyrics(&asked()).await.expect("ran").is_err());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_radio_plugin_picks_from_the_library_and_leaves_out_the_queue() {
+    let orders = Hook::answering(200, "").await;
+    let kopuz = Arc::new(FakeKopuz::default());
+    let integration = Integration::new(remote(&[]), vec![("url".into(), orders.url.clone())])
+        .with_bridge(kopuz.clone());
+    let seed = wit::Song {
+        key: "blue-1".into(),
+        title: "So What".into(),
+        artist: "Miles Davis".into(),
+        album: "Kind of Blue".into(),
+        duration_ms: None,
+    };
+    assert_eq!(
+        integration.radio(&seed, &[]).await.expect("ran"),
+        Ok(vec!["blue-2".to_string()]),
+        "the seed itself is left out"
+    );
+    assert_eq!(
+        integration
+            .radio(&seed, &["blue-2".to_string()])
+            .await
+            .expect("ran"),
+        Ok(Vec::new()),
+        "nothing new: an empty answer lets kopuz's own radio go on"
+    );
+}

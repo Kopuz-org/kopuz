@@ -40,6 +40,8 @@ const MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
 const PERSIST_INTERVAL: Duration = Duration::from_secs(5);
 const REMOTE_PUSH_TIMEOUT: Duration = Duration::from_secs(3);
 const PROGRESS_STEP_SECS: u64 = 5;
+/// How much of the queue a radio plugin is told of, so it can leave it out.
+const RADIO_RECENT: usize = 50;
 
 /// The queue as `api::QueueSnapshot` reports it: tracks in play order, `position` a play-order index.
 #[derive(Debug, Clone, Default)]
@@ -64,6 +66,12 @@ pub trait QueueMaterializer: Send + Sync {
 
     async fn more_radio(&self, _cursor: &str) -> Result<RadioPage, ApiError> {
         Ok(RadioPage::default())
+    }
+
+    /// What a plugin would play after `seed` once the queue runs out; nothing
+    /// when no plugin provides radio. `recent` is the queue's keys, newest last.
+    async fn plugin_radio(&self, _seed: &str, _recent: &[String]) -> Vec<Track> {
+        Vec::new()
     }
 
     /// Make a restored queue's rows addressable by key, since some were listed once and never stored.
@@ -1604,14 +1612,14 @@ impl Session {
     }
 
     /// The mix is a network round trip, so it is fetched off the actor and
-    /// lands as a command.
+    /// lands as a command. A plugin that provides radio is asked first, since
+    /// the person turned it on; the source's own radio is the fallback.
     fn start_autoplay(&mut self) {
         let radio = self
             .active_source
             .as_ref()
             .is_some_and(|source| source.capabilities().radio.track);
         if !self.settings.playback.autoplay_radio
-            || !radio
             || self.offline.offline_mode()
             || self.current_track_is_radio()
             || self
@@ -1628,10 +1636,32 @@ impl Session {
         else {
             return;
         };
+        // In the order it played, which shuffle makes other than the queue's own.
+        let items = self.model.items();
+        let order: Vec<usize> = match self.model.shuffle() && !self.model.shuffle_order().is_empty()
+        {
+            true => self.model.shuffle_order().to_vec(),
+            false => (0..items.len()).collect(),
+        };
+        let played: Vec<String> = order
+            .iter()
+            .filter_map(|&index| items.get(index))
+            .map(|track| track.id.key().into_owned())
+            .collect();
+        let recent = played[played.len().saturating_sub(RADIO_RECENT)..].to_vec();
         let materializer = self.materializer.clone();
         let tx = self.cmd_tx.clone();
         let queue_rev = self.queue_rev;
         self.autoplay_task = Some(tokio::spawn(async move {
+            let from_plugin = materializer.plugin_radio(&seed, &recent).await;
+            if !from_plugin.is_empty() || !radio {
+                let _ = tx.send(SessionCmd::AutoplayRadio {
+                    queue_rev,
+                    seed,
+                    result: Ok(RadioPage::last(from_plugin)),
+                });
+                return;
+            }
             let context = QueueContext::TrackRadio { key: seed.clone() };
             let result = match tokio::time::timeout(
                 MATERIALIZE_TIMEOUT,

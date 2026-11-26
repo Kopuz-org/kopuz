@@ -111,6 +111,15 @@ pub trait Integration: Sized + 'static {
         let _ = track;
         Ok(None)
     }
+
+    /// Library track keys to play after `seed` when the queue runs out,
+    /// asked only when the manifest's `[integration]` provides `radio` and
+    /// autoplay is on. `recent` is the queue so far, newest last. An empty
+    /// list lets kopuz's own radio go on.
+    fn radio(&self, seed: Song, recent: Vec<String>) -> std::result::Result<Vec<String>, String> {
+        let _ = (seed, recent);
+        Ok(Vec::new())
+    }
 }
 
 /// Read the library, for a manifest with `library = "read"` under
@@ -288,6 +297,16 @@ macro_rules! export_integration {
                 ::std::string::String,
             > {
                 $crate::integration::Integration::lyrics(&self.0, track)
+            }
+            fn radio(
+                &self,
+                seed: $crate::integration::Song,
+                recent: ::std::vec::Vec<::std::string::String>,
+            ) -> ::std::result::Result<
+                ::std::vec::Vec<::std::string::String>,
+                ::std::string::String,
+            > {
+                $crate::integration::Integration::radio(&self.0, seed, recent)
             }
         }
 

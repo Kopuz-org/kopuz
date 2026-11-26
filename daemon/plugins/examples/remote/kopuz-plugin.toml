@@ -12,6 +12,7 @@ library = "read"
 [integration]
 server = "url"
 listens = ["tick"]
+provides = ["radio"]
 tick-ms = 500
 
 [[integration.field]]
