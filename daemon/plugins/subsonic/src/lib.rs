@@ -483,6 +483,20 @@ mod tests {
     }
 
     #[test]
+    fn blend_interleaves_seeds_by_rank() {
+        let ids = |songs: Vec<SubsonicSong>| songs.into_iter().map(|s| s.id).collect::<Vec<_>>();
+        let lists = vec![
+            vec![song("a1", None), song("a2", None)],
+            vec![song("b1", None), song("b2", None)],
+        ];
+
+        assert_eq!(
+            ids(blend(&HashSet::new(), lists, 10)),
+            ["a1", "b1", "a2", "b2"]
+        );
+    }
+
+    #[test]
     fn an_album_keeps_one_id_and_its_cover_stays_an_unsigned_ref() {
         let first = song_to_track("custom", song("s1", Some("al-1")), None);
         let again = song_to_track("custom", song("s1", Some("al-1")), None);
