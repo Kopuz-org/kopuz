@@ -112,17 +112,17 @@ pub struct MixPage {
 }
 
 impl MixPage {
-    /// Keeps only `artist`'s songs. The first song by anyone else means the
-    /// mix has run past theirs, so there is no page after this one.
+    /// Keeps only `artist`'s songs. A stray upload or remix by another channel
+    /// can land mid-page while more of the artist's songs follow on later pages,
+    /// so continuation only stops once a page yields none of their songs.
     pub(super) fn confined_to(mut self, artist: &str) -> Self {
-        let before = self.tracks.len();
         self.tracks.retain(|track| {
             track
                 .credits
                 .iter()
                 .any(|credit| credit.id.as_deref() == Some(artist))
         });
-        if self.tracks.len() < before {
+        if self.tracks.is_empty() {
             self.continuation = None;
         }
         self.artist = Some(artist.to_string());
@@ -654,11 +654,21 @@ mod tests {
     }
 
     #[test]
-    fn an_artist_shuffle_ends_where_other_artists_begin() {
+    fn an_artist_shuffle_drops_stray_tracks_and_stops_when_a_page_has_none() {
         let mixed = page(vec![credited("a1", "UCada"), credited("b1", "UCbo")]);
         let kept = mixed.confined_to("UCada");
         let keys: Vec<String> = kept.tracks.iter().map(|t| t.id.key().to_string()).collect();
         assert_eq!(keys, ["a1"]);
+        assert_eq!(
+            kept.continuation.as_deref(),
+            Some("next"),
+            "a stray track on a page must not stop paging"
+        );
+        assert_eq!(kept.artist.as_deref(), Some("UCada"));
+
+        let others_only = page(vec![credited("b1", "UCbo"), credited("b2", "UCbo")]);
+        let kept = others_only.confined_to("UCada");
+        assert!(kept.tracks.is_empty());
         assert_eq!(kept.continuation, None, "no page after the artist's songs");
 
         let own = page(vec![credited("a1", "UCada"), credited("a2", "UCada")]);
