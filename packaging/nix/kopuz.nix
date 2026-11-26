@@ -126,7 +126,7 @@ craneLib.buildPackage (
 
     meta = {
       description = "Fast, modern music player with Jellyfin and local library support";
-      homepage = "https://github.com/Kopuz-org/kopuz";
+      homepage = "https://kopuz.moe";
       license = lib.licenses.eupl12;
       maintainers = with lib.maintainers; [
         temidaradev

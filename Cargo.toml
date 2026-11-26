@@ -13,7 +13,7 @@ rust-version = "1.95.0"
 description = "A modern, lightweight music player built with Rust and Dioxus."
 license = "EUPL-1.2"
 repository = "https://github.com/Kopuz-org/kopuz"
-homepage = "https://github.com/Kopuz-org/kopuz"
+homepage = "https://kopuz.moe"
 keywords = ["music", "player", "audio", "dioxus"]
 
 [workspace.dependencies]

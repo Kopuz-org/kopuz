@@ -191,7 +191,7 @@ craneLib.mkCargoDerivation (
 
     meta = {
       description = "The legacy Dioxus interface of the Kopuz music player, with the daemon built in";
-      homepage = "https://github.com/Kopuz-org/kopuz";
+      homepage = "https://kopuz.moe";
       license = lib.licenses.eupl12;
       maintainers = with lib.maintainers; [
         temidaradev

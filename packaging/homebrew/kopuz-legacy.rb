@@ -5,7 +5,7 @@ cask "kopuz-legacy" do
   url "https://github.com/Kopuz-org/kopuz/releases/download/v#{version}/Kopuz-Legacy-#{version}-aarch64.dmg"
   name "Kopuz Legacy"
   desc "Legacy interface of the Kopuz music player, with the daemon built in"
-  homepage "https://github.com/Kopuz-org/kopuz"
+  homepage "https://kopuz.moe"
 
   livecheck do
     url :url
