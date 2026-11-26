@@ -2347,9 +2347,14 @@ fn position_after_start(
     wait_until("status switches to token 2", || engine.status().token == 2);
     // Lets the worker run past its leading silence, if it drops any.
     std::thread::sleep(Duration::from_millis(300));
-    sink.pull(1024);
+    // B's first progress, so a ring still empty cannot pass for an intro kept.
+    let mut position = Duration::ZERO;
+    wait_until("B plays", || {
+        sink.pull(1024);
+        position = engine.status().position();
+        !position.is_zero()
+    });
 
-    let position = engine.status().position();
     engine.shutdown();
     position
 }
@@ -2440,9 +2445,9 @@ fn a_planned_mix_brings_the_incoming_track_in_on_the_target_frame() {
     let mut events = engine_subscribe(&engine);
     let mut seen = Vec::new();
 
-    // A is silent where the mix runs (3.0 s to 3.5 s) and loud again after
-    // it, so B is the first sound past 0.5 s and A playing on would show.
-    let (factory_a, duration_a) = segments_factory(&[(0.5, LOUD), (3.0, 0), (6.5, LOUD)]);
+    // A is silent until the mix starts at 3.0 s and loud from there on, so
+    // B's entrance and A's cut at 3.5 s both show as level changes.
+    let (factory_a, duration_a) = segments_factory(&[(0.5, LOUD), (2.5, 0), (7.0, LOUD)]);
     load(&engine, 1, factory_a, duration_a);
     wait_until("phase Playing", || engine.status().phase == Phase::Playing);
     engine.send(Command::PlanOutgoing {
@@ -2482,17 +2487,22 @@ fn a_planned_mix_brings_the_incoming_track_in_on_the_target_frame() {
     );
 
     let target = samples_at(3.0);
-    let after_a = samples_at(0.5);
-    let first_b = samples[after_a..].iter().position(|s| *s != 0.0);
-    assert_eq!(first_b.map(|index| index + after_a), Some(target));
-
-    let b_level = samples[target];
-    assert!((samples[0] / b_level - 2.0).abs() < 1e-3, "A is twice B");
-    let tail = &samples[target..samples_at(4.0)];
+    let end = samples_at(3.5);
+    let a_level = samples[0];
+    let both = a_level * 1.5;
+    let near = |s: f32, level: f32| (s - level).abs() < 1e-3 * a_level;
+    assert_eq!(samples[target - 1], 0.0, "nothing before the mix start");
+    let overlap = &samples[target..end];
     assert!(
-        tail.iter().all(|s| (s - b_level).abs() < 1e-6),
-        "only B past the mix start, A stopped after it: {:?}",
-        tail.iter().position(|s| (s - b_level).abs() >= 1e-6)
+        overlap.iter().all(|s| near(*s, both)),
+        "A and B from the mix start to its last frame: {:?}",
+        overlap.iter().position(|s| !near(*s, both))
+    );
+    let tail = &samples[end..samples_at(4.0)];
+    assert!(
+        tail.iter().all(|s| near(*s, a_level / 2.0)),
+        "only B once the mix is over: {:?}",
+        tail.iter().position(|s| !near(*s, a_level / 2.0))
     );
     assert_eq!(engine.status().token, 2);
     engine.shutdown();
@@ -2557,5 +2567,143 @@ fn a_seek_drops_a_planned_mix() {
         drain_events(&mut events, &mut seen);
         seen.contains(&Event::MixMissed { token: 1 })
     });
+    engine.shutdown();
+}
+
+/// A WAV whose bytes past `open_after` wait until `gate` is set, so its
+/// decode worker can be held in a read.
+fn held_factory(
+    seconds: f64,
+    open_after: usize,
+    gate: Arc<std::sync::atomic::AtomicBool>,
+) -> (SourceFactory, Duration) {
+    let frames = (seconds * TEST_CONFIG.sample_rate as f64) as usize;
+    let bytes = wav_bytes(frames, TEST_CONFIG.sample_rate, TEST_CONFIG.channels as u16);
+    let factory: SourceFactory = Box::new(move || {
+        let reader = HeldReader {
+            inner: std::io::Cursor::new(bytes),
+            open_after,
+            gate,
+        };
+        Ok(crate::decoder::from_stream_with_len(reader, None))
+    });
+    (factory, Duration::from_secs_f64(seconds))
+}
+
+struct HeldReader {
+    inner: std::io::Cursor<Vec<u8>>,
+    open_after: usize,
+    gate: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl std::io::Read for HeldReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        while self.inner.position() as usize >= self.open_after
+            && !self.gate.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let room = if self.gate.load(std::sync::atomic::Ordering::Relaxed) {
+            buf.len()
+        } else {
+            buf.len()
+                .min(self.open_after - self.inner.position() as usize)
+        };
+        self.inner.read(&mut buf[..room])
+    }
+}
+
+impl std::io::Seek for HeldReader {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(pos)
+    }
+}
+
+#[test]
+fn a_plan_the_worker_has_not_armed_does_not_take_the_outgoing_track() {
+    let (_sink, engine) = spawn_engine();
+    let gate = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    // A's worker blocks in a read after one second of audio and cannot
+    // answer the plan before B is ready.
+    let (factory_a, duration_a) = held_factory(30.0, TEST_AUDIO_BYTES_PER_SEC, gate.clone());
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    std::thread::sleep(Duration::from_millis(100));
+    engine.send(Command::PlanOutgoing {
+        token: 1,
+        at: Duration::from_secs(20),
+        mix: flat_mix(Duration::from_millis(500)),
+    });
+
+    let (factory_b, duration_b) = wav_factory(10.0);
+    let outcome = load_mixed(&engine, 2, factory_b, duration_b, 1);
+    gate.store(true, std::sync::atomic::Ordering::Relaxed);
+    assert!(!outcome.mixed && outcome.crossfaded, "{outcome:?}");
+    engine.shutdown();
+}
+
+#[test]
+fn a_mix_start_playback_has_passed_falls_back_to_the_transition() {
+    let (sink, engine) = spawn_engine();
+
+    let (factory_a, duration_a) = wav_factory(30.0);
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    engine.send(Command::PlanOutgoing {
+        token: 1,
+        at: Duration::from_secs(3),
+        mix: flat_mix(Duration::from_millis(500)),
+    });
+
+    // Play A past the start, still inside its mix.
+    let mut pulled = 0;
+    while pulled < samples_at(3.2) {
+        pulled += sink.pull(4096).len();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let (factory_b, duration_b) = wav_factory(10.0);
+    let outcome = load_mixed(&engine, 2, factory_b, duration_b, 1);
+    assert!(!outcome.mixed && outcome.crossfaded, "{outcome:?}");
+    engine.shutdown();
+}
+
+#[test]
+fn a_planned_mix_can_follow_a_planned_mix() {
+    let (sink, engine) = spawn_engine();
+    let mut events = engine_subscribe(&engine);
+    let mut seen = Vec::new();
+
+    let (factory_a, duration_a) = wav_factory(10.0);
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    engine.send(Command::PlanOutgoing {
+        token: 1,
+        at: Duration::from_secs(1),
+        mix: flat_mix(Duration::from_millis(500)),
+    });
+    let (factory_b, duration_b) = wav_factory(30.0);
+    assert!(load_mixed(&engine, 2, factory_b, duration_b, 1).mixed);
+
+    pull_paced(&sink, || {
+        drain_events(&mut events, &mut seen);
+        seen.iter()
+            .any(|e| matches!(e, Event::TrackSwitched { token: 2, .. }))
+    });
+
+    // B is past its own mix; its outgoing plan starts well ahead of the decoder.
+    engine.send(Command::PlanOutgoing {
+        token: 2,
+        at: Duration::from_secs(20),
+        mix: flat_mix(Duration::from_millis(500)),
+    });
+    std::thread::sleep(Duration::from_millis(200));
+    let (factory_c, duration_c) = wav_factory(10.0);
+    let outcome = load_mixed(&engine, 3, factory_c, duration_c, 2);
+
+    drain_events(&mut events, &mut seen);
+    assert!(!seen.contains(&Event::MixMissed { token: 2 }), "{seen:?}");
+    assert!(outcome.mixed, "{outcome:?}");
     engine.shutdown();
 }

@@ -88,19 +88,18 @@ impl Deck {
         self.side == Side::Outgoing && self.elapsed >= self.end
     }
 
+    /// The incoming deck is past its mix and holds the last point.
+    pub(crate) fn holding(&self) -> bool {
+        self.side == Side::Incoming && self.elapsed >= self.end
+    }
+
     /// Mixes `input` (interleaved, output rate) into `out`, which is cleared
     /// first. Input the speed curve has not reached yet carries over.
     pub(crate) fn process(&mut self, input: &[f32], out: &mut Vec<f32>) {
         out.clear();
         self.carry.extend_from_slice(input);
-        self.settle();
 
-        while !self.done() {
-            self.tune();
-            if !self.render_block(out) {
-                break;
-            }
-        }
+        while !self.done() && self.render_block(out) {}
 
         // Drop the frames the read position has moved past.
         let frames = self.carry.len() / self.channels;
@@ -148,6 +147,12 @@ impl Deck {
         let block_end = self.elapsed - self.elapsed % BLOCK_FRAMES + BLOCK_FRAMES;
 
         while self.elapsed < block_end && !self.done() {
+            // Both follow output time, so where a packet ends cannot move them.
+            if self.elapsed.is_multiple_of(BLOCK_FRAMES) {
+                self.tune();
+            }
+            self.settle();
+
             let index = self.pos.floor() as usize;
             let frac = (self.pos - index as f64) as f32;
             // Interpolating needs the next frame too; a whole position does not.
@@ -277,5 +282,48 @@ mod tests {
         deck.process(&input[..2_048], &mut out);
 
         assert_eq!(deck.pos.fract(), 0.0);
+    }
+
+    /// Plays `input` through a fresh deck in packets of `packet` frames.
+    fn played_in_packets(curves: &MixCurves, input: &[f32], packet: usize) -> Vec<f32> {
+        let mut deck = deck(curves.clone(), Duration::from_millis(100), Side::Incoming);
+        let mut out = Vec::new();
+        let mut all = Vec::new();
+        for chunk in input.chunks(packet * 2) {
+            deck.process(chunk, &mut out);
+            all.extend_from_slice(&out);
+        }
+        all
+    }
+
+    fn assert_same_audio(a: &[f32], b: &[f32]) {
+        let shorter = a.len().min(b.len());
+        assert!(shorter > 0);
+        let first = (0..shorter).find(|&i| (a[i] - b[i]).abs() > 1e-6);
+        assert_eq!(first, None, "the packet size changed the audio");
+    }
+
+    #[test]
+    fn packet_size_does_not_move_the_coefficient_updates() {
+        let mut curves = flat_curves(2);
+        curves.mid_db = vec![0.0, -40.0];
+        let input = signal(8_000);
+
+        assert_same_audio(
+            &played_in_packets(&curves, &input, 8_000),
+            &played_in_packets(&curves, &input, 64),
+        );
+    }
+
+    #[test]
+    fn packet_size_does_not_move_where_the_deck_settles() {
+        let mut curves = flat_curves(2);
+        curves.speed = vec![1.5, 1.0];
+        let input = signal(16_000);
+
+        assert_same_audio(
+            &played_in_packets(&curves, &input, 16_000),
+            &played_in_packets(&curves, &input, 100),
+        );
     }
 }

@@ -14,6 +14,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+/// Playback rates a deck renders: past them a packet's output grows without
+/// bound (slow) or its read position runs off the input (fast).
+const MIN_SPEED: f32 = 0.5;
+const MAX_SPEED: f32 = 2.0;
+
 /// Per-point values of one deck, all of equal length.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MixCurves {
@@ -64,7 +69,7 @@ pub enum MixError {
     Uneven,
     /// `step` or `length` is zero.
     Span,
-    /// A value is not finite, a speed not positive, or a filter not audible.
+    /// A value is not finite, a speed outside 0.5 to 2, or a filter not audible.
     Value,
 }
 
@@ -183,7 +188,11 @@ fn check_curves(curves: &MixCurves) -> Result<(), MixError> {
     {
         return Err(MixError::Value);
     }
-    if curves.speed.iter().any(|speed| *speed <= 0.0) {
+    if curves
+        .speed
+        .iter()
+        .any(|speed| !(MIN_SPEED..=MAX_SPEED).contains(speed))
+    {
         return Err(MixError::Value);
     }
     Ok(())
@@ -204,19 +213,22 @@ fn check_filters(filters: &MixFilters) -> Result<(), MixError> {
 }
 
 /// The ring index (interleaved samples, `played` scale) where the outgoing
-/// deck's mix begins, shared by its worker (writes once), the callback (holds
-/// the incoming deck until A's `played` reaches it) and the actor (reports a
-/// refusal).
+/// deck's mix begins, shared by its worker (arms, then writes the index or
+/// refuses), the callback (holds the incoming deck until A's `played` reaches
+/// it) and the actor (mixes only into an armed plan, reports a refusal).
 #[derive(Clone, Debug)]
 pub(crate) struct MixStart(Arc<AtomicU64>);
 
 const MIX_PENDING: u64 = u64::MAX;
 const MIX_REFUSED: u64 = u64::MAX - 1;
+const MIX_ARMED: u64 = u64::MAX - 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MixMark {
-    /// The worker has not reached `at` yet.
+    /// The worker has not answered the plan yet.
     Pending,
+    /// The worker took the plan and has not reached `at` yet.
+    Armed,
     /// The worker had already decoded past `at`.
     Refused,
     At(u64),
@@ -227,6 +239,10 @@ impl MixStart {
         Self(Arc::new(AtomicU64::new(MIX_PENDING)))
     }
 
+    pub(crate) fn arm(&self) {
+        self.0.store(MIX_ARMED, Ordering::Release);
+    }
+
     pub(crate) fn refuse(&self) {
         self.0.store(MIX_REFUSED, Ordering::Release);
     }
@@ -234,23 +250,24 @@ impl MixStart {
     /// Stored before the first mixed sample enters the ring, so the callback
     /// sees it by the time it plays that far.
     pub(crate) fn set(&self, index: u64) {
-        self.0.store(index.min(MIX_REFUSED - 1), Ordering::Release);
+        self.0.store(index.min(MIX_ARMED - 1), Ordering::Release);
     }
 
     pub(crate) fn mark(&self) -> MixMark {
         match self.0.load(Ordering::Acquire) {
             MIX_PENDING => MixMark::Pending,
             MIX_REFUSED => MixMark::Refused,
+            MIX_ARMED => MixMark::Armed,
             index => MixMark::At(index),
         }
     }
 
     /// The `played` count to hold the incoming deck until; never reached
-    /// while pending or refused.
+    /// before the worker writes it.
     pub(crate) fn target(&self) -> u64 {
         match self.mark() {
             MixMark::At(index) => index,
-            MixMark::Pending | MixMark::Refused => u64::MAX,
+            MixMark::Pending | MixMark::Armed | MixMark::Refused => u64::MAX,
         }
     }
 }
@@ -349,9 +366,30 @@ mod tests {
     }
 
     #[test]
+    fn speeds_outside_the_renderable_range_are_rejected() {
+        for speed in [f32::MAX, 1e-30] {
+            let mut curves = flat_curves(3);
+            curves.speed[1] = speed;
+            assert_eq!(
+                DeckMix::new(curves, TEST_FILTERS, STEP, LENGTH),
+                Err(MixError::Value),
+                "{speed}"
+            );
+        }
+
+        let mut nudged = flat_curves(3);
+        nudged.speed = vec![1.0, 1.02, 0.98];
+        assert!(DeckMix::new(nudged, TEST_FILTERS, STEP, LENGTH).is_ok());
+    }
+
+    #[test]
     fn a_mix_start_reports_what_the_worker_decided() {
         let start = MixStart::pending();
         assert_eq!(start.mark(), MixMark::Pending);
+        assert_eq!(start.target(), u64::MAX);
+
+        start.arm();
+        assert_eq!(start.mark(), MixMark::Armed);
         assert_eq!(start.target(), u64::MAX);
 
         start.set(88_200);

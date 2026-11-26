@@ -453,9 +453,14 @@ impl RtState {
         };
 
         let played = outgoing.played.load(Ordering::Relaxed);
+        // The ring before the mark: the worker publishes the start before it
+        // pushes the first mixed sample, so what this snapshot holds lies
+        // before a start still unpublished.
+        let available = outgoing.consumer.slots();
         let held = overlay.start.target().saturating_sub(played);
         let held = held.min(data.len() as u64) as usize;
-        let written = read_plain(outgoing, &mut data[..held], channels, ramp_frames);
+        let read = held.min(available);
+        let written = read_plain(outgoing, &mut data[..read], channels, ramp_frames);
         if written < held && !drained(outgoing) {
             return written;
         }
@@ -473,7 +478,14 @@ impl RtState {
         let mut written = 0;
 
         while written < data.len() {
-            let chunk_len = (data.len() - written).min(chunk_capacity);
+            // A ring still filling holds both decks back, so they stay aligned.
+            let chunk_len = (data.len() - written)
+                .min(chunk_capacity)
+                .min(filling(self.fading.as_ref()))
+                .min(filling(self.active.as_ref()));
+            if chunk_len == 0 {
+                break;
+            }
             let outgoing = &mut self.scratch_fading[..chunk_len];
             let incoming = &mut self.scratch_active[..chunk_len];
             outgoing.fill(0.0);
@@ -515,6 +527,15 @@ impl RtState {
         let _ = self
             .retire_tx
             .send(Retired::FadeComplete(fading.consumer, overlay.generation));
+    }
+}
+
+/// Samples a ring holds while its worker still writes; unbounded once it has
+/// finished, when the deck ends instead of waiting.
+fn filling(session: Option<&RtSession>) -> usize {
+    match session {
+        Some(session) if !session.eof.load(Ordering::Acquire) => session.consumer.slots(),
+        _ => usize::MAX,
     }
 }
 
@@ -788,6 +809,31 @@ mod tests {
 
         assert_eq!(samples, [1.0; 8]);
         assert_eq!(incoming_played.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn a_dry_incoming_deck_holds_the_outgoing_one_at_the_mix_start() {
+        let (cmd_tx, _retire_rx, mut state) = unity_state();
+        let outgoing = filled(1.0, 16);
+        outgoing.eof.store(false, Ordering::Relaxed);
+        let outgoing_played = outgoing.played.clone();
+        let (mut producer, consumer) = rtrb::RingBuffer::new(16);
+        let mut incoming = filled(0.5, 0);
+        incoming.consumer = consumer;
+        incoming.eof.store(false, Ordering::Relaxed);
+        let start = overlay(&cmd_tx, outgoing, incoming);
+        start.set(4);
+
+        let mut samples = [0.0; 8];
+        state.process(&mut samples);
+        assert_eq!(samples, [1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(outgoing_played.load(Ordering::Relaxed), 4);
+
+        for _ in 0..4 {
+            producer.push(0.5).unwrap();
+        }
+        state.process(&mut samples);
+        assert_eq!(samples[..4], [1.5; 4], "the decks meet on the mix start");
     }
 
     #[test]

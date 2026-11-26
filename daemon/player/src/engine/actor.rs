@@ -126,6 +126,10 @@ impl EngineHandle {
     }
 }
 
+/// How far ahead of playback a planned entrance must lie when the incoming
+/// load is ready, so the callback cannot play past it before the swap lands.
+const MIX_LEAD: Duration = Duration::from_millis(200);
+
 impl Drop for EngineHandle {
     fn drop(&mut self) {
         // Fire-and-forget: the actor tears itself down; joining here would
@@ -870,7 +874,8 @@ impl Actor {
     }
 
     /// The live session `mix` answers, with the output config and its mix
-    /// start, when its plan is still armed and the stream can blend now.
+    /// start, when its worker armed the plan, playback is still `MIX_LEAD`
+    /// short of the start, and the stream can blend now.
     fn take_mix_outgoing(
         &mut self,
         mix: Option<&IncomingMix>,
@@ -880,12 +885,21 @@ impl Actor {
             return None;
         }
         let config = self.sink.config()?;
-        let start = self
+        let lead = (MIX_LEAD.as_secs_f64() * f64::from(config.sample_rate)) as u64
+            * config.channels as u64;
+        let current = self
             .current
             .as_ref()
-            .filter(|current| current.token == from_token && !current.ended)
-            .and_then(|current| current.mix_start.clone())
-            .filter(|start| start.mark() != MixMark::Refused)?;
+            .filter(|current| current.token == from_token && !current.ended)?;
+        let played = current.played.load(Ordering::Relaxed);
+        let start = current
+            .mix_start
+            .clone()
+            .filter(|start| match start.mark() {
+                MixMark::Armed => true,
+                MixMark::At(index) => index >= played.saturating_add(lead),
+                MixMark::Pending | MixMark::Refused => false,
+            })?;
         let outgoing = self.current.take()?;
         Some((config, outgoing, start))
     }

@@ -135,11 +135,13 @@ struct Output {
 }
 
 enum MixPhase {
-    /// The outgoing deck waits for its source time `at`, in seconds.
+    /// The outgoing deck waits for its source time `at`, in seconds. Until
+    /// then `lead_in`, the incoming deck of the mix before, plays on.
     Armed {
         at: f64,
         start: MixStart,
         deck: Deck,
+        lead_in: Option<Deck>,
     },
     Live(Deck),
 }
@@ -318,6 +320,7 @@ fn run(
     }
 
     let mut scratch = Scratch::default();
+    let mut lead = Vec::new();
     let mut mixed = Vec::new();
     loop {
         let change = drain_commands(
@@ -411,7 +414,7 @@ fn run(
             skipped: decoded_len - samples.len(),
             speed_permille,
         };
-        let (head, tail) = mix_packet(&mut output, samples, at, &mut mixed);
+        let (head, tail) = mix_packet(&mut output, samples, at, &mut lead, &mut mixed);
 
         let change = write_all(
             cmd_rx,
@@ -465,58 +468,100 @@ struct MixAt {
     speed_permille: u32,
 }
 
-/// Splits a packet into the part written as decoded and the part the mix
-/// deck rendered into `mixed`. When the outgoing deck's `at` falls inside
-/// the packet, the split is the first frame at or past it, and its ring
-/// index is published so the callback can bring the incoming deck in there.
-fn mix_packet<'a, 'b>(
+/// Splits a packet into the part written before the outgoing deck's mix and
+/// the part that deck rendered into `mixed`. When the deck's `at` falls inside
+/// the packet, the split is the first frame at or past it, and its ring index
+/// is published so the callback can bring the incoming deck in there. Before
+/// the split, a lead-in deck renders into `lead`.
+fn mix_packet<'a>(
     output: &mut Output,
     samples: &'a [f32],
     at: MixAt,
-    mixed: &'b mut Vec<f32>,
-) -> (&'a [f32], &'b [f32]) {
-    let channels = output.channels.max(1);
-    let split = match output.mix.as_ref() {
+    lead: &'a mut Vec<f32>,
+    mixed: &'a mut Vec<f32>,
+) -> (&'a [f32], &'a [f32]) {
+    let mix_at = match output.mix.as_mut() {
         None => return (samples, &[]),
-        Some(MixPhase::Live(_)) => 0,
-        Some(MixPhase::Armed { at: mix_at, .. }) => {
-            let rate = f64::from(output.sample_rate) * f64::from(super::SPEED_NORMAL)
-                / f64::from(at.speed_permille.max(1));
-            let frames = ((mix_at - at.packet_start) * rate).round().max(0.0) as usize;
-            let split = (frames * channels).saturating_sub(at.skipped);
-            if split >= samples.len() {
-                return (samples, &[]);
-            }
-            split
+        Some(MixPhase::Live(deck)) => {
+            deck.process(samples, mixed);
+            return (&[], mixed);
         }
+        Some(MixPhase::Armed { at, .. }) => *at,
     };
 
+    let channels = output.channels.max(1);
+    let rate = f64::from(output.sample_rate) * f64::from(super::SPEED_NORMAL)
+        / f64::from(at.speed_permille.max(1));
+    let frames = frames_until(mix_at - at.packet_start, rate);
+    let split = (frames * channels)
+        .saturating_sub(at.skipped)
+        .min(samples.len());
     let (head, rest) = samples.split_at(split);
-    let Some(phase) = output.mix.take() else {
-        return (samples, &[]);
-    };
-    let mut deck = match phase {
-        MixPhase::Armed { start, deck, .. } => {
-            start.set(output.written.load(Ordering::Relaxed) + head.len() as u64);
-            deck
+
+    let head: &[f32] = match output.mix.as_mut() {
+        Some(MixPhase::Armed {
+            lead_in: Some(deck),
+            ..
+        }) => {
+            deck.process(head, lead);
+            lead
         }
-        MixPhase::Live(deck) => deck,
+        _ => head,
     };
+    if rest.is_empty() {
+        return (head, &[]);
+    }
+
+    // The lead-in's carry, under two frames, ends with it.
+    let Some(MixPhase::Armed {
+        start, mut deck, ..
+    }) = output.mix.take()
+    else {
+        return (head, &[]);
+    };
+    start.set(output.written.load(Ordering::Relaxed) + head.len() as u64);
     deck.process(rest, mixed);
     output.mix = Some(MixPhase::Live(deck));
     (head, mixed)
 }
 
+/// Float error in a frame offset; a split this close past a whole frame
+/// stays on it.
+const FRAME_NOISE: f64 = 1e-6;
+
+/// Output frames from a packet's start to the first frame at or past
+/// `seconds` into it.
+fn frames_until(seconds: f64, rate: f64) -> usize {
+    (seconds * rate - FRAME_NOISE).ceil().max(0.0) as usize
+}
+
 /// Arms the outgoing deck, or refuses when the decode has passed `at` or a
-/// deck already plays.
+/// mix still runs. An incoming deck past its mix plays on until `at`; a plan
+/// armed before is replaced.
 fn arm_mix(output: &mut Output, at: Duration, mix: DeckMix, start: MixStart) {
     let at = at.as_secs_f64();
-    if at < output.clock || matches!(output.mix, Some(MixPhase::Live(_))) {
+    if at < output.clock {
         start.refuse();
         return;
     }
+    let lead_in = match output.mix.take() {
+        None => None,
+        Some(MixPhase::Armed { lead_in, .. }) => lead_in,
+        Some(MixPhase::Live(deck)) if deck.holding() => Some(deck),
+        Some(running) => {
+            output.mix = Some(running);
+            start.refuse();
+            return;
+        }
+    };
     let deck = Deck::new(mix, Side::Outgoing, output.sample_rate, output.channels);
-    output.mix = Some(MixPhase::Armed { at, start, deck });
+    start.arm();
+    output.mix = Some(MixPhase::Armed {
+        at,
+        start,
+        deck,
+        lead_in,
+    });
 }
 
 enum ParkOutcome {
@@ -931,5 +976,20 @@ fn resample(samples: &[f32], channels: usize, src_rate: u32, dst_rate: u32, out:
             };
             out.push(s0 + (s1 - s0) * frac as f32);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::frames_until;
+
+    #[test]
+    fn a_mix_splits_on_the_first_frame_at_or_past_its_start() {
+        // 0.48 frames in: frame 0 is still before the start.
+        assert_eq!(frames_until(10e-6, 48_000.0), 1);
+        assert_eq!(frames_until(0.0, 48_000.0), 0);
+        // Float noise around a whole frame must not push it one later.
+        assert_eq!(frames_until(3.0 - 2.9, 44_100.0), 4_410);
+        assert_eq!(frames_until(-0.5, 44_100.0), 0);
     }
 }

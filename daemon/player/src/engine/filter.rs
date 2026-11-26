@@ -8,6 +8,9 @@ use std::f32::consts::{FRAC_1_SQRT_2, PI};
 const FLAT_DB: f32 = 0.01;
 /// Corners are kept under Nyquist, where the cookbook formulas fold over.
 const MAX_CORNER: f32 = 0.45;
+/// Deepest cut or boost a band takes; past it `A` under- or overflows and the
+/// coefficients turn NaN. 60 dB down is already inaudible.
+const MAX_GAIN_DB: f32 = 60.0;
 /// Shelf slope S = 1: the steepest without overshoot.
 const SHELF_ALPHA_SCALE: f32 = std::f32::consts::SQRT_2;
 
@@ -67,7 +70,7 @@ fn shelf(rate: f32, hz: f32, gain_db: f32, side: Shelf) -> Coefficients {
     if gain_db.abs() < FLAT_DB {
         return Coefficients::IDENTITY;
     }
-    let a = 10.0_f32.powf(gain_db / 40.0);
+    let a = 10.0_f32.powf(gain_db.clamp(-MAX_GAIN_DB, MAX_GAIN_DB) / 40.0);
     let (cos, sin) = corner(rate, hz);
     let lift = 2.0 * a.sqrt() * sin / SHELF_ALPHA_SCALE;
 
@@ -90,7 +93,7 @@ pub(crate) fn peaking(rate: f32, hz: f32, q: f32, gain_db: f32) -> Coefficients 
     if gain_db.abs() < FLAT_DB {
         return Coefficients::IDENTITY;
     }
-    let a = 10.0_f32.powf(gain_db / 40.0);
+    let a = 10.0_f32.powf(gain_db.clamp(-MAX_GAIN_DB, MAX_GAIN_DB) / 40.0);
     let (cos, sin) = corner(rate, hz);
     let alpha = sin / (2.0 * q.max(0.001));
     Coefficients::normalized(
@@ -209,6 +212,25 @@ mod tests {
 
         assert!(rms_through(coeffs, 1_000.0) < SINE_RMS * 0.05);
         assert!((rms_through(coeffs, 20.0) - SINE_RMS).abs() < SINE_RMS * 0.1);
+    }
+
+    #[test]
+    fn an_extreme_gain_keeps_the_filter_finite() {
+        for gain_db in [-20_000.0, 20_000.0] {
+            for coeffs in [
+                high_shelf(RATE, 4_000.0, gain_db),
+                peaking(RATE, 1_000.0, 0.5, gain_db),
+                low_shelf(RATE, 180.0, gain_db),
+            ] {
+                let mut filter = Biquad {
+                    coeffs,
+                    ..Biquad::default()
+                };
+                for x in [0.5, -0.25, 1.0] {
+                    assert!(filter.process(x).is_finite(), "{gain_db} dB: {coeffs:?}");
+                }
+            }
+        }
     }
 
     #[test]
