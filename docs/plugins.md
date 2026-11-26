@@ -30,6 +30,14 @@ Every source is a plugin, of one of three kinds:
   service Kopuz serves itself, since that would hand them its sources'
   credentials.
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:696efcf48b8f9f5e89de70971a8840ee60f0eaf11aa201fbb969a31f24e719b0 -->
+
+In the legacy desktop app, open the marketplace under **Settings → Library → Plugins**.
+
+<!-- /coderabbit-ai-generated:v1 -->
+
 ## Writing one
 
 Start a `cdylib` crate that depends on
