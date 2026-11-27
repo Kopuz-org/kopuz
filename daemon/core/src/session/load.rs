@@ -570,14 +570,8 @@ pub(super) fn temp_cover_key(track: &Track, url: &str) -> String {
     }
 }
 
-/// Download a cover to a temp file named by a hash of `key`, so repeated plays
-/// of the same album reuse the file instead of growing the temp dir. MPRIS
-/// `mpris:artUrl` wants a file too, not just macOS Now Playing.
-pub(super) async fn fetch_cover_to_temp(
-    url: &str,
-    key: &str,
-    reach: Option<&server::plugins::Reach>,
-) -> Option<String> {
+/// The temp file for the cover named by `key`: a hash of it, so any key makes a file name.
+fn temp_cover_path(key: &str) -> PathBuf {
     use sha2::{Digest as _, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(key.as_bytes());
@@ -588,8 +582,24 @@ pub(super) async fn fetch_cover_to_temp(
         let _ = write!(name, "{byte:02x}");
     }
     name.push_str(".jpg");
-    let path = std::env::temp_dir().join(name);
-    if tokio::fs::metadata(&path).await.is_ok() {
+    std::env::temp_dir().join(name)
+}
+
+/// Download a cover to a temp file named by a hash of `key`, so repeated plays
+/// of the same album reuse the file instead of growing the temp dir. MPRIS
+/// `mpris:artUrl` wants a file too, not just macOS Now Playing.
+pub(super) async fn fetch_cover_to_temp(
+    url: &str,
+    key: &str,
+    reach: Option<&server::plugins::Reach>,
+) -> Option<String> {
+    let path = temp_cover_path(key);
+
+    // A file written before downloads were checked may hold an error answer; it is fetched again.
+    let reusable = tokio::fs::read(&path)
+        .await
+        .is_ok_and(|bytes| image::guess_format(&bytes).is_ok());
+    if reusable {
         return Some(path.to_string_lossy().to_string());
     }
     let fetch = async {
@@ -598,7 +608,10 @@ pub(super) async fn fetch_cover_to_temp(
             .ok()?
             .error_for_status()
             .ok()?;
-        response.bytes().await.ok()
+        let bytes = response.bytes().await.ok()?;
+
+        // A Subsonic error answer arrives as 200; written here it would be reused as the cover.
+        image::guess_format(&bytes).is_ok().then_some(bytes)
     };
     let bytes = tokio::time::timeout(Duration::from_secs(30), fetch)
         .await
@@ -893,4 +906,50 @@ pub(super) struct LoadFinished {
     token: u64,
     result: Option<Result<player::engine::LoadOutcome, player::engine::Failure>>,
     clear_pending_resume: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fetch_cover_to_temp, temp_cover_path};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Answers every request with 200 and `body`, as Subsonic does for a bad cover id.
+    async fn serve(body: &'static str) -> String {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("address");
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let mut request = vec![0u8; 4096];
+                let _ = stream.read(&mut request).await;
+                let reply = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(reply.as_bytes()).await;
+            }
+        });
+        format!("http://{address}/cover")
+    }
+
+    #[tokio::test]
+    async fn an_error_answer_is_no_cover_file() {
+        let url = serve(r#"{"subsonic-response":{"status":"failed"}}"#).await;
+        let key = format!("error-answer-{url}");
+
+        assert_eq!(fetch_cover_to_temp(&url, &key, None).await, None);
+    }
+
+    #[tokio::test]
+    async fn an_error_answer_written_before_the_check_is_not_reused() {
+        let url = serve(r#"{"subsonic-response":{"status":"failed"}}"#).await;
+        let key = format!("stale-error-{url}");
+        let path = temp_cover_path(&key);
+        std::fs::write(&path, br#"{"subsonic-response":{"status":"failed"}}"#).unwrap();
+
+        let fetched = fetch_cover_to_temp(&url, &key, None).await;
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(fetched, None);
+    }
 }

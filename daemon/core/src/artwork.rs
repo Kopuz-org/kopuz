@@ -458,7 +458,7 @@ impl ArtworkService {
             "remote_{}_{cache_name}",
             if hq { "hq" } else { "thumb" },
         ));
-        let cached = tokio::fs::read(&cache_path).await.ok();
+        let cached = read_cached(&cache_path).await;
         let fresh = tokio::fs::metadata(&cache_path)
             .await
             .and_then(|meta| meta.modified())
@@ -511,6 +511,13 @@ impl ArtworkService {
             }
             bytes.extend_from_slice(&chunk);
         }
+
+        // Kept out of the cache, or the error would be served as a cover for a week.
+        if !is_picture(&bytes) {
+            return Err(ApiError::not_found(
+                "the server answered with an error, not artwork",
+            ));
+        }
         Ok(resize_remote(bytes, hq).await)
     }
 
@@ -520,6 +527,22 @@ impl ArtworkService {
             content_type,
         }
     }
+}
+
+/// A cached remote cover. Bytes that are no picture, e.g. an error answer
+/// cached before downloads were checked, count as no cover, so they are
+/// neither served nor kept as fallback.
+async fn read_cached(path: &std::path::Path) -> Option<Vec<u8>> {
+    let bytes = tokio::fs::read(path).await.ok()?;
+    is_picture(&bytes).then_some(bytes)
+}
+
+/// Whether `bytes` are a picture, judged by the bytes alone. Subsonic servers
+/// report a bad `getCoverArt` id with HTTP 200 and a JSON or XML error, and a
+/// header can be wrong either way: a picture sent as `text/plain` is kept, an
+/// error page sent as `image/jpeg` is not.
+fn is_picture(bytes: &[u8]) -> bool {
+    image::guess_format(bytes).is_ok()
 }
 
 /// A client that follows no redirect, for a fetch that checks each hop itself.
@@ -724,6 +747,51 @@ mod tests {
         let small = THUMB_MAX / 4;
         let (bytes, _) = resize_remote(jpeg_of(small), false).await;
         assert_eq!(edge_of(&bytes), small, "shrinking only ever goes down");
+    }
+
+    #[test]
+    fn a_subsonic_error_answer_is_not_a_cover() {
+        // Navidrome answers a bad `getCoverArt` id with 200 and a JSON error.
+        let body = br#"{"subsonic-response":{"status":"failed","error":{"code":0}}}"#;
+        assert!(!is_picture(body));
+        assert!(!is_picture(b"<subsonic-response/>"));
+        assert!(is_picture(&jpeg_of(4)));
+    }
+
+    #[tokio::test]
+    async fn an_error_answer_cached_before_the_check_is_no_cover() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = dir.path().join("remote_thumb_error");
+        let cover = dir.path().join("remote_thumb_cover");
+        std::fs::write(&error, br#"{"subsonic-response":{"status":"failed"}}"#).unwrap();
+        std::fs::write(&cover, jpeg_of(4)).unwrap();
+
+        assert_eq!(read_cached(&error).await, None);
+        assert_eq!(read_cached(&cover).await, Some(jpeg_of(4)));
+        assert_eq!(read_cached(&dir.path().join("missing")).await, None);
+    }
+
+    #[tokio::test]
+    async fn a_cached_body_that_is_no_picture_is_no_cover() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = dir.path().join("remote_thumb_text");
+        std::fs::write(&text, b"Internal server error").unwrap();
+
+        assert_eq!(read_cached(&text).await, None, "plain text is not artwork");
+    }
+
+    #[test]
+    fn the_body_decides_over_a_wrong_or_missing_header() {
+        assert!(!is_picture(
+            br#"<?xml version="1.0"?><subsonic-response status="failed"/>"#
+        ));
+        assert!(!is_picture(b"\n  {\"error\":1}"));
+    }
+
+    #[test]
+    fn a_body_that_is_no_picture_is_no_cover_whatever_its_header() {
+        // Sent as `image/jpeg`. Cached, it would count as none and be fetched again on every request.
+        assert!(!is_picture(b"Internal server error"));
     }
 
     #[tokio::test]
