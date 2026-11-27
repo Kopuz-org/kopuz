@@ -864,7 +864,7 @@ pub struct Playback {
     #[serde(default = "default_crossfade_seconds")]
     #[garde(range(max = 12))]
     pub crossfade_seconds: u8,
-    /// Shape each crossfade to the music: none inside an album.
+    /// Shape each crossfade to the music: none inside an album, past silence.
     #[serde(default = "default_smart_crossfade")]
     #[garde(skip)]
     pub smart_crossfade: bool,
