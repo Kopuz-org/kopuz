@@ -897,6 +897,9 @@ impl api::PluginApi for LocalApi {
 
     async fn uninstall_plugin(&self, id: String) -> Result<(), ApiError> {
         self.plugins.uninstall(&id).await?;
+        if let Ok(integrations) = self.integrations() {
+            integrations.plugins().forget(&id).await?;
+        }
         self.plugins_changed().await;
         Ok(())
     }
@@ -908,6 +911,10 @@ impl LocalApi {
     async fn plugins_changed(&self) {
         if let Some(sources) = &self.sources {
             sources.plugins_changed().await;
+        }
+        // An integration whose plugin went closes now, and a new build takes over a running one.
+        if let Ok(integrations) = self.integrations() {
+            integrations.plugins().running();
         }
         self.session.invalidate(api::Table::Servers);
         self.session.invalidate(api::Table::Plugins);
