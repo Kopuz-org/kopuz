@@ -254,6 +254,16 @@ impl Plugins {
                     .when(plugin.integration, |text| {
                         text.child(ui::hint(t("plugin_integration_hint"), cx))
                     })
+                    .when(plugin.controls_playback, |text| {
+                        text.child(
+                            h_flex()
+                                .gap_1()
+                                .text_xs()
+                                .text_color(cx.theme().warning)
+                                .child(icons::icon(icons::WARNING).size_3())
+                                .child(t("plugin_controls_playback")),
+                        )
+                    })
                     .when(plugin.reads_folders, |text| {
                         text.child(
                             h_flex()

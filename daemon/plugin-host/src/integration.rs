@@ -34,6 +34,7 @@ pub struct Integration {
     settings: Vec<(String, String)>,
     live: Mutex<Option<Live>>,
     closed: AtomicBool,
+    bridge: Option<Arc<dyn crate::Bridge>>,
 }
 
 impl std::fmt::Debug for Integration {
@@ -52,7 +53,14 @@ impl Integration {
             settings,
             live: Mutex::new(None),
             closed: AtomicBool::new(false),
+            bridge: None,
         }
+    }
+
+    /// Let the plugin reach kopuz through `bridge`, as far as its manifest allows.
+    pub fn with_bridge(mut self, bridge: Arc<dyn crate::Bridge>) -> Self {
+        self.bridge = Some(bridge);
+        self
     }
 
     pub fn plugin(&self) -> Arc<Plugin> {
@@ -101,7 +109,9 @@ impl Integration {
             .as_ref()
             .map(|integration| integration.server_url(&self.settings).to_string())
             .unwrap_or_default();
-        let mut instance = plugin.instantiate_integration(&server_url).await?;
+        let mut instance = plugin
+            .instantiate_integration(&server_url, self.bridge.clone())
+            .await?;
         let settings: Vec<wit::Setting> = self
             .settings
             .iter()
@@ -183,4 +193,6 @@ calls! {
     fn on_playback => call_on_playback(event: &wit::PlaybackEvent => event) -> ();
 
     fn on_audio => call_on_audio(frames: &[wit::AudioFrame] => frames) -> ();
+
+    fn on_tick => call_on_tick() -> ();
 }

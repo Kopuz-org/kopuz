@@ -5,6 +5,7 @@
 //! out are the `http` and `tcp` imports, checked against its manifest. This
 //! crate knows nothing of kopuz's models.
 
+mod bridge;
 pub mod folders;
 mod host;
 mod integration;
@@ -14,6 +15,7 @@ mod plugin;
 mod registry;
 mod session;
 
+pub use bridge::{Answer, Bridge};
 pub use host::{Decryption, Opener};
 pub use integration::Integration;
 pub use plugin::{Code, Origin, Plugin};
@@ -53,6 +55,10 @@ pub mod wit {
     pub use crate::integration_bindings::exports::kopuz::plugin::integration::{
         AudioFrame, NowPlaying, PlaybackEvent, Setting, Started,
     };
+
+    pub mod playback {
+        pub use crate::integration_bindings::kopuz::plugin::playback::{Command, QueueMode};
+    }
 }
 
 #[derive(Debug, Clone, thiserror::Error)]

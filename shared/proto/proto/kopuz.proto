@@ -2247,6 +2247,8 @@ message PluginInfo {
   bool reads_folders = 14;
   // Adds an integration, turned on under Connectivity, instead of a source.
   bool integration = 15;
+  // May play, pause, skip and change what is queued.
+  bool controls_playback = 16;
 }
 
 message PluginCatalog {

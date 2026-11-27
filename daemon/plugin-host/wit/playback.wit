@@ -1,0 +1,28 @@
+/// What plays, steered by an integration whose manifest asks for
+/// `playback = "control"`. Any other plugin is refused every call.
+interface playback {
+    variant command {
+        play,
+        pause,
+        toggle,
+        next,
+        previous,
+        stop,
+        /// Milliseconds into the track playing.
+        seek(u64),
+        /// From 0 to 1; it also unmutes.
+        volume(f32),
+    }
+
+    enum queue-mode {
+        /// The tracks become the queue and the first one plays.
+        replace,
+        play-next,
+        append,
+    }
+
+    control: func(command: command) -> result<_, string>;
+
+    /// Library track keys, as playback events and the library name them.
+    queue: func(keys: list<string>, mode: queue-mode) -> result<_, string>;
+}

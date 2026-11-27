@@ -16,6 +16,11 @@ struct Hook {
 
 impl Hook {
     async fn start(status: u16) -> Self {
+        Self::answering(status, "").await
+    }
+
+    /// Answers every request with `status` and `body`.
+    async fn answering(status: u16, body: &'static str) -> Self {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind");
@@ -27,7 +32,8 @@ impl Hook {
                 let request = read_request(&mut stream).await;
                 kept.lock().unwrap().push(request);
                 let reply = format!(
-                    "HTTP/1.1 {status} X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
                 );
                 let _ = stream.write_all(reply.as_bytes()).await;
             }
@@ -261,4 +267,81 @@ async fn an_integration_hears_the_beats_it_asked_for() {
     let beat: serde_json::Value = serde_json::from_str(body).expect("JSON");
     assert_eq!(beat["event"], "beat");
     assert_eq!(beat["level"], 0.5);
+}
+
+/// What reached "kopuz" through the bridge, in order.
+#[derive(Default)]
+struct FakeKopuz {
+    seen: Mutex<Vec<String>>,
+}
+
+impl plugin_host::Bridge for FakeKopuz {
+    fn control(&self, command: wit::playback::Command) -> plugin_host::Answer<()> {
+        self.seen.lock().unwrap().push(format!("{command:?}"));
+        Box::pin(async { Ok(()) })
+    }
+
+    fn queue(&self, keys: Vec<String>, mode: wit::playback::QueueMode) -> plugin_host::Answer<()> {
+        self.seen
+            .lock()
+            .unwrap()
+            .push(format!("queue {mode:?} {keys:?}"));
+        Box::pin(async { Ok(()) })
+    }
+}
+
+fn remote(control: bool) -> Arc<Plugin> {
+    let bundled = bundled_plugins::examples()
+        .iter()
+        .find(|example| example.manifest.contains("id = \"remote\""))
+        .expect("the remote example is built with the examples feature");
+    let text = match control {
+        true => bundled.manifest.to_string(),
+        false => bundled.manifest.replace("playback = \"control\"\n", ""),
+    };
+    let manifest = Manifest::parse(&text).expect("its manifest");
+    Arc::new(Plugin::new(
+        manifest,
+        Code::Wasm(std::borrow::Cow::Borrowed(
+            bundled.wasm.expect("a component"),
+        )),
+        Origin::Installed,
+    ))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plugin_allowed_to_steer_playback_does_on_its_tick() {
+    let orders = Hook::answering(
+        200,
+        "next\nvolume 50\nplay key one\nqueue key two\nvolume nan\n",
+    )
+    .await;
+    let kopuz = Arc::new(FakeKopuz::default());
+    let integration = Integration::new(remote(true), vec![("url".into(), orders.url.clone())])
+        .with_bridge(kopuz.clone());
+    integration.on_tick().await.expect("ticked");
+    assert_eq!(
+        *kopuz.seen.lock().unwrap(),
+        [
+            "Command::Next".to_string(),
+            "Command::Volume(0.5)".to_string(),
+            r#"queue QueueMode::Replace ["key one"]"#.to_string(),
+            r#"queue QueueMode::Append ["key two"]"#.to_string(),
+        ],
+        "a volume that is not a number never reaches kopuz"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plugin_that_did_not_ask_is_refused_playback() {
+    let orders = Hook::answering(200, "next\n").await;
+    let kopuz = Arc::new(FakeKopuz::default());
+    let integration = Integration::new(remote(false), vec![("url".into(), orders.url.clone())])
+        .with_bridge(kopuz.clone());
+    integration.on_tick().await.expect("ticked");
+    assert_eq!(orders.received().len(), 1, "it asked its address");
+    assert!(
+        kopuz.seen.lock().unwrap().is_empty(),
+        "nothing reached kopuz"
+    );
 }

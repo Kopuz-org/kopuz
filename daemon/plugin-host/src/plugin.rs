@@ -217,6 +217,7 @@ impl Plugin {
     pub(crate) async fn instantiate_integration(
         &self,
         server_url: &str,
+        bridge: Option<Arc<dyn crate::Bridge>>,
     ) -> Result<Instance<IntegrationPlugin>, PluginError> {
         if !self.manifest.is_integration() {
             return Err(PluginError::Invalid(format!(
@@ -227,6 +228,9 @@ impl Plugin {
         let component = self.component().await?;
         let runtime = runtime()?;
         let mut store = self.store(runtime, server_url, &[]);
+        if let Some(bridge) = bridge {
+            store.data_mut().bridge_to(bridge);
+        }
         let started = self
             .starting(
                 "instantiating",

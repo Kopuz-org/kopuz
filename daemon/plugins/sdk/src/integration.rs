@@ -74,6 +74,37 @@ pub trait Integration: Sized + 'static {
     fn on_audio(&self, frames: Vec<AudioFrame>) {
         let _ = frames;
     }
+
+    /// Every `tick-ms`, for a manifest that lists `"tick"` in `listens`: the
+    /// place to look for what the plugin waits on, such as a remote's button.
+    fn on_tick(&self) {}
+}
+
+/// Steer what plays, for a manifest with `playback = "control"` under
+/// `[permissions]`; any other plugin's calls are refused.
+pub mod playback {
+    pub use super::bindings::kopuz::plugin::playback::{Command, QueueMode};
+
+    pub fn control(command: Command) -> Result<(), String> {
+        #[cfg(target_arch = "wasm32")]
+        return super::bindings::kopuz::plugin::playback::control(command);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = command;
+            Err("there is no host outside wasm".into())
+        }
+    }
+
+    /// Queue library track keys, as playback events name them.
+    pub fn queue(keys: &[String], mode: QueueMode) -> Result<(), String> {
+        #[cfg(target_arch = "wasm32")]
+        return super::bindings::kopuz::plugin::playback::queue(keys, mode);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = (keys, mode);
+            Err("there is no host outside wasm".into())
+        }
+    }
 }
 
 #[macro_export]
@@ -107,6 +138,9 @@ macro_rules! export_integration {
             }
             fn on_audio(&self, frames: ::std::vec::Vec<$crate::integration::AudioFrame>) {
                 $crate::integration::Integration::on_audio(&self.0, frames)
+            }
+            fn on_tick(&self) {
+                $crate::integration::Integration::on_tick(&self.0)
             }
         }
 
