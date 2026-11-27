@@ -484,6 +484,14 @@ impl SubsonicClient {
         ))
     }
 
+    pub fn delete_playlist(&self, playlist_id: &str) -> Result<(), SourceError> {
+        self.call::<EmptyData>(
+            "deletePlaylist.view",
+            vec![("id".to_string(), playlist_id.to_string())],
+        )
+        .map(|_| ())
+    }
+
     pub fn add_to_playlist(&self, playlist_id: &str, item_id: &str) -> Result<(), SourceError> {
         self.call::<EmptyData>(
             "updatePlaylist.view",

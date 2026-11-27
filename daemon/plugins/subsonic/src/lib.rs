@@ -299,6 +299,11 @@ impl Source for Subsonic {
         self.client.reorder_playlist(playlist_id, &ids, ids.len())
     }
 
+    /// Without it the SDK default reports success, and the next sync brings the playlist back.
+    fn delete_remote_playlist(&self, playlist_id: &str) -> Result<()> {
+        self.client.delete_playlist(playlist_id)
+    }
+
     fn fetch_favorites(&self) -> Result<Vec<String>> {
         self.client.get_starred_song_ids()
     }
