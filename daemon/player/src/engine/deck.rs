@@ -58,6 +58,9 @@ pub(crate) struct Deck {
     /// Interleaved input not yet consumed; `pos` is the read position into it, in frames.
     carry: Vec<f32>,
     pos: f64,
+    /// Input frames read beyond the output frames produced; the speed curve
+    /// moves the track's timeline this far from what the ring counts.
+    drift: f64,
     strips: Vec<Strip>,
     /// The fractional read position was dropped once the held speed is 1, so
     /// the rest of the track copies samples instead of interpolating them.
@@ -78,6 +81,7 @@ impl Deck {
             end,
             carry: Vec::with_capacity(CARRY_FRAMES * channels),
             pos: 0.0,
+            drift: 0.0,
             strips: vec![Strip::default(); channels],
             settled: false,
         }
@@ -91,6 +95,11 @@ impl Deck {
     /// The incoming deck is past its mix and holds the last point.
     pub(crate) fn holding(&self) -> bool {
         self.side == Side::Incoming && self.elapsed >= self.end
+    }
+
+    /// Input frames read beyond the output frames produced so far.
+    pub(crate) fn drift(&self) -> f64 {
+        self.drift
     }
 
     /// Mixes `input` (interleaved, output rate) into `out`, which is cleared
@@ -119,7 +128,9 @@ impl Deck {
         if self.settled || self.elapsed < self.end || self.mix.speed(self.seconds()) != 1.0 {
             return;
         }
-        self.pos = self.pos.round();
+        let snapped = self.pos.round();
+        self.drift += snapped - self.pos;
+        self.pos = snapped;
         self.settled = true;
     }
 
@@ -173,7 +184,9 @@ impl Deck {
                 out.push(strip.process(sample) * volume);
             }
 
-            self.pos += f64::from(self.mix.speed(t));
+            let speed = f64::from(self.mix.speed(t));
+            self.pos += speed;
+            self.drift += speed - 1.0;
             self.elapsed += 1;
         }
         true

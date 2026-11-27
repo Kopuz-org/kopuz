@@ -2417,6 +2417,19 @@ fn load_mixed(
     duration: Duration,
     from_token: u64,
 ) -> Result<LoadOutcome, Failure> {
+    let mix = flat_mix(Duration::from_millis(500));
+    load_mixed_with(engine, token, factory, duration, from_token, mix)
+}
+
+/// `load_mixed` with the incoming deck's own `mix`.
+fn load_mixed_with(
+    engine: &EngineHandle,
+    token: u64,
+    factory: SourceFactory,
+    duration: Duration,
+    from_token: u64,
+    mix: DeckMix,
+) -> Result<LoadOutcome, Failure> {
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
     engine.send(Command::Load(LoadRequest {
         token,
@@ -2427,10 +2440,7 @@ fn load_mixed(
         leading_silence: LeadingSilence::Trim,
         album_context: false,
         service_replay_gain: config::ReplayGainInfo::default(),
-        mix: Some(IncomingMix {
-            mix: flat_mix(Duration::from_millis(500)),
-            from_token,
-        }),
+        mix: Some(IncomingMix { mix, from_token }),
         reply: Some(reply_tx),
     }));
     reply_rx.blocking_recv().expect("load reply")
@@ -2758,5 +2768,48 @@ fn a_planned_mix_can_follow_a_planned_mix() {
     drain_events(&mut events, &mut seen);
     assert!(!seen.contains(&Event::MixMissed { token: 2 }), "{seen:?}");
     assert!(outcome.mixed, "{outcome:?}");
+    engine.shutdown();
+}
+
+#[test]
+fn position_follows_the_source_an_incoming_deck_read_faster() {
+    let (sink, engine) = spawn_engine();
+    let mut events = engine_subscribe(&engine);
+    let mut seen = Vec::new();
+
+    let (factory_a, duration_a) = wav_factory(10.0);
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    engine.send(Command::PlanOutgoing {
+        token: 1,
+        at: PAST_THE_RING,
+        mix: flat_mix(Duration::from_secs(1)),
+    });
+
+    // B ramps from double speed to normal over the 1 s mix: it reads 1.5 s.
+    let mut curves = mix::flat_curves(2);
+    curves.speed = vec![2.0, 1.0];
+    let step = Duration::from_secs(1);
+    let ramp = DeckMix::new(curves, mix::TEST_FILTERS, step, step).expect("valid mix");
+    let (factory_b, duration_b) = wav_factory(30.0);
+    let outcome = load_mixed_with(&engine, 2, factory_b, duration_b, 1, ramp);
+    assert!(outcome.is_ok_and(|outcome| outcome.mixed));
+
+    // 2 s past the mix end, B's source is at 3.5 s, not 3 s.
+    let mut pulled = 0;
+    while pulled < samples_at(PAST_THE_RING.as_secs_f64() + 3.0) {
+        pulled += sink.pull(4096).len();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    drain_events(&mut events, &mut seen);
+    assert!(
+        seen.iter()
+            .any(|e| matches!(e, Event::TrackSwitched { token: 2, .. })),
+        "{seen:?}"
+    );
+    let played = pulled as f64 / samples_at(1.0) as f64;
+    let source = played - PAST_THE_RING.as_secs_f64() + 0.5;
+    let position = engine.status().position().as_secs_f64();
+    assert!((position - source).abs() < 0.01, "{position} vs {source}");
     engine.shutdown();
 }

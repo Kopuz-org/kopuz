@@ -9,7 +9,7 @@
 
 use std::io::{Seek as _, SeekFrom};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::time::Duration;
 
@@ -33,6 +33,8 @@ pub(crate) enum WorkerCmd {
     Start {
         producer: rtrb::Producer<f32>,
         written: Arc<AtomicU64>,
+        /// Source time the mix decks read beyond the ring, in microseconds.
+        drift: Arc<AtomicI64>,
         channels: usize,
         sample_rate: u32,
         start_at: Option<Duration>,
@@ -62,6 +64,7 @@ pub(crate) enum WorkerCmd {
         target: Duration,
         producer: rtrb::Producer<f32>,
         written: Arc<AtomicU64>,
+        drift: Arc<AtomicI64>,
         channels: usize,
         sample_rate: u32,
         /// New ring generation; a stale `Eof` tagged with the old epoch is
@@ -134,6 +137,10 @@ struct Output {
     clock: f64,
     /// A planned mix this ring plays; a seek drops it with the ring.
     mix: Option<MixPhase>,
+    /// Input frames the mix decks read beyond what they wrote, published to
+    /// `drift` so position follows the track, not the ring.
+    drift_frames: f64,
+    drift: Arc<AtomicI64>,
 }
 
 enum MixPhase {
@@ -253,6 +260,7 @@ fn run(
         Ok(WorkerCmd::Start {
             producer,
             written,
+            drift,
             channels,
             sample_rate,
             start_at,
@@ -287,6 +295,8 @@ fn run(
                 mix: mix.map(|mix| {
                     MixPhase::Live(Deck::new(mix, Side::Incoming, sample_rate, channels))
                 }),
+                drift_frames: 0.0,
+                drift,
             }
         }
         _ => return,
@@ -485,7 +495,8 @@ fn mix_packet<'a>(
     let mix_at = match output.mix.as_mut() {
         None => return (samples, &[]),
         Some(MixPhase::Live(deck)) => {
-            deck.process(samples, mixed);
+            output.drift_frames += play_deck(deck, samples, mixed);
+            publish_drift(output, at.speed_permille);
             return (&[], mixed);
         }
         Some(MixPhase::Armed { at, .. }) => *at,
@@ -505,12 +516,13 @@ fn mix_packet<'a>(
             lead_in: Some(deck),
             ..
         }) => {
-            deck.process(head, lead);
+            output.drift_frames += play_deck(deck, head, lead);
             lead
         }
         _ => head,
     };
     if rest.is_empty() {
+        publish_drift(output, at.speed_permille);
         return (head, &[]);
     }
 
@@ -522,9 +534,27 @@ fn mix_packet<'a>(
         return (head, &[]);
     };
     start.set(output.written.load(Ordering::Relaxed) + head.len() as u64);
-    deck.process(rest, mixed);
+    output.drift_frames += play_deck(&mut deck, rest, mixed);
     output.mix = Some(MixPhase::Live(deck));
+    publish_drift(output, at.speed_permille);
     (head, mixed)
+}
+
+/// Plays `input` through `deck`; returns the input frames it read beyond
+/// the frames it wrote.
+fn play_deck(deck: &mut Deck, input: &[f32], out: &mut Vec<f32>) -> f64 {
+    let before = deck.drift();
+    deck.process(input, out);
+    deck.drift() - before
+}
+
+/// Publishes the decks' drift as source time. A ring frame holds
+/// `speed_permille / SPEED_NORMAL` frames of the track.
+fn publish_drift(output: &Output, speed_permille: u32) {
+    let rate = f64::from(output.sample_rate.max(1));
+    let speed = f64::from(speed_permille) / f64::from(super::SPEED_NORMAL);
+    let micros = output.drift_frames * speed / rate * 1e6;
+    output.drift.store(micros.round() as i64, Ordering::Relaxed);
 }
 
 /// Float error in a frame offset; a split this close past a whole frame
@@ -600,6 +630,7 @@ fn park_at_eof(
                 target,
                 producer,
                 written,
+                drift,
                 channels,
                 sample_rate,
                 epoch,
@@ -613,6 +644,8 @@ fn park_at_eof(
                     lead: None,
                     clock: target.as_secs_f64(),
                     mix: None,
+                    drift_frames: 0.0,
+                    drift,
                 };
                 return match seek_reader(format, decoder, track_id, target) {
                     SeekOutcome::Done => ParkOutcome::Resume,
@@ -645,6 +678,7 @@ fn apply_command(
             target,
             producer,
             written,
+            drift,
             channels,
             sample_rate,
             epoch,
@@ -658,6 +692,8 @@ fn apply_command(
                 lead: None,
                 clock: target.as_secs_f64(),
                 mix: None,
+                drift_frames: 0.0,
+                drift,
             };
             match seek_reader(format, decoder, track_id, target) {
                 SeekOutcome::Done => {

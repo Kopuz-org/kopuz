@@ -4,7 +4,7 @@
 //! token-tagged events.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
@@ -145,6 +145,8 @@ struct Session {
     token: u64,
     worker: WorkerHandle,
     written: Arc<AtomicU64>,
+    /// Source time the mix decks read beyond the ring; see `WorkerCmd::Start`.
+    drift: Arc<AtomicI64>,
     played: Arc<AtomicU64>,
     eof_flag: Arc<AtomicBool>,
     starved: Arc<AtomicBool>,
@@ -208,6 +210,7 @@ struct Probed {
 struct RingParts {
     producer: rtrb::Producer<f32>,
     written: Arc<AtomicU64>,
+    drift: Arc<AtomicI64>,
     played: Arc<AtomicU64>,
     eof: Arc<AtomicBool>,
     starved: Arc<AtomicBool>,
@@ -228,6 +231,7 @@ fn make_ring(config: SinkConfig, gain: Arc<AtomicU32>) -> RingParts {
     RingParts {
         producer,
         written,
+        drift: Arc::new(AtomicI64::new(0)),
         played: played.clone(),
         eof: eof.clone(),
         starved: starved.clone(),
@@ -872,6 +876,7 @@ impl Actor {
         let RingParts {
             producer,
             written,
+            drift,
             played,
             eof,
             starved,
@@ -885,6 +890,7 @@ impl Actor {
         let _ = worker.cmd_tx.send(WorkerCmd::Start {
             producer,
             written: written.clone(),
+            drift: drift.clone(),
             lead_trim,
             channels: config.channels,
             sample_rate: config.sample_rate,
@@ -897,6 +903,7 @@ impl Actor {
             token,
             worker,
             written,
+            drift,
             played,
             eof_flag: eof,
             starved,
@@ -1127,6 +1134,7 @@ impl Actor {
             target,
             producer: ring.producer,
             written: ring.written.clone(),
+            drift: ring.drift.clone(),
             // The live config rides along: a device rebuild may have changed
             // the rate/channels since this session's Start, and the decode
             // must retarget with the ring or play at the wrong pitch.
@@ -1135,6 +1143,7 @@ impl Actor {
             epoch: current.ring_epoch,
         });
         current.written = ring.written;
+        current.drift = ring.drift;
         current.played = ring.played;
         current.eof_flag = ring.eof;
         current.starved = ring.starved;
@@ -1480,6 +1489,7 @@ impl Actor {
             duration: f.duration,
             base_micros: f.base_micros,
             played_samples: f.played.clone(),
+            drift_micros: f.drift.clone(),
         });
         let output_latency_micros = self.sink.output_latency_micros();
         let status = match &self.current {
@@ -1492,6 +1502,7 @@ impl Actor {
                 fading,
                 base_micros: current.base_micros,
                 played_samples: current.played.clone(),
+                drift_micros: current.drift.clone(),
                 channels,
                 sample_rate,
                 speed_permille: self.speed.load(Ordering::Relaxed),
@@ -1506,6 +1517,7 @@ impl Actor {
                 fading,
                 base_micros: 0,
                 played_samples: Arc::new(AtomicU64::new(0)),
+                drift_micros: Arc::new(AtomicI64::new(0)),
                 channels: 0,
                 sample_rate: 0,
                 speed_permille: self.speed.load(Ordering::Relaxed),

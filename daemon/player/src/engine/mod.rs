@@ -24,7 +24,7 @@ pub use sink::{
 };
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
 
 use config::{ChannelMode, EqualizerSettings, ReplayGainInfo, ReplayGainSettings};
@@ -275,6 +275,7 @@ pub struct FadingStatus {
     pub duration: Duration,
     pub(crate) base_micros: u64,
     pub(crate) played_samples: Arc<AtomicU64>,
+    pub(crate) drift_micros: Arc<AtomicI64>,
 }
 
 /// Lock-free snapshot published by the actor. Position is exact on demand:
@@ -293,6 +294,8 @@ pub struct EngineStatus {
     pub fading: Option<FadingStatus>,
     pub(crate) base_micros: u64,
     pub(crate) played_samples: Arc<AtomicU64>,
+    /// Source time a planned mix's speed curve moved the track past `played`.
+    pub(crate) drift_micros: Arc<AtomicI64>,
     pub(crate) channels: u32,
     pub(crate) sample_rate: u32,
     pub(crate) speed_permille: u32,
@@ -301,11 +304,13 @@ pub struct EngineStatus {
 
 pub(crate) const SPEED_NORMAL: u32 = 1_000;
 
-/// Position from a base offset plus the samples the RT callback has played,
-/// clamped to the track duration. Shared by the current and fading sessions.
+/// Position from a base offset plus the samples the RT callback has played
+/// and the mix decks' drift, clamped to the track duration. Shared by the
+/// current and fading sessions.
 fn position_from(
     base_micros: u64,
     played_samples: &AtomicU64,
+    drift_micros: &AtomicI64,
     channels: u32,
     sample_rate: u32,
     speed_permille: u32,
@@ -319,6 +324,7 @@ fn position_from(
     } else {
         base_micros
     };
+    let micros = micros.saturating_add_signed(drift_micros.load(Ordering::Relaxed));
     let raw = Duration::from_micros(micros);
     if duration > Duration::ZERO && raw > duration {
         duration
@@ -338,6 +344,7 @@ impl EngineStatus {
             fading: None,
             base_micros: 0,
             played_samples: Arc::new(AtomicU64::new(0)),
+            drift_micros: Arc::new(AtomicI64::new(0)),
             channels: 0,
             sample_rate: 0,
             speed_permille: SPEED_NORMAL,
@@ -363,6 +370,7 @@ impl EngineStatus {
         position_from(
             self.base_micros,
             &self.played_samples,
+            &self.drift_micros,
             self.channels,
             self.sample_rate,
             self.speed_permille,
@@ -378,6 +386,7 @@ impl EngineStatus {
         Some(position_from(
             fading.base_micros,
             &fading.played_samples,
+            &fading.drift_micros,
             self.channels,
             self.sample_rate,
             self.speed_permille,
