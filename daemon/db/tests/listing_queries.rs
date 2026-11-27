@@ -365,6 +365,11 @@ async fn albums_sort_by_their_latest_play_here_or_on_the_server() {
         ["Alpha", "Delta", "beta", "100% Pure", "Epsilon"],
         "never-played albums last, in the default order"
     );
+    assert_eq!(
+        titles(&database, &ordered(false)).await,
+        ["beta", "Delta", "Alpha", "100% Pure", "Epsilon"],
+        "never-played albums last in either direction"
+    );
 }
 
 #[tokio::test]

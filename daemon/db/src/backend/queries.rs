@@ -973,7 +973,10 @@ pub async fn albums_page(
                 order.push(format!("COALESCE(tc.last_pk, 0) {dir}"));
             }
             config::AlbumSortField::TrackCount => order.push(format!("COALESCE(tc.n, 0) {dir}")),
-            config::AlbumSortField::LastPlayed => order.push(format!("COALESCE(lp.at, 0) {dir}")),
+            // Never-played albums last, whichever the direction.
+            config::AlbumSortField::LastPlayed => {
+                order.push(format!("lp.at IS NULL, lp.at {dir}"));
+            }
         }
     }
     order.push("al.artist COLLATE LOCALE ASC".into());
