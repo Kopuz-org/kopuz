@@ -453,6 +453,7 @@ impl PluginIntegrations {
                             .map(|place| match place {
                                 manifest::PanelPlace::Album => api::PanelPlace::Album,
                                 manifest::PanelPlace::Artist => api::PanelPlace::Artist,
+                                manifest::PanelPlace::NowPlaying => api::PanelPlace::NowPlaying,
                             })
                             .collect(),
                     })
@@ -487,6 +488,10 @@ impl PluginIntegrations {
             api::PanelTarget::Artist(artist) => (
                 manifest::PanelPlace::Artist,
                 wit::PanelTarget::Artist(artist),
+            ),
+            api::PanelTarget::Track(track) => (
+                manifest::PanelPlace::NowPlaying,
+                wit::PanelTarget::Track(track),
             ),
         };
         if !panel.places.contains(&wanted) {

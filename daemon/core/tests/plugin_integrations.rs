@@ -108,7 +108,10 @@ async fn an_integration_plugin_is_set_up_from_its_own_fields() {
     install_webhook(&plugins);
     // Its panel narrowed to albums, so a page it does not name can be refused.
     install_example_as(&plugins, "remote", |manifest| {
-        manifest.replace("places = [\"album\", \"artist\"]", "places = [\"album\"]")
+        manifest.replace(
+            "places = [\"album\", \"artist\", \"now-playing\"]",
+            "places = [\"album\"]",
+        )
     });
     server::plugins::init(Some(plugins), Vec::new()).await;
 

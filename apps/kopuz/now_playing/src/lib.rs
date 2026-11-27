@@ -101,6 +101,8 @@ pub struct NowPlaying {
     video: Option<(Entity<video::MusicVideo>, Subscription)>,
     queue: Option<Entity<QueueView>>,
     lyrics: Option<Entity<LyricsView>>,
+    /// The plugin tab last picked, kept while another tab shows.
+    plugin_tab: Option<Entity<components::plugin_ui::PluginTab>>,
     sheet_bar: Option<Entity<NowPlaying>>,
     // Around the mini restore button, so keyboard focus shows it as hover does.
     restore_focus: FocusHandle,
@@ -183,6 +185,11 @@ impl NowPlaying {
                 cx.notify();
             }),
             cx.observe(&QueueModel::global(cx), |_, _, cx| cx.notify()),
+            // Plugin tabs come and go as their plugins are turned on and off.
+            cx.observe(
+                &store::plugin_actions::PluginActions::global(cx),
+                |_, _, cx| cx.notify(),
+            ),
             cx.observe(&FavoritesModel::global(cx), |_, _, cx| cx.notify()),
             cx.observe(&ConfigModel::global(cx), |_, _, cx| cx.notify()),
             cx.observe(&store::LayoutModel::global(cx), |this, _, cx| {
@@ -212,6 +219,7 @@ impl NowPlaying {
             hero: None,
             sheet_fade: components::motion::Fade::hidden(),
             detached: false,
+            plugin_tab: None,
             tab_drawn: None,
             tab_leaving: None,
             tab_fade: components::motion::Fade::shown(),

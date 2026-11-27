@@ -67,26 +67,45 @@ fn action_target(target: &PanelTarget) -> ActionTarget {
     match target {
         PanelTarget::Album(album) => ActionTarget::Album(album.clone()),
         PanelTarget::Artist(artist) => ActionTarget::Artist(artist.clone()),
+        PanelTarget::Track(track) => ActionTarget::Tracks(vec![track.clone()]),
     }
 }
 
 impl PluginPanels {
     pub fn new(target: PanelTarget, cx: &mut Context<Self>) -> Self {
+        Self::build(target, None, cx)
+    }
+
+    /// The panels for `target`, or only the one `only` names, each fetched once.
+    fn build(target: PanelTarget, only: Option<(String, String)>, cx: &mut Context<Self>) -> Self {
         let place = match target {
             PanelTarget::Album(_) => PanelPlace::Album,
             PanelTarget::Artist(_) => PanelPlace::Artist,
+            PanelTarget::Track(_) => PanelPlace::NowPlaying,
         };
         let model = PluginActions::global(cx);
         let subscriptions = vec![cx.observe(&model, |this, _, cx| this.sync(cx))];
         let mut this = Self {
             place,
             target,
-            only: None,
+            only,
             shown: Vec::new(),
             _subscriptions: subscriptions,
         };
         this.sync(cx);
         this
+    }
+
+    /// Only `panel`, under the title something around it already shows.
+    fn only(target: PanelTarget, panel: (String, String), cx: &mut Context<Self>) -> Self {
+        Self::build(target, Some(panel), cx)
+    }
+
+    /// Whether every panel has answered at least once.
+    fn settled(&self, cx: &App) -> bool {
+        self.shown
+            .iter()
+            .all(|shown| shown.blocks.read(cx).value().is_some())
     }
 
     /// The panels that have something to show, for a row that opens each in a sheet: one
@@ -107,13 +126,7 @@ impl PluginPanels {
 
     /// Open `panel` in a sheet of its own, for a page with no room below its list.
     pub fn open_sheet(target: PanelTarget, panel: PluginPanel, window: &mut Window, cx: &mut App) {
-        let view = cx.new(|cx| {
-            let mut view = Self::new(target, cx);
-            view.only = Some((panel.plugin.clone(), panel.id.clone()));
-            view.shown.clear();
-            view.sync(cx);
-            view
-        });
+        let view = cx.new(|cx| Self::only(target, (panel.plugin.clone(), panel.id.clone()), cx));
         crate::dialogs::FormDialog::new(SharedString::from(panel.title))
             .size(crate::dialogs::DialogSize::Sheet)
             .footer(crate::dialogs::FormFooter::Cancel)
@@ -306,5 +319,86 @@ impl Render for PluginPanels {
             }
         }
         column
+    }
+}
+
+/// The panels plugins draw beside the queue and the lyrics, as tabs.
+pub fn now_playing_tabs(cx: &App) -> Vec<PluginPanel> {
+    PluginActions::global(cx)
+        .read(cx)
+        .panels_at(PanelPlace::NowPlaying, cx)
+}
+
+/// One plugin's tab beside the queue and the lyrics, drawn again for each
+/// track that starts.
+pub struct PluginTab {
+    panel: (String, String),
+    track: Option<String>,
+    panels: Option<Entity<PluginPanels>>,
+    _subscription: Subscription,
+}
+
+impl PluginTab {
+    pub fn new(panel: &PluginPanel, cx: &mut Context<Self>) -> Self {
+        let player = store::PlayerModel::global(cx);
+        // The player notifies on every playhead tick; only a new track matters here.
+        let subscription = cx.observe(&player, |this, _, cx| this.follow(cx));
+        let mut this = Self {
+            panel: (panel.plugin.clone(), panel.id.clone()),
+            track: None,
+            panels: None,
+            _subscription: subscription,
+        };
+        this.follow(cx);
+        this
+    }
+
+    /// Whether this is the tab for `panel`.
+    pub fn is(&self, panel: &PluginPanel) -> bool {
+        self.panel.0 == panel.plugin && self.panel.1 == panel.id
+    }
+
+    fn follow(&mut self, cx: &mut Context<Self>) {
+        let track = store::PlayerModel::global(cx)
+            .read(cx)
+            .track()
+            .map(|track| track.key.clone())
+            .filter(|key| !key.is_empty());
+        if track == self.track {
+            return;
+        }
+        self.track = track.clone();
+        self.panels = track.map(|track| {
+            let panel = self.panel.clone();
+            let panels = cx.new(|cx| PluginPanels::only(PanelTarget::Track(track), panel, cx));
+            cx.observe(&panels, |_, _, cx| cx.notify()).detach();
+            panels
+        });
+        cx.notify();
+    }
+}
+
+impl Render for PluginTab {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Still asking: nothing yet, rather than "nothing here" for a moment.
+        if let Some(panels) = &self.panels
+            && !panels.read(cx).settled(cx)
+        {
+            return div().into_any_element();
+        }
+        let drawn = self
+            .panels
+            .as_ref()
+            .filter(|panels| !panels.read(cx).is_empty(cx));
+        match drawn {
+            Some(panels) => div()
+                .id("plugin-tab")
+                .size_full()
+                .overflow_y_scroll()
+                .p_4()
+                .child(panels.clone())
+                .into_any_element(),
+            None => crate::EmptyState::new(i18n::t("plugin_tab_empty")).into_any_element(),
+        }
     }
 }

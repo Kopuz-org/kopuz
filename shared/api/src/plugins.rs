@@ -116,11 +116,13 @@ pub enum ActionTarget {
     Artist(String),
 }
 
-/// Where a plugin's panel is drawn: at the bottom of these pages.
+/// Where a plugin's panel is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PanelPlace {
     Album,
     Artist,
+    /// A tab beside the queue and the lyrics.
+    NowPlaying,
 }
 
 /// A section an integration plugin that is turned on fills.
@@ -139,6 +141,8 @@ pub enum PanelTarget {
     Album(String),
     /// An artist's library key.
     Artist(String),
+    /// The library key of the track playing.
+    Track(String),
 }
 
 /// One piece of a panel, drawn by the app in its own style.

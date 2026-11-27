@@ -192,6 +192,7 @@ impl NowPlaying {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
+        let showing = self.resolve_tab(showing, cx);
         let body = self.tab_body(showing, window, cx);
         let strip = h_flex()
             .flex_1()

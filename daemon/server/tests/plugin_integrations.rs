@@ -494,7 +494,7 @@ async fn an_action_runs_with_what_the_person_typed_or_picked() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_panel_draws_blocks_for_an_album_or_an_artist() {
+async fn a_panel_draws_blocks_for_an_album_an_artist_or_the_track_playing() {
     let orders = Hook::answering(200, "").await;
     let kopuz = Arc::new(FakeKopuz::default());
     let integration = Integration::new(remote(&[]), vec![("url".into(), orders.url.clone())])
@@ -526,6 +526,22 @@ async fn a_panel_draws_blocks_for_an_album_or_an_artist() {
         artist,
         Ok(expected),
         "an artist key is read through the library"
+    );
+    let playing = integration
+        .render_panel("more-by-artist", &wit::PanelTarget::Track("blue-1".into()))
+        .await
+        .expect("ran");
+    assert_eq!(
+        playing,
+        Ok(vec![
+            wit::Block::Text("What else the library has by Miles Davis".into()),
+            wit::Block::Tracks(vec!["blue-2".into()]),
+            wit::Block::Action(wit::PanelAction {
+                label: "Play everything by them".into(),
+                action: "more-by-artist".into(),
+            }),
+        ]),
+        "the track playing is left out of its own tab"
     );
     let missing = integration
         .render_panel("lyrics", &wit::PanelTarget::Artist("Miles Davis".into()))

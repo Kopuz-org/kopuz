@@ -2270,6 +2270,7 @@ enum PanelPlace {
   PANEL_PLACE_UNSPECIFIED = 0;
   PANEL_PLACE_ALBUM = 1;
   PANEL_PLACE_ARTIST = 2;
+  PANEL_PLACE_NOW_PLAYING = 3;
 }
 
 message GetPluginPanelsRequest {}
@@ -2291,6 +2292,7 @@ message RenderPluginPanelRequest {
   oneof target {
     string album_id = 3;
     string artist_key = 4;
+    string track_key = 5;
   }
 }
 

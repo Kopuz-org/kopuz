@@ -67,6 +67,8 @@ pub struct Panel {
 pub enum PanelPlace {
     Album,
     Artist,
+    /// A tab beside the queue and the lyrics, following what plays.
+    NowPlaying,
 }
 
 /// Something the person can choose to run, where the app offers it.
@@ -829,6 +831,15 @@ mod tests {
         let parsed = Manifest::parse(&panel).expect("a panel");
         let near = &parsed.integration.expect("integration").panels[0];
         assert_eq!(near.places, [PanelPlace::Album, PanelPlace::Artist]);
+        let tab = Manifest::parse(&panel.replace(
+            "places = [\"album\", \"artist\"]",
+            "places = [\"now-playing\"]",
+        ))
+        .expect("a tab");
+        assert_eq!(
+            tab.integration.expect("integration").panels[0].places,
+            [PanelPlace::NowPlaying]
+        );
         assert!(matches!(
             Manifest::parse(&format!("{panel}\n[[integration.panel]]\nid = \"near\"\ntitle = \"x\"\nplaces = [\"album\"]\n")),
             Err(ManifestError::DuplicatePanel(id)) if id == "near"

@@ -1240,6 +1240,7 @@ plugin_integration_hint = Adds an integration rather than a source. Turn it on u
 plugin_set_up = Set up
 plugin_controls_playback = Can play, pause, skip and change what is queued. Only install it if you trust it.
 plugin_reads_library = Can see your library, playlists and favorites. Only install it if you trust it.
+plugin_tab_empty = Nothing here for this track
 library_empty_offline = Nothing is available offline yet
 library_empty_offline_detail = Download songs, or play them while online, to keep them for offline listening.
 

@@ -36,4 +36,4 @@ places = ["track", "album", "artist"]
 [[integration.panel]]
 id = "more-by-artist"
 title = "More by this artist"
-places = ["album", "artist"]
+places = ["album", "artist", "now-playing"]

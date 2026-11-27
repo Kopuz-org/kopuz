@@ -79,6 +79,8 @@ interface integration {
         album(string),
         /// An artist's library key.
         artist(string),
+        /// The library key of the track playing, for a tab beside the queue.
+        track(string),
     }
 
     /// One piece of a panel, drawn by the app in its own style.

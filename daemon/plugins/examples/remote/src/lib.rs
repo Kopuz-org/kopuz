@@ -120,6 +120,7 @@ impl Integration for Remote {
                 (ActionTarget::Album(album), own)
             }
             PanelTarget::Artist(artist) => (ActionTarget::Artist(artist), Vec::new()),
+            PanelTarget::Track(track) => (ActionTarget::Tracks(vec![track.clone()]), vec![track]),
         };
         let artist = artist_of(&target)?;
         let keys: Vec<String> = library::search(&artist, FOUND)?
