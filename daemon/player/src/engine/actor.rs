@@ -996,7 +996,9 @@ impl Actor {
         self.publish();
     }
 
-    /// Drops the live session's plan; its worker disarms it unless the mix began.
+    /// Drops the live session's plan. Its worker disarms an armed one; once
+    /// the decode has passed the start, the ring already holds the outgoing
+    /// deck up to the mix end, so a seek to where playback is replaces it.
     fn cancel_plan(&mut self, token: u64) {
         let Some(current) = self
             .current
@@ -1005,9 +1007,28 @@ impl Actor {
         else {
             return;
         };
-        if current.mix_start.take().is_some() {
+        let Some(start) = current.mix_start.take() else {
+            return;
+        };
+        let live = matches!(start.mark(), MixMark::At(_));
+        if !live || !current.seekable || self.fading.is_some() {
             let _ = current.worker.cmd_tx.send(WorkerCmd::CancelMix);
+            return;
         }
+
+        let Some(config) = self.sink.config() else {
+            return;
+        };
+        let position = super::position_from(
+            current.base_micros,
+            &current.played,
+            &current.drift,
+            config.channels as u32,
+            config.sample_rate,
+            self.speed.load(Ordering::Relaxed),
+            current.duration,
+        );
+        self.handle_seek(position, Some(token));
     }
 
     /// Hands the plan to the live session's worker, which arms or refuses it.

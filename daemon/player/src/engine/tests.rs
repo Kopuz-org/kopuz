@@ -2704,6 +2704,41 @@ fn a_mix_start_playback_has_passed_refuses_the_load() {
 }
 
 #[test]
+fn a_refused_mix_does_not_end_the_track_at_the_mix_end() {
+    let (sink, engine) = spawn_engine();
+
+    let (factory_a, duration_a) = wav_factory(30.0);
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    engine.send(Command::PlanOutgoing {
+        token: 1,
+        at: Duration::from_secs(3),
+        mix: flat_mix(Duration::from_millis(500)),
+    });
+
+    // The decoder runs a ring ahead, so A's deck is live when B is refused.
+    let mut pulled = 0;
+    while pulled < samples_at(3.2) {
+        pulled += sink.pull(4096).len();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let (factory_b, duration_b) = wav_factory(10.0);
+    assert_mix_missed(&load_mixed(&engine, 2, factory_b, duration_b, 1));
+
+    // Without the plan, A plays on well past the mix end at 3.5 s.
+    let mut tail = Vec::new();
+    while tail.len() < samples_at(1.5) {
+        tail.extend(sink.pull(4096));
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let status = engine.status();
+    assert_eq!((status.token, status.phase), (1, Phase::Playing));
+    let late = &tail[samples_at(1.0)..];
+    assert!(late.iter().any(|s| *s != 0.0), "A is still audible");
+    engine.shutdown();
+}
+
+#[test]
 fn a_cancelled_plan_lets_the_track_play_past_its_mix() {
     let (sink, engine) = spawn_engine();
 
@@ -2741,6 +2776,7 @@ fn a_planned_mix_can_follow_a_planned_mix() {
     let (factory_a, duration_a) = wav_factory(10.0);
     load(&engine, 1, factory_a, duration_a);
     wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    // Past the ring the worker may fill before it reads the plan.
     engine.send(Command::PlanOutgoing {
         token: 1,
         at: PAST_THE_RING,
