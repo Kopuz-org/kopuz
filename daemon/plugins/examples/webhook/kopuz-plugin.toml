@@ -9,6 +9,7 @@ network = ["$server"]
 
 [integration]
 server = "url"
+listens = ["playback"]
 
 [[integration.field]]
 key = "url"

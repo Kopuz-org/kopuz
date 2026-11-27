@@ -22,7 +22,9 @@ pub mod bindings {
     });
 }
 
-pub use bindings::exports::kopuz::plugin::integration::Setting;
+pub use bindings::exports::kopuz::plugin::integration::{
+    NowPlaying, PlaybackEvent, Setting, Started,
+};
 
 use crate::Result;
 
@@ -59,6 +61,12 @@ pub trait Integration: Sized + 'static {
     fn validate(&self) -> Result<()> {
         Ok(())
     }
+
+    /// What playback just did, for a manifest that lists `"playback"` in
+    /// `listens`. Calls come one at a time, in order; a slow one holds up the next.
+    fn on_playback(&self, event: PlaybackEvent) {
+        let _ = event;
+    }
 }
 
 #[macro_export]
@@ -86,6 +94,9 @@ macro_rules! export_integration {
             }
             fn validate(&self) -> ::std::result::Result<(), $crate::SourceError> {
                 $crate::integration::Integration::validate(&self.0)
+            }
+            fn on_playback(&self, event: $crate::integration::PlaybackEvent) {
+                $crate::integration::Integration::on_playback(&self.0, event)
             }
         }
 

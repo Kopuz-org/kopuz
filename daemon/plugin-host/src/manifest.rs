@@ -37,8 +37,18 @@ pub struct Integration {
     /// An SVG path in a 24x24 box.
     #[serde(default)]
     pub icon: Option<String>,
+    /// What the host tells it as it happens; nothing it does not list.
+    #[serde(default)]
+    pub listens: Vec<Listen>,
     #[serde(default, rename = "field")]
     pub fields: Vec<Field>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Listen {
+    /// A track starting, pausing, resuming, seeking or stopping.
+    Playback,
 }
 
 /// One thing the person fills in, in the order the settings page shows it.
@@ -371,6 +381,10 @@ impl Integration {
         Ok(())
     }
 
+    pub fn listens_to(&self, what: Listen) -> bool {
+        self.listens.contains(&what)
+    }
+
     pub fn field(&self, key: &str) -> Option<&Field> {
         self.fields.iter().find(|field| field.key == key)
     }
@@ -565,6 +579,7 @@ mod tests {
 
         [integration]
         server = "url"
+        listens = ["playback"]
 
         [[integration.field]]
         key = "url"
@@ -586,6 +601,7 @@ mod tests {
         assert!(manifest.is_integration());
         let integration = manifest.integration.expect("integration");
         assert_eq!(integration.fields.len(), 2);
+        assert!(integration.listens_to(Listen::Playback));
         assert_eq!(integration.fields[0].kind, FieldKind::Url);
         assert_eq!(integration.fields[1].options[1].value, "level");
         let answers = vec![

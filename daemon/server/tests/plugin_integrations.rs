@@ -180,3 +180,48 @@ async fn a_call_dropped_midway_leaves_no_half_run_instance_behind() {
     let again = integration.validate().await.expect("the plugin ran");
     assert!(again.is_ok(), "a fresh instance answers: {again:?}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_listening_integration_is_told_what_plays() {
+    let hook = Hook::start(200).await;
+    let integration = Integration::new(webhook(), answers(&hook.url, ""));
+    let started = wit::PlaybackEvent::Started(wit::Started {
+        track: wit::NowPlaying {
+            key: "subsonic:tr-1".into(),
+            title: "Blue in Green".into(),
+            artist: "Miles Davis".into(),
+            album: "Kind of Blue".into(),
+            duration_ms: Some(337_000),
+            musicbrainz_recording_id: None,
+            musicbrainz_release_id: None,
+        },
+        position_ms: 0,
+    });
+    integration.on_playback(&started).await.expect("told");
+    integration
+        .on_playback(&wit::PlaybackEvent::Paused(12_000))
+        .await
+        .expect("told");
+    integration
+        .on_playback(&wit::PlaybackEvent::Stopped)
+        .await
+        .expect("told");
+
+    let bodies: Vec<serde_json::Value> = hook
+        .received()
+        .iter()
+        .map(|request| {
+            let body = request.split("\r\n\r\n").nth(1).unwrap_or_default();
+            serde_json::from_str(body).expect("a JSON body")
+        })
+        .collect();
+    assert_eq!(bodies.len(), 3, "{bodies:?}");
+    assert_eq!(bodies[0]["event"], "started");
+    assert_eq!(bodies[0]["track"]["key"], "subsonic:tr-1");
+    assert_eq!(bodies[0]["track"]["title"], "Blue in Green");
+    assert_eq!(
+        bodies[1],
+        serde_json::json!({ "event": "paused", "position_ms": 12000 })
+    );
+    assert_eq!(bodies[2], serde_json::json!({ "event": "stopped" }));
+}

@@ -179,4 +179,6 @@ type Fallible<T> = Result<T, wit::SourceError>;
 calls! {
     /// Whether the settings work.
     fn validate => call_validate() -> Fallible<()>;
+
+    fn on_playback => call_on_playback(event: &wit::PlaybackEvent => event) -> ();
 }

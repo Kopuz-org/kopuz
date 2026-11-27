@@ -205,6 +205,7 @@ network = ["$server"]
 
 [integration]
 server = "url"               # the url field whose host `$server` names
+listens = ["playback"]       # what the host tells it as it happens; see below
 # icon = "M12 2L2 7..."      # optional SVG path in a 24x24 box
 
 [[integration.field]]
@@ -262,8 +263,17 @@ impl Integration for Webhook {
 kopuz_plugin_sdk::export_integration!(Webhook);
 ```
 
+An integration hears only what its `listens` list names:
+
+- **`playback`** calls `on_playback` with a `PlaybackEvent`: `Started` with the
+  track (its library key, title, artist, album, length and MusicBrainz ids) and
+  where it began, then `Paused`, `Resumed` and `Seeked` with the position in
+  milliseconds, and `Stopped`. An integration turned on partway through a track
+  hears it start first. Events come one at a time, in order; one the plugin is
+  too far behind on is dropped rather than held for it.
+
 [`daemon/plugins/examples/webhook`](../daemon/plugins/examples/webhook) is a
-complete one. An integration plugin is listed in the marketplace like any
+complete one: it posts each playback event to an address as JSON. An integration plugin is listed in the marketplace like any
 other, with an empty `services` list.
 
 ## Installing by hand
