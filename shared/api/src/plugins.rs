@@ -35,6 +35,8 @@ pub struct PluginInfo {
     pub integration: bool,
     /// May play, pause, skip and change what is queued.
     pub controls_playback: bool,
+    /// May read the library: its tracks, playlists and favorites.
+    pub reads_library: bool,
 }
 
 /// A different build of an installed plugin: the marketplace lists another
@@ -45,12 +47,51 @@ pub struct PluginUpdate {
     pub version: String,
     /// Everything it reaches. Installing it agrees to these.
     pub network: Vec<String>,
-    /// What it reaches that the installed version does not.
+    /// What it reaches that the installed version does not, and as
+    /// [`PLAYBACK_GRANT`] or [`LIBRARY_GRANT`] what more it may do.
     pub added_hosts: Vec<String>,
+}
+
+/// In [`PluginUpdate::added_hosts`], no host (unlike `$server`, which is one): the update newly asks to play,
+/// pause, skip and queue.
+pub const PLAYBACK_GRANT: &str = "$playback:control";
+/// In [`PluginUpdate::added_hosts`], no host: the update newly asks to read the library.
+pub const LIBRARY_GRANT: &str = "$library:read";
+
+impl PluginUpdate {
+    /// The hosts it reaches that the installed version does not.
+    pub fn new_hosts(&self) -> Vec<String> {
+        self.added_hosts
+            .iter()
+            .filter(|host| *host != PLAYBACK_GRANT && *host != LIBRARY_GRANT)
+            .cloned()
+            .collect()
+    }
+
+    /// Whether it asks for `grant`, one of [`PLAYBACK_GRANT`] and [`LIBRARY_GRANT`], anew.
+    pub fn adds(&self, grant: &str) -> bool {
+        self.added_hosts.iter().any(|added| added == grant)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PluginCatalog {
     pub plugins: Vec<PluginInfo>,
     pub marketplace_error: Option<String>,
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+
+    #[test]
+    fn an_update_tells_its_new_hosts_from_its_new_grants() {
+        let update = PluginUpdate {
+            added_hosts: vec!["$server".into(), "b.test".into(), PLAYBACK_GRANT.into()],
+            ..PluginUpdate::default()
+        };
+        assert_eq!(update.new_hosts(), ["$server", "b.test"]);
+        assert!(update.adds(PLAYBACK_GRANT));
+        assert!(!update.adds(LIBRARY_GRANT));
+    }
 }

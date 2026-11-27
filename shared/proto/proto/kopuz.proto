@@ -2249,6 +2249,8 @@ message PluginInfo {
   bool integration = 15;
   // May play, pause, skip and change what is queued.
   bool controls_playback = 16;
+  // May read the library: its tracks, playlists and favorites.
+  bool reads_library = 17;
 }
 
 message PluginCatalog {

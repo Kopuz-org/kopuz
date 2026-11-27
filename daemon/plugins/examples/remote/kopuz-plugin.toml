@@ -7,6 +7,7 @@ description = "Plays, pauses and skips when an address of your choice says so, f
 [permissions]
 network = ["$server"]
 playback = "control"
+library = "read"
 
 [integration]
 server = "url"
@@ -18,5 +19,5 @@ key = "url"
 label = "Address"
 kind = "url"
 placeholder = "http://192.168.1.20:8000/kopuz"
-help = "Answers each request with commands, one a line: play, pause, toggle, next, previous, stop, seek 30, volume 50, play <track key> or queue <track key>. An empty answer does nothing."
+help = "Answers each request with commands, one a line: play, pause, toggle, next, previous, stop, seek 30, volume 50, play <track key>, queue <track key> or find <words>, which plays what a library search finds. An empty answer does nothing."
 required = true

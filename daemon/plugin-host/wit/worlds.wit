@@ -16,6 +16,7 @@ world integration-plugin {
     import log;
     import tcp;
     import playback;
+    import library;
 
     export integration;
 }

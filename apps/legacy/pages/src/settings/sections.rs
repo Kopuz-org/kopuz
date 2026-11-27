@@ -947,13 +947,18 @@ fn PluginRow(
     let update_reaches = plugin
         .update
         .as_ref()
-        .filter(|update| !update.added_hosts.is_empty())
-        .map(|update| {
-            i18n::t_with(
-                "plugin_update_reaches",
-                &[("hosts", shown(&update.added_hosts).into())],
-            )
-        });
+        .map(api::PluginUpdate::new_hosts)
+        .filter(|added| !added.is_empty())
+        .map(|added| i18n::t_with("plugin_update_reaches", &[("hosts", shown(&added).into())]));
+    // What an update newly asks for is warned of before it is installed, like a new host.
+    let adds = |grant| {
+        plugin
+            .update
+            .as_ref()
+            .is_some_and(|update| update.adds(grant))
+    };
+    let reads_library = plugin.reads_library || adds(api::LIBRARY_GRANT);
+    let controls_playback = plugin.controls_playback || adds(api::PLAYBACK_GRANT);
     let install_network = plugin.network.clone();
     let update = plugin.update.clone();
     // A package manager's plugin is its own to remove.
@@ -996,7 +1001,13 @@ fn PluginRow(
                 if plugin.integration {
                     p { class: "text-xs text-white/60", "{i18n::t(\"plugin_integration_hint\")}" }
                 }
-                if plugin.controls_playback {
+                if reads_library {
+                    p { class: "text-xs text-white/60",
+                        i { class: "fa-solid fa-triangle-exclamation mr-1" }
+                        "{i18n::t(\"plugin_reads_library\")}"
+                    }
+                }
+                if controls_playback {
                     p { class: "text-xs text-white/60",
                         i { class: "fa-solid fa-triangle-exclamation mr-1" }
                         "{i18n::t(\"plugin_controls_playback\")}"

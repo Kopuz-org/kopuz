@@ -137,13 +137,18 @@ impl Plugins {
         let update_reaches = plugin
             .update
             .as_ref()
-            .filter(|update| !update.added_hosts.is_empty())
-            .map(|update| {
-                t_with(
-                    "plugin_update_reaches",
-                    &[("hosts", hosts(&update.added_hosts).into())],
-                )
-            });
+            .map(api::PluginUpdate::new_hosts)
+            .filter(|added| !added.is_empty())
+            .map(|added| t_with("plugin_update_reaches", &[("hosts", hosts(&added).into())]));
+        // What an update newly asks for is warned of before it is installed, like a new host.
+        let adds = |grant| {
+            plugin
+                .update
+                .as_ref()
+                .is_some_and(|update| update.adds(grant))
+        };
+        let reads_library = plugin.reads_library || adds(api::LIBRARY_GRANT);
+        let controls_playback = plugin.controls_playback || adds(api::PLAYBACK_GRANT);
         let byline = (!plugin.author.is_empty())
             .then(|| t_with("plugin_by", &[("author", plugin.author.clone().into())]));
 
@@ -254,7 +259,17 @@ impl Plugins {
                     .when(plugin.integration, |text| {
                         text.child(ui::hint(t("plugin_integration_hint"), cx))
                     })
-                    .when(plugin.controls_playback, |text| {
+                    .when(reads_library, |text| {
+                        text.child(
+                            h_flex()
+                                .gap_1()
+                                .text_xs()
+                                .text_color(cx.theme().warning)
+                                .child(icons::icon(icons::WARNING).size_3())
+                                .child(t("plugin_reads_library")),
+                        )
+                    })
+                    .when(controls_playback, |text| {
                         text.child(
                             h_flex()
                                 .gap_1()

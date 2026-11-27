@@ -50,6 +50,9 @@ pub struct Listing {
     /// Shown before install: whether it may play, pause, skip and queue.
     #[serde(default)]
     pub playback: crate::manifest::PlaybackAccess,
+    /// Shown before install: whether it reads the library.
+    #[serde(default)]
+    pub library: crate::manifest::LibraryAccess,
     pub manifest: Download,
     pub component: Download,
 }
@@ -203,6 +206,7 @@ pub fn check_manifest(
         || manifest.permissions.folders != listing.folders
         || manifest.is_integration() != listing.integration
         || manifest.permissions.playback != listing.playback
+        || manifest.permissions.library != listing.library
     {
         return Err(MarketError::PermissionsDiffer);
     }
@@ -335,6 +339,7 @@ mod tests {
             folders: FolderAccess::None,
             integration: false,
             playback: crate::manifest::PlaybackAccess::None,
+            library: crate::manifest::LibraryAccess::None,
             manifest: Download {
                 url: "https://example.test/kopuz-plugin.toml".into(),
                 sha256: sha(MANIFEST.as_bytes()),

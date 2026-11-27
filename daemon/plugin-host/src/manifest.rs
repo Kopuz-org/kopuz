@@ -133,6 +133,18 @@ pub struct Permissions {
     /// page says so before it is installed.
     #[serde(default)]
     pub playback: PlaybackAccess,
+    /// Whether an integration may read the library: its tracks, playlists
+    /// and favorites. The Plugins page says so before it is installed.
+    #[serde(default)]
+    pub library: LibraryAccess,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum LibraryAccess {
+    #[default]
+    None,
+    Read,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -306,6 +318,8 @@ pub enum ManifestError {
     TickTooShort(u32),
     #[error("only an integration may control playback")]
     SourceControlsPlayback,
+    #[error("only an integration may read the library")]
+    SourceReadsLibrary,
 }
 
 impl Manifest {
@@ -356,6 +370,8 @@ impl Manifest {
             }
         } else if manifest.permissions.controls_playback() {
             return Err(ManifestError::SourceControlsPlayback);
+        } else if manifest.permissions.reads_library() {
+            return Err(ManifestError::SourceReadsLibrary);
         }
         Ok(manifest)
     }
@@ -471,6 +487,10 @@ impl Permissions {
 
     pub fn controls_playback(&self) -> bool {
         self.playback == PlaybackAccess::Control
+    }
+
+    pub fn reads_library(&self) -> bool {
+        self.library == LibraryAccess::Read
     }
 
     pub fn allows(&self, host: &str, server_host: Option<&str>) -> bool {
@@ -662,6 +682,13 @@ mod tests {
         ))
         .expect("an integration may ask to control playback");
         assert!(remote.permissions.controls_playback());
+        assert!(!remote.permissions.reads_library());
+        let stats = Manifest::parse(&LIGHTS.replace(
+            "network = [\"$server\"]",
+            "network = [\"$server\"]\nlibrary = \"read\"",
+        ))
+        .expect("an integration may ask to read the library");
+        assert!(stats.permissions.reads_library());
         assert_eq!(integration.fields[0].kind, FieldKind::Url);
         assert_eq!(integration.fields[1].options[1].value, "level");
         let answers = vec![
@@ -718,6 +745,14 @@ mod tests {
         assert!(matches!(
             Manifest::parse(&source_driving),
             Err(ManifestError::SourceControlsPlayback)
+        ));
+        let source_reading = SUBSONIC.replace(
+            "network = [\"$server\"]",
+            "network = [\"$server\"]\nlibrary = \"read\"",
+        );
+        assert!(matches!(
+            Manifest::parse(&source_reading),
+            Err(ManifestError::SourceReadsLibrary)
         ));
         let reserved = LIGHTS.replace("key = \"mode\"", "key = \"$enabled\"");
         assert!(matches!(

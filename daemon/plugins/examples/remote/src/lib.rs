@@ -3,6 +3,7 @@
 
 use kopuz_plugin_sdk::SourceError;
 use kopuz_plugin_sdk::http::Client;
+use kopuz_plugin_sdk::integration::library;
 use kopuz_plugin_sdk::integration::playback::{self, Command, QueueMode};
 use kopuz_plugin_sdk::integration::{Integration, Settings};
 
@@ -16,7 +17,12 @@ enum Order {
     Command(Command),
     /// A track key, which may hold spaces, so it is the rest of its line.
     Queue(String, QueueMode),
+    /// Words to search the library for, whose tracks then play.
+    Find(String),
 }
+
+/// How many of a search's tracks are queued.
+const FOUND: u32 = 50;
 
 fn order(line: &str) -> Option<Order> {
     let line = line.trim();
@@ -27,6 +33,7 @@ fn order(line: &str) -> Option<Order> {
     Some(Order::Command(match word.as_str() {
         "play" if !rest.is_empty() => return Some(Order::Queue(rest.into(), QueueMode::Replace)),
         "queue" if !rest.is_empty() => return Some(Order::Queue(rest.into(), QueueMode::Append)),
+        "find" if !rest.is_empty() => return Some(Order::Find(rest.into())),
         "play" => Command::Play,
         "pause" => Command::Pause,
         "toggle" => Command::Toggle,
@@ -66,6 +73,7 @@ impl Integration for Remote {
             let done = match order(line) {
                 Some(Order::Command(command)) => playback::control(command),
                 Some(Order::Queue(key, mode)) => playback::queue(&[key], mode),
+                Some(Order::Find(words)) => find(&words),
                 None if line.trim().is_empty() => Ok(()),
                 None => Err(format!("not a command: {line}")),
             };
@@ -74,6 +82,18 @@ impl Integration for Remote {
             }
         }
     }
+}
+
+/// Play what a library search for `words` finds.
+fn find(words: &str) -> Result<(), String> {
+    let keys: Vec<String> = library::search(words, FOUND)?
+        .into_iter()
+        .map(|track| track.key)
+        .collect();
+    if keys.is_empty() {
+        return Err(format!("the library has nothing for {words}"));
+    }
+    playback::queue(&keys, QueueMode::Replace)
 }
 
 kopuz_plugin_sdk::export_integration!(Remote);
@@ -105,6 +125,10 @@ mod tests {
             order("queue b"),
             Some(Order::Queue(key, QueueMode::Append)) if key == "b"
         ));
+        assert!(
+            matches!(order("find blue in green"), Some(Order::Find(words)) if words == "blue in green")
+        );
+        assert!(order("find").is_none());
         assert!(order("seek soon").is_none());
         assert!(order("dance").is_none());
         assert!(order("").is_none());

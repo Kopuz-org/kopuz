@@ -18,6 +18,26 @@ pub const APPROVED_FILE: &str = ".approved-hosts.toml";
 
 type Approved = BTreeMap<String, BTreeSet<String>>;
 
+/// Recorded with a plugin's agreed hosts when it may steer playback, so an
+/// update that newly asks to waits for approval like one reaching a new host.
+/// The `$` keeps it apart from any host name.
+pub const PLAYBACK_GRANT: &str = "$playback:control";
+/// The same for reading the library.
+pub const LIBRARY_GRANT: &str = "$library:read";
+
+/// Everything installing `manifest` agrees to: the hosts it reaches, and the
+/// grants beyond them it asks for.
+pub fn grants(manifest: &Manifest) -> BTreeSet<String> {
+    let mut agreed = host_set(&manifest.permissions.network);
+    if manifest.permissions.playback == crate::manifest::PlaybackAccess::Control {
+        agreed.insert(PLAYBACK_GRANT.to_string());
+    }
+    if manifest.permissions.library == crate::manifest::LibraryAccess::Read {
+        agreed.insert(LIBRARY_GRANT.to_string());
+    }
+    agreed
+}
+
 /// A plugin shipped inside kopuz: a component, or none for a native plugin.
 #[derive(Debug, Clone, Copy)]
 pub struct Bundled {
@@ -244,10 +264,9 @@ impl Registry {
         }
         // Bundled ones too, so an override reaching more waits after a restart.
         for plugin in &registry.plugins {
-            registry.approved.insert(
-                plugin.id().to_string(),
-                host_set(&plugin.manifest().permissions.network),
-            );
+            registry
+                .approved
+                .insert(plugin.id().to_string(), grants(plugin.manifest()));
         }
         registry
     }
@@ -403,8 +422,9 @@ impl Registry {
         if waiting.plugin.origin() != Origin::Extension {
             return Some(self.with_installed(waiting.dir.clone(), Arc::clone(&waiting.plugin)));
         }
+        // Approving the update agrees to the grants it was shown with, not only its hosts.
         let mut approved = self.approved.clone();
-        approved.insert(id.to_string(), host_set(network));
+        approved.insert(id.to_string(), grants(waiting.plugin.manifest()));
         Some(Self::assemble(
             self.bundled.clone(),
             self.extensions.clone(),
@@ -545,7 +565,7 @@ pub fn host_set(network: &[String]) -> BTreeSet<String> {
 }
 
 fn added_hosts(agreed: &BTreeSet<String>, candidate: &Plugin) -> Vec<String> {
-    host_set(&candidate.manifest().permissions.network)
+    grants(candidate.manifest())
         .into_iter()
         .filter(|host| !agreed.contains(host))
         .collect()
@@ -842,6 +862,39 @@ mod tests {
             .approve("radio", &["b.test".into(), "a.test".into()])
             .expect("the hosts shown are the hosts asked for");
         assert_eq!(serving(&allowed).manifest().version, "1.1.0");
+        assert!(allowed.pending().is_empty());
+    }
+
+    fn steering(version: &str, playback: bool) -> String {
+        format!(
+            "id = \"radio\"\nname = \"radio\"\nversion = \"{version}\"\napi = \"0.2\"\n\
+             [permissions]\nnetwork = [\"a.test\"]\n{}[integration]\n",
+            if playback {
+                "playback = \"control\"\n"
+            } else {
+                ""
+            }
+        )
+    }
+
+    #[tokio::test]
+    async fn an_update_newly_asking_to_steer_playback_waits_like_a_new_host() {
+        let dir = scratch("grants");
+        write(&dir, &steering("1.0.0", false), EMPTY_COMPONENT);
+        let first = Registry::load(&[], Some(&dir), &[]).await;
+        write(&dir, &steering("1.1.0", true), EMPTY_COMPONENT);
+        let waiting = first.reload(&dir).await;
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(waiting.plugins()[0].manifest().version, "1.0.0");
+        let [pending] = waiting.pending() else {
+            panic!("the update waits");
+        };
+        assert_eq!(pending.added_hosts, [PLAYBACK_GRANT]);
+        let allowed = waiting
+            .approve("radio", &["a.test".into()])
+            .expect("approving the update it was shown with");
+        assert_eq!(allowed.plugins()[0].manifest().version, "1.1.0");
         assert!(allowed.pending().is_empty());
     }
 

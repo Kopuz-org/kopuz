@@ -288,17 +288,69 @@ impl plugin_host::Bridge for FakeKopuz {
             .push(format!("queue {mode:?} {keys:?}"));
         Box::pin(async { Ok(()) })
     }
+
+    fn search(&self, query: String, limit: u32) -> plugin_host::Answer<Vec<wit::library::Track>> {
+        self.seen
+            .lock()
+            .unwrap()
+            .push(format!("search {query} {limit}"));
+        let found = ["blue-1", "blue-2"].map(library_track).to_vec();
+        Box::pin(async move { Ok(found) })
+    }
+
+    fn tracks(&self, keys: Vec<String>) -> plugin_host::Answer<Vec<wit::library::Track>> {
+        let found = keys.iter().map(|key| library_track(key)).collect();
+        Box::pin(async move { Ok(found) })
+    }
+
+    fn album_tracks(&self, _: String) -> plugin_host::Answer<Vec<wit::library::Track>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn tracks_page(&self, _: u32, _: u32) -> plugin_host::Answer<wit::library::TrackPage> {
+        Box::pin(async {
+            Ok(wit::library::TrackPage {
+                total: 0,
+                tracks: Vec::new(),
+            })
+        })
+    }
+
+    fn playlists(&self) -> plugin_host::Answer<Vec<wit::library::Playlist>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn favorites(&self) -> plugin_host::Answer<Vec<String>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
 }
 
-fn remote(control: bool) -> Arc<Plugin> {
+fn library_track(key: &str) -> wit::library::Track {
+    wit::library::Track {
+        key: key.to_string(),
+        title: key.to_string(),
+        artist: String::new(),
+        album: String::new(),
+        album_id: String::new(),
+        duration_ms: None,
+        track_number: None,
+        disc_number: None,
+        musicbrainz_recording_id: None,
+        musicbrainz_release_id: None,
+    }
+}
+
+/// The remote example, without the manifest lines in `dropped`.
+fn remote(dropped: &[&str]) -> Arc<Plugin> {
     let bundled = bundled_plugins::examples()
         .iter()
         .find(|example| example.manifest.contains("id = \"remote\""))
         .expect("the remote example is built with the examples feature");
-    let text = match control {
-        true => bundled.manifest.to_string(),
-        false => bundled.manifest.replace("playback = \"control\"\n", ""),
-    };
+    let text = dropped
+        .iter()
+        .fold(bundled.manifest.to_string(), |text, line| {
+            text.replace(line, "")
+        });
     let manifest = Manifest::parse(&text).expect("its manifest");
     Arc::new(Plugin::new(
         manifest,
@@ -317,7 +369,7 @@ async fn a_plugin_allowed_to_steer_playback_does_on_its_tick() {
     )
     .await;
     let kopuz = Arc::new(FakeKopuz::default());
-    let integration = Integration::new(remote(true), vec![("url".into(), orders.url.clone())])
+    let integration = Integration::new(remote(&[]), vec![("url".into(), orders.url.clone())])
         .with_bridge(kopuz.clone());
     integration.on_tick().await.expect("ticked");
     assert_eq!(
@@ -336,12 +388,47 @@ async fn a_plugin_allowed_to_steer_playback_does_on_its_tick() {
 async fn a_plugin_that_did_not_ask_is_refused_playback() {
     let orders = Hook::answering(200, "next\n").await;
     let kopuz = Arc::new(FakeKopuz::default());
-    let integration = Integration::new(remote(false), vec![("url".into(), orders.url.clone())])
-        .with_bridge(kopuz.clone());
+    let integration = Integration::new(
+        remote(&["playback = \"control\"\n"]),
+        vec![("url".into(), orders.url.clone())],
+    )
+    .with_bridge(kopuz.clone());
     integration.on_tick().await.expect("ticked");
     assert_eq!(orders.received().len(), 1, "it asked its address");
     assert!(
         kopuz.seen.lock().unwrap().is_empty(),
         "nothing reached kopuz"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plugin_allowed_to_read_the_library_finds_and_plays() {
+    let orders = Hook::answering(200, "find blue\n").await;
+    let kopuz = Arc::new(FakeKopuz::default());
+    let integration = Integration::new(remote(&[]), vec![("url".into(), orders.url.clone())])
+        .with_bridge(kopuz.clone());
+    integration.on_tick().await.expect("ticked");
+    assert_eq!(
+        *kopuz.seen.lock().unwrap(),
+        [
+            "search blue 50".to_string(),
+            r#"queue QueueMode::Replace ["blue-1", "blue-2"]"#.to_string(),
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plugin_that_did_not_ask_is_refused_the_library() {
+    let orders = Hook::answering(200, "find blue\n").await;
+    let kopuz = Arc::new(FakeKopuz::default());
+    let integration = Integration::new(
+        remote(&["library = \"read\"\n"]),
+        vec![("url".into(), orders.url.clone())],
+    )
+    .with_bridge(kopuz.clone());
+    integration.on_tick().await.expect("ticked");
+    assert!(
+        kopuz.seen.lock().unwrap().is_empty(),
+        "nothing was searched, so nothing was queued"
     );
 }
