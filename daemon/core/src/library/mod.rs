@@ -33,6 +33,9 @@ pub struct LibraryService {
     artwork_in_flight: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// When each source's photos were last swept for, by source.
     photo_sweeps: std::sync::Mutex<HashMap<String, std::time::Instant>>,
+    /// Asked for lyrics and radio the sources have none of. Weak, since the
+    /// plugins reach back into the library through the API.
+    plugins: OnceLock<std::sync::Weak<crate::plugin_integrations::PluginIntegrations>>,
 }
 
 /// Tracks that exist but the database has never seen: a browse shelf, a
@@ -227,6 +230,7 @@ impl LibraryService {
             transient: std::sync::Mutex::new(TransientTracks::default()),
             artwork_in_flight: Arc::default(),
             photo_sweeps: std::sync::Mutex::default(),
+            plugins: OnceLock::new(),
         }
     }
 
@@ -258,6 +262,32 @@ impl LibraryService {
             .get()
             .map(Arc::as_ref)
             .ok_or_else(|| ApiError::unsupported("this daemon runs without a catalog service"))
+    }
+
+    /// The library's own rows for `keys`, in their order, each once, leaving out any it does
+    /// not hold. Only the database is read: a plugin's key is never taken for a path on disk
+    /// or looked up at the source.
+    async fn library_tracks(&self, keys: &[String]) -> Vec<Track> {
+        if keys.is_empty() {
+            return Vec::new();
+        }
+        let rows = match self.db.tracks_by_keys(&self.query_source(), keys).await {
+            Ok(rows) => rows,
+            Err(error) => {
+                tracing::warn!(%error, "a plugin's tracks could not be read");
+                return Vec::new();
+            }
+        };
+        let mut by_key: HashMap<String, Track> = rows
+            .into_iter()
+            .map(|track| (track.id.key().to_string(), track))
+            .collect();
+        keys.iter().filter_map(|key| by_key.remove(key)).collect()
+    }
+
+    /// Ask `plugins` for lyrics and radio the sources have none of.
+    pub fn attach_plugins(&self, plugins: &Arc<crate::plugin_integrations::PluginIntegrations>) {
+        let _ = self.plugins.set(Arc::downgrade(plugins));
     }
 
     /// Late-bound, because the catalog service needs this one to register
@@ -829,6 +859,28 @@ impl QueueMaterializer for LibraryService {
 
     async fn more_radio(&self, cursor: &str) -> Result<RadioPage, ApiError> {
         self.catalog_service()?.more_radio(cursor).await
+    }
+
+    async fn plugin_radio(&self, seed: &str, recent: &[String]) -> Vec<Track> {
+        let Some(plugins) = self.plugins.get().and_then(std::sync::Weak::upgrade) else {
+            return Vec::new();
+        };
+        let track = match self.library_tracks(&[seed.to_string()]).await.pop() {
+            Some(track) => track,
+            None => match self.transient_track(seed) {
+                Some(track) => track,
+                None => return Vec::new(),
+            },
+        };
+        let song = plugin_host::wit::Song {
+            key: seed.to_string(),
+            title: track.title.clone(),
+            artist: track.artist.clone(),
+            album: track.album.clone(),
+            duration_ms: (track.duration > 0).then_some(track.duration * 1_000),
+        };
+        let keys = plugins.radio(&song, recent).await;
+        self.library_tracks(&keys).await
     }
 
     fn register_restored(&self, tracks: &[Track]) {

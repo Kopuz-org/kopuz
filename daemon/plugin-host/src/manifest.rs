@@ -116,6 +116,8 @@ pub enum Listen {
 pub enum Provide {
     /// Words for a track kopuz's own lyric sources have none for.
     Lyrics,
+    /// What plays when the queue runs out, with autoplay on.
+    Radio,
 }
 
 /// The shortest `tick-ms` a manifest may ask for.

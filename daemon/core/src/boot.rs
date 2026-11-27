@@ -346,6 +346,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let integrations =
         crate::IntegrationService::new(config_service_for_api, credentials, presence_pause);
     let plugin_integrations = Arc::clone(integrations.plugins());
+    library.attach_plugins(&plugin_integrations);
     let api = Arc::new(
         LocalApi::new(session.clone())
             .with_library(library.clone())

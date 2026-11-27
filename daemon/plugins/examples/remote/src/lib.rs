@@ -6,7 +6,7 @@ use kopuz_plugin_sdk::http::Client;
 use kopuz_plugin_sdk::integration::library;
 use kopuz_plugin_sdk::integration::playback::{self, Command, QueueMode};
 use kopuz_plugin_sdk::integration::{
-    ActionTarget, Block, Integration, PanelAction, PanelTarget, Settings,
+    ActionTarget, Block, Integration, PanelAction, PanelTarget, Settings, Song,
 };
 
 pub struct Remote {
@@ -25,6 +25,9 @@ enum Order {
 
 /// How many of a search's tracks are queued.
 const FOUND: u32 = 50;
+
+/// How many tracks one radio answer adds.
+const RADIO: usize = 10;
 
 fn order(line: &str) -> Option<Order> {
     let line = line.trim();
@@ -105,6 +108,29 @@ impl Integration for Remote {
             }
             _ => Err(format!("the remote has no action {id} for that")),
         }
+    }
+
+    /// More by the same artist, then the rest of the library, leaving out
+    /// what was already queued.
+    fn radio(&self, seed: Song, recent: Vec<String>) -> Result<Vec<String>, String> {
+        let fresh = |key: &String| *key != seed.key && !recent.contains(key);
+        let mut picks: Vec<String> = match seed.artist.is_empty() {
+            true => Vec::new(),
+            false => library::search(&seed.artist, FOUND)?
+                .into_iter()
+                .map(|track| track.key)
+                .filter(fresh)
+                .collect(),
+        };
+        if picks.is_empty() {
+            picks = library::tracks_page(0, FOUND)?
+                .tracks
+                .into_iter()
+                .map(|track| track.key)
+                .filter(fresh)
+                .collect();
+        }
+        Ok(picks.into_iter().take(RADIO).collect())
     }
 
     fn render_panel(&self, id: &str, target: PanelTarget) -> Result<Vec<Block>, String> {

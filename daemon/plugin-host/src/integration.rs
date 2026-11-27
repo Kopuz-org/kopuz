@@ -26,6 +26,9 @@ const CALL_LIMIT: Duration = if cfg!(test) {
 /// How long a plugin may look for lyrics before kopuz's lyrics tab gives up on it.
 const LYRICS_LIMIT: Duration = Duration::from_secs(8);
 
+/// How long a plugin may pick what plays next before the source's own radio is tried.
+const RADIO_LIMIT: Duration = Duration::from_secs(10);
+
 struct Live {
     plugin: Arc<Plugin>,
     instance: Instance<IntegrationPlugin>,
@@ -218,4 +221,10 @@ calls! {
     fn lyrics => call_lyrics(track: &wit::Song => track) -> Result<Option<wit::FoundLyrics>, String>,
         within LYRICS_LIMIT;
 
+    /// Library keys to play after `seed`, from a plugin that provides radio.
+    fn radio => call_radio(
+        seed: &wit::Song => seed,
+        recent: &[String] => recent
+    ) -> Result<Vec<String>, String>,
+        within RADIO_LIMIT;
 }

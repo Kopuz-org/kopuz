@@ -362,6 +362,30 @@ turning the plugin off takes them with it.
 asks an address of your choice, with the artist, title, album and length in
 the query, and hands back whatever it answers.
 
+### Radio
+
+An integration can choose what plays when the queue runs out:
+
+```toml
+[integration]
+provides = ["radio"]
+```
+
+With autoplay on, when the last track in the queue finishes, kopuz calls
+`radio(seed, recent)` with the track that just ended and up to 50 keys of the
+queue so far, newest last. The plugin answers with library track keys, which
+are queued and played; keys the library does not have are dropped, and so are
+the seed and anything in `recent`. When those run out it is asked again,
+seeded with the last of them, so the music goes on for as long as it has
+picks. Plugins are asked before the source's own radio, since the person
+turned them on; an empty answer, a failure or a wait over ten seconds lets the
+next plugin, then the source's radio, go on instead. This also gives a local
+library, which has no radio of its own, something to play next. A plugin that
+picks from the library needs `library = "read"` to know its keys.
+
+The remote example below provides radio: more by the same artist, then the
+rest of the library.
+
 ### Controlling playback
 
 An integration that asks for it may play, pause, skip, seek, set the volume

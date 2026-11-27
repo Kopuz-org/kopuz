@@ -153,5 +153,12 @@ interface integration {
         /// a track none of kopuz's own lyric sources has words for. Nothing
         /// found is `none`.
         lyrics: func(track: song) -> result<option<found-lyrics>, string>;
+
+        /// Asked only of an integration whose manifest provides `radio`, when
+        /// the queue runs out with autoplay on: library track keys to play
+        /// after `seed`, the track that just finished. `recent` holds the keys
+        /// of the queue so far, newest last, so it can leave them out. An
+        /// empty list lets kopuz's own radio go on instead.
+        radio: func(seed: song, recent: list<string>) -> result<list<string>, string>;
     }
 }
