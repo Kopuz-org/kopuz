@@ -166,9 +166,7 @@ pub fn sort_control<F: SortTarget>(
         })
 }
 
-/// Tracks ⇄ Albums for one artist, writing the `artist_view_order` pref.
-/// Tracks ⇄ albums, written to the pref, and About when `about` says whether it shows;
-/// `show_about` hears each pick.
+/// Tracks ⇄ albums (the `artist_view_order` pref), plus About when `about` is set.
 pub fn view_order_toggle(
     albums: bool,
     about: Option<bool>,

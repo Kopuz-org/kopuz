@@ -392,8 +392,7 @@ impl ArtistDetail {
 impl Render for ArtistDetail {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let albums_view = controls::albums_first(cx);
-        // Biography, similar artists and sound get a view of their own: above the
-        // tracks they left the list a sliver of the window.
+        // About gets its own view: above the tracks it left the list a sliver.
         let about = self.about(cx);
         let has_about = about.is_some();
         let page = cx.entity().downgrade();
