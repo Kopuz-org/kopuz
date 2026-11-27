@@ -106,6 +106,7 @@ fn IntegrationRows(integration: api::IntegrationInfo, changed: Signal<u64>) -> E
         components::forms::schema_form::SchemaForm {
             fields: integration.fields.clone(),
             values: Vec::new(),
+            settled: true,
             on_change: move |value: api::FieldValue| {
                 hooks::integrations::set_settings(id.clone(), vec![value], changed);
             },

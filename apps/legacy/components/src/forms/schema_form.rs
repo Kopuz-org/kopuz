@@ -60,6 +60,10 @@ pub fn SchemaForm(
     fields: Vec<api::FieldSpec>,
     values: Vec<api::FieldValue>,
     #[props(default)] problems: Vec<api::Problem>,
+    /// Report a typed field once it is done with (blur or Enter) rather than
+    /// on every key, for a form whose every change is checked remotely.
+    #[props(default)]
+    settled: bool,
     on_change: EventHandler<api::FieldValue>,
 ) -> Element {
     let shown: Vec<api::FieldSpec> = fields
@@ -97,6 +101,7 @@ pub fn SchemaForm(
                     value: current(&values, &field),
                     heading,
                     field,
+                    settled,
                     on_change,
                 }
             }
@@ -110,6 +115,7 @@ fn Field(
     value: String,
     heading: Option<String>,
     problem: Option<String>,
+    settled: bool,
     on_change: EventHandler<api::FieldValue>,
 ) -> Element {
     let title = super::text(&field.label);
@@ -166,8 +172,18 @@ fn Field(
                                 placeholder: "{placeholder}",
                                 value: "{free}",
                                 onkeydown: move |e| e.stop_propagation(),
-                                oninput: move |e| {
-                                    on_change.call(api::FieldValue::new(type_key.clone(), e.value()));
+                                oninput: {
+                                    let type_key = type_key.clone();
+                                    move |e| {
+                                        if !settled {
+                                            on_change.call(api::FieldValue::new(type_key.clone(), e.value()));
+                                        }
+                                    }
+                                },
+                                onchange: move |e| {
+                                    if settled {
+                                        on_change.call(api::FieldValue::new(type_key.clone(), e.value()));
+                                    }
                                 },
                             }
                         }
@@ -216,8 +232,18 @@ fn Field(
                             placeholder: "{placeholder}",
                             value: "{value}",
                             onkeydown: move |e| e.stop_propagation(),
-                            oninput: move |e| {
-                                on_change.call(api::FieldValue::new(typed_key.clone(), e.value()));
+                            oninput: {
+                                let typed_key = typed_key.clone();
+                                move |e| {
+                                    if !settled {
+                                        on_change.call(api::FieldValue::new(typed_key.clone(), e.value()));
+                                    }
+                                }
+                            },
+                            onchange: move |e| {
+                                if settled {
+                                    on_change.call(api::FieldValue::new(typed_key.clone(), e.value()));
+                                }
                             },
                         }
                     }
@@ -274,8 +300,18 @@ fn Field(
                         placeholder: "{placeholder}",
                         value: "{value}",
                         onkeydown: move |e| e.stop_propagation(),
-                        oninput: move |e| {
-                            on_change.call(api::FieldValue::new(key.clone(), e.value()));
+                        oninput: {
+                            let key = key.clone();
+                            move |e| {
+                                if !settled {
+                                    on_change.call(api::FieldValue::new(key.clone(), e.value()));
+                                }
+                            }
+                        },
+                        onchange: move |e| {
+                            if settled {
+                                on_change.call(api::FieldValue::new(key.clone(), e.value()));
+                            }
                         },
                     }
                 }

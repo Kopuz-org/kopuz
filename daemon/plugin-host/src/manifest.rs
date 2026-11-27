@@ -324,14 +324,14 @@ impl Integration {
     fn check(&self) -> Result<(), ManifestError> {
         let mut seen = std::collections::HashSet::new();
         for field in &self.fields {
+            if field.key.starts_with('$') {
+                return Err(ManifestError::ReservedField(field.key.clone()));
+            }
             if !seen.insert(field.key.as_str()) {
                 return Err(ManifestError::DuplicateField(field.key.clone()));
             }
             if field.key.trim().is_empty() || field.label.trim().is_empty() {
                 return Err(ManifestError::BlankField);
-            }
-            if field.key.starts_with('$') {
-                return Err(ManifestError::ReservedField(field.key.clone()));
             }
             if field.kind == FieldKind::Choice && field.options.is_empty() {
                 return Err(ManifestError::NoOptions(field.key.clone()));
@@ -629,6 +629,11 @@ mod tests {
         assert!(matches!(
             Manifest::parse(&no_options),
             Err(ManifestError::NoOptions(key)) if key == "mode"
+        ));
+        let reserved = LIGHTS.replace("key = \"mode\"", "key = \"$enabled\"");
+        assert!(matches!(
+            Manifest::parse(&reserved),
+            Err(ManifestError::ReservedField(key)) if key == "$enabled"
         ));
         let unknown = LIGHTS.replace("required = true", "required = true\nsecret = true");
         assert!(matches!(
