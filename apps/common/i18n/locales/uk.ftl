@@ -1362,7 +1362,6 @@ interface_panel_side = Бік
 interface_panel_side_description = З якого боку сторінки стоїть колонка плейлистів.
 interface_queue_side = Бік колонки черги й тексту
 interface_queue_side_description = З якого боку відкривається колонка черги й тексту.
-artist_similar = Similar artists
 artist_info_link = Докладніше про цього виконавця
 radio_from_server = З вашого сервера
 radio_metadata_basis = AudioMuse ще не знає цих пісень, тож це радіо спирається на теги та Last.fm.

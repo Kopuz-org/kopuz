@@ -1311,7 +1311,6 @@ interface_panel_side = 위치
 interface_panel_side_description = 재생목록 열을 페이지 어느 쪽에 둘지.
 interface_queue_side = 대기열·가사 열 위치
 interface_queue_side_description = 대기열과 가사 열을 어느 쪽에 열지.
-artist_similar = Similar artists
 artist_info_link = 이 아티스트에 대해 더 보기
 radio_from_server = 내 서버에서
 radio_metadata_basis = AudioMuse가 아직 이 곡들을 알지 못해서, 이 라디오는 태그와 Last.fm을 따릅니다.

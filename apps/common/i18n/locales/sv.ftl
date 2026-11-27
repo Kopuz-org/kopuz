@@ -1338,7 +1338,6 @@ interface_panel_side = Sida
 interface_panel_side_description = Vilken sida av sidan spellistkolumnen sitter på.
 interface_queue_side = Sida för kö- och låttextkolumnen
 interface_queue_side_description = Vilken sida den dockade kö- och låttextkolumnen öppnas på.
-artist_similar = Similar artists
 artist_info_link = Mer om den här artisten
 radio_from_server = Från din server
 radio_metadata_basis = AudioMuse känner inte till de här låtarna än, så den här radion följer taggar och Last.fm.

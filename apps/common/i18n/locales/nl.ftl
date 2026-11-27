@@ -1338,7 +1338,6 @@ interface_panel_side = Kant
 interface_panel_side_description = Aan welke kant van de pagina de afspeellijstkolom staat.
 interface_queue_side = Kant van wachtrij- en songtekstkolom
 interface_queue_side_description = Aan welke kant de vastgezette wachtrij- en songtekstkolom opent.
-artist_similar = Similar artists
 artist_info_link = Meer over deze artiest
 radio_from_server = Van je server
 radio_metadata_basis = AudioMuse kent deze nummers nog niet, dus deze radio volgt tags en Last.fm.

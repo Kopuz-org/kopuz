@@ -1301,7 +1301,6 @@ interface_panel_side = Taraf
 interface_panel_side_description = Çalma listesi sütununun sayfanın hangi tarafında duracağı.
 interface_queue_side = Sıra ve şarkı sözü sütunu tarafı
 interface_queue_side_description = Sabitlenen sıra ve şarkı sözü sütununun sayfanın hangi tarafında açılacağı.
-artist_similar = Similar artists
 artist_info_link = Bu sanatçı hakkında daha fazlası
 radio_from_server = Sunucunuzdan
 radio_metadata_basis = AudioMuse bu şarkıları henüz tanımıyor, bu yüzden bu radyo etiketleri ve Last.fm'i izliyor.

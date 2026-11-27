@@ -1345,7 +1345,6 @@ interface_panel_side = צד
 interface_panel_side_description = באיזה צד של הדף נמצאת עמודת הרשימות.
 interface_queue_side = צד עמודת התור והמילים
 interface_queue_side_description = באיזה צד נפתחת עמודת התור והמילים.
-artist_similar = Similar artists
 artist_info_link = עוד על האמן הזה
 radio_from_server = מהשרת שלך
 radio_metadata_basis = AudioMuse עדיין לא מכיר את השירים האלה, לכן הרדיו הזה פועל לפי תגיות ו־Last.fm.

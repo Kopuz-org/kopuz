@@ -1362,7 +1362,6 @@ interface_panel_side = Strona
 interface_panel_side_description = Po której stronie strony jest kolumna playlist.
 interface_queue_side = Strona kolumny kolejki i tekstu
 interface_queue_side_description = Po której stronie otwiera się kolumna kolejki i tekstu.
-artist_similar = Similar artists
 artist_info_link = Więcej o tym wykonawcy
 radio_from_server = Z Twojego serwera
 radio_metadata_basis = AudioMuse jeszcze nie zna tych utworów, więc to radio opiera się na tagach i Last.fm.

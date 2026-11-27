@@ -1312,7 +1312,6 @@ interface_panel_side = Oldal
 interface_panel_side_description = Az oldal melyik szélén van a lejátszási listák oszlopa.
 interface_queue_side = A sor és dalszöveg oszlop oldala
 interface_queue_side_description = Melyik oldalon nyílik a dokkolt sor és dalszöveg oszlop.
-artist_similar = Similar artists
 artist_info_link = Továbbiak erről az előadóról
 radio_from_server = A szerveredről
 radio_metadata_basis = Az AudioMuse még nem ismeri ezeket a dalokat, ezért ez a rádió a címkéket és a Last.fm-et követi.

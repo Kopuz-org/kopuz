@@ -1324,7 +1324,6 @@ interface_panel_side = poka
 interface_panel_side_description = kulupu kalama li lon poka seme.
 interface_queue_side = poka pi linja kalama
 interface_queue_side_description = linja kalama en nimi li open lon poka seme.
-artist_similar = Similar artists
 artist_info_link = sona mute pi jan pali ni
 radio_from_server = tan pana sina
 radio_metadata_basis = ilo AudioMuse li sona ala e kalama ni. ni la ilo kalama ni li kepeken nimi lili en ilo Last.fm.
