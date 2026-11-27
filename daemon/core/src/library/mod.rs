@@ -36,6 +36,8 @@ pub struct LibraryService {
     /// Asked for lyrics and radio the sources have none of. Weak, since the
     /// plugins reach back into the library through the API.
     plugins: OnceLock<std::sync::Weak<crate::plugin_integrations::PluginIntegrations>>,
+    /// Held across a rating's source and store writes; see `rate_track`.
+    rating: tokio::sync::Mutex<()>,
 }
 
 /// Tracks that exist but the database has never seen: a browse shelf, a
@@ -231,6 +233,7 @@ impl LibraryService {
             artwork_in_flight: Arc::default(),
             photo_sweeps: std::sync::Mutex::default(),
             plugins: OnceLock::new(),
+            rating: tokio::sync::Mutex::default(),
         }
     }
 
@@ -529,7 +532,7 @@ impl LibraryService {
     /// Stars go to the source first; only what it accepted is kept locally, so the two never disagree.
     pub async fn set_star_rating(&self, key: &str, stars: u8) -> Result<(), ApiError> {
         let source = server::source::active(self.db.clone(), &self.current_sources());
-        rate_track(source.as_ref(), key, stars).await?;
+        rate_track(&self.rating, source.as_ref(), key, stars).await?;
         self.invalidate(Table::Recents);
         Ok(())
     }
@@ -931,8 +934,11 @@ impl QueueMaterializer for LibraryService {
 
 const MAX_STARS: u8 = 5;
 
-/// The source takes the stars first; a refusal leaves the stored ratings as they were.
+/// The source takes the stars first; a refusal leaves the stored ratings as
+/// they were. `lock` keeps two quick ratings from crossing, where the source
+/// ends on one and the store on the other.
 async fn rate_track(
+    lock: &tokio::sync::Mutex<()>,
     source: &dyn server::source::MediaSource,
     key: &str,
     stars: u8,
@@ -947,6 +953,7 @@ async fn rate_track(
         return Err(ApiError::unsupported("ratings"));
     }
 
+    let _held = lock.lock().await;
     source
         .set_rating(key, stars)
         .await
@@ -985,10 +992,13 @@ mod tests {
     use server::source::{Capabilities, MediaSource, SourceError};
 
     /// A local source that claims ratings and answers `set_rating` as told.
+    /// It logs what it accepts; an answer for `slow` stars comes late.
     struct Rater {
         inner: Box<dyn MediaSource>,
         accept: bool,
         ratings: bool,
+        slow: Option<u8>,
+        accepted: std::sync::Mutex<Vec<u8>>,
     }
 
     #[async_trait::async_trait]
@@ -1043,12 +1053,20 @@ mod tests {
         async fn push_favorite(&self, key: &str, on: bool) -> Result<(), SourceError> {
             self.inner.push_favorite(key, on).await
         }
-        async fn set_rating(&self, _: &str, _: u8) -> Result<(), SourceError> {
-            match self.accept {
-                true => Ok(()),
-                false => Err(SourceError::Connectivity),
+        async fn set_rating(&self, _: &str, stars: u8) -> Result<(), SourceError> {
+            if !self.accept {
+                return Err(SourceError::Connectivity);
             }
+            self.accepted.lock().expect("log").push(stars);
+            if self.slow == Some(stars) {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            Ok(())
         }
+    }
+
+    fn unlocked() -> tokio::sync::Mutex<()> {
+        tokio::sync::Mutex::new(())
     }
 
     async fn rater(dir: &tempfile::TempDir, accept: bool, ratings: bool) -> Rater {
@@ -1057,6 +1075,8 @@ mod tests {
             inner: server::source::local(database, config::Source::default()),
             accept,
             ratings,
+            slow: None,
+            accepted: std::sync::Mutex::default(),
         }
     }
 
@@ -1073,11 +1093,43 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let source = rater(&dir, true, true).await;
 
-        rate_track(&source, "t1", 4).await.expect("rate");
+        rate_track(&unlocked(), &source, "t1", 4)
+            .await
+            .expect("rate");
         assert_eq!(stored(&source).await.get("t1"), Some(&4));
 
-        rate_track(&source, "t1", 0).await.expect("clear");
+        rate_track(&unlocked(), &source, "t1", 0)
+            .await
+            .expect("clear");
         assert!(stored(&source).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn two_quick_ratings_end_on_the_same_stars_in_both_places() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = Rater {
+            slow: Some(1),
+            ..rater(&dir, true, true).await
+        };
+        let lock = tokio::sync::Mutex::new(());
+
+        // The source takes 1, then 5, but answers 1 last.
+        let first = rate_track(&lock, &source, "t1", 1);
+        let second = async {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            rate_track(&lock, &source, "t1", 5).await
+        };
+        let (first, second) = tokio::join!(first, second);
+        first.expect("rate 1");
+        second.expect("rate 5");
+
+        let last = *source
+            .accepted
+            .lock()
+            .expect("log")
+            .last()
+            .expect("accepted");
+        assert_eq!(stored(&source).await.get("t1"), Some(&last));
     }
 
     #[tokio::test]
@@ -1085,7 +1137,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let source = rater(&dir, false, true).await;
 
-        assert!(rate_track(&source, "t1", 4).await.is_err());
+        assert!(rate_track(&unlocked(), &source, "t1", 4).await.is_err());
         assert!(stored(&source).await.is_empty());
     }
 
@@ -1093,11 +1145,15 @@ mod tests {
     async fn too_many_stars_or_no_capability_is_refused_before_the_source() {
         let dir = tempfile::tempdir().expect("tempdir");
         let source = rater(&dir, true, true).await;
-        let error = rate_track(&source, "t1", 6).await.expect_err("six stars");
+        let error = rate_track(&unlocked(), &source, "t1", 6)
+            .await
+            .expect_err("six stars");
         assert_eq!(error.code, api::ErrorCode::InvalidInput);
 
         let plain = rater(&dir, true, false).await;
-        let error = rate_track(&plain, "t1", 3).await.expect_err("no ratings");
+        let error = rate_track(&unlocked(), &plain, "t1", 3)
+            .await
+            .expect_err("no ratings");
         assert_eq!(error.code, api::ErrorCode::Unsupported);
         assert!(stored(&plain).await.is_empty());
     }
