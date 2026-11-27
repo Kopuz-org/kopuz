@@ -28,6 +28,11 @@ pub struct RadioService {
 /// Source station ids start with this, so none can be a registry's or the directory's.
 const SOURCE_STATION_PREFIX: &str = "server-";
 
+/// Whether `station_id` names one of the active source's own stations.
+pub(crate) fn from_source(station_id: &str) -> bool {
+    station_id.starts_with(SOURCE_STATION_PREFIX)
+}
+
 /// Not the directory's stream id, which makes a play count a click there.
 const SOURCE_STREAM_ID: &str = "live";
 

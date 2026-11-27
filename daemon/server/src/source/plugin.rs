@@ -641,6 +641,10 @@ impl MediaSource for PluginSource {
         }))
     }
 
+    fn stream_guard(&self) -> Option<utils::http::Guard> {
+        self.artwork().stream_guard()
+    }
+
     async fn fetch_radio_stations(&self) -> Result<Vec<RadioStation>, SourceError> {
         let stations = answer(self.session.fetch_radio_stations().await)?;
         Ok(reachable_stations(&self.artwork(), stations))

@@ -85,6 +85,18 @@ pub fn radio_client(user_agent: Option<String>) -> reqwest::Client {
     stream_client(user_agent)
 }
 
+/// [`radio_client`], held to a plugin's hosts where it lists the station, as
+/// [`guarded_stream_client`] holds a track. A guarded client takes rustls.
+pub fn guarded_radio_client(
+    user_agent: Option<String>,
+    guard: Option<utils::http::Guard>,
+) -> std::io::Result<reqwest::Client> {
+    match guard {
+        None => Ok(radio_client(user_agent)),
+        Some(_) => guarded_stream_client(user_agent, guard),
+    }
+}
+
 impl StreamBuffer {
     /// `runtime` is the handle the background download runs on. It's passed in
     /// (not `Handle::current()`) because construction happens on the engine's
@@ -112,6 +124,17 @@ impl StreamBuffer {
         progress: Option<BufferProgressCallback>,
     ) -> Self {
         Self::open(url, is_radio, client, None, icy_tx, runtime, progress, None)
+    }
+
+    /// A radio stream; a playlist it opens may only lead where `guard` allows.
+    pub fn radio(
+        url: String,
+        client: reqwest::Client,
+        guard: Option<utils::http::Guard>,
+        icy_tx: Option<tokio::sync::watch::Sender<super::icy::IcyMeta>>,
+        runtime: tokio::runtime::Handle,
+    ) -> Self {
+        Self::open(url, true, client, guard, icy_tx, runtime, None, None)
     }
 
     /// A track's progressive stream that hands its whole file to `complete`

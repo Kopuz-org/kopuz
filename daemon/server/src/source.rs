@@ -287,6 +287,12 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("radio stations"))
     }
 
+    /// What the daemon holds a stream this source lists to, such as one of
+    /// its radio stations; nothing for a source kopuz trusts.
+    fn stream_guard(&self) -> Option<utils::http::Guard> {
+        None
+    }
+
     /// Whether the server now holds `queue`. A queue holding tracks the source
     /// does not own has no remote form, so an impl skips it (`false`) rather
     /// than saving a partial one. An empty queue clears the server's.
