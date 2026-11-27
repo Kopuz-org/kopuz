@@ -433,11 +433,20 @@ impl MediaSource for PluginSource {
     ) -> Result<Option<Box<dyn symphonia::core::io::MediaSource>>, SourceError> {
         let plugin = self.session.plugin();
         let reads_folders = plugin.manifest().permissions.reads_folders();
-        let stream = answer(
+        // Only asked to learn whether the stream needs the host; a failure is left to
+        // the configured-quality resolve, which reports its own.
+        let resolved = answer(
             self.session
                 .resolve_stream(item_id, wit::StreamQuality::High)
                 .await,
-        )?;
+        );
+        let stream = match resolved {
+            Ok(stream) => stream,
+            Err(error) => {
+                tracing::debug!(%error, "stream probe failed; using the ordinary path");
+                return Ok(None);
+            }
+        };
         if reads_folders && let Some(path) = self.artwork().local_file(&stream.url) {
             let file = std::fs::File::open(&path).map_err(|error| {
                 SourceError::Backend(format!("could not open {}: {error}", path.display()))
