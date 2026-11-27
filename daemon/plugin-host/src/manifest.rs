@@ -236,6 +236,24 @@ pub enum ManifestError {
     NoServerField(String),
     #[error("the integration's choice field `{0}` has no options")]
     NoOptions(String),
+    #[error("the id `{0}` may only hold letters, digits, `-`, `_` and `.`, and not start with `.`")]
+    BadId(String),
+    #[error("an integration field has a blank key or label")]
+    BlankField,
+    #[error("the integration field `{0}` starts with `$`, which kopuz keeps for its own")]
+    ReservedField(String),
+    #[error("the integration field `{0}` lists options but is no choice")]
+    OptionsOutsideChoice(String),
+    #[error("the integration's choice field `{0}` lists an option twice")]
+    DuplicateOption(String),
+    #[error("the integration's secret field `{0}` has a default, which a secret may not")]
+    SecretDefault(String),
+    #[error("the integration field `{0}` has a default it cannot take")]
+    BadDefault(String),
+    #[error("an integration may not read the folders picked for sources")]
+    IntegrationReadsFolders,
+    #[error("the manifest reaches `$server`, but its integration names no server field")]
+    NoServer,
 }
 
 impl Manifest {
@@ -243,6 +261,15 @@ impl Manifest {
         let manifest: Manifest = toml::from_str(text)?;
         if manifest.id.trim().is_empty() {
             return Err(ManifestError::MissingId);
+        }
+        // The id names the plugin's directory and keys its answers in the database.
+        if manifest.id.starts_with('.')
+            || !manifest
+                .id
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "-_.".contains(character))
+        {
+            return Err(ManifestError::BadId(manifest.id));
         }
         if !SUPPORTED_API.contains(&manifest.api.as_str()) {
             return Err(ManifestError::UnsupportedApi(manifest.api));
@@ -263,6 +290,18 @@ impl Manifest {
                 return Err(ManifestError::SourceAndIntegration);
             }
             integration.check()?;
+            if manifest.permissions.reads_folders() {
+                return Err(ManifestError::IntegrationReadsFolders);
+            }
+            if integration.server.is_none()
+                && manifest
+                    .permissions
+                    .network
+                    .iter()
+                    .any(|host| host == "$server")
+            {
+                return Err(ManifestError::NoServer);
+            }
         }
         Ok(manifest)
     }
@@ -288,8 +327,38 @@ impl Integration {
             if !seen.insert(field.key.as_str()) {
                 return Err(ManifestError::DuplicateField(field.key.clone()));
             }
+            if field.key.trim().is_empty() || field.label.trim().is_empty() {
+                return Err(ManifestError::BlankField);
+            }
+            if field.key.starts_with('$') {
+                return Err(ManifestError::ReservedField(field.key.clone()));
+            }
             if field.kind == FieldKind::Choice && field.options.is_empty() {
                 return Err(ManifestError::NoOptions(field.key.clone()));
+            }
+            if field.kind != FieldKind::Choice && !field.options.is_empty() {
+                return Err(ManifestError::OptionsOutsideChoice(field.key.clone()));
+            }
+            let mut values = std::collections::HashSet::new();
+            if !field
+                .options
+                .iter()
+                .all(|option| values.insert(option.value.as_str()))
+            {
+                return Err(ManifestError::DuplicateOption(field.key.clone()));
+            }
+            if let Some(default) = &field.default {
+                let fits = match field.kind {
+                    FieldKind::Secret => {
+                        return Err(ManifestError::SecretDefault(field.key.clone()));
+                    }
+                    FieldKind::Toggle => matches!(default.as_str(), "true" | "false"),
+                    FieldKind::Choice => values.contains(default.as_str()),
+                    FieldKind::Text | FieldKind::Url => true,
+                };
+                if !fits {
+                    return Err(ManifestError::BadDefault(field.key.clone()));
+                }
             }
         }
         if let Some(server) = &self.server
@@ -566,5 +635,79 @@ mod tests {
             Manifest::parse(&unknown),
             Err(ManifestError::Parse(_))
         ));
+    }
+
+    fn integration_with(extra: &str, field: &str) -> String {
+        format!(
+            "id = \"lights\"\nname = \"Lights\"\nversion = \"0.1.0\"\napi = \"0.2\"\n\
+             [permissions]\nnetwork = [\"$server\"]\n{extra}\
+             [integration]\nserver = \"url\"\n\
+             [[integration.field]]\nkey = \"url\"\nlabel = \"Address\"\nkind = \"url\"\n\
+             [[integration.field]]\n{field}\n"
+        )
+    }
+
+    #[test]
+    fn an_integration_field_has_to_make_sense() {
+        let parse = |field: &str| Manifest::parse(&integration_with("", field));
+        assert!(parse("key = \"mode\"\nlabel = \"Mode\"\nkind = \"choice\"\noptions = [{ value = \"a\", label = \"A\" }]\ndefault = \"a\"").is_ok());
+        assert!(matches!(
+            parse("key = \" \"\nlabel = \"Mode\""),
+            Err(ManifestError::BlankField)
+        ));
+        assert!(matches!(
+            parse("key = \"$enabled\"\nlabel = \"On\""),
+            Err(ManifestError::ReservedField(_))
+        ));
+        assert!(matches!(
+            parse("key = \"mode\"\nlabel = \"Mode\"\noptions = [{ value = \"a\", label = \"A\" }]"),
+            Err(ManifestError::OptionsOutsideChoice(_))
+        ));
+        assert!(matches!(
+            parse(
+                "key = \"mode\"\nlabel = \"Mode\"\nkind = \"choice\"\noptions = [{ value = \"a\", label = \"A\" }, { value = \"a\", label = \"B\" }]"
+            ),
+            Err(ManifestError::DuplicateOption(_))
+        ));
+        assert!(matches!(
+            parse("key = \"token\"\nlabel = \"Token\"\nkind = \"secret\"\ndefault = \"hunter2\""),
+            Err(ManifestError::SecretDefault(_))
+        ));
+        assert!(matches!(
+            parse("key = \"on\"\nlabel = \"On\"\nkind = \"toggle\"\ndefault = \"yes\""),
+            Err(ManifestError::BadDefault(_))
+        ));
+        assert!(matches!(
+            parse(
+                "key = \"mode\"\nlabel = \"Mode\"\nkind = \"choice\"\noptions = [{ value = \"a\", label = \"A\" }]\ndefault = \"b\""
+            ),
+            Err(ManifestError::BadDefault(_))
+        ));
+    }
+
+    #[test]
+    fn an_integration_may_not_read_folders_or_reach_a_server_it_has_no_field_for() {
+        let field = "key = \"note\"\nlabel = \"Note\"";
+        assert!(matches!(
+            Manifest::parse(&integration_with("folders = \"read\"\n", field)),
+            Err(ManifestError::IntegrationReadsFolders)
+        ));
+        let serverless = integration_with("", field).replace("server = \"url\"\n", "");
+        assert!(matches!(
+            Manifest::parse(&serverless),
+            Err(ManifestError::NoServer)
+        ));
+    }
+
+    #[test]
+    fn an_id_that_could_name_another_path_is_refused() {
+        for id in ["../up", "a/b", ".hidden", "with space"] {
+            let text = integration_with("", "key = \"note\"\nlabel = \"Note\"")
+                .replace("id = \"lights\"", &format!("id = \"{id}\""));
+            assert!(
+                matches!(Manifest::parse(&text), Err(ManifestError::BadId(_))),
+                "{id}"
+            );
+        }
     }
 }
