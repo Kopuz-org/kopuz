@@ -2,12 +2,13 @@
 
 use kopuz_plugin_sdk::SourceError;
 use kopuz_plugin_sdk::http::Client;
-use kopuz_plugin_sdk::integration::{Integration, NowPlaying, PlaybackEvent, Settings};
+use kopuz_plugin_sdk::integration::{AudioFrame, Integration, NowPlaying, PlaybackEvent, Settings};
 
 pub struct Webhook {
     http: Client,
     url: String,
     token: Option<String>,
+    beats: bool,
 }
 
 impl Webhook {
@@ -30,6 +31,7 @@ impl Integration for Webhook {
             http: Client::new(),
             url: settings.get("url").unwrap_or_default().to_string(),
             token: settings.get("token").map(str::to_string),
+            beats: settings.flag("beats"),
         }
     }
 
@@ -45,6 +47,19 @@ impl Integration for Webhook {
     fn on_playback(&self, event: PlaybackEvent) {
         if let Err(error) = self.post(&body(&event)) {
             kopuz_plugin_sdk::warn!("the webhook was not told: {}", error.message());
+        }
+    }
+
+    fn on_audio(&self, frames: Vec<AudioFrame>) {
+        if !self.beats {
+            return;
+        }
+        for frame in frames.iter().filter(|frame| frame.beat) {
+            let beat =
+                serde_json::json!({ "event": "beat", "level": frame.level, "low": frame.low });
+            if let Err(error) = self.post(&beat) {
+                kopuz_plugin_sdk::warn!("the webhook was not told of a beat: {}", error.message());
+            }
         }
     }
 }

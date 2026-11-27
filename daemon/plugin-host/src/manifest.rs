@@ -49,6 +49,8 @@ pub struct Integration {
 pub enum Listen {
     /// A track starting, pausing, resuming, seeking or stopping.
     Playback,
+    /// How loud the music is and where its beats fall, many times a second.
+    Audio,
 }
 
 /// One thing the person fills in, in the order the settings page shows it.
@@ -579,7 +581,7 @@ mod tests {
 
         [integration]
         server = "url"
-        listens = ["playback"]
+        listens = ["playback", "audio"]
 
         [[integration.field]]
         key = "url"
@@ -602,6 +604,7 @@ mod tests {
         let integration = manifest.integration.expect("integration");
         assert_eq!(integration.fields.len(), 2);
         assert!(integration.listens_to(Listen::Playback));
+        assert!(integration.listens_to(Listen::Audio));
         assert_eq!(integration.fields[0].kind, FieldKind::Url);
         assert_eq!(integration.fields[1].options[1].value, "level");
         let answers = vec![

@@ -15,6 +15,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use config::{ChannelMode, EqualizerSettings};
 
 use crate::eq::Equalizer;
+use crate::meter::{AudioMeter, MeterTap};
 
 /// One playback session as the callback sees it: a ring to drain and the
 /// counter that reports how much of it has actually reached the device.
@@ -136,6 +137,7 @@ pub(crate) struct RtState {
     scratch_fading: Vec<f32>,
     channels: usize,
     gain_ramp_frames: f32,
+    meter: MeterTap,
 }
 
 pub(crate) fn volume_bits(volume: f32) -> u32 {
@@ -153,6 +155,7 @@ impl RtState {
         sample_rate: u32,
         eq_settings: EqualizerSettings,
         channel_mode: ChannelMode,
+        meter: Arc<AudioMeter>,
     ) -> Self {
         let channels = channels.max(1);
         let mut eq = Equalizer::new(sample_rate, channels);
@@ -173,6 +176,7 @@ impl RtState {
             scratch_fading: vec![0.0; SCRATCH_FRAMES * channels],
             channels,
             gain_ramp_frames: sample_rate as f32 * GAIN_RAMP_SECONDS,
+            meter: MeterTap::new(meter, channels, sample_rate),
         }
     }
 
@@ -213,6 +217,8 @@ impl RtState {
         if read > 0 {
             self.eq.process_in_place(&mut data[..read]);
             apply_channel_mode_in_place(&mut data[..read], self.channels, self.channel_mode);
+            // Before the volume, so turning it down does not quiet what follows the music.
+            self.meter.measure(&data[..read]);
 
             let volume = f32::from_bits(self.volume.load(Ordering::Relaxed));
             for sample in data[..read].iter_mut() {
@@ -542,7 +548,8 @@ mod tests {
     use config::{ChannelMode, EqualizerSettings};
 
     use super::{
-        GainRamp, Retired, RtCmd, RtSession, RtState, apply_gain, equal_power, soft_limit,
+        AudioMeter, GainRamp, Retired, RtCmd, RtSession, RtState, apply_gain, equal_power,
+        soft_limit,
     };
 
     #[test]
@@ -558,6 +565,7 @@ mod tests {
             80,
             EqualizerSettings::default(),
             ChannelMode::Stereo,
+            AudioMeter::new(),
         );
         let session = |initial: f32, target: f32| {
             let (mut producer, consumer) = rtrb::RingBuffer::new(8);
@@ -619,6 +627,7 @@ mod tests {
                 80,
                 EqualizerSettings::default(),
                 ChannelMode::Stereo,
+                AudioMeter::new(),
             );
             let (mut producer, consumer) = rtrb::RingBuffer::new(8);
             for _ in 0..4 {
@@ -720,6 +729,7 @@ mod tests {
             44_100,
             EqualizerSettings::default(),
             ChannelMode::Stereo,
+            AudioMeter::new(),
         );
         cmd_tx
             .send(RtCmd::Swap {

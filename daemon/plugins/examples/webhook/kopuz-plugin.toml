@@ -9,7 +9,7 @@ network = ["$server"]
 
 [integration]
 server = "url"
-listens = ["playback"]
+listens = ["playback", "audio"]
 
 [[integration.field]]
 key = "url"
@@ -23,3 +23,9 @@ key = "token"
 label = "Token"
 kind = "secret"
 help = "Sent as a bearer token, for an address that asks for one."
+
+[[integration.field]]
+key = "beats"
+label = "Post beats"
+kind = "toggle"
+help = "Also posts each beat of the music as it plays, many times a minute."

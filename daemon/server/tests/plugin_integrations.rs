@@ -225,3 +225,40 @@ async fn a_listening_integration_is_told_what_plays() {
     );
     assert_eq!(bodies[2], serde_json::json!({ "event": "stopped" }));
 }
+
+fn frame(level: f32, beat: bool) -> wit::AudioFrame {
+    wit::AudioFrame {
+        level,
+        peak: level,
+        low: level,
+        mid: level,
+        high: level,
+        onset: if beat { level } else { 0.0 },
+        beat,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_integration_hears_the_beats_it_asked_for() {
+    let hook = Hook::start(200).await;
+    let mut settings = answers(&hook.url, "");
+    let quiet = Integration::new(webhook(), settings.clone());
+    quiet
+        .on_audio(&[frame(0.4, true), frame(0.1, false)])
+        .await
+        .expect("told");
+    assert!(hook.received().is_empty(), "beats are off unless asked for");
+
+    settings.push(("beats".to_string(), "true".to_string()));
+    let beating = Integration::new(webhook(), settings);
+    beating
+        .on_audio(&[frame(0.1, false), frame(0.5, true), frame(0.2, false)])
+        .await
+        .expect("told");
+    let received = hook.received();
+    assert_eq!(received.len(), 1, "only the beat is posted: {received:?}");
+    let body = received[0].split("\r\n\r\n").nth(1).unwrap_or_default();
+    let beat: serde_json::Value = serde_json::from_str(body).expect("JSON");
+    assert_eq!(beat["event"], "beat");
+    assert_eq!(beat["level"], 0.5);
+}

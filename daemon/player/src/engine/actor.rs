@@ -52,6 +52,7 @@ pub(crate) enum ActorMsg {
 pub struct EngineHandle {
     tx: Sender<ActorMsg>,
     status: Arc<ArcSwap<EngineStatus>>,
+    meter: Arc<crate::meter::AudioMeter>,
     join: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -71,6 +72,8 @@ impl EngineHandle {
 
         let actor_tx = tx.clone();
         let actor_status = status.clone();
+        let meter = crate::meter::AudioMeter::new();
+        let actor_meter = Arc::clone(&meter);
         let join = std::thread::Builder::new()
             .name("kopuz-player-engine".to_string())
             .spawn(move || {
@@ -84,7 +87,7 @@ impl EngineHandle {
                         return;
                     }
                 };
-                Actor::new(rx, actor_tx, sink, actor_status).run();
+                Actor::new(rx, actor_tx, sink, actor_status, actor_meter).run();
             })
             .map_err(PlayerInitError::EngineThread)?;
 
@@ -92,6 +95,7 @@ impl EngineHandle {
             Ok(Ok(())) => Ok(Self {
                 tx,
                 status,
+                meter,
                 join: Some(join),
             }),
             Ok(Err(e)) => Err(e),
@@ -105,6 +109,11 @@ impl EngineHandle {
 
     pub fn status(&self) -> Arc<EngineStatus> {
         self.status.load_full()
+    }
+
+    /// What the output plays, measured while anyone wants it; it outlives an output rebuild.
+    pub fn meter(&self) -> Arc<crate::meter::AudioMeter> {
+        Arc::clone(&self.meter)
     }
 
     /// Shut down and wait for the actor (and its workers) to exit.
@@ -219,6 +228,7 @@ struct Actor {
     volume: Arc<AtomicU32>,
     speed: Arc<AtomicU32>,
     paused: Arc<AtomicBool>,
+    meter: Arc<crate::meter::AudioMeter>,
     eq_settings: EqualizerSettings,
     replay_gain_settings: ReplayGainSettings,
     channel_mode: ChannelMode,
@@ -264,8 +274,10 @@ impl Actor {
         self_tx: Sender<ActorMsg>,
         sink: Box<dyn AudioSink>,
         status: Arc<ArcSwap<EngineStatus>>,
+        meter: Arc<crate::meter::AudioMeter>,
     ) -> Self {
         Self {
+            meter,
             rx,
             self_tx,
             sink,
@@ -1306,6 +1318,7 @@ impl Actor {
         let paused = self.paused.clone();
         let eq_settings = self.eq_settings.clone();
         let channel_mode = self.channel_mode;
+        let meter = Arc::clone(&self.meter);
 
         let make_cb: DataCallbackFactory = Box::new(move |config: SinkConfig| {
             let mut state = RtState::new(
@@ -1317,6 +1330,7 @@ impl Actor {
                 config.sample_rate,
                 eq_settings,
                 channel_mode,
+                meter,
             );
             Box::new(move |data: &mut [f32]| state.process(data))
         });

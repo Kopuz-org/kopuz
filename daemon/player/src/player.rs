@@ -123,6 +123,11 @@ impl Player {
         Self::try_new().expect("failed to initialize audio player")
     }
 
+    /// What the output plays; see [`crate::meter`].
+    pub fn audio_meter(&self) -> std::sync::Arc<crate::meter::AudioMeter> {
+        self.engine.meter()
+    }
+
     /// Subscribe to the engine's event stream. Multiple subscribers are
     /// supported — each receives every event; a subscriber whose receiver is
     /// dropped is pruned on the next emit.
