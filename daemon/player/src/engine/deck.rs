@@ -297,9 +297,9 @@ mod tests {
     }
 
     fn assert_same_audio(a: &[f32], b: &[f32]) {
-        let shorter = a.len().min(b.len());
-        assert!(shorter > 0);
-        let first = (0..shorter).find(|&i| (a[i] - b[i]).abs() > 1e-6);
+        assert!(!a.is_empty());
+        assert_eq!(a.len(), b.len(), "the packet size changed the length");
+        let first = (0..a.len()).find(|&i| (a[i] - b[i]).abs() > 1e-6);
         assert_eq!(first, None, "the packet size changed the audio");
     }
 

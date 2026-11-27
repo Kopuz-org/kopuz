@@ -2405,6 +2405,10 @@ fn flat_mix(length: Duration) -> DeckMix {
     DeckMix::new(mix::flat_curves(2), mix::TEST_FILTERS, step, length).expect("valid mix")
 }
 
+/// A mix start beyond the desktop ring, which a worker can fill before it
+/// handles a plan sent right after the load.
+const PAST_THE_RING: Duration = Duration::from_secs(3);
+
 /// Loads `token` as the incoming deck of `from_token`'s planned mix.
 fn load_mixed(
     engine: &EngineHandle,
@@ -2696,16 +2700,17 @@ fn a_cancelled_plan_lets_the_track_play_past_its_mix() {
     let (factory_a, duration_a) = wav_factory(30.0);
     load(&engine, 1, factory_a, duration_a);
     wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    // Past the ring the worker may fill before it reads the plan.
     engine.send(Command::PlanOutgoing {
         token: 1,
-        at: Duration::from_secs(1),
+        at: PAST_THE_RING,
         mix: flat_mix(Duration::from_millis(500)),
     });
     engine.send(Command::CancelPlan { token: 1 });
 
-    // Armed, A would end at 1.5 s.
+    // Armed, A would end at 3.5 s.
     let mut pulled = 0;
-    while pulled < samples_at(2.5) {
+    while pulled < samples_at(4.5) {
         pulled += sink.pull(4096).len();
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -2728,7 +2733,7 @@ fn a_planned_mix_can_follow_a_planned_mix() {
     wait_until("phase Playing", || engine.status().phase == Phase::Playing);
     engine.send(Command::PlanOutgoing {
         token: 1,
-        at: Duration::from_secs(1),
+        at: PAST_THE_RING,
         mix: flat_mix(Duration::from_millis(500)),
     });
     let (factory_b, duration_b) = wav_factory(30.0);
