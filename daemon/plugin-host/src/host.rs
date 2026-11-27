@@ -11,7 +11,7 @@ use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxView, WasiView};
 use crate::bindings::kopuz::plugin::{browser, decryption, details, http, log, tcp};
 use crate::manifest::Permissions;
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 const MAX_BODY_BYTES: usize = 512 * 1024 * 1024;
 
