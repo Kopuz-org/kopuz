@@ -21,5 +21,6 @@ gpui-kit = { workspace = true }
 tracing = { workspace = true }
 settings_appearance = { path = "../settings_appearance" }
 settings_sources = { path = "../settings_sources" }
+settings_plugins = { path = "../settings_plugins" }
 settings_playback = { path = "../settings_playback" }
 settings_interface = { path = "../settings_interface" }

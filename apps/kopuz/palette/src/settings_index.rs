@@ -10,13 +10,14 @@ const fn entry(key: &'static str, slug: &'static str) -> Entry {
     Entry { key, slug }
 }
 
-/// The nine category panels, so one is reachable even when it holds no named row.
+/// The category panels, so one is reachable even when it holds no named row.
 pub static CATEGORIES: &[Entry] = &[
     entry("settings_general", "general"),
     entry("settings_customization", "appearance"),
     entry("settings_interface", "interface"),
     entry("settings_library", "library"),
     entry("settings_connectivity", "connectivity"),
+    entry("plugins", "plugins"),
     entry("settings_offline", "offline"),
     entry("settings_metadata", "metadata"),
     entry("settings_player", "player"),

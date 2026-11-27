@@ -24,11 +24,19 @@ Every source is a plugin, of one of three kinds:
   into Kopuz and runs in-process. They register in the same plugin registry
   with a manifest, and a sandboxed plugin installed with one's id replaces it.
 - **Community plugins** live in their authors' repositories and are installed
-  from the marketplace under **Settings → Library → Plugins** with one click.
+  from the marketplace under **Settings → Plugins** with one click.
   They always run sandboxed. They may add services of their own, which then
   show up in the source picker, marked experimental. They may not claim a
   service Kopuz serves itself, since that would hand them its sources'
   credentials.
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:696efcf48b8f9f5e89de70971a8840ee60f0eaf11aa201fbb969a31f24e719b0 -->
+
+In the legacy desktop app, open the marketplace under **Settings → Library → Plugins**.
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 ## Writing one
 
