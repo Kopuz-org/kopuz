@@ -1,6 +1,7 @@
 //! OS media-key integration for the daemon process: MPRIS (Linux), SMTC
-//! (Windows), and MPRemoteCommandCenter (macOS) commands flow into the
-//! session; shuffle/repeat modes flow back out where the platform shows them.
+//! (Windows), MPRemoteCommandCenter (macOS) and the Android media session
+//! (notification, lock screen, Android Auto) commands flow into the session;
+//! shuffle/repeat modes flow back out where the platform shows them.
 //!
 //! Now-playing metadata itself is pushed by the player engine
 //! (`Player::push_now_playing`), so this module only handles the command
@@ -8,9 +9,7 @@
 //! main thread to run a CFRunLoop; the kopuzd binary parks its main thread
 //! there via `player::systemint::park_main_loop`.
 
-#![cfg_attr(target_os = "android", allow(unused))]
-
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 use api::LoopMode;
 use api::PlayerCommand;
 
@@ -152,5 +151,69 @@ pub fn spawn(session: &SessionHandle) {
     });
 }
 
+/// Commands land here straight from the JNI callback, on the core's own
+/// runtime, so they are answered at once even while the UI is asleep in the
+/// background (a phone in a car mount, screen off).
 #[cfg(target_os = "android")]
-pub fn spawn(_session: &SessionHandle) {}
+pub fn spawn(session: &SessionHandle) {
+    use api::ApiEvent;
+    use player::systemint::{RepeatMode, SystemEvent};
+
+    fn repeat_mode(mode: LoopMode) -> RepeatMode {
+        match mode {
+            LoopMode::None => RepeatMode::Off,
+            LoopMode::Queue => RepeatMode::Playlist,
+            LoopMode::Track => RepeatMode::Track,
+        }
+    }
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SystemEvent>();
+    player::systemint::set_background_handler(move |event| {
+        let _ = tx.send(event);
+    });
+
+    let commands = session.clone();
+    tokio::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            let mapped = match event {
+                SystemEvent::Play => PlayerCommand::Play,
+                SystemEvent::Pause | SystemEvent::Stop => PlayerCommand::Pause,
+                SystemEvent::Toggle => PlayerCommand::Toggle,
+                SystemEvent::Next => PlayerCommand::Next,
+                SystemEvent::Prev => PlayerCommand::Previous,
+                SystemEvent::Seek(seconds) => seek_command(seconds),
+                // The notification has no authority over the modes, so a tap
+                // flips whatever the queue holds now.
+                SystemEvent::ToggleShuffle => PlayerCommand::SetMode {
+                    shuffle: Some(!commands.state().queue.shuffle),
+                    loop_mode: None,
+                },
+                SystemEvent::CycleRepeat => PlayerCommand::SetMode {
+                    shuffle: None,
+                    loop_mode: Some(commands.state().queue.loop_mode.next()),
+                },
+            };
+            command(&commands, mapped).await;
+        }
+    });
+
+    let mut events = session.subscribe();
+    let initial = session.state();
+    tokio::spawn(async move {
+        let mut last = (initial.queue.shuffle, initial.queue.loop_mode);
+        player::systemint::update_modes(last.0, repeat_mode(last.1));
+        loop {
+            match events.recv().await {
+                Ok(ApiEvent::PlayerState(state)) => {
+                    let modes = (state.queue.shuffle, state.queue.loop_mode);
+                    if modes != last {
+                        last = modes;
+                        player::systemint::update_modes(modes.0, repeat_mode(modes.1));
+                    }
+                }
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+            }
+        }
+    });
+}

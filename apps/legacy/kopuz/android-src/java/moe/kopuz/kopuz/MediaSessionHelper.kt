@@ -130,8 +130,70 @@ object MediaSessionHelper {
                 override fun onCustomAction(action: String, extras: android.os.Bundle?) {
                     MediaReceiver.nativeOnAction(action)
                 }
+                // Android Auto: a row picked from the browse tree, and voice search.
+                override fun onPlayFromMediaId(mediaId: String, extras: android.os.Bundle?) {
+                    if (!KopuzBrowserService.play(mediaId)) showNotReady()
+                }
+                override fun onPlayFromSearch(query: String?, extras: android.os.Bundle?) {
+                    if (!KopuzBrowserService.playSearch(query ?: "")) showNotReady()
+                }
             })
+            // Until the first track renders, the car still needs to know it can
+            // start playback from its browse screens.
+            setPlaybackState(
+                PlaybackState.Builder()
+                    .setState(PlaybackState.STATE_NONE, 0, 0f)
+                    .setActions(BROWSE_ACTIONS or PlaybackState.ACTION_PLAY)
+                    .build()
+            )
             isActive = true
+        }
+    }
+
+    /** What Android Auto needs to play from its browse and search screens. */
+    private const val BROWSE_ACTIONS =
+        PlaybackState.ACTION_PLAY_FROM_MEDIA_ID or PlaybackState.ACTION_PLAY_FROM_SEARCH
+
+    @JvmStatic
+    fun token(): MediaSession.Token? = session?.sessionToken
+
+    // Every playback-state write holds this, so a browse worker clearing the
+    // not-ready error cannot land after, and wipe out, a newer real state.
+    private val stateLock = Any()
+    private var notReady = false
+
+    /**
+     * The car woke the browse service before the app ever started, so there is
+     * no library to list. Android Auto shows an error state's message on screen.
+     */
+    @JvmStatic
+    fun showNotReady() {
+        val s = session ?: return
+        synchronized(stateLock) {
+            notReady = true
+            s.setPlaybackState(
+                PlaybackState.Builder()
+                    .setState(PlaybackState.STATE_ERROR, 0, 0f)
+                    .setErrorMessage("Open Kopuz on your phone once, then try again")
+                    .setActions(BROWSE_ACTIONS)
+                    .build()
+            )
+        }
+    }
+
+    /** Drops the not-ready error, and only that: any later state stays. */
+    @JvmStatic
+    fun clearNotReady() {
+        val s = session ?: return
+        synchronized(stateLock) {
+            if (!notReady) return
+            notReady = false
+            s.setPlaybackState(
+                PlaybackState.Builder()
+                    .setState(PlaybackState.STATE_NONE, 0, 0f)
+                    .setActions(BROWSE_ACTIONS or PlaybackState.ACTION_PLAY)
+                    .build()
+            )
         }
     }
 
@@ -291,28 +353,31 @@ object MediaSessionHelper {
             PlaybackState.ACTION_PLAY_PAUSE or
             PlaybackState.ACTION_STOP or
             PlaybackState.ACTION_SKIP_TO_NEXT or
-            PlaybackState.ACTION_SKIP_TO_PREVIOUS
+            PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+            BROWSE_ACTIONS
         // SEEK_TO is what makes the notification's progress bar draggable. A
         // radio stream or a track with no known length has nothing to seek in.
         if (durationMs in 1 until MAX_SEEKABLE_MS) {
             actions = actions or PlaybackState.ACTION_SEEK_TO
         }
-        s.setPlaybackState(
-            PlaybackState.Builder()
-                .setState(stateVal, positionMs, if (playing) 1f else 0f)
-                .setActions(actions)
-                .addCustomAction(
-                    PlaybackState.CustomAction.Builder(
-                        "shuffle", shuffleLabel(), shuffleIcon()
-                    ).build()
-                )
-                .addCustomAction(
-                    PlaybackState.CustomAction.Builder(
-                        "loop", repeatLabel(), repeatIcon()
-                    ).build()
-                )
-                .build()
-        )
+        val state = PlaybackState.Builder()
+            .setState(stateVal, positionMs, if (playing) 1f else 0f)
+            .setActions(actions)
+            .addCustomAction(
+                PlaybackState.CustomAction.Builder(
+                    "shuffle", shuffleLabel(), shuffleIcon()
+                ).build()
+            )
+            .addCustomAction(
+                PlaybackState.CustomAction.Builder(
+                    "loop", repeatLabel(), repeatIcon()
+                ).build()
+            )
+            .build()
+        synchronized(stateLock) {
+            notReady = false
+            s.setPlaybackState(state)
+        }
 
         val playPauseIcon =
             if (playing) android.R.drawable.ic_media_pause
@@ -389,11 +454,15 @@ object MediaSessionHelper {
         unregisterNoisy(context)
         MusicService.stop(context)
         nm(context).cancel(NOTIF_ID)
-        session?.setPlaybackState(
-            PlaybackState.Builder()
-                .setState(PlaybackState.STATE_STOPPED, 0, 1f)
-                .build()
-        )
+        synchronized(stateLock) {
+            notReady = false
+            session?.setPlaybackState(
+                PlaybackState.Builder()
+                    .setState(PlaybackState.STATE_STOPPED, 0, 1f)
+                    .setActions(BROWSE_ACTIONS or PlaybackState.ACTION_PLAY)
+                    .build()
+            )
+        }
     }
 
     @JvmStatic

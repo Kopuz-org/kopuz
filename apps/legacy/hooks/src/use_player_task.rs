@@ -1,139 +1,43 @@
-//! Android media controls: dispatch JNI callbacks and update notification state.
+//! Android: keep the UI runtime turning while the activity is hidden.
+//!
+//! Media buttons, the notification's shuffle and repeat, and Android Auto are
+//! answered by the daemon core on its own runtime (`daemon::os_media`,
+//! `daemon::android_auto`), so they never wait on this loop.
 
-#[cfg(target_os = "android")]
-use crate::use_player_controller::LoopMode;
 use crate::use_player_controller::PlayerController;
 #[cfg(target_os = "android")]
 use dioxus::prelude::*;
 
 #[cfg(target_os = "android")]
-mod android_media {
-    #[derive(Debug, Clone, Copy)]
-    pub(super) enum BgCmd {
-        Play,
-        Pause,
-        Toggle,
-        Next,
-        Prev,
-        ToggleShuffle,
-        CycleRepeat,
-        Seek(std::time::Duration),
-    }
+static UI_WAKE: std::sync::OnceLock<tokio::sync::Notify> = std::sync::OnceLock::new();
 
-    pub(super) static BG_CMD_TX: std::sync::OnceLock<
-        std::sync::Mutex<std::sync::mpsc::Sender<BgCmd>>,
-    > = std::sync::OnceLock::new();
-    pub(super) static BG_CMD_RX: std::sync::OnceLock<
-        std::sync::Mutex<std::sync::mpsc::Receiver<BgCmd>>,
-    > = std::sync::OnceLock::new();
-    pub(super) static BG_NOTIFY: std::sync::OnceLock<tokio::sync::Notify> =
-        std::sync::OnceLock::new();
-
-    pub(super) fn init_bg_channel() {
-        BG_CMD_TX.get_or_init(|| {
-            let (tx, rx) = std::sync::mpsc::channel::<BgCmd>();
-            let _ = BG_CMD_RX.set(std::sync::Mutex::new(rx));
-            std::sync::Mutex::new(tx)
-        });
-        BG_NOTIFY.get_or_init(tokio::sync::Notify::new);
-    }
-
-    pub(super) fn send_bg_cmd(cmd: BgCmd) {
-        if let Some(lock) = BG_CMD_TX.get()
-            && let Ok(tx) = lock.lock()
-        {
-            let _ = tx.send(cmd);
-        }
-        if let Some(notify) = BG_NOTIFY.get() {
-            notify.notify_one();
-        }
-    }
-
-    pub(super) fn drain_bg_cmds() -> Vec<BgCmd> {
-        let mut cmds = Vec::new();
-        if let Some(lock) = BG_CMD_RX.get()
-            && let Ok(rx) = lock.try_lock()
-        {
-            while let Ok(cmd) = rx.try_recv() {
-                cmds.push(cmd);
-            }
-        }
-        cmds
-    }
-}
-
-pub fn use_player_task(
-    #[cfg_attr(not(target_os = "android"), allow(unused_variables))] ctrl: PlayerController,
-) {
-    #[cfg(target_os = "android")]
-    use_effect(move || {
-        let shuffle = *ctrl.shuffle.read();
-        let repeat = match *ctrl.loop_mode.read() {
-            LoopMode::None => player::systemint::RepeatMode::Off,
-            LoopMode::Queue => player::systemint::RepeatMode::Playlist,
-            LoopMode::Track => player::systemint::RepeatMode::Track,
-        };
-        player::systemint::update_modes(shuffle, repeat);
-    });
-
+pub fn use_player_task(_ctrl: PlayerController) {
     #[cfg(target_os = "android")]
     {
-        use android_media::BgCmd;
-        use_hook(move || {
-            android_media::init_bg_channel();
-
+        use_hook(|| {
+            UI_WAKE.get_or_init(tokio::sync::Notify::new);
             player::systemint::capture_event_loop();
-
             player::systemint::set_tokio_waker(|| {
-                if let Some(notify) = android_media::BG_NOTIFY.get() {
+                if let Some(notify) = UI_WAKE.get() {
                     notify.notify_one();
                 }
             });
-            player::systemint::set_background_handler(move |event| {
-                use player::systemint::SystemEvent;
-                let cmd = match event {
-                    SystemEvent::Play => BgCmd::Play,
-                    SystemEvent::Pause => BgCmd::Pause,
-                    SystemEvent::Toggle => BgCmd::Toggle,
-                    SystemEvent::Next => BgCmd::Next,
-                    SystemEvent::Prev => BgCmd::Prev,
-                    SystemEvent::Stop => BgCmd::Pause,
-                    SystemEvent::ToggleShuffle => BgCmd::ToggleShuffle,
-                    SystemEvent::CycleRepeat => BgCmd::CycleRepeat,
-                    SystemEvent::Seek(seconds) => {
-                        BgCmd::Seek(std::time::Duration::from_secs_f64(seconds.max(0.0)))
+        });
+        // Dioxus only advances its tasks while something here is pending, and
+        // the keepalive ticker pokes this one so the UI's own work (progress,
+        // queue view) keeps up in the background.
+        use_future(|| async {
+            loop {
+                let notified = async {
+                    if let Some(notify) = UI_WAKE.get() {
+                        notify.notified().await;
+                    } else {
+                        std::future::pending::<()>().await;
                     }
                 };
-                android_media::send_bg_cmd(cmd);
-            });
-        });
-        use_future(move || {
-            let mut ctrl = ctrl;
-            async move {
-                loop {
-                    for cmd in android_media::drain_bg_cmds() {
-                        match cmd {
-                            BgCmd::Play => ctrl.resume(),
-                            BgCmd::Pause => ctrl.pause(),
-                            BgCmd::Toggle => ctrl.toggle(),
-                            BgCmd::Next => ctrl.play_next(),
-                            BgCmd::Prev => ctrl.play_prev(),
-                            BgCmd::ToggleShuffle => ctrl.toggle_shuffle(),
-                            BgCmd::CycleRepeat => ctrl.toggle_loop(),
-                            BgCmd::Seek(position) => ctrl.seek(position),
-                        }
-                    }
-                    let notified = async {
-                        if let Some(notify) = android_media::BG_NOTIFY.get() {
-                            notify.notified().await;
-                        } else {
-                            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-                        }
-                    };
-                    tokio::select! {
-                        _ = notified => {}
-                        _ = tokio::time::sleep(std::time::Duration::from_millis(250)) => {}
-                    }
+                tokio::select! {
+                    _ = notified => {}
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(250)) => {}
                 }
             }
         });
