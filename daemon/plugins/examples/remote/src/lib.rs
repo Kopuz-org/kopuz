@@ -5,7 +5,9 @@ use kopuz_plugin_sdk::SourceError;
 use kopuz_plugin_sdk::http::Client;
 use kopuz_plugin_sdk::integration::library;
 use kopuz_plugin_sdk::integration::playback::{self, Command, QueueMode};
-use kopuz_plugin_sdk::integration::{ActionTarget, Integration, Settings};
+use kopuz_plugin_sdk::integration::{
+    ActionTarget, Block, Integration, PanelAction, PanelTarget, Settings,
+};
 
 pub struct Remote {
     http: Client,
@@ -96,19 +98,67 @@ impl Integration for Remote {
                 find(&words)?;
                 Ok(Some(format!("Playing what the library has for {words}")))
             }
-            ("more-by-artist", ActionTarget::Tracks(keys)) => {
-                let first = library::tracks(&keys[..keys.len().min(1)])?;
-                let artist = first
-                    .first()
-                    .map(|track| track.artist.clone())
-                    .filter(|artist| !artist.is_empty())
-                    .ok_or("the track has no artist")?;
+            ("more-by-artist", target) => {
+                let artist = artist_of(&target)?;
                 find(&artist)?;
                 Ok(Some(format!("Playing more by {artist}")))
             }
             _ => Err(format!("the remote has no action {id} for that")),
         }
     }
+
+    fn render_panel(&self, id: &str, target: PanelTarget) -> Result<Vec<Block>, String> {
+        if id != "more-by-artist" {
+            return Err(format!("the remote has no panel {id}"));
+        }
+        let (target, own) = match target {
+            PanelTarget::Album(album) => {
+                let own: Vec<String> = library::album_tracks(&album)?
+                    .into_iter()
+                    .map(|track| track.key)
+                    .collect();
+                (ActionTarget::Album(album), own)
+            }
+            PanelTarget::Artist(artist) => (ActionTarget::Artist(artist), Vec::new()),
+        };
+        let artist = artist_of(&target)?;
+        let keys: Vec<String> = library::search(&artist, FOUND)?
+            .into_iter()
+            .map(|track| track.key)
+            .filter(|key| !own.contains(key))
+            .take(10)
+            .collect();
+        let play = Block::Action(PanelAction {
+            label: "Play everything by them".into(),
+            action: "more-by-artist".into(),
+        });
+        if keys.is_empty() {
+            return Ok(vec![
+                Block::Text(format!("Nothing else by {artist} in the library yet.")),
+                play,
+            ]);
+        }
+        Ok(vec![
+            Block::Text(format!("What else the library has by {artist}")),
+            Block::Tracks(keys),
+            play,
+        ])
+    }
+}
+
+/// The artist a track, an album or an artist page is by.
+fn artist_of(target: &ActionTarget) -> Result<String, String> {
+    let first = match target {
+        ActionTarget::Tracks(keys) => library::tracks(&keys[..keys.len().min(1)])?,
+        ActionTarget::Album(album) => library::album_tracks(album)?,
+        ActionTarget::Artist(artist) => library::artist_tracks(artist)?,
+        ActionTarget::None => return Err("nothing was picked".into()),
+    };
+    first
+        .first()
+        .map(|track| track.artist.clone())
+        .filter(|artist| !artist.is_empty())
+        .ok_or_else(|| "the track has no artist".into())
 }
 
 /// Play what a library search for `words` finds.

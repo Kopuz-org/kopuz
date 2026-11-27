@@ -58,6 +58,8 @@ pub struct AlbumDetail {
     offline_reads: bool,
     scroll: ScrollHandle,
     reveal: components::scroll::Reveal,
+    /// What the integration plugins turned on draw under the tracks.
+    plugin_panels: Entity<components::plugin_ui::PluginPanels>,
     _subscriptions: Vec<Subscription>,
     _lists: Vec<Subscription>,
 }
@@ -111,7 +113,13 @@ impl AlbumDetail {
         ];
 
         let scroll = ScrollHandle::new();
+        let plugin_panels = cx.new(|cx| {
+            components::plugin_ui::PluginPanels::new(api::PanelTarget::Album(id.to_string()), cx)
+        });
+        // Its panels load after the page and come and go with their plugins.
+        cx.observe(&plugin_panels, |_, _, cx| cx.notify()).detach();
         Self {
+            plugin_panels,
             id,
             album,
             tracks,
@@ -348,6 +356,10 @@ impl AlbumDetail {
                     None => section,
                 }
             }))
+            // Inside the scroll, after the tracks: the list fills the page, so beside it a panel would squeeze it.
+            .when(!self.plugin_panels.read(cx).is_empty(cx), |body| {
+                body.child(div().mt_12().child(self.plugin_panels.clone()))
+            })
             .into_any_element()
     }
 

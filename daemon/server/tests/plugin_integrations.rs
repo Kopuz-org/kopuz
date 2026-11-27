@@ -309,8 +309,20 @@ impl plugin_host::Bridge for FakeKopuz {
         Box::pin(async move { Ok(found) })
     }
 
-    fn album_tracks(&self, _: String) -> plugin_host::Answer<Vec<wit::library::Track>> {
-        Box::pin(async { Ok(Vec::new()) })
+    fn album_tracks(&self, album: String) -> plugin_host::Answer<Vec<wit::library::Track>> {
+        let own = vec![wit::library::Track {
+            artist: "Miles Davis".into(),
+            ..library_track(&format!("{album}-1"))
+        }];
+        Box::pin(async move { Ok(own) })
+    }
+
+    fn artist_tracks(&self, artist: String) -> plugin_host::Answer<Vec<wit::library::Track>> {
+        let found = vec![wit::library::Track {
+            artist: "Miles Davis".into(),
+            ..library_track(&format!("{artist}-1"))
+        }];
+        Box::pin(async move { Ok(found) })
     }
 
     fn tracks_page(&self, _: u32, _: u32) -> plugin_host::Answer<wit::library::TrackPage> {
@@ -479,4 +491,45 @@ async fn an_action_runs_with_what_the_person_typed_or_picked() {
         .await
         .expect("ran");
     assert_eq!(blank, Err("type something to search for".into()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_panel_draws_blocks_for_an_album_or_an_artist() {
+    let orders = Hook::answering(200, "").await;
+    let kopuz = Arc::new(FakeKopuz::default());
+    let integration = Integration::new(remote(&[]), vec![("url".into(), orders.url.clone())])
+        .with_bridge(kopuz.clone());
+    let expected = vec![
+        wit::Block::Text("What else the library has by Miles Davis".into()),
+        wit::Block::Tracks(vec!["blue-1".into(), "blue-2".into()]),
+        wit::Block::Action(wit::PanelAction {
+            label: "Play everything by them".into(),
+            action: "more-by-artist".into(),
+        }),
+    ];
+    let album = integration
+        .render_panel(
+            "more-by-artist",
+            &wit::PanelTarget::Album("kind-of-blue".into()),
+        )
+        .await
+        .expect("ran");
+    assert_eq!(album, Ok(expected.clone()));
+    let artist = integration
+        .render_panel(
+            "more-by-artist",
+            &wit::PanelTarget::Artist("an-artist-key".into()),
+        )
+        .await
+        .expect("ran");
+    assert_eq!(
+        artist,
+        Ok(expected),
+        "an artist key is read through the library"
+    );
+    let missing = integration
+        .render_panel("lyrics", &wit::PanelTarget::Artist("Miles Davis".into()))
+        .await
+        .expect("ran");
+    assert!(missing.is_err());
 }

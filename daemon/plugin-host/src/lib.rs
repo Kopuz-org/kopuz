@@ -54,7 +54,8 @@ mod integration_bindings {
 pub mod wit {
     pub use crate::bindings::kopuz::plugin::types::*;
     pub use crate::integration_bindings::exports::kopuz::plugin::integration::{
-        ActionTarget, AudioFrame, NowPlaying, PlaybackEvent, Setting, Started,
+        ActionTarget, AudioFrame, Block, NowPlaying, PanelAction, PanelTarget, PlaybackEvent,
+        Setting, Started,
     };
 
     pub mod playback {

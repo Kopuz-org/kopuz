@@ -33,6 +33,8 @@ interface library {
     /// The tracks with these keys, in that order; a key nothing has is left out.
     tracks: func(keys: list<string>) -> result<list<track>, string>;
     album-tracks: func(album-id: string) -> result<list<track>, string>;
+    /// The tracks of the artist with this library key, the one an artist page and its actions name.
+    artist-tracks: func(artist-key: string) -> result<list<track>, string>;
     /// Every track, a page at a time; at most 500 a page.
     tracks-page: func(offset: u32, limit: u32) -> result<track-page, string>;
     playlists: func() -> result<list<playlist>, string>;

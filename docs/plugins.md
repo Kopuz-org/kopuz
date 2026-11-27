@@ -302,16 +302,38 @@ ask = "Words to search the library for" # optional: asked first, handed over as 
 [[integration.action]]
 id = "more-by-artist"
 label = "Play more by this artist"
-places = ["track", "album"]            # a track's or a selection's menu, an album's menu
+places = ["track", "album", "artist"]  # a track's or a selection's menu, an album's, an artist's
 ```
 
 Choosing one calls `run_action(id, target, input)`, where `target` is
 `ActionTarget::None` from the palette, `Tracks(keys)` from a track menu or a
-selection, or `Album(id)` from an album's. `Ok(Some(text))` is shown as a
+selection, `Album(id)` from an album's, or `Artist(key)` from an artist's.
+`Ok(Some(text))` is shown as a
 notice and `Err(text)` as a failure. Only a plugin that is turned on offers
 its actions; the palette finds them by their label like its own commands, and
 a menu lists them after kopuz's own. An action only runs where its manifest
 offers it.
+
+### Panels
+
+An integration can also draw a small panel on an album's or an artist's page:
+
+```toml
+[[integration.panel]]
+id = "more-by-artist"
+title = "More by this artist"
+places = ["album", "artist"]
+```
+
+On an album the panel sits under the tracks; on an artist it is a button
+under the header that opens it. Either way kopuz calls `render_panel(id,
+target)` with `PanelTarget::Album(id)` or `PanelTarget::Artist(key)` and draws
+the `Block`s it returns, in order: a `Heading`, a line of `Text`, `Tracks`
+(library keys, shown as rows that play from the one clicked) and an `Action`
+button that runs one of the plugin's own actions on the same target. The
+plugin says what goes in the panel, never how it looks, so it matches the
+rest of the app. A panel that returns no blocks or an `Err` is left out. It is drawn again when the page opens and when the
+library changes.
 
 ### Controlling playback
 
@@ -341,14 +363,15 @@ library = "read"
 
 Its listing says so with `"library": "read"`, and the Plugins page warns
 before it is installed. `kopuz_plugin_sdk::integration::library` then has
-`search(query, limit)`, `tracks(&keys)`, `album_tracks(id)`,
+`search(query, limit)`, `tracks(&keys)`, `album_tracks(id)`, `artist_tracks(key)`,
 `tracks_page(offset, limit)` to walk every track, `playlists()` with each
 one's track keys, and `favorites()`. A call hands back at most 500 tracks.
 Without the permission every call is refused, and a source may not ask for it.
 
 [`daemon/plugins/examples/remote`](../daemon/plugins/examples/remote) asks an
 address for commands on each tick and carries them out, so a phone shortcut or
-a script can work kopuz; `find <words>` plays what a library search finds.
+a script can work kopuz; `find <words>` plays what a library search finds. It
+also offers a "More by this artist" panel and action on album and artist pages.
 
 [`daemon/plugins/examples/webhook`](../daemon/plugins/examples/webhook) is a
 complete one: it posts each playback event to an address as JSON, and each

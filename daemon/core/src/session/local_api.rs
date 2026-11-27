@@ -920,6 +920,22 @@ impl api::PluginApi for LocalApi {
             .run_action(&plugin, &id, target, input)
             .await
     }
+
+    async fn plugin_panels(&self) -> Result<Vec<api::PluginPanel>, ApiError> {
+        Ok(self.integrations()?.plugins().panels())
+    }
+
+    async fn render_plugin_panel(
+        &self,
+        plugin: String,
+        id: String,
+        target: api::PanelTarget,
+    ) -> Result<Vec<api::PanelBlock>, ApiError> {
+        self.integrations()?
+            .plugins()
+            .render_panel(&plugin, &id, target)
+            .await
+    }
 }
 
 impl LocalApi {

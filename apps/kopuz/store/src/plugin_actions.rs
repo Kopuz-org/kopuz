@@ -1,13 +1,14 @@
-//! What the integration plugins turned on offer to run, and running it.
+//! What the integration plugins turned on offer to run and draw, and running it.
 
-use api::{ActionPlace, ActionTarget, PluginAction, Table};
+use api::{ActionPlace, ActionTarget, PanelPlace, PluginAction, PluginPanel, Table};
 use gpui_kit::{App, AppContext as _, Context, Entity, Subscription};
 
 use crate::{Link, Notices, Query};
 
 pub struct PluginActions {
     query: Entity<Query<Vec<PluginAction>>>,
-    _subscription: Subscription,
+    panels: Entity<Query<Vec<PluginPanel>>>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl PluginActions {
@@ -24,11 +25,47 @@ impl PluginActions {
                 cx,
             )
         });
-        let subscription = cx.observe(&query, |_, _, cx| cx.notify());
+        let panels = cx.new(|cx| {
+            Query::new(
+                &[Table::Plugins],
+                |api| async move { api.plugin_panels().await },
+                cx,
+            )
+        });
+        let subscriptions = vec![
+            cx.observe(&query, |_, _, cx| cx.notify()),
+            cx.observe(&panels, |_, _, cx| cx.notify()),
+        ];
         Self {
             query,
-            _subscription: subscription,
+            panels,
+            _subscriptions: subscriptions,
         }
+    }
+
+    /// The panels drawn at `place`, in the order the daemon listed them.
+    pub fn panels_at(&self, place: PanelPlace, cx: &App) -> Vec<PluginPanel> {
+        self.panels
+            .read(cx)
+            .value()
+            .map(|panels| {
+                panels
+                    .iter()
+                    .filter(|panel| panel.places.contains(&place))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// `plugin`'s action `id`, wherever it is offered.
+    pub fn find(&self, plugin: &str, id: &str, cx: &App) -> Option<PluginAction> {
+        self.query.read(cx).value().and_then(|actions| {
+            actions
+                .iter()
+                .find(|action| action.plugin == plugin && action.id == id)
+                .cloned()
+        })
     }
 
     /// The actions offered at `place`, in the order the daemon listed them.

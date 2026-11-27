@@ -23,7 +23,8 @@ pub mod bindings {
 }
 
 pub use bindings::exports::kopuz::plugin::integration::{
-    ActionTarget, AudioFrame, NowPlaying, PlaybackEvent, Setting, Started,
+    ActionTarget, AudioFrame, Block, NowPlaying, PanelAction, PanelTarget, PlaybackEvent, Setting,
+    Started,
 };
 
 use crate::Result;
@@ -91,6 +92,17 @@ pub trait Integration: Sized + 'static {
         let _ = (target, input);
         Err(format!("this plugin has no action {id}"))
     }
+
+    /// One of the manifest's `[[integration.panel]]` entries, for the album or
+    /// artist page it is drawn on. An empty list draws nothing.
+    fn render_panel(
+        &self,
+        id: &str,
+        target: PanelTarget,
+    ) -> std::result::Result<Vec<Block>, String> {
+        let _ = target;
+        Err(format!("this plugin has no panel {id}"))
+    }
 }
 
 /// Read the library, for a manifest with `library = "read"` under
@@ -135,6 +147,17 @@ pub mod library {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let _ = album_id;
+            no_host()
+        }
+    }
+
+    /// The tracks of the artist with this library key, as an artist page and its actions name it.
+    pub fn artist_tracks(artist_key: &str) -> Result<Vec<Track>, String> {
+        #[cfg(target_arch = "wasm32")]
+        return host::artist_tracks(artist_key);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = artist_key;
             no_host()
         }
     }
@@ -238,6 +261,16 @@ macro_rules! export_integration {
                 ::std::string::String,
             > {
                 $crate::integration::Integration::run_action(&self.0, &id, target, input)
+            }
+            fn render_panel(
+                &self,
+                id: ::std::string::String,
+                target: $crate::integration::PanelTarget,
+            ) -> ::std::result::Result<
+                ::std::vec::Vec<$crate::integration::Block>,
+                ::std::string::String,
+            > {
+                $crate::integration::Integration::render_panel(&self.0, &id, target)
             }
         }
 

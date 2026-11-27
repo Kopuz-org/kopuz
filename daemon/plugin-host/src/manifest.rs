@@ -48,6 +48,25 @@ pub struct Integration {
     /// Buttons the app shows for it, in the order listed.
     #[serde(default, rename = "action")]
     pub actions: Vec<Action>,
+    /// Sections it draws on the app's pages, in the order listed.
+    #[serde(default, rename = "panel")]
+    pub panels: Vec<Panel>,
+}
+
+/// A section the plugin fills, at the bottom of the pages it lists.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Panel {
+    pub id: String,
+    pub title: String,
+    pub places: Vec<PanelPlace>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PanelPlace {
+    Album,
+    Artist,
 }
 
 /// Something the person can choose to run, where the app offers it.
@@ -72,6 +91,8 @@ pub enum ActionPlace {
     Track,
     /// An album's menu, run on the album.
     Album,
+    /// An artist's menu, run on the artist.
+    Artist,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -101,6 +122,7 @@ impl Default for Integration {
             tick_ms: default_tick_ms(),
             fields: Vec::new(),
             actions: Vec::new(),
+            panels: Vec::new(),
         }
     }
 }
@@ -354,6 +376,12 @@ pub enum ManifestError {
     ActionWithoutPlace(String),
     #[error("the action `{0}` has a blank id, label or question")]
     BlankAction(String),
+    #[error("the integration lists panel `{0}` twice")]
+    DuplicatePanel(String),
+    #[error("the integration's panel `{0}` is drawn nowhere")]
+    PanelWithoutPlace(String),
+    #[error("the panel `{0}` has a blank id or title")]
+    BlankPanel(String),
 }
 
 impl Manifest {
@@ -466,6 +494,18 @@ impl Integration {
                 if !fits {
                     return Err(ManifestError::BadDefault(field.key.clone()));
                 }
+            }
+        }
+        let mut panels = std::collections::HashSet::new();
+        for panel in &self.panels {
+            if !panels.insert(panel.id.as_str()) {
+                return Err(ManifestError::DuplicatePanel(panel.id.clone()));
+            }
+            if panel.places.is_empty() {
+                return Err(ManifestError::PanelWithoutPlace(panel.id.clone()));
+            }
+            if panel.id.trim().is_empty() || panel.title.trim().is_empty() {
+                return Err(ManifestError::BlankPanel(panel.id.clone()));
             }
         }
         let mut actions = std::collections::HashSet::new();
@@ -782,6 +822,20 @@ mod tests {
         assert!(matches!(
             Manifest::parse(&no_options),
             Err(ManifestError::NoOptions(key)) if key == "mode"
+        ));
+        let panel = format!(
+            "{LIGHTS}\n[[integration.panel]]\nid = \"near\"\ntitle = \"Nearby\"\nplaces = [\"album\", \"artist\"]\n"
+        );
+        let parsed = Manifest::parse(&panel).expect("a panel");
+        let near = &parsed.integration.expect("integration").panels[0];
+        assert_eq!(near.places, [PanelPlace::Album, PanelPlace::Artist]);
+        assert!(matches!(
+            Manifest::parse(&format!("{panel}\n[[integration.panel]]\nid = \"near\"\ntitle = \"x\"\nplaces = [\"album\"]\n")),
+            Err(ManifestError::DuplicatePanel(id)) if id == "near"
+        ));
+        assert!(matches!(
+            Manifest::parse(&panel.replace("places = [\"album\", \"artist\"]", "places = []")),
+            Err(ManifestError::PanelWithoutPlace(id)) if id == "near"
         ));
         let actions = format!(
             "{LIGHTS}\n[[integration.action]]\nid = \"party\"\nlabel = \"Party\"\nplaces = [\"palette\"]\n"

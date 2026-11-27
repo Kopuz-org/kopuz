@@ -568,6 +568,13 @@ impl crate::integration_bindings::kopuz::plugin::library::Host for State {
         self.library()?.album_tracks(album_id).await
     }
 
+    async fn artist_tracks(
+        &mut self,
+        artist_key: String,
+    ) -> Result<Vec<crate::wit::library::Track>, String> {
+        self.library()?.artist_tracks(artist_key).await
+    }
+
     async fn tracks_page(
         &mut self,
         offset: u32,

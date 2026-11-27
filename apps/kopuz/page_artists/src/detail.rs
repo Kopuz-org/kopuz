@@ -14,6 +14,8 @@ use components::{
     TrackActions, TrackHeader, TrackList, TrackListEvent, TrackListOptions, icons, menus,
 };
 use config::{AlbumSortField, AlbumViewMode, SortCriterion, SortDirection};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -30,6 +32,8 @@ use crate::controls::{self, ViewModeKey};
 /// One artist from the library: tracks and albums.
 pub struct ArtistDetail {
     key: String,
+    /// What the integration plugins turned on draw under the artist's albums and tracks.
+    plugin_panels: Entity<components::plugin_ui::PluginPanels>,
     tracks: Entity<Query<TrackPage>>,
     detail: Entity<Query<api::ArtistDetail>>,
     list: Entity<TrackList>,
@@ -102,7 +106,13 @@ impl ArtistDetail {
             cx.observe(&PlayerModel::global(cx), |_, _, cx| cx.notify()),
             cx.subscribe(&list, Self::on_list_event),
         ];
+        let plugin_panels = cx.new(|cx| {
+            components::plugin_ui::PluginPanels::new(api::PanelTarget::Artist(key.clone()), cx)
+        });
+        // Its panels load after the page and come and go with their plugins.
+        cx.observe(&plugin_panels, |_, _, cx| cx.notify()).detach();
         Self {
+            plugin_panels,
             key,
             tracks,
             detail,
@@ -284,6 +294,40 @@ impl ArtistDetail {
         )
     }
 
+    /// A button per plugin panel, each opening it in a sheet: the list below fills the page, so a panel inline would squeeze it.
+    fn plugin_section(&self, cx: &App) -> Option<AnyElement> {
+        let panels = self.plugin_panels.read(cx).drawn(cx);
+        if panels.is_empty() {
+            return None;
+        }
+        let target = api::PanelTarget::Artist(self.key.clone());
+        Some(
+            h_flex()
+                .flex_none()
+                .flex_wrap()
+                .gap_2()
+                .children(panels.into_iter().map(|panel| {
+                    let target = target.clone();
+                    Button::new(SharedString::from(format!(
+                        "artist-plugin-{}-{}",
+                        panel.plugin, panel.id
+                    )))
+                    .custom(components::style::soft_button(cx.theme().foreground, cx))
+                    .small()
+                    .label(SharedString::from(panel.title.clone()))
+                    .on_click(move |_, window, cx| {
+                        components::plugin_ui::PluginPanels::open_sheet(
+                            target.clone(),
+                            panel.clone(),
+                            window,
+                            cx,
+                        )
+                    })
+                }))
+                .into_any_element(),
+        )
+    }
+
     fn name(&self, cx: &App) -> SharedString {
         self.detail
             .read(cx)
@@ -367,6 +411,7 @@ impl ArtistDetail {
             .gap_12()
             .child(self.hero(cx))
             .children(self.similar_row(cx))
+            .children(self.plugin_section(cx))
             .child(body)
             .when(selecting, |view| view.child(self.selection_bar(cx)))
             .into_any_element()
@@ -517,6 +562,7 @@ impl ArtistDetail {
             .min_h_0()
             .gap_12()
             .child(self.hero(cx))
+            .children(self.plugin_section(cx))
             .child(
                 v_flex()
                     .flex_1()

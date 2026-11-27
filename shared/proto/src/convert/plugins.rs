@@ -78,6 +78,7 @@ fn action_place_to_proto(place: api::ActionPlace) -> ActionPlace {
         api::ActionPlace::Palette => ActionPlace::Palette,
         api::ActionPlace::Track => ActionPlace::Track,
         api::ActionPlace::Album => ActionPlace::Album,
+        api::ActionPlace::Artist => ActionPlace::Artist,
     }
 }
 
@@ -87,6 +88,7 @@ fn action_place_from_proto(place: i32) -> Option<api::ActionPlace> {
         ActionPlace::Palette => Some(api::ActionPlace::Palette),
         ActionPlace::Track => Some(api::ActionPlace::Track),
         ActionPlace::Album => Some(api::ActionPlace::Album),
+        ActionPlace::Artist => Some(api::ActionPlace::Artist),
         ActionPlace::Unspecified => None,
     }
 }
@@ -133,10 +135,11 @@ pub fn run_plugin_action_to_proto(
     target: api::ActionTarget,
     input: Option<String>,
 ) -> RunPluginActionRequest {
-    let (track_keys, album_id) = match target {
-        api::ActionTarget::None => (Vec::new(), None),
-        api::ActionTarget::Tracks(keys) => (keys, None),
-        api::ActionTarget::Album(id) => (Vec::new(), Some(id)),
+    let (track_keys, album_id, artist_key) = match target {
+        api::ActionTarget::None => (Vec::new(), None, None),
+        api::ActionTarget::Tracks(keys) => (keys, None, None),
+        api::ActionTarget::Album(id) => (Vec::new(), Some(id), None),
+        api::ActionTarget::Artist(key) => (Vec::new(), None, Some(key)),
     };
     RunPluginActionRequest {
         plugin,
@@ -144,6 +147,7 @@ pub fn run_plugin_action_to_proto(
         track_keys,
         album_id,
         input,
+        artist_key,
     }
 }
 
@@ -151,17 +155,173 @@ pub fn run_plugin_action_to_proto(
 pub fn run_plugin_action_from_proto(
     request: RunPluginActionRequest,
 ) -> (String, String, api::ActionTarget, Option<String>) {
-    let target = match (request.album_id, request.track_keys.is_empty()) {
+    let target = match (request.album_id, request.artist_key) {
         (Some(album), _) => api::ActionTarget::Album(album),
-        (None, false) => api::ActionTarget::Tracks(request.track_keys),
-        (None, true) => api::ActionTarget::None,
+        (None, Some(artist)) => api::ActionTarget::Artist(artist),
+        (None, None) if !request.track_keys.is_empty() => {
+            api::ActionTarget::Tracks(request.track_keys)
+        }
+        (None, None) => api::ActionTarget::None,
     };
     (request.plugin, request.id, target, request.input)
+}
+
+/// A place this build does not know is left out rather than guessed.
+fn panel_place_from_proto(place: i32) -> Option<api::PanelPlace> {
+    match PanelPlace::try_from(place).ok()? {
+        PanelPlace::Album => Some(api::PanelPlace::Album),
+        PanelPlace::Artist => Some(api::PanelPlace::Artist),
+        PanelPlace::Unspecified => None,
+    }
+}
+
+pub fn plugin_panels_to_proto(panels: &[api::PluginPanel]) -> PluginPanelList {
+    PluginPanelList {
+        panels: panels
+            .iter()
+            .map(|panel| PluginPanel {
+                plugin: panel.plugin.clone(),
+                id: panel.id.clone(),
+                title: panel.title.clone(),
+                places: panel
+                    .places
+                    .iter()
+                    .map(|place| match place {
+                        api::PanelPlace::Album => PanelPlace::Album as i32,
+                        api::PanelPlace::Artist => PanelPlace::Artist as i32,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
+pub fn plugin_panels_from_proto(list: &PluginPanelList) -> Vec<api::PluginPanel> {
+    list.panels
+        .iter()
+        .map(|panel| api::PluginPanel {
+            plugin: panel.plugin.clone(),
+            id: panel.id.clone(),
+            title: panel.title.clone(),
+            places: panel
+                .places
+                .iter()
+                .filter_map(|place| panel_place_from_proto(*place))
+                .collect(),
+        })
+        .collect()
+}
+
+pub fn render_plugin_panel_to_proto(
+    plugin: String,
+    id: String,
+    target: api::PanelTarget,
+) -> RenderPluginPanelRequest {
+    RenderPluginPanelRequest {
+        plugin,
+        id,
+        target: Some(match target {
+            api::PanelTarget::Album(album) => render_plugin_panel_request::Target::AlbumId(album),
+            api::PanelTarget::Artist(artist) => {
+                render_plugin_panel_request::Target::ArtistKey(artist)
+            }
+        }),
+    }
+}
+
+/// The request's plugin, panel and target; a request naming no target is invalid.
+pub fn render_plugin_panel_from_proto(
+    request: RenderPluginPanelRequest,
+) -> Option<(String, String, api::PanelTarget)> {
+    let target = match request.target? {
+        render_plugin_panel_request::Target::AlbumId(album) => api::PanelTarget::Album(album),
+        render_plugin_panel_request::Target::ArtistKey(artist) => api::PanelTarget::Artist(artist),
+    };
+    Some((request.plugin, request.id, target))
+}
+
+pub fn panel_blocks_to_proto(blocks: &[api::PanelBlock]) -> PanelBlockList {
+    PanelBlockList {
+        blocks: blocks
+            .iter()
+            .map(|block| PanelBlock {
+                kind: Some(match block {
+                    api::PanelBlock::Heading(text) => panel_block::Kind::Heading(text.clone()),
+                    api::PanelBlock::Text(text) => panel_block::Kind::Text(text.clone()),
+                    api::PanelBlock::Tracks(keys) => {
+                        panel_block::Kind::Tracks(PanelTracks { keys: keys.clone() })
+                    }
+                    api::PanelBlock::Action { label, action } => {
+                        panel_block::Kind::Action(PanelActionButton {
+                            label: label.clone(),
+                            action: action.clone(),
+                        })
+                    }
+                }),
+            })
+            .collect(),
+    }
+}
+
+/// A block of a kind this build does not know is left out.
+pub fn panel_blocks_from_proto(list: &PanelBlockList) -> Vec<api::PanelBlock> {
+    list.blocks
+        .iter()
+        .filter_map(|block| {
+            Some(match block.kind.as_ref()? {
+                panel_block::Kind::Heading(text) => api::PanelBlock::Heading(text.clone()),
+                panel_block::Kind::Text(text) => api::PanelBlock::Text(text.clone()),
+                panel_block::Kind::Tracks(tracks) => api::PanelBlock::Tracks(tracks.keys.clone()),
+                panel_block::Kind::Action(button) => api::PanelBlock::Action {
+                    label: button.label.clone(),
+                    action: button.action.clone(),
+                },
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn panels_and_what_they_draw_survive_the_wire() {
+        let panels = vec![api::PluginPanel {
+            plugin: "remote".into(),
+            id: "more".into(),
+            title: "More by this artist".into(),
+            places: vec![api::PanelPlace::Album, api::PanelPlace::Artist],
+        }];
+        assert_eq!(
+            plugin_panels_from_proto(&plugin_panels_to_proto(&panels)),
+            panels
+        );
+        for target in [
+            api::PanelTarget::Album("al-1".into()),
+            api::PanelTarget::Artist("miles davis".into()),
+        ] {
+            let request =
+                render_plugin_panel_to_proto("remote".into(), "more".into(), target.clone());
+            assert_eq!(
+                render_plugin_panel_from_proto(request),
+                Some(("remote".into(), "more".into(), target))
+            );
+        }
+        let blocks = vec![
+            api::PanelBlock::Heading("More".into()),
+            api::PanelBlock::Text("by Miles".into()),
+            api::PanelBlock::Tracks(vec!["a".into(), "b".into()]),
+            api::PanelBlock::Action {
+                label: "Play them all".into(),
+                action: "more".into(),
+            },
+        ];
+        assert_eq!(
+            panel_blocks_from_proto(&panel_blocks_to_proto(&blocks)),
+            blocks
+        );
+    }
 
     #[test]
     fn actions_and_a_run_survive_the_wire() {
@@ -177,6 +337,7 @@ mod tests {
             actions
         );
         for target in [
+            api::ActionTarget::Artist("miles davis".into()),
             api::ActionTarget::None,
             api::ActionTarget::Tracks(vec!["a".into(), "b".into()]),
             api::ActionTarget::Album("al-1".into()),

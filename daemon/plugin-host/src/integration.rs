@@ -202,4 +202,10 @@ calls! {
         target: &wit::ActionTarget => target,
         input: Option<&str> => input
     ) -> Result<Option<String>, String>;
+
+    /// Draw one of the manifest's panels for `target`.
+    fn render_panel => call_render_panel(
+        id: &str => id,
+        target: &wit::PanelTarget => target
+    ) -> Result<Vec<wit::Block>, String>;
 }

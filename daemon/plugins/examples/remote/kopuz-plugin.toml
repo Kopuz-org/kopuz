@@ -31,4 +31,9 @@ ask = "Words to search the library for"
 [[integration.action]]
 id = "more-by-artist"
 label = "Play more by this artist"
-places = ["track"]
+places = ["track", "album", "artist"]
+
+[[integration.panel]]
+id = "more-by-artist"
+title = "More by this artist"
+places = ["album", "artist"]
