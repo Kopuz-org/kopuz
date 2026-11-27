@@ -14,6 +14,7 @@ pub mod market;
 mod plugin;
 mod registry;
 mod session;
+pub mod transition;
 
 pub use bridge::{Answer, Bridge, MAX_PAGE};
 pub use host::{Decryption, Opener};
@@ -54,8 +55,8 @@ mod integration_bindings {
 pub mod wit {
     pub use crate::bindings::kopuz::plugin::types::*;
     pub use crate::integration_bindings::exports::kopuz::plugin::integration::{
-        ActionTarget, AudioFrame, Block, FoundLyrics, NowPlaying, PanelAction, PanelTarget,
-        PlaybackEvent, Setting, Song, Started,
+        ActionTarget, AudioFrame, Bands, Block, DeckCurves, FoundLyrics, NowPlaying, PanelAction,
+        PanelTarget, PlaybackEvent, Setting, Song, Started, TransitionPlan,
     };
 
     pub mod playback {

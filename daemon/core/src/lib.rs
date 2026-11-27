@@ -49,6 +49,7 @@ pub mod services;
 pub mod session;
 pub mod sources;
 pub mod spotify;
+pub mod transition;
 pub mod url_download;
 pub mod video;
 mod wire;

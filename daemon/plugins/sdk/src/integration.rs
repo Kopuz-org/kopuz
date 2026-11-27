@@ -23,8 +23,8 @@ pub mod bindings {
 }
 
 pub use bindings::exports::kopuz::plugin::integration::{
-    ActionTarget, AudioFrame, Block, FoundLyrics, NowPlaying, PanelAction, PanelTarget,
-    PlaybackEvent, Setting, Song, Started,
+    ActionTarget, AudioFrame, Bands, Block, DeckCurves, FoundLyrics, NowPlaying, PanelAction,
+    PanelTarget, PlaybackEvent, Setting, Song, Started, TransitionPlan,
 };
 
 use crate::Result;
@@ -119,6 +119,21 @@ pub trait Integration: Sized + 'static {
     fn radio(&self, seed: Song, recent: Vec<String>) -> std::result::Result<Vec<String>, String> {
         let _ = (seed, recent);
         Ok(Vec::new())
+    }
+
+    /// How to go from `outgoing` into `incoming`, asked only when the
+    /// manifest's `[integration]` provides `transitions`, once the next track
+    /// is known and about ten seconds before kopuz would start its crossfade.
+    /// A deck's curves share one length, the last sample held past their
+    /// end; [`TransitionPlan`] says what each one is. `Ok(None)` leaves
+    /// kopuz's own crossfade.
+    fn transition(
+        &self,
+        outgoing: Song,
+        incoming: Song,
+    ) -> std::result::Result<Option<TransitionPlan>, String> {
+        let _ = (outgoing, incoming);
+        Ok(None)
     }
 }
 
@@ -307,6 +322,16 @@ macro_rules! export_integration {
                 ::std::string::String,
             > {
                 $crate::integration::Integration::radio(&self.0, seed, recent)
+            }
+            fn transition(
+                &self,
+                outgoing: $crate::integration::Song,
+                incoming: $crate::integration::Song,
+            ) -> ::std::result::Result<
+                ::std::option::Option<$crate::integration::TransitionPlan>,
+                ::std::string::String,
+            > {
+                $crate::integration::Integration::transition(&self.0, outgoing, incoming)
             }
         }
 

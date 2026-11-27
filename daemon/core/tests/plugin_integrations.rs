@@ -326,4 +326,27 @@ async fn an_integration_plugin_is_set_up_from_its_own_fields() {
         .await
         .expect_err("no bridge, so the library read is refused");
     assert!(unread.message.contains("library"), "{unread:?}");
+
+    // A plugin that provides transitions plans one between albums, checked whole.
+    let song = |key: &str, album: &str| plugin_host::wit::Song {
+        key: key.into(),
+        title: key.into(),
+        artist: "Ada".into(),
+        album: album.into(),
+        duration_ms: Some(200_000),
+    };
+    let plan = service
+        .plugins()
+        .transition(&song("a", "First"), &song("b", "Second"))
+        .await
+        .expect("the remote plans one");
+    assert_eq!(plan.length, 8.0);
+    assert!(
+        service
+            .plugins()
+            .transition(&song("a", "First"), &song("c", "First"))
+            .await
+            .is_none(),
+        "within an album it leaves the crossfade"
+    );
 }

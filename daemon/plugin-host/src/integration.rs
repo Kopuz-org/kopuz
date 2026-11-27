@@ -29,6 +29,10 @@ const LYRICS_LIMIT: Duration = Duration::from_secs(8);
 /// How long a plugin may pick what plays next before the source's own radio is tried.
 const RADIO_LIMIT: Duration = Duration::from_secs(10);
 
+/// How long a plugin may plan a transition: it is asked ten seconds before the
+/// transition and its plan is no use under three seconds before.
+const TRANSITION_LIMIT: Duration = Duration::from_secs(7);
+
 struct Live {
     plugin: Arc<Plugin>,
     instance: Instance<IntegrationPlugin>,
@@ -227,4 +231,11 @@ calls! {
         recent: &[String] => recent
     ) -> Result<Vec<String>, String>,
         within RADIO_LIMIT;
+
+    /// How to go from `from` into `to`, from a plugin that provides transitions.
+    fn transition => call_transition(
+        from: &wit::Song => from,
+        to: &wit::Song => to
+    ) -> Result<Option<wit::TransitionPlan>, String>,
+        within TRANSITION_LIMIT;
 }

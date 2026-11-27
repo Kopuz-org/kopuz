@@ -386,6 +386,40 @@ picks from the library needs `library = "read"` to know its keys.
 The remote example below provides radio: more by the same artist, then the
 rest of the library.
 
+### Transitions
+
+An integration can plan how one track goes into the next. The hook is in
+place, but playback asks it only once the transition engine that plays these
+plans lands; until then kopuz's own crossfade plays as before.
+
+```toml
+[integration]
+provides = ["transitions"]
+```
+
+Once the track after the playing one is known, about ten seconds before
+kopuz would start the transition, it calls `transition(outgoing, incoming)`
+with both tracks. The answer is a `TransitionPlan`, in seconds:
+
+- `start`, where in the outgoing track the transition begins, `length`, and
+  `entry`, where in the incoming track it starts playing;
+- `step`, how far apart the curves' samples are, above 0;
+- `bands`, where the high, mid (with its Q) and bass bands sit, in Hz;
+- for each deck, `outgoing` and `incoming`, curves sampled every `step`:
+  `volume` (linear), `speed` (rate), `high_db`, `mid_db` and `bass_db`, and
+  an optional `highpass_hz`, all of one length per deck. Past its last
+  sample a curve holds that value, so `length / step + 1` samples cover the
+  whole transition and fewer are fine.
+
+A plain crossfade is volume ramps with every other curve flat. The host turns
+away a plan that is not whole, with a number that is not finite, a negative
+time, a step of 0, an empty deck, curves of one deck of different lengths or
+more than 8192 samples a curve, and asks the next plugin. `Ok(None)`, a failure or an answer later
+than three seconds before the transition leaves kopuz's own crossfade, so the
+audio thread never waits on a plugin. The remote example plans an
+equal-power fade that hands the bass from one track to the other halfway
+when the album changes, and nothing within an album.
+
 ### Controlling playback
 
 An integration that asks for it may play, pause, skip, seek, set the volume

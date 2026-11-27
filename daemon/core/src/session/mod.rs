@@ -74,6 +74,18 @@ pub trait QueueMaterializer: Send + Sync {
         Vec::new()
     }
 
+    /// A plugin's plan for going from the track `outgoing` into `incoming`;
+    /// nothing when no plugin provides transitions, and the crossfade plays.
+    /// Ask [`crate::transition::ASK_BEFORE`] ahead and pass the answer through
+    /// [`crate::transition::in_time`].
+    async fn plugin_transition(
+        &self,
+        _outgoing: &str,
+        _incoming: &str,
+    ) -> Option<crate::transition::TransitionPlan> {
+        None
+    }
+
     /// Make a restored queue's rows addressable by key, since some were listed once and never stored.
     fn register_restored(&self, _tracks: &[Track]) {}
 }

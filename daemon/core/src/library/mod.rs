@@ -722,6 +722,17 @@ mod reads;
 
 pub(crate) use reads::album_info;
 
+/// `track`, under its library `key`, as a plugin is told of it.
+fn song_of(key: &str, track: &Track) -> plugin_host::wit::Song {
+    plugin_host::wit::Song {
+        key: key.to_string(),
+        title: track.title.clone(),
+        artist: track.artist.clone(),
+        album: track.album.clone(),
+        duration_ms: (track.duration > 0).then_some(track.duration * 1_000),
+    }
+}
+
 #[async_trait::async_trait]
 impl QueueMaterializer for LibraryService {
     async fn materialize(&self, context: &QueueContext) -> Result<Vec<Track>, ApiError> {
@@ -872,15 +883,29 @@ impl QueueMaterializer for LibraryService {
                 None => return Vec::new(),
             },
         };
-        let song = plugin_host::wit::Song {
-            key: seed.to_string(),
-            title: track.title.clone(),
-            artist: track.artist.clone(),
-            album: track.album.clone(),
-            duration_ms: (track.duration > 0).then_some(track.duration * 1_000),
-        };
-        let keys = plugins.radio(&song, recent).await;
+        let keys = plugins.radio(&song_of(seed, &track), recent).await;
         self.library_tracks(&keys).await
+    }
+
+    async fn plugin_transition(
+        &self,
+        outgoing: &str,
+        incoming: &str,
+    ) -> Option<crate::transition::TransitionPlan> {
+        let plugins = self.plugins.get().and_then(std::sync::Weak::upgrade)?;
+        let song = |key: &str| {
+            let key = key.to_string();
+            async move {
+                let track = match self.library_tracks(std::slice::from_ref(&key)).await.pop() {
+                    Some(track) => track,
+                    None => self.transient_track(&key)?,
+                };
+                Some(song_of(&key, &track))
+            }
+        };
+        let (outgoing, incoming) = (song(outgoing).await?, song(incoming).await?);
+        let plan = plugins.transition(&outgoing, &incoming).await?;
+        Some(plan.into())
     }
 
     fn register_restored(&self, tracks: &[Track]) {
