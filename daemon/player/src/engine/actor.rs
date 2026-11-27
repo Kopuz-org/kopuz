@@ -16,8 +16,8 @@ use super::rt::{Blend, GainRamp, Retired, RtCmd, RtSession, RtState};
 use super::sink::{AudioSink, DataCallbackFactory, SinkConfig};
 use super::worker::{WorkerCmd, WorkerHandle, WorkerMsg};
 use super::{
-    Command, EngineStatus, Event, FadingStatus, Failure, LeadingSilence, LoadOutcome, LoadReply,
-    LoadRequest, Phase, Transition,
+    Command, EngineStatus, Event, FadingStatus, Failure, FailureKind, LeadingSilence, LoadOutcome,
+    LoadReply, LoadRequest, Phase, Transition,
 };
 use crate::player::PlayerInitError;
 #[cfg(any(target_os = "android", target_os = "linux", target_os = "macos"))]
@@ -408,6 +408,7 @@ impl Actor {
             }
             Command::Seek { position, token } => self.handle_seek(position, token),
             Command::PlanOutgoing { token, at, mix } => self.handle_plan(token, at, mix),
+            Command::CancelPlan { token } => self.cancel_plan(token),
             Command::Pause => {
                 self.paused.store(true, Ordering::Relaxed);
                 self.sink.pause();
@@ -702,6 +703,13 @@ impl Actor {
             ..
         } = probed;
         let Pending { plan, reply, .. } = pending;
+        if let Some(mix) = plan.mix.as_ref()
+            && self.mix_ready(mix).is_none()
+        {
+            let from_token = mix.from_token;
+            self.refuse_mix_load(plan, reply, from_token);
+            return;
+        }
         let token = plan.token;
 
         match self.try_start_session(plan, source_sample_rate, seekable, replay_gain) {
@@ -936,7 +944,14 @@ impl Actor {
         &mut self,
         mix: Option<&IncomingMix>,
     ) -> Option<(SinkConfig, Session, MixStart)> {
-        let from_token = mix?.from_token;
+        let (config, start) = self.mix_ready(mix?)?;
+        let outgoing = self.current.take()?;
+        Some((config, outgoing, start))
+    }
+
+    /// The output config and mix start `mix` would enter on, see `take_mix_outgoing`.
+    fn mix_ready(&self, mix: &IncomingMix) -> Option<(SinkConfig, MixStart)> {
+        let from_token = mix.from_token;
         if self.paused.load(Ordering::Relaxed) || self.rt_tx.is_none() {
             return None;
         }
@@ -956,8 +971,36 @@ impl Actor {
                 MixMark::At(index) => index >= played.saturating_add(lead),
                 MixMark::Pending | MixMark::Refused => false,
             })?;
-        let outgoing = self.current.take()?;
-        Some((config, outgoing, start))
+        Some((config, start))
+    }
+
+    /// A load whose mix cannot play starts nothing: the outgoing track keeps
+    /// playing past its dropped plan, and the caller picks the transition.
+    fn refuse_mix_load(&mut self, plan: StartPlan, reply: Option<LoadReply>, from_token: u64) {
+        self.cancel_plan(from_token);
+        self.retire_worker(plan.worker);
+        if let Some(reply) = reply {
+            let _ = reply.send(Err(Failure {
+                kind: FailureKind::MixMissed,
+                message: "the planned mix cannot play".to_string(),
+            }));
+        }
+        self.emit(Event::MixMissed { token: from_token });
+        self.publish();
+    }
+
+    /// Drops the live session's plan; its worker disarms it unless the mix began.
+    fn cancel_plan(&mut self, token: u64) {
+        let Some(current) = self
+            .current
+            .as_mut()
+            .filter(|current| current.token == token)
+        else {
+            return;
+        };
+        if current.mix_start.take().is_some() {
+            let _ = current.worker.cmd_tx.send(WorkerCmd::CancelMix);
+        }
     }
 
     /// Hands the plan to the live session's worker, which arms or refuses it.

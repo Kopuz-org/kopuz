@@ -45,6 +45,9 @@ pub enum FailureKind {
     Unreachable,
     /// The media is not where its track says.
     NotFound,
+    /// The load carried an `IncomingMix` the outgoing session could not
+    /// play; nothing started.
+    MixMissed,
     Other,
 }
 
@@ -159,7 +162,7 @@ pub struct LoadRequest {
     pub service_replay_gain: ReplayGainInfo,
     /// The incoming deck of a planned mix. Played only when `from_token` is
     /// the current session with a `PlanOutgoing` still armed; otherwise the
-    /// load follows `transition` and plays flat.
+    /// load fails with `FailureKind::MixMissed` and the plan is dropped.
     pub mix: Option<IncomingMix>,
     pub reply: Option<LoadReply>,
 }
@@ -183,6 +186,11 @@ pub enum Command {
         token: u64,
         at: Duration,
         mix: DeckMix,
+    },
+    /// Drops session `token`'s plan while its mix has not started, so the
+    /// track plays to its end.
+    CancelPlan {
+        token: u64,
     },
     Pause,
     Resume,

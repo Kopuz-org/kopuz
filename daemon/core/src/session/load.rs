@@ -908,7 +908,9 @@ pub(super) fn engine_failure_code(kind: player::engine::FailureKind) -> api::Err
     match kind {
         player::engine::FailureKind::Unreachable => api::ErrorCode::SourceUnreachable,
         player::engine::FailureKind::NotFound => api::ErrorCode::NotFound,
-        player::engine::FailureKind::Other => api::ErrorCode::Internal,
+        player::engine::FailureKind::MixMissed | player::engine::FailureKind::Other => {
+            api::ErrorCode::Internal
+        }
     }
 }
 

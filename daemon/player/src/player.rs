@@ -198,6 +198,11 @@ impl Player {
         self.engine.send(Command::PlanOutgoing { token, at, mix });
     }
 
+    /// Drop session `token`'s plan before its mix begins.
+    pub fn cancel_plan(&self, token: u64) {
+        self.engine.send(Command::CancelPlan { token });
+    }
+
     /// Drop a load that is still resolving without touching live playback.
     pub fn cancel_pending_load(&self) {
         self.engine.send(Command::CancelPending);

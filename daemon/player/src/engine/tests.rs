@@ -2412,7 +2412,7 @@ fn load_mixed(
     factory: SourceFactory,
     duration: Duration,
     from_token: u64,
-) -> LoadOutcome {
+) -> Result<LoadOutcome, Failure> {
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
     engine.send(Command::Load(LoadRequest {
         token,
@@ -2429,10 +2429,7 @@ fn load_mixed(
         }),
         reply: Some(reply_tx),
     }));
-    reply_rx
-        .blocking_recv()
-        .expect("load reply")
-        .expect("load ok")
+    reply_rx.blocking_recv().expect("load reply")
 }
 
 fn samples_at(seconds: f64) -> usize {
@@ -2457,7 +2454,7 @@ fn a_planned_mix_brings_the_incoming_track_in_on_the_target_frame() {
     });
 
     let (factory_b, duration_b) = segments_factory(&[(5.0, LOUD / 2)]);
-    let outcome = load_mixed(&engine, 2, factory_b, duration_b, 1);
+    let outcome = load_mixed(&engine, 2, factory_b, duration_b, 1).expect("mixed load");
     assert!(outcome.mixed && outcome.crossfaded && !outcome.gapless);
     std::thread::sleep(Duration::from_millis(200));
 
@@ -2537,10 +2534,10 @@ fn a_plan_the_decoder_has_passed_is_refused() {
             .all(|token| seen.contains(&Event::MixMissed { token: *token }))
     });
 
-    // Without an armed plan the incoming load follows its transition.
+    // Without an armed plan the incoming load is refused.
     let (factory_b, duration_b) = wav_factory(10.0);
-    let outcome = load_mixed(&engine, 2, factory_b, duration_b, 1);
-    assert!(!outcome.mixed && outcome.crossfaded);
+    let refused = load_mixed(&engine, 2, factory_b, duration_b, 1);
+    assert_mix_missed(&refused);
     engine.shutdown();
 }
 
@@ -2621,7 +2618,7 @@ impl std::io::Seek for HeldReader {
 
 /// Loads B as the incoming deck while A's worker is held in a read, so the
 /// plan stays unanswered until the gate opens after `answer_after`.
-fn mixed_while_unanswered(answer_after: Duration) -> LoadOutcome {
+fn mixed_while_unanswered(answer_after: Duration) -> Result<LoadOutcome, Failure> {
     let (_sink, engine) = spawn_engine();
     let gate = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
@@ -2650,17 +2647,24 @@ fn mixed_while_unanswered(answer_after: Duration) -> LoadOutcome {
 #[test]
 fn a_ready_load_waits_for_the_worker_to_answer_the_plan() {
     let outcome = mixed_while_unanswered(Duration::from_millis(300));
-    assert!(outcome.mixed, "{outcome:?}");
+    assert!(outcome.is_ok_and(|outcome| outcome.mixed));
 }
 
 #[test]
-fn a_plan_left_unanswered_falls_back_to_the_transition() {
-    let outcome = mixed_while_unanswered(Duration::from_secs(5));
-    assert!(!outcome.mixed && outcome.crossfaded, "{outcome:?}");
+fn a_plan_left_unanswered_refuses_the_load() {
+    assert_mix_missed(&mixed_while_unanswered(Duration::from_secs(5)));
+}
+
+/// A load whose mix cannot play is refused rather than started some other way.
+fn assert_mix_missed(outcome: &Result<LoadOutcome, Failure>) {
+    assert!(
+        matches!(outcome, Err(failure) if failure.kind == FailureKind::MixMissed),
+        "{outcome:?}"
+    );
 }
 
 #[test]
-fn a_mix_start_playback_has_passed_falls_back_to_the_transition() {
+fn a_mix_start_playback_has_passed_refuses_the_load() {
     let (sink, engine) = spawn_engine();
 
     let (factory_a, duration_a) = wav_factory(30.0);
@@ -2680,8 +2684,36 @@ fn a_mix_start_playback_has_passed_falls_back_to_the_transition() {
     }
 
     let (factory_b, duration_b) = wav_factory(10.0);
-    let outcome = load_mixed(&engine, 2, factory_b, duration_b, 1);
-    assert!(!outcome.mixed && outcome.crossfaded, "{outcome:?}");
+    assert_mix_missed(&load_mixed(&engine, 2, factory_b, duration_b, 1));
+    assert_eq!(engine.status().token, 1, "A plays on");
+    engine.shutdown();
+}
+
+#[test]
+fn a_cancelled_plan_lets_the_track_play_past_its_mix() {
+    let (sink, engine) = spawn_engine();
+
+    let (factory_a, duration_a) = wav_factory(30.0);
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    engine.send(Command::PlanOutgoing {
+        token: 1,
+        at: Duration::from_secs(1),
+        mix: flat_mix(Duration::from_millis(500)),
+    });
+    engine.send(Command::CancelPlan { token: 1 });
+
+    // Armed, A would end at 1.5 s.
+    let mut pulled = 0;
+    while pulled < samples_at(2.5) {
+        pulled += sink.pull(4096).len();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let status = engine.status();
+    assert_eq!((status.token, status.phase), (1, Phase::Playing));
+
+    let (factory_b, duration_b) = wav_factory(10.0);
+    assert_mix_missed(&load_mixed(&engine, 2, factory_b, duration_b, 1));
     engine.shutdown();
 }
 
@@ -2700,7 +2732,7 @@ fn a_planned_mix_can_follow_a_planned_mix() {
         mix: flat_mix(Duration::from_millis(500)),
     });
     let (factory_b, duration_b) = wav_factory(30.0);
-    assert!(load_mixed(&engine, 2, factory_b, duration_b, 1).mixed);
+    assert!(load_mixed(&engine, 2, factory_b, duration_b, 1).is_ok_and(|outcome| outcome.mixed));
 
     pull_paced(&sink, || {
         drain_events(&mut events, &mut seen);
@@ -2716,7 +2748,7 @@ fn a_planned_mix_can_follow_a_planned_mix() {
     });
     std::thread::sleep(Duration::from_millis(200));
     let (factory_c, duration_c) = wav_factory(10.0);
-    let outcome = load_mixed(&engine, 3, factory_c, duration_c, 2);
+    let outcome = load_mixed(&engine, 3, factory_c, duration_c, 2).expect("mixed load");
 
     drain_events(&mut events, &mut seen);
     assert!(!seen.contains(&Event::MixMissed { token: 2 }), "{seen:?}");

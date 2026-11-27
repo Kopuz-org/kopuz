@@ -52,6 +52,8 @@ pub(crate) enum WorkerCmd {
         mix: DeckMix,
         start: MixStart,
     },
+    /// Drop the armed outgoing deck; a mix already playing carries on.
+    CancelMix,
     /// Re-seek and switch to a fresh ring (the old one was swapped out of the
     /// audio callback; pre-seek samples die with it). Carries the output config
     /// because a device rebuild can revive a session onto a stream with a
@@ -535,6 +537,18 @@ fn frames_until(seconds: f64, rate: f64) -> usize {
     (seconds * rate - FRAME_NOISE).ceil().max(0.0) as usize
 }
 
+/// Drops an armed outgoing deck, back to its lead-in if one played.
+fn disarm_mix(output: &mut Output) {
+    let Some(MixPhase::Armed { start, lead_in, .. }) = output
+        .mix
+        .take_if(|phase| matches!(phase, MixPhase::Armed { .. }))
+    else {
+        return;
+    };
+    start.refuse();
+    output.mix = lead_in.map(MixPhase::Live);
+}
+
 /// Arms the outgoing deck, or refuses when the decode has passed `at` or a
 /// mix still runs. An incoming deck past its mix plays on until `at`; a plan
 /// armed before is replaced.
@@ -608,6 +622,7 @@ fn park_at_eof(
             Ok(WorkerCmd::Stop) | Err(_) => return ParkOutcome::Exit,
             // The track has ended; nothing is left to mix from.
             Ok(WorkerCmd::Mix { start, .. }) => start.refuse(),
+            Ok(WorkerCmd::CancelMix) => {}
             Ok(WorkerCmd::Start { .. }) => {
                 tracing::warn!("unexpected Start for an already-started decode worker");
             }
@@ -655,6 +670,10 @@ fn apply_command(
         WorkerCmd::Stop => Some(FlowChange::Exit),
         WorkerCmd::Mix { at, mix, start } => {
             arm_mix(output, at, mix, start);
+            None
+        }
+        WorkerCmd::CancelMix => {
+            disarm_mix(output);
             None
         }
         WorkerCmd::Start { .. } => {
