@@ -474,7 +474,9 @@ impl Drive {
                 ));
             }
             for (bytes, sample) in output
-                .chunks_exact_mut(2)
+                .as_chunks_mut::<2>()
+                .0
+                .iter_mut()
                 .zip(std::slice::from_raw_parts(samples, SECTOR_BYTES / 2))
             {
                 bytes.copy_from_slice(&sample.to_le_bytes());

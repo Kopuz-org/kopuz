@@ -590,7 +590,7 @@ fn album_context_updates_both_sessions_during_a_crossfade() {
     }));
     for token in [1, 2] {
         let mut bytes = wav_bytes(5 * 44_100, 44_100, 2);
-        for sample in bytes[44..].chunks_exact_mut(2) {
+        for sample in bytes[44..].as_chunks_mut::<2>().0 {
             sample.copy_from_slice(&10_000_i16.to_le_bytes());
         }
         let (reply, received) = tokio::sync::oneshot::channel();

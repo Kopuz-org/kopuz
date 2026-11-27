@@ -416,10 +416,10 @@ impl NowPlaying {
                 let inset = (hero.size.width - side) / 2.;
                 (point(hero.origin.x + inset, hero.origin.y), side)
             }
-            None => match bar {
-                Some(bar) => (bar.origin, bar.size.width),
-                None => return None,
-            },
+            None => {
+                let bar = bar?;
+                (bar.origin, bar.size.width)
+            }
         };
         let local = point(origin.x - root.origin.x, origin.y - root.origin.y);
         // Back to the bar as quickly as the sheet fades, out of it as slowly as the sheet grows.
