@@ -287,6 +287,32 @@ An integration hears only what its `listens` list names:
   look for something itself, such as a button pressed on a remote. A tick
   still running when the next is due makes that one skip.
 
+### Actions
+
+An integration can offer buttons in the app. Each is listed once in the
+manifest, with where it is offered:
+
+```toml
+[[integration.action]]
+id = "find"
+label = "Play what the library finds for…"
+places = ["palette"]                   # the command palette
+ask = "Words to search the library for" # optional: asked first, handed over as `input`
+
+[[integration.action]]
+id = "more-by-artist"
+label = "Play more by this artist"
+places = ["track", "album"]            # a track's or a selection's menu, an album's menu
+```
+
+Choosing one calls `run_action(id, target, input)`, where `target` is
+`ActionTarget::None` from the palette, `Tracks(keys)` from a track menu or a
+selection, or `Album(id)` from an album's. `Ok(Some(text))` is shown as a
+notice and `Err(text)` as a failure. Only a plugin that is turned on offers
+its actions; the palette finds them by their label like its own commands, and
+a menu lists them after kopuz's own. An action only runs where its manifest
+offers it.
+
 ### Controlling playback
 
 An integration that asks for it may play, pause, skip, seek, set the volume

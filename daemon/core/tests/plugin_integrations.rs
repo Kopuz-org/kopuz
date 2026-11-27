@@ -65,11 +65,16 @@ impl Hook {
 
 /// The webhook example's files, written where an installed plugin goes.
 fn install_webhook(dir: &std::path::Path) {
+    install_example(dir, "webhook");
+}
+
+/// An example plugin's files, written where an installed plugin goes.
+fn install_example(dir: &std::path::Path, id: &str) {
     let example = bundled_plugins::examples()
         .iter()
-        .find(|example| example.manifest.contains("id = \"webhook\""))
-        .expect("the webhook example is built with the examples feature");
-    let at = dir.join("webhook");
+        .find(|example| example.manifest.contains(&format!("id = \"{id}\"")))
+        .expect("the examples are built with the examples feature");
+    let at = dir.join(id);
     std::fs::create_dir_all(&at).unwrap();
     std::fs::write(at.join(plugin_host::MANIFEST_FILE), example.manifest).unwrap();
     std::fs::write(
@@ -96,6 +101,7 @@ async fn an_integration_plugin_is_set_up_from_its_own_fields() {
     let dir = tempfile::tempdir().expect("tempdir");
     let plugins = dir.path().join("plugins");
     install_webhook(&plugins);
+    install_example(&plugins, "remote");
     server::plugins::init(Some(plugins), Vec::new()).await;
 
     let database = db::init(&dir.path().join("kopuz.db")).await.expect("db");
@@ -235,4 +241,45 @@ async fn an_integration_plugin_is_set_up_from_its_own_fields() {
             .all(|key| !key.starts_with("plugin/webhook/")),
         "forgetting leaves no secret behind"
     );
+
+    // Only a plugin that is turned on offers its actions, in its manifest's order.
+    assert!(service.plugins().actions().is_empty());
+    let orders = Hook::start().await;
+    service
+        .set_settings(
+            "plugin:remote",
+            vec![answer("url", &orders.url), answer("$enabled", "true")],
+        )
+        .await
+        .expect("the remote is on");
+    let actions = service.plugins().actions();
+    let ids: Vec<&str> = actions.iter().map(|action| action.id.as_str()).collect();
+    assert_eq!(ids, ["find", "more-by-artist"]);
+    assert_eq!(actions[0].places, [api::ActionPlace::Palette]);
+    assert!(actions[0].ask.is_some());
+
+    let elsewhere = service
+        .plugins()
+        .run_action("remote", "more-by-artist", api::ActionTarget::None, None)
+        .await
+        .expect_err("a track action run from the palette");
+    assert_eq!(elsewhere.code, ErrorCode::InvalidInput);
+    let off = service
+        .plugins()
+        .run_action("webhook", "find", api::ActionTarget::None, None)
+        .await
+        .expect_err("the webhook is off and has no actions");
+    assert_eq!(off.code, ErrorCode::NotFound);
+    // No bridge in this test, so the plugin's library search is refused and it says so.
+    let refused = service
+        .plugins()
+        .run_action(
+            "remote",
+            "find",
+            api::ActionTarget::None,
+            Some("blue".into()),
+        )
+        .await
+        .expect_err("nothing to search");
+    assert!(refused.message.contains("library"), "{refused:?}");
 }

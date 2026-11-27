@@ -191,6 +191,14 @@ pub fn info_of(id: &str, credentials: &Credentials) -> Option<IntegrationInfo> {
     plugin_of(id).map(|plugin| info(&plugin, credentials))
 }
 
+fn place_of(place: manifest::ActionPlace) -> api::ActionPlace {
+    match place {
+        manifest::ActionPlace::Palette => api::ActionPlace::Palette,
+        manifest::ActionPlace::Track => api::ActionPlace::Track,
+        manifest::ActionPlace::Album => api::ActionPlace::Album,
+    }
+}
+
 /// Plain text for a person, since the generated `Display` is the debug form.
 pub fn message(error: &wit::SourceError) -> String {
     match error {
@@ -328,6 +336,69 @@ impl PluginIntegrations {
         }
         self.running();
         Ok(info(&plugin, &held))
+    }
+
+    /// What the plugins turned on offer to run, in their manifests' order.
+    pub fn actions(&self) -> Vec<api::PluginAction> {
+        let mut running = self.running();
+        running.sort_by(|a, b| a.plugin().id().cmp(b.plugin().id()));
+        running
+            .iter()
+            .flat_map(|integration| {
+                let plugin = integration.plugin();
+                spec(plugin.manifest())
+                    .actions
+                    .iter()
+                    .map(|action| api::PluginAction {
+                        plugin: plugin.id().to_string(),
+                        id: action.id.clone(),
+                        label: action.label.clone(),
+                        places: action.places.iter().map(|place| place_of(*place)).collect(),
+                        ask: action.ask.clone(),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    /// Run `plugin`'s action `id` on `target`, if it is turned on, lists the
+    /// action, and offers it where `target` came from.
+    pub async fn run_action(
+        &self,
+        plugin: &str,
+        id: &str,
+        target: api::ActionTarget,
+        input: Option<String>,
+    ) -> Result<Option<String>, ApiError> {
+        let integration = self
+            .running()
+            .into_iter()
+            .find(|integration| integration.plugin().id() == plugin)
+            .ok_or_else(|| ApiError::not_found("that plugin is not turned on"))?;
+        let manifest = integration.plugin();
+        let action = spec(manifest.manifest())
+            .actions
+            .iter()
+            .find(|action| action.id == id)
+            .ok_or_else(|| ApiError::not_found("the plugin has no such action"))?;
+        let wanted = match &target {
+            api::ActionTarget::None => manifest::ActionPlace::Palette,
+            api::ActionTarget::Tracks(_) => manifest::ActionPlace::Track,
+            api::ActionTarget::Album(_) => manifest::ActionPlace::Album,
+        };
+        if !action.places.contains(&wanted) {
+            return Err(ApiError::invalid_input("the action is not offered there"));
+        }
+        let target = match target {
+            api::ActionTarget::None => wit::ActionTarget::None,
+            api::ActionTarget::Tracks(keys) => wit::ActionTarget::Tracks(keys),
+            api::ActionTarget::Album(album) => wit::ActionTarget::Album(album),
+        };
+        match integration.run_action(id, &target, input.as_deref()).await {
+            Ok(Ok(message)) => Ok(message),
+            Ok(Err(message)) => Err(ApiError::invalid_input(message)),
+            Err(error) => Err(ApiError::internal(error.to_string())),
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<Integration>>> {

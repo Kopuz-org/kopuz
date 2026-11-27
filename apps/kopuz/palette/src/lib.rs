@@ -53,6 +53,10 @@ const SCRIM: f32 = 0.55;
 const FEW: usize = 5;
 const MANY: usize = 8;
 
+/// Rows kept for plugins' actions after kopuz's own commands, so a full list of
+/// those never pushes every plugin action out.
+const PLUGIN_ROOM: usize = 4;
+
 /// Somewhere to go, with the command that already has a keystroke for it.
 struct Place {
     name: &'static str,
@@ -103,6 +107,8 @@ enum Act {
     Recall(SharedString),
     /// Hand the query to Discover, which shows every match rather than the best few.
     Browse(SharedString),
+    /// One of a plugin's actions, run on what the palette was opened for.
+    Plugin(api::PluginAction, api::ActionTarget),
 }
 
 /// One drawn row, already ranked.
@@ -207,6 +213,10 @@ impl Palette {
                     }
                 }),
                 cx.observe(&PlaylistsModel::global(cx), |this, _, cx| this.rebuild(cx)),
+                cx.observe(
+                    &store::plugin_actions::PluginActions::global(cx),
+                    |this, _, cx| this.rebuild(cx),
+                ),
             ];
         let open = chrome.read(cx).is_quick_search_open();
         Self {
@@ -472,6 +482,10 @@ impl Palette {
                 self.close(cx);
                 Navigator::global(cx).update(cx, |navigator, cx| navigator.go(route, cx));
             }
+            Act::Plugin(action, target) => {
+                self.close(cx);
+                commands::run_plugin_action(action, target, window, cx);
+            }
             Act::Setting { slug, title } => {
                 self.close(cx);
                 components::settings::set_highlight(Some(title), cx);
@@ -611,7 +625,44 @@ impl Palette {
                 Some((score, self.command_item(command, target, title, cx)))
             })
             .collect();
-        ranked(scored, MANY)
+        let mut items = ranked(scored, MANY);
+        items.extend(ranked(self.plugin_items(target, cx), PLUGIN_ROOM));
+        items
+    }
+
+    /// The plugins' actions offered where `target` is, scored like commands.
+    fn plugin_items(&self, target: &Target, cx: &gpui_kit::App) -> Vec<(i32, Item)> {
+        let (place, on) = match target {
+            Target::None => (api::ActionPlace::Palette, api::ActionTarget::None),
+            Target::Tracks { keys, .. } => (
+                api::ActionPlace::Track,
+                api::ActionTarget::Tracks(keys.iter().map(|key| key.to_string()).collect()),
+            ),
+            Target::Album { id, .. } => (
+                api::ActionPlace::Album,
+                api::ActionTarget::Album(id.to_string()),
+            ),
+            _ => return Vec::new(),
+        };
+        store::plugin_actions::PluginActions::global(cx)
+            .read(cx)
+            .at(place, cx)
+            .into_iter()
+            .filter_map(|action| {
+                let title = SharedString::from(action.label.clone());
+                let score = fuzzy::score(&title, &self.query)?;
+                let item = Item {
+                    title,
+                    subtitle: Some(SharedString::from(action.plugin.clone())),
+                    icon: icons::GEARS,
+                    hint: None,
+                    act: Act::Plugin(action, on.clone()),
+                    target: None,
+                    faded: false,
+                };
+                Some((score, item))
+            })
+            .collect()
     }
 
     fn command_item(

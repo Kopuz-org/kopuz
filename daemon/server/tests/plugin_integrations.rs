@@ -299,7 +299,13 @@ impl plugin_host::Bridge for FakeKopuz {
     }
 
     fn tracks(&self, keys: Vec<String>) -> plugin_host::Answer<Vec<wit::library::Track>> {
-        let found = keys.iter().map(|key| library_track(key)).collect();
+        let found = keys
+            .iter()
+            .map(|key| wit::library::Track {
+                artist: "Miles Davis".into(),
+                ..library_track(key)
+            })
+            .collect();
         Box::pin(async move { Ok(found) })
     }
 
@@ -431,4 +437,46 @@ async fn a_plugin_that_did_not_ask_is_refused_the_library() {
         kopuz.seen.lock().unwrap().is_empty(),
         "nothing was searched, so nothing was queued"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_action_runs_with_what_the_person_typed_or_picked() {
+    let orders = Hook::answering(200, "").await;
+    let kopuz = Arc::new(FakeKopuz::default());
+    let integration = Integration::new(remote(&[]), vec![("url".into(), orders.url.clone())])
+        .with_bridge(kopuz.clone());
+
+    let found = integration
+        .run_action("find", &wit::ActionTarget::None, Some("blue"))
+        .await
+        .expect("ran");
+    assert_eq!(
+        found,
+        Ok(Some("Playing what the library has for blue".into()))
+    );
+
+    let more = integration
+        .run_action(
+            "more-by-artist",
+            &wit::ActionTarget::Tracks(vec!["kind-of-blue-1".into()]),
+            None,
+        )
+        .await
+        .expect("ran");
+    assert_eq!(more, Ok(Some("Playing more by Miles Davis".into())));
+    assert_eq!(
+        *kopuz.seen.lock().unwrap(),
+        [
+            "search blue 50".to_string(),
+            r#"queue QueueMode::Replace ["blue-1", "blue-2"]"#.to_string(),
+            "search Miles Davis 50".to_string(),
+            r#"queue QueueMode::Replace ["blue-1", "blue-2"]"#.to_string(),
+        ]
+    );
+
+    let blank = integration
+        .run_action("find", &wit::ActionTarget::None, Some("  "))
+        .await
+        .expect("ran");
+    assert_eq!(blank, Err("type something to search for".into()));
 }

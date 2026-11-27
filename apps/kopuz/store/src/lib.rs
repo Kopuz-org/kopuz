@@ -28,6 +28,7 @@ mod player;
 mod playing;
 mod playlist_io;
 mod playlists;
+pub mod plugin_actions;
 mod query;
 mod queue;
 mod settings_filter;
@@ -171,4 +172,5 @@ pub fn init(cx: &mut App) {
     register(cx, SettingsFilter::new);
     register(cx, SetupModel::new);
     register(cx, UpdateModel::new);
+    register(cx, plugin_actions::PluginActions::new);
 }

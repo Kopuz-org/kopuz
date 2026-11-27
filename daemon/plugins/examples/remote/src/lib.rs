@@ -5,7 +5,7 @@ use kopuz_plugin_sdk::SourceError;
 use kopuz_plugin_sdk::http::Client;
 use kopuz_plugin_sdk::integration::library;
 use kopuz_plugin_sdk::integration::playback::{self, Command, QueueMode};
-use kopuz_plugin_sdk::integration::{Integration, Settings};
+use kopuz_plugin_sdk::integration::{ActionTarget, Integration, Settings};
 
 pub struct Remote {
     http: Client,
@@ -80,6 +80,33 @@ impl Integration for Remote {
             if let Err(error) = done {
                 kopuz_plugin_sdk::warn!("the remote's command failed: {error}");
             }
+        }
+    }
+
+    fn run_action(
+        &self,
+        id: &str,
+        target: ActionTarget,
+        input: Option<String>,
+    ) -> Result<Option<String>, String> {
+        match (id, target) {
+            ("find", _) => {
+                let words = input.filter(|words| !words.trim().is_empty());
+                let words = words.ok_or("type something to search for")?;
+                find(&words)?;
+                Ok(Some(format!("Playing what the library has for {words}")))
+            }
+            ("more-by-artist", ActionTarget::Tracks(keys)) => {
+                let first = library::tracks(&keys[..keys.len().min(1)])?;
+                let artist = first
+                    .first()
+                    .map(|track| track.artist.clone())
+                    .filter(|artist| !artist.is_empty())
+                    .ok_or("the track has no artist")?;
+                find(&artist)?;
+                Ok(Some(format!("Playing more by {artist}")))
+            }
+            _ => Err(format!("the remote has no action {id} for that")),
         }
     }
 }

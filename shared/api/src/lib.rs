@@ -59,7 +59,8 @@ pub use playlists::{
     PlaylistInfo, PlaylistPrivacy, PlaylistReorder,
 };
 pub use plugins::{
-    LIBRARY_GRANT, PLAYBACK_GRANT, PluginCatalog, PluginInfo, PluginOrigin, PluginUpdate,
+    ActionPlace, ActionTarget, LIBRARY_GRANT, PLAYBACK_GRANT, PluginAction, PluginCatalog,
+    PluginInfo, PluginOrigin, PluginUpdate,
 };
 pub use prefs::{
     FrontendPref, MAX_PREF_ENTRIES_PER_CALL, MAX_PREF_FRONTEND_BYTES, MAX_PREF_KEY_BYTES,
@@ -730,6 +731,20 @@ pub trait PluginApi: Send + Sync {
     /// Remove an installed community plugin. Sources of its services stay,
     /// reading what they cached, until it is installed again.
     async fn uninstall_plugin(&self, id: String) -> Result<(), ApiError>;
+
+    /// What the integration plugins turned on offer to run, in the order
+    /// their manifests list it. Changes with `Table::Plugins`.
+    async fn plugin_actions(&self) -> Result<Vec<PluginAction>, ApiError>;
+
+    /// Run one of [`Self::plugin_actions`] on `target`; `input` answers its
+    /// `ask`. A line the plugin answered with is for the person to read.
+    async fn run_plugin_action(
+        &self,
+        plugin: String,
+        id: String,
+        target: ActionTarget,
+        input: Option<String>,
+    ) -> Result<Option<String>, ApiError>;
 }
 
 /// Subscribe to the state stream. Every subscriber gets every event from the

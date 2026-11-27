@@ -62,6 +62,16 @@ interface integration {
         beat: bool,
     }
 
+    /// What an action was run on.
+    variant action-target {
+        /// Nothing: it was run from the command palette.
+        none,
+        /// Library track keys, from a track's menu or a selection.
+        tracks(list<string>),
+        /// An album id, from an album's menu.
+        album(string),
+    }
+
     resource instance {
         constructor(settings: list<setting>);
 
@@ -84,5 +94,10 @@ interface integration {
         /// button pressed on a remote. A tick still running when the next is
         /// due makes that one skip.
         on-tick: func();
+
+        /// One of the manifest's `[[integration.action]]` entries, chosen by
+        /// the person. `input` is what they typed when the action has an
+        /// `ask`. An answer is shown to them as a notice; an error as a failure.
+        run-action: func(id: string, target: action-target, input: option<string>) -> result<option<string>, string>;
     }
 }

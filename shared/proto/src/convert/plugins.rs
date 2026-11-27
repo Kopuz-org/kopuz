@@ -73,9 +73,126 @@ pub fn plugin_catalog_from_proto(value: &PluginCatalog) -> api::PluginCatalog {
     }
 }
 
+fn action_place_to_proto(place: api::ActionPlace) -> ActionPlace {
+    match place {
+        api::ActionPlace::Palette => ActionPlace::Palette,
+        api::ActionPlace::Track => ActionPlace::Track,
+        api::ActionPlace::Album => ActionPlace::Album,
+    }
+}
+
+/// A place this build does not know is left out rather than guessed.
+fn action_place_from_proto(place: i32) -> Option<api::ActionPlace> {
+    match ActionPlace::try_from(place).ok()? {
+        ActionPlace::Palette => Some(api::ActionPlace::Palette),
+        ActionPlace::Track => Some(api::ActionPlace::Track),
+        ActionPlace::Album => Some(api::ActionPlace::Album),
+        ActionPlace::Unspecified => None,
+    }
+}
+
+pub fn plugin_actions_to_proto(actions: &[api::PluginAction]) -> PluginActionList {
+    PluginActionList {
+        actions: actions
+            .iter()
+            .map(|action| PluginAction {
+                plugin: action.plugin.clone(),
+                id: action.id.clone(),
+                label: action.label.clone(),
+                places: action
+                    .places
+                    .iter()
+                    .map(|place| action_place_to_proto(*place) as i32)
+                    .collect(),
+                ask: action.ask.clone(),
+            })
+            .collect(),
+    }
+}
+
+pub fn plugin_actions_from_proto(list: &PluginActionList) -> Vec<api::PluginAction> {
+    list.actions
+        .iter()
+        .map(|action| api::PluginAction {
+            plugin: action.plugin.clone(),
+            id: action.id.clone(),
+            label: action.label.clone(),
+            places: action
+                .places
+                .iter()
+                .filter_map(|place| action_place_from_proto(*place))
+                .collect(),
+            ask: action.ask.clone(),
+        })
+        .collect()
+}
+
+pub fn run_plugin_action_to_proto(
+    plugin: String,
+    id: String,
+    target: api::ActionTarget,
+    input: Option<String>,
+) -> RunPluginActionRequest {
+    let (track_keys, album_id) = match target {
+        api::ActionTarget::None => (Vec::new(), None),
+        api::ActionTarget::Tracks(keys) => (keys, None),
+        api::ActionTarget::Album(id) => (Vec::new(), Some(id)),
+    };
+    RunPluginActionRequest {
+        plugin,
+        id,
+        track_keys,
+        album_id,
+        input,
+    }
+}
+
+/// The request's target, plugin, id and input.
+pub fn run_plugin_action_from_proto(
+    request: RunPluginActionRequest,
+) -> (String, String, api::ActionTarget, Option<String>) {
+    let target = match (request.album_id, request.track_keys.is_empty()) {
+        (Some(album), _) => api::ActionTarget::Album(album),
+        (None, false) => api::ActionTarget::Tracks(request.track_keys),
+        (None, true) => api::ActionTarget::None,
+    };
+    (request.plugin, request.id, target, request.input)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn actions_and_a_run_survive_the_wire() {
+        let actions = vec![api::PluginAction {
+            plugin: "remote".into(),
+            id: "find".into(),
+            label: "Play what the library finds for…".into(),
+            places: vec![api::ActionPlace::Palette, api::ActionPlace::Track],
+            ask: Some("Words".into()),
+        }];
+        assert_eq!(
+            plugin_actions_from_proto(&plugin_actions_to_proto(&actions)),
+            actions
+        );
+        for target in [
+            api::ActionTarget::None,
+            api::ActionTarget::Tracks(vec!["a".into(), "b".into()]),
+            api::ActionTarget::Album("al-1".into()),
+        ] {
+            let request = run_plugin_action_to_proto(
+                "remote".into(),
+                "find".into(),
+                target.clone(),
+                Some("blue".into()),
+            );
+            assert_eq!(
+                run_plugin_action_from_proto(request),
+                ("remote".into(), "find".into(), target, Some("blue".into()))
+            );
+        }
+    }
 
     #[test]
     fn a_catalog_survives_the_wire() {

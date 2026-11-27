@@ -1581,6 +1581,29 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::Unit {}))
     }
 
+    async fn get_plugin_actions(
+        &self,
+        _request: Request<proto::GetPluginActionsRequest>,
+    ) -> Result<Response<proto::PluginActionList>, Status> {
+        let actions = self.0.api.plugin_actions().await.map_err(failed)?;
+        Ok(Response::new(convert::plugin_actions_to_proto(&actions)))
+    }
+
+    async fn run_plugin_action(
+        &self,
+        request: Request<proto::RunPluginActionRequest>,
+    ) -> Result<Response<proto::PluginActionAnswer>, Status> {
+        let (plugin, id, target, input) =
+            convert::run_plugin_action_from_proto(request.into_inner());
+        let message = self
+            .0
+            .api
+            .run_plugin_action(plugin, id, target, input)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::PluginActionAnswer { message }))
+    }
+
     async fn preview_equalizer(
         &self,
         request: Request<proto::EqualizerSettings>,
