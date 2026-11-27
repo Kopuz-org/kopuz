@@ -181,7 +181,7 @@ impl Session {
                 self.publish(state_tx, false);
             }
             EngineEvent::MixMissed { token } => {
-                // A load already sent falls back to its crossfade in the engine.
+                // A load already sent is refused; the crossfade window takes over.
                 tracing::debug!(token, "the planned mix will not play");
                 self.mixes.missed = Some(token);
             }
@@ -275,10 +275,18 @@ impl Session {
             return None;
         }
         let (idx, pair) = self.mix_pair()?;
-        if !self.should_crossfade(self.model.track_at(idx)) {
+        let next = self.model.track_at(idx);
+        // An integration plays the next track itself; the engine cannot mix into it.
+        if !self.should_crossfade(next) || next.is_some_and(|track| self.sink_for(track).is_some())
+        {
             return None;
         }
         let mix = self.mixes.plan(&pair)?.clone();
+        // A plan past the end of this track would never start.
+        let duration = Duration::from_secs(self.model.current_track()?.duration);
+        if mix.start >= duration {
+            return None;
+        }
         Some((idx, mix))
     }
 

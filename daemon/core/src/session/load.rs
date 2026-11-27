@@ -38,7 +38,8 @@ impl Session {
             } else {
                 Transition::Immediate
             };
-        // A planned mix crossfades for its own length if the engine cannot play it.
+        // A planned mix fades for its own length; the engine refuses it rather
+        // than start it otherwise.
         let staged = self
             .mixes
             .take_staged(&track.id.key())
@@ -192,6 +193,7 @@ impl Session {
         let from_token = self.intent.token();
         let token = self.allocate_token();
         let entry = staged.as_ref().map(|staged| staged.entry);
+        self.mixes.loading = staged.as_ref().map(|_| (token, from_token));
         self.mixes.incoming = staged.map(|staged| {
             (
                 token,
@@ -423,6 +425,7 @@ impl Session {
         self.load_task = None;
         match finished.result {
             Some(Ok(outcome)) => {
+                self.mixes.settle(finished.token);
                 self.set_intent(PlaybackIntent::Committed {
                     token: finished.token,
                 });
@@ -486,6 +489,13 @@ impl Session {
                     self.publish(state_tx, false);
                 }
                 self.prefetch_next();
+            }
+            Some(Err(error)) if error.kind == player::engine::FailureKind::MixMissed => {
+                // Not a guard: a stale miss must not fall through to the failure arm.
+                let refused = self.mix_refused(finished.token);
+                if refused {
+                    self.publish(state_tx, false);
+                }
             }
             Some(Err(error)) => {
                 tracing::error!(error = %error, "playback failed");

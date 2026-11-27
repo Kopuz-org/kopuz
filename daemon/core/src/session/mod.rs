@@ -2528,6 +2528,9 @@ impl Session {
             task.abort();
         }
         self.player.cancel_pending_load();
+        if let Some((token, _)) = self.mixes.loading {
+            self.drop_mix_plan(token);
+        }
     }
 
     fn allocate_token(&mut self) -> u64 {
@@ -2547,6 +2550,7 @@ impl Session {
         code: api::ErrorCode,
         error: impl std::fmt::Display,
     ) -> bool {
+        self.drop_mix_plan(token);
         let intent = self.intent;
         if intent.token() != token {
             return false;

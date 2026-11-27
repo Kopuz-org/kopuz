@@ -41,6 +41,8 @@ pub(super) struct MixPlans {
     pub staged: Option<StagedMix>,
     /// The incoming deck of the load with this token.
     pub incoming: Option<(u64, IncomingMix)>,
+    /// The load carrying a mix and the session whose plan it answers, until it settles.
+    pub loading: Option<(u64, u64)>,
 }
 
 impl MixPlans {
@@ -60,6 +62,16 @@ impl MixPlans {
             return None;
         }
         self.incoming.take().map(|(_, mix)| mix)
+    }
+
+    /// The session whose plan the load with `token` answers; clears it.
+    pub fn settle(&mut self, token: u64) -> Option<u64> {
+        let (owner, from_token) = self.loading?;
+        if owner != token {
+            return None;
+        }
+        self.loading = None;
+        Some(from_token)
     }
 
     fn should_ask(&self, pair: &Pair) -> bool {
@@ -154,5 +166,31 @@ impl Session {
         if self.try_arm_mix(position) {
             self.publish(state_tx, false);
         }
+    }
+
+    /// The engine would not mix the load with `token` and started nothing:
+    /// the outgoing track plays on and its crossfade window takes over.
+    pub(super) fn mix_refused(&mut self, token: u64) -> bool {
+        self.mixes.settle(token);
+        let PlaybackIntent::Loading { from_token, .. } = self.intent else {
+            return false;
+        };
+        if self.intent.token() != token {
+            return false;
+        }
+        tracing::debug!(token, "the engine refused the planned mix");
+        self.mixes.missed = Some(from_token);
+        self.pending_transition = None;
+        self.set_intent(PlaybackIntent::Committed { token: from_token });
+        true
+    }
+
+    /// A load carrying a mix that will not come: drop the plan that waits for it.
+    pub(super) fn drop_mix_plan(&mut self, token: u64) {
+        let Some(from_token) = self.mixes.settle(token) else {
+            return;
+        };
+        self.player.cancel_plan(from_token);
+        self.mixes.missed = Some(from_token);
     }
 }
