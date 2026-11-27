@@ -44,6 +44,9 @@ pub struct Listing {
     /// picked for its sources.
     #[serde(default)]
     pub folders: FolderAccess,
+    /// Shown before install: an integration rather than a source.
+    #[serde(default)]
+    pub integration: bool,
     pub manifest: Download,
     pub component: Download,
 }
@@ -195,6 +198,7 @@ pub fn check_manifest(
     if declared != asked
         || services != listed_services
         || manifest.permissions.folders != listing.folders
+        || manifest.is_integration() != listing.integration
     {
         return Err(MarketError::PermissionsDiffer);
     }
@@ -325,6 +329,7 @@ mod tests {
             services: vec!["bandcamp".into()],
             network: vec!["*.bandcamp.com".into()],
             folders: FolderAccess::None,
+            integration: false,
             manifest: Download {
                 url: "https://example.test/kopuz-plugin.toml".into(),
                 sha256: sha(MANIFEST.as_bytes()),

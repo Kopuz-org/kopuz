@@ -285,7 +285,9 @@ An integration hears only what its `listens` list names:
 [`daemon/plugins/examples/webhook`](../daemon/plugins/examples/webhook) is a
 complete one: it posts each playback event to an address as JSON, and each
 beat too when its **Post beats** toggle is on. An integration plugin is listed in the marketplace like any
-other, with an empty `services` list.
+other, with an empty `services` list and `"integration": true`; the Plugins
+page marks it as one and, once it is installed, offers a Set up button that
+opens Connectivity.
 
 ## Installing by hand
 
@@ -368,8 +370,9 @@ each:
 ```
 
 Installing fetches both files over HTTPS, refuses either if its hash differs,
-and refuses a manifest whose id, version, services, hosts or folder access
-differ from the listing; `folders` defaults to `"none"`. The index is fetched
+and refuses a manifest whose id, version, services, hosts, folder access or
+`integration` flag differ from the listing; `folders` defaults to `"none"` and
+`integration` to `false`. The index is fetched
 again for the install, so the hosts the Plugins
 page showed are sent with the request, and an install whose listing now reaches
 other hosts is refused. The component is compiled once before anything is

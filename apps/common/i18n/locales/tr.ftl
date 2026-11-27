@@ -1195,6 +1195,9 @@ plugin_install = Kur
 plugin_update = Güncelle
 plugin_remove = Kaldır
 plugin_working = Çalışıyor…
+plugin_integration = Integration
+plugin_integration_hint = Adds an integration rather than a source. Turn it on under Connectivity.
+plugin_set_up = Set up
 library_empty_offline = Henüz çevrimdışı kullanılabilen bir şey yok
 library_empty_offline_detail = Şarkıları indir ya da çevrimiçiyken çal, çevrimdışı dinlemek için saklansınlar.
 

@@ -137,6 +137,15 @@ impl Settings {
                 }
             }),
             cx.observe(&ConfigModel::global(cx), |_, _, cx| cx.notify()),
+            cx.observe_global::<store::SettingsSection>(|this, cx| {
+                let slug = cx.global::<store::SettingsSection>().slug.clone();
+                if let Some(category) = Category::from_slug(&slug)
+                    && category != this.category
+                {
+                    this.select(category, cx);
+                    cx.notify();
+                }
+            }),
         ];
         let mut settings = Self {
             category,

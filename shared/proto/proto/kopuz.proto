@@ -2245,6 +2245,8 @@ message PluginInfo {
   bool system = 13;
   // Reads the files in the folders picked for each of its sources.
   bool reads_folders = 14;
+  // Adds an integration, turned on under Connectivity, instead of a source.
+  bool integration = 15;
 }
 
 message PluginCatalog {

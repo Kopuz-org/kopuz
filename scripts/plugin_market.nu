@@ -41,6 +41,11 @@ def main [] {
       author: "Kopuz examples"
       services: ($manifest.service? | default [] | each {|service| $service.id })
       network: ($manifest.permissions?.network? | default [])
+      # Everything else a listing has to say before install, as the manifest asks for it.
+      folders: ($manifest.permissions?.folders? | default "none")
+      playback: ($manifest.permissions?.playback? | default "none")
+      library: ($manifest.permissions?.library? | default "none")
+      integration: ($manifest.integration? != null)
       manifest: { url: $"file://($manifest_file)", sha256: (open --raw $manifest_file | hash sha256) }
       component: { url: $"file://($component_file)", sha256: (open --raw $component_file | hash sha256) }
     }

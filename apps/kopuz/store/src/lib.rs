@@ -31,6 +31,7 @@ mod playlists;
 mod query;
 mod queue;
 mod settings_filter;
+mod settings_section;
 mod setup;
 mod signin;
 mod sleep;
@@ -77,6 +78,7 @@ pub use playlists::PlaylistsModel;
 pub use query::{FirstRead, Query};
 pub use queue::{QueueModel, QueueSummary};
 pub use settings_filter::SettingsFilter;
+pub use settings_section::{SettingsSection, ask_settings_section};
 pub use setup::{Decision, SetupModel};
 pub use signin::{
     SignInWait, browser as browser_sign_in, register_password_form, register_session_chooser,
