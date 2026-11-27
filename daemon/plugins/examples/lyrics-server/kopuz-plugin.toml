@@ -1,0 +1,20 @@
+id = "lyrics-server"
+name = "Lyrics server"
+version = "0.1.0"
+api = "0.2"
+description = "Asks an address of your choice for the words to a song kopuz found none for, such as a lyrics folder served on your network."
+
+[permissions]
+network = ["$server"]
+
+[integration]
+server = "url"
+provides = ["lyrics"]
+
+[[integration.field]]
+key = "url"
+label = "Address"
+kind = "url"
+placeholder = "http://192.168.1.20:8000/lyrics"
+help = "Asked with artist, title, album and duration (in seconds) in the query. Answers with LRC or plain words, or 404 when it has none."
+required = true

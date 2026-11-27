@@ -40,6 +40,9 @@ pub struct Integration {
     /// What the host tells it as it happens; nothing it does not list.
     #[serde(default)]
     pub listens: Vec<Listen>,
+    /// What kopuz may ask it for, beside its own sources.
+    #[serde(default)]
+    pub provides: Vec<Provide>,
     /// How often a plugin that listens to `tick` is called, in milliseconds.
     #[serde(default = "default_tick_ms")]
     pub tick_ms: u32,
@@ -108,6 +111,13 @@ pub enum Listen {
     Tick,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Provide {
+    /// Words for a track kopuz's own lyric sources have none for.
+    Lyrics,
+}
+
 /// The shortest `tick-ms` a manifest may ask for.
 pub const MIN_TICK_MS: u32 = 100;
 
@@ -121,6 +131,7 @@ impl Default for Integration {
             server: None,
             icon: None,
             listens: Vec::new(),
+            provides: Vec::new(),
             tick_ms: default_tick_ms(),
             fields: Vec::new(),
             actions: Vec::new(),
@@ -538,6 +549,10 @@ impl Integration {
 
     pub fn listens_to(&self, what: Listen) -> bool {
         self.listens.contains(&what)
+    }
+
+    pub fn provides(&self, what: Provide) -> bool {
+        self.provides.contains(&what)
     }
 
     pub fn field(&self, key: &str) -> Option<&Field> {

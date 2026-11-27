@@ -549,3 +549,64 @@ async fn a_panel_draws_blocks_for_an_album_an_artist_or_the_track_playing() {
         .expect("ran");
     assert!(missing.is_err());
 }
+
+fn lyrics_server() -> Arc<Plugin> {
+    let bundled = bundled_plugins::examples()
+        .iter()
+        .find(|example| example.manifest.contains("id = \"lyrics-server\""))
+        .expect("the lyrics server example is built with the examples feature");
+    let manifest = Manifest::parse(bundled.manifest).expect("its manifest");
+    assert!(
+        manifest
+            .integration
+            .as_ref()
+            .is_some_and(|integration| integration.provides(plugin_host::manifest::Provide::Lyrics))
+    );
+    Arc::new(Plugin::new(
+        manifest,
+        Code::Wasm(std::borrow::Cow::Borrowed(
+            bundled.wasm.expect("a component"),
+        )),
+        Origin::Installed,
+    ))
+}
+
+fn asked() -> wit::Song {
+    wit::Song {
+        key: "blue-1".into(),
+        title: "So What".into(),
+        artist: "Miles Davis".into(),
+        album: "Kind of Blue".into(),
+        duration_ms: Some(562_000),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lyrics_plugin_answers_with_lrc_plain_words_or_nothing() {
+    let synced = Hook::answering(200, "[00:01.00]So what\n[00:03.00]Next line\n").await;
+    let integration = Integration::new(lyrics_server(), vec![("url".into(), synced.url.clone())]);
+    let found = integration.lyrics(&asked()).await.expect("ran");
+    assert!(
+        matches!(&found, Ok(Some(wit::FoundLyrics::Lrc(text))) if text.starts_with("[00:01.00]")),
+        "{found:?}"
+    );
+    let request = synced.received().join("\n");
+    assert!(request.contains("artist=Miles+Davis"), "{request}");
+    assert!(request.contains("title=So+What"), "{request}");
+    assert!(request.contains("duration=562"), "{request}");
+
+    let plain = Hook::answering(200, "So what\nNext line").await;
+    let integration = Integration::new(lyrics_server(), vec![("url".into(), plain.url.clone())]);
+    assert_eq!(
+        integration.lyrics(&asked()).await.expect("ran"),
+        Ok(Some(wit::FoundLyrics::Plain("So what\nNext line".into())))
+    );
+
+    let missing = Hook::start(404).await;
+    let integration = Integration::new(lyrics_server(), vec![("url".into(), missing.url.clone())]);
+    assert_eq!(integration.lyrics(&asked()).await.expect("ran"), Ok(None));
+
+    let broken = Hook::start(500).await;
+    let integration = Integration::new(lyrics_server(), vec![("url".into(), broken.url.clone())]);
+    assert!(integration.lyrics(&asked()).await.expect("ran").is_err());
+}

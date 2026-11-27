@@ -23,8 +23,8 @@ pub mod bindings {
 }
 
 pub use bindings::exports::kopuz::plugin::integration::{
-    ActionTarget, AudioFrame, Block, NowPlaying, PanelAction, PanelTarget, PlaybackEvent, Setting,
-    Started,
+    ActionTarget, AudioFrame, Block, FoundLyrics, NowPlaying, PanelAction, PanelTarget,
+    PlaybackEvent, Setting, Song, Started,
 };
 
 use crate::Result;
@@ -102,6 +102,14 @@ pub trait Integration: Sized + 'static {
     ) -> std::result::Result<Vec<Block>, String> {
         let _ = target;
         Err(format!("this plugin has no panel {id}"))
+    }
+
+    /// Words for `track`, asked only when the manifest's `[integration]`
+    /// provides `lyrics` and kopuz's own sources found none. `Ok(None)` is
+    /// "nothing found".
+    fn lyrics(&self, track: Song) -> std::result::Result<Option<FoundLyrics>, String> {
+        let _ = track;
+        Ok(None)
     }
 }
 
@@ -271,6 +279,15 @@ macro_rules! export_integration {
                 ::std::string::String,
             > {
                 $crate::integration::Integration::render_panel(&self.0, &id, target)
+            }
+            fn lyrics(
+                &self,
+                track: $crate::integration::Song,
+            ) -> ::std::result::Result<
+                ::std::option::Option<$crate::integration::FoundLyrics>,
+                ::std::string::String,
+            > {
+                $crate::integration::Integration::lyrics(&self.0, track)
             }
         }
 

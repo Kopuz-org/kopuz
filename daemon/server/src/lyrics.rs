@@ -129,6 +129,66 @@ struct PaxsenixAppleLyricPart {
     part: bool,
 }
 
+/// Lyrics from LRC text, word-timed where it carries `<mm:ss.xx>` tags; plain
+/// text when no line is timed. Nothing for text with no words.
+pub fn from_lrc(text: &str) -> Option<Lyrics> {
+    let lines = parse_lrc(text);
+    if !lines.is_empty() && lrc_has_usable_timing(text) {
+        return Some(Lyrics::Synced(lines));
+    }
+    // Timing that goes nowhere is words with no timing.
+    let plain = text
+        .lines()
+        .map(untagged)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!plain.is_empty()).then_some(Lyrics::Plain(plain))
+}
+
+/// A line of LRC without its `[..]` and `<..>` tags.
+fn untagged(line: &str) -> String {
+    let mut words = String::new();
+    let mut rest = line;
+    while let Some(at) = rest.find(['[', '<']) {
+        let close = if rest[at..].starts_with('[') {
+            ']'
+        } else {
+            '>'
+        };
+        let Some(length) = rest[at + 1..].find(close) else {
+            break;
+        };
+        let inner = &rest[at + 1..at + 1 + length];
+        words.push_str(&rest[..at]);
+        // Only a time, or a `[tag:value]` like `[ar:Artist]`, is LRC's; "<3" and "[Chorus]" are words.
+        if !is_lrc_tag(inner, close == ']') {
+            words.push_str(&rest[at..at + 2 + length]);
+        }
+        rest = &rest[at + 2 + length..];
+    }
+    words.push_str(rest);
+    words.trim().to_string()
+}
+
+/// Whether `inner`, what a pair of brackets holds, is an LRC time or, in square
+/// brackets, an LRC metadata tag.
+fn is_lrc_tag(inner: &str, square: bool) -> bool {
+    let time = !inner.is_empty()
+        && inner.contains(':')
+        && inner
+            .chars()
+            .all(|character| character.is_ascii_digit() || matches!(character, ':' | '.'));
+    let metadata = square
+        && inner.split_once(':').is_some_and(|(name, _)| {
+            !name.is_empty()
+                && name
+                    .chars()
+                    .all(|character| character.is_ascii_alphabetic())
+        });
+    time || metadata
+}
+
 /// Fetch lyrics from local files, source APIs and external providers, preferring
 /// word timing over line timing and plain text. Source-specific lyrics precede
 /// the concurrent Apple Music, NetEase and LRCLIB fallbacks.
@@ -993,6 +1053,31 @@ mod tests {
         assert!(logged.chars().all(|c| c.is_ascii_hexdigit()));
         assert!(!logged.contains("/Users"));
         assert_ne!(logged, key);
+    }
+
+    #[test]
+    fn a_plugin_answer_reads_as_synced_plain_or_nothing() {
+        let synced = from_lrc("[00:01.00]Hello\n[00:02.50]World").expect("words");
+        assert!(matches!(synced, Lyrics::Synced(lines) if lines.len() == 2));
+        assert_eq!(
+            from_lrc("[00:00.00]First\n[00:00.00]Second"),
+            Some(Lyrics::Plain("First\nSecond".into()))
+        );
+        assert_eq!(
+            from_lrc("No timing here\n"),
+            Some(Lyrics::Plain("No timing here".into()))
+        );
+        assert_eq!(from_lrc("  \n"), None);
+        assert_eq!(
+            from_lrc("[ar:Someone]\nI <3 you\n[Chorus]"),
+            Some(Lyrics::Plain("I <3 you\n[Chorus]".into())),
+            "only LRC's own tags are taken out"
+        );
+        assert_eq!(
+            from_lrc("[ar:Someone]\n[ti:Song]\n"),
+            None,
+            "metadata alone is no lyrics"
+        );
     }
 
     #[test]

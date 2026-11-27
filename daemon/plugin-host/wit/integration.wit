@@ -99,6 +99,24 @@ interface integration {
         action: string,
     }
 
+    /// A track kopuz asks a plugin about.
+    record song {
+        key: string,
+        title: string,
+        artist: string,
+        album: string,
+        duration-ms: option<u64>,
+    }
+
+    /// Lyrics a plugin found.
+    variant found-lyrics {
+        /// Words with no timing.
+        plain(string),
+        /// LRC: `[mm:ss.xx]` before each line, and `<mm:ss.xx>` before each
+        /// word for word timing.
+        lrc(string),
+    }
+
     resource instance {
         constructor(settings: list<setting>);
 
@@ -130,5 +148,10 @@ interface integration {
         /// One of the manifest's `[[integration.panel]]` entries, for the
         /// album or artist page it is drawn on. Nothing to show is an empty list.
         render-panel: func(id: string, target: panel-target) -> result<list<block>, string>;
+
+        /// Asked only of an integration whose manifest provides `lyrics`, for
+        /// a track none of kopuz's own lyric sources has words for. Nothing
+        /// found is `none`.
+        lyrics: func(track: song) -> result<option<found-lyrics>, string>;
     }
 }

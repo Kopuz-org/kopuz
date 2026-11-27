@@ -7177,6 +7177,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kopuz-plugin-lyrics-server"
+version = "0.1.0"
+dependencies = [
+ "kopuz-plugin-sdk",
+]
+
+[[package]]
 name = "kopuz-plugin-remote"
 version = "0.1.0"
 dependencies = [

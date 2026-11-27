@@ -23,6 +23,9 @@ const CALL_LIMIT: Duration = if cfg!(test) {
     crate::host::DEFAULT_TIMEOUT.saturating_add(Duration::from_secs(10))
 };
 
+/// How long a plugin may look for lyrics before kopuz's lyrics tab gives up on it.
+const LYRICS_LIMIT: Duration = Duration::from_secs(8);
+
 struct Live {
     plugin: Arc<Plugin>,
     instance: Instance<IntegrationPlugin>,
@@ -146,7 +149,8 @@ impl Integration {
 macro_rules! calls {
     ($(
         $(#[$meta:meta])*
-        fn $name:ident => $call:ident ( $( $arg:ident : $ty:ty => $pass:expr ),* ) -> $ret:ty;
+        fn $name:ident => $call:ident ( $( $arg:ident : $ty:ty => $pass:expr ),* ) -> $ret:ty
+            $( , within $limit:expr )?;
     )*) => {
         impl Integration {
             $(
@@ -167,7 +171,8 @@ macro_rules! calls {
                     }
                     let guest = live.instance.bindings.kopuz_plugin_integration().instance();
                     let call = guest.$call(&mut live.instance.store, live.handle, $( $pass ),*);
-                    match tokio::time::timeout(CALL_LIMIT, call).await {
+                    let limit = CALL_LIMIT $( .min($limit) )?;
+                    match tokio::time::timeout(limit, call).await {
                         Ok(Ok(value)) => {
                             *held = Some(live);
                             Ok(value)
@@ -208,4 +213,9 @@ calls! {
         id: &str => id,
         target: &wit::PanelTarget => target
     ) -> Result<Vec<wit::Block>, String>;
+
+    /// Words for `track`, from a plugin that provides lyrics.
+    fn lyrics => call_lyrics(track: &wit::Song => track) -> Result<Option<wit::FoundLyrics>, String>,
+        within LYRICS_LIMIT;
+
 }
