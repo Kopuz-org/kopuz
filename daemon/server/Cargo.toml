@@ -109,4 +109,5 @@ path = "examples/duration_probe.rs"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+bundled-plugins = { workspace = true, features = ["examples"] }
 tempfile = { workspace = true }

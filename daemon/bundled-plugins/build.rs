@@ -43,6 +43,12 @@ fn main() {
     println!("cargo:rerun-if-env-changed=KOPUZ_PLUGIN_WASM_DIR");
 
     let plugins = plugin_crates(&plugins_dir);
+    // Tests load the examples as real components; kopuz itself never ships them.
+    let examples = match std::env::var_os("CARGO_FEATURE_EXAMPLES") {
+        Some(_) => plugin_crates(&plugins_dir.join("examples")),
+        None => Vec::new(),
+    };
+    let every: Vec<&PluginCrate> = plugins.iter().chain(&examples).collect();
     let wasm_dir = match std::env::var_os("KOPUZ_PLUGIN_WASM_DIR") {
         Some(dir) => std::fs::canonicalize(&dir).unwrap_or_else(|error| {
             panic!(
@@ -50,11 +56,19 @@ fn main() {
                 PathBuf::from(&dir).display()
             )
         }),
-        None => build(&workspace, &plugins),
+        None => build(&workspace, &every),
     };
 
-    let mut table = String::from("static BUNDLED: &[plugin_host::Bundled] = &[\n");
-    for plugin in &plugins {
+    let mut table = String::new();
+    write_table(&mut table, "BUNDLED", &plugins, &wasm_dir);
+    write_table(&mut table, "EXAMPLES", &examples, &wasm_dir);
+    let out = PathBuf::from(env("OUT_DIR")).join("bundled.rs");
+    std::fs::write(&out, table).expect("write the bundled plugin table");
+}
+
+fn write_table(table: &mut String, name: &str, plugins: &[PluginCrate], wasm_dir: &Path) {
+    table.push_str(&format!("static {name}: &[plugin_host::Bundled] = &[\n"));
+    for plugin in plugins {
         let wasm = wasm_dir.join(format!("{}.wasm", plugin.package.replace('-', "_")));
         assert!(
             wasm.is_file(),
@@ -69,8 +83,6 @@ fn main() {
         ));
     }
     table.push_str("];\n");
-    let out = PathBuf::from(env("OUT_DIR")).join("bundled.rs");
-    std::fs::write(&out, table).expect("write the bundled plugin table");
 }
 
 fn plugin_crates(dir: &Path) -> Vec<PluginCrate> {
@@ -94,7 +106,7 @@ fn plugin_crates(dir: &Path) -> Vec<PluginCrate> {
     plugins
 }
 
-fn build(workspace: &Path, plugins: &[PluginCrate]) -> PathBuf {
+fn build(workspace: &Path, plugins: &[&PluginCrate]) -> PathBuf {
     let target_dir = std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| workspace.join("target"))

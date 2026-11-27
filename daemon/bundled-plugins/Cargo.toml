@@ -15,6 +15,10 @@ name = "bundled_plugins"
 [lints]
 workspace = true
 
+[features]
+# Builds and embeds the example plugins too, for tests.
+examples = []
+
 [dependencies]
 plugin-host = { workspace = true }
 

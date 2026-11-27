@@ -1,0 +1,19 @@
+[package]
+name = "kopuz-plugin-webhook"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "An example integration plugin: tells an address of your choice what kopuz is doing."
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+kopuz-plugin-sdk = { path = "../../sdk" }
+serde_json = { workspace = true }

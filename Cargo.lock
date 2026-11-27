@@ -7208,6 +7208,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "kopuz-plugin-webhook"
+version = "0.1.0"
+dependencies = [
+ "kopuz-plugin-sdk",
+ "serde_json",
+]
+
+[[package]]
 name = "kopuz-proto"
 version = "1.0.1"
 dependencies = [

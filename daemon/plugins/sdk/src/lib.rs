@@ -1,10 +1,12 @@
 //! Build a kopuz plugin: implement [`Source`] and export it with
-//! [`export_source!`], then build for `wasm32-wasip2`. The crate builds
-//! natively too, so a plugin's own logic can be unit tested.
+//! [`export_source!`], or implement [`integration::Integration`] and export it
+//! with [`export_integration!`], then build for `wasm32-wasip2`. The crate
+//! builds natively too, so a plugin's own logic can be unit tested.
 
 pub mod browser;
 pub mod cover;
 pub mod http;
+pub mod integration;
 pub mod log;
 pub mod tcp;
 
