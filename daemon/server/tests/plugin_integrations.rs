@@ -146,3 +146,37 @@ async fn a_closed_integration_stays_closed() {
     );
     assert_eq!(hook.received().len(), 3);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_call_dropped_midway_leaves_no_half_run_instance_behind() {
+    // The first request is never answered; every later one is.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let url = format!("http://{}/hook", listener.local_addr().expect("address"));
+    let arrived = Arc::new(tokio::sync::Notify::new());
+    let told = Arc::clone(&arrived);
+    tokio::spawn(async move {
+        let mut first = true;
+        let mut held = Vec::new();
+        while let Ok((mut stream, _)) = listener.accept().await {
+            read_request(&mut stream).await;
+            if std::mem::take(&mut first) {
+                held.push(stream);
+                told.notify_one();
+                continue;
+            }
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await;
+        }
+    });
+    let integration = Integration::new(webhook(), answers(&url, ""));
+    // Given up on only once the plugin is inside its call, waiting on the address.
+    tokio::select! {
+        _ = integration.validate() => panic!("the first check should hang"),
+        () = arrived.notified() => {}
+    }
+    let again = integration.validate().await.expect("the plugin ran");
+    assert!(again.is_ok(), "a fresh instance answers: {again:?}");
+}

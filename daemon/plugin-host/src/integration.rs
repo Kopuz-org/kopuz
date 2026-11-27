@@ -15,11 +15,12 @@ use crate::plugin::{Instance, Plugin};
 use crate::{PluginError, wit};
 
 /// An integration answers what kopuz is doing as it happens, so a call still
-/// going after this is stuck, not busy.
+/// going after this is stuck, not busy. Past the host's own request timeout,
+/// so a slow request fails as itself before the whole call is given up on.
 const CALL_LIMIT: Duration = if cfg!(test) {
     Duration::from_secs(1)
 } else {
-    Duration::from_secs(30)
+    crate::host::DEFAULT_TIMEOUT.saturating_add(Duration::from_secs(10))
 };
 
 struct Live {
@@ -74,6 +75,11 @@ impl Integration {
             .plugin
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = plugin;
+        // An idle instance of the old code goes now, with whatever connection it
+        // holds; one busy in a call is replaced before the next.
+        if let Ok(mut held) = self.live.try_lock() {
+            held.take();
+        }
     }
 
     /// Drop the running instance and whatever connections it held, for good:
@@ -123,8 +129,10 @@ impl Integration {
     }
 }
 
-/// One method per instance call. An instance that trapped or timed out is
-/// dropped, since its memory may be half-written.
+/// One method per instance call. The instance is taken out of `live` for the
+/// call and put back only once it returns: one that trapped, timed out or was
+/// dropped mid-call goes with it, since its memory may be half-written and a
+/// component cannot be entered again after a call it never finished.
 macro_rules! calls {
     ($(
         $(#[$meta:meta])*
@@ -139,25 +147,24 @@ macro_rules! calls {
                         return Err(PluginError::Runtime("the integration was closed".into()));
                     }
                     let current = self.plugin();
-                    if held.as_ref().is_none_or(|live| !Arc::ptr_eq(&live.plugin, &current)) {
-                        *held = None;
-                        *held = Some(self.open(current).await?);
-                    }
-                    let Some(live) = held.as_mut() else {
-                        return Err(PluginError::Runtime("the integration did not open".into()));
+                    let mut live = match held.take() {
+                        Some(live) if Arc::ptr_eq(&live.plugin, &current) => live,
+                        _ => self.open(current).await?,
                     };
+                    // Closed while it opened: what it opened goes unused.
+                    if self.is_closed() {
+                        return Err(PluginError::Runtime("the integration was closed".into()));
+                    }
                     let guest = live.instance.bindings.kopuz_plugin_integration().instance();
                     let call = guest.$call(&mut live.instance.store, live.handle, $( $pass ),*);
                     match tokio::time::timeout(CALL_LIMIT, call).await {
-                        Ok(Ok(value)) => Ok(value),
-                        Ok(Err(error)) => {
-                            let error = live.plugin.trapped(error);
-                            *held = None;
-                            Err(error)
+                        Ok(Ok(value)) => {
+                            *held = Some(live);
+                            Ok(value)
                         }
+                        Ok(Err(error)) => Err(live.plugin.trapped(error)),
                         Err(_) => {
                             tracing::error!(plugin = %live.plugin.id(), "integration call timed out");
-                            *held = None;
                             Err(PluginError::TimedOut)
                         }
                     }
