@@ -570,14 +570,8 @@ pub(super) fn temp_cover_key(track: &Track, url: &str) -> String {
     }
 }
 
-/// Download a cover to a temp file named by a hash of `key`, so repeated plays
-/// of the same album reuse the file instead of growing the temp dir. MPRIS
-/// `mpris:artUrl` wants a file too, not just macOS Now Playing.
-pub(super) async fn fetch_cover_to_temp(
-    url: &str,
-    key: &str,
-    reach: Option<&server::plugins::Reach>,
-) -> Option<String> {
+/// The temp file for the cover named by `key`: a hash of it, so any key makes a file name.
+fn temp_cover_path(key: &str) -> PathBuf {
     use sha2::{Digest as _, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(key.as_bytes());
@@ -588,8 +582,24 @@ pub(super) async fn fetch_cover_to_temp(
         let _ = write!(name, "{byte:02x}");
     }
     name.push_str(".jpg");
-    let path = std::env::temp_dir().join(name);
-    if tokio::fs::metadata(&path).await.is_ok() {
+    std::env::temp_dir().join(name)
+}
+
+/// Download a cover to a temp file named by a hash of `key`, so repeated plays
+/// of the same album reuse the file instead of growing the temp dir. MPRIS
+/// `mpris:artUrl` wants a file too, not just macOS Now Playing.
+pub(super) async fn fetch_cover_to_temp(
+    url: &str,
+    key: &str,
+    reach: Option<&server::plugins::Reach>,
+) -> Option<String> {
+    let path = temp_cover_path(key);
+
+    // A file written before downloads were checked may hold an error answer; it is fetched again.
+    let reusable = tokio::fs::read(&path)
+        .await
+        .is_ok_and(|bytes| image::guess_format(&bytes).is_ok());
+    if reusable {
         return Some(path.to_string_lossy().to_string());
     }
     let fetch = async {
@@ -900,7 +910,7 @@ pub(super) struct LoadFinished {
 
 #[cfg(test)]
 mod tests {
-    use super::fetch_cover_to_temp;
+    use super::{fetch_cover_to_temp, temp_cover_path};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     /// Answers every request with 200 and `body`, as Subsonic does for a bad cover id.
@@ -929,5 +939,17 @@ mod tests {
         let key = format!("error-answer-{url}");
 
         assert_eq!(fetch_cover_to_temp(&url, &key, None).await, None);
+    }
+
+    #[tokio::test]
+    async fn an_error_answer_written_before_the_check_is_not_reused() {
+        let url = serve(r#"{"subsonic-response":{"status":"failed"}}"#).await;
+        let key = format!("stale-error-{url}");
+        let path = temp_cover_path(&key);
+        std::fs::write(&path, br#"{"subsonic-response":{"status":"failed"}}"#).unwrap();
+
+        let fetched = fetch_cover_to_temp(&url, &key, None).await;
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(fetched, None);
     }
 }

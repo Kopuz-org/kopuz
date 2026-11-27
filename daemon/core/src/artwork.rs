@@ -504,11 +504,6 @@ impl ArtworkService {
         {
             return Err(ApiError::internal("artwork exceeds the maximum size"));
         }
-        let content_type = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned);
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(fetch_failed)? {
             if bytes.len().saturating_add(chunk.len()) > MAX_REMOTE_ARTWORK_BYTES {
@@ -518,7 +513,7 @@ impl ArtworkService {
         }
 
         // Kept out of the cache, or the error would be served as a cover for a week.
-        if is_error_body(content_type.as_deref(), &bytes) {
+        if !is_picture(&bytes) {
             return Err(ApiError::not_found(
                 "the server answered with an error, not artwork",
             ));
@@ -535,33 +530,19 @@ impl ArtworkService {
 }
 
 /// A cached remote cover. Bytes that are no picture, e.g. an error answer
-/// cached before `is_error_body` existed, count as no cover, so they are
+/// cached before downloads were checked, count as no cover, so they are
 /// neither served nor kept as fallback.
 async fn read_cached(path: &std::path::Path) -> Option<Vec<u8>> {
     let bytes = tokio::fs::read(path).await.ok()?;
-    image::guess_format(&bytes).is_ok().then_some(bytes)
+    is_picture(&bytes).then_some(bytes)
 }
 
-/// A body that is an API answer rather than a picture. Subsonic servers
-/// report a bad `getCoverArt` id with HTTP 200 and a JSON or XML error.
-/// The bytes win over the header: a picture sent as `text/plain` is kept.
-fn is_error_body(content_type: Option<&str>, bytes: &[u8]) -> bool {
-    const ERROR_TYPES: [&str; 3] = ["application/json", "text/", "application/xml"];
-    const SUBSONIC_XML: &[u8] = b"<subsonic-response";
-
-    if image::guess_format(bytes).is_ok() {
-        return false;
-    }
-    let declared =
-        content_type.is_some_and(|value| ERROR_TYPES.iter().any(|kind| value.starts_with(kind)));
-
-    // E.g. `{"subsonic-response":…}` or `<?xml …?><subsonic-response …>`, after any whitespace.
-    let body = bytes.trim_ascii_start();
-    let subsonic_xml = body
-        .windows(SUBSONIC_XML.len())
-        .take(64)
-        .any(|w| w == SUBSONIC_XML);
-    declared || body.starts_with(b"{") || subsonic_xml
+/// Whether `bytes` are a picture, judged by the bytes alone. Subsonic servers
+/// report a bad `getCoverArt` id with HTTP 200 and a JSON or XML error, and a
+/// header can be wrong either way: a picture sent as `text/plain` is kept, an
+/// error page sent as `image/jpeg` is not.
+fn is_picture(bytes: &[u8]) -> bool {
+    image::guess_format(bytes).is_ok()
 }
 
 /// A client that follows no redirect, for a fetch that checks each hop itself.
@@ -772,17 +753,9 @@ mod tests {
     fn a_subsonic_error_answer_is_not_a_cover() {
         // Navidrome answers a bad `getCoverArt` id with 200 and a JSON error.
         let body = br#"{"subsonic-response":{"status":"failed","error":{"code":0}}}"#;
-        assert!(is_error_body(Some("application/json"), body));
-        assert!(
-            is_error_body(None, body),
-            "sniffed when the header is missing"
-        );
-        assert!(is_error_body(
-            Some("text/xml; charset=utf-8"),
-            b"<subsonic-response/>"
-        ));
-        assert!(!is_error_body(Some("image/jpeg"), &jpeg_of(4)));
-        assert!(!is_error_body(None, &jpeg_of(4)));
+        assert!(!is_picture(body));
+        assert!(!is_picture(b"<subsonic-response/>"));
+        assert!(is_picture(&jpeg_of(4)));
     }
 
     #[tokio::test]
@@ -809,19 +782,16 @@ mod tests {
 
     #[test]
     fn the_body_decides_over_a_wrong_or_missing_header() {
-        assert!(
-            !is_error_body(Some("text/plain"), &jpeg_of(4)),
-            "a picture sent as text is still a picture"
-        );
-        assert!(is_error_body(
-            None,
+        assert!(!is_picture(
             br#"<?xml version="1.0"?><subsonic-response status="failed"/>"#
         ));
-        assert!(is_error_body(
-            None,
-            b"<subsonic-response status=\"failed\"/>"
-        ));
-        assert!(is_error_body(None, b"\n  {\"error\":1}"));
+        assert!(!is_picture(b"\n  {\"error\":1}"));
+    }
+
+    #[test]
+    fn a_body_that_is_no_picture_is_no_cover_whatever_its_header() {
+        // Sent as `image/jpeg`. Cached, it would count as none and be fetched again on every request.
+        assert!(!is_picture(b"Internal server error"));
     }
 
     #[tokio::test]
