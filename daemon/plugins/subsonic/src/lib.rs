@@ -18,6 +18,10 @@ use kopuz_plugin_sdk::{
 /// How many neighbours a radio start asks for.
 const SIMILAR_SONGS_COUNT: usize = 50;
 
+/// How many playlist songs seed a playlist radio. Each is one similarity
+/// lookup, and the metadata fallback can take seconds per lookup.
+const PLAYLIST_RADIO_SEEDS: usize = 3;
+
 /// Albums per `getAlbumList2` page during a sync.
 const ALBUM_PAGE: usize = 250;
 
@@ -124,6 +128,39 @@ fn playlist_meta(service: &str, playlist: SubsonicPlaylist) -> PlaylistMeta {
         name: playlist.name,
         image_tag,
     }
+}
+
+/// `count` songs spread over the whole list, so a long playlist is not seeded by its opening alone.
+/// E.g. 10 songs, 3 seeds: indices 0, 3, 6; 4 songs, 3 seeds: 0, 1, 2.
+fn spread<T>(items: &[T], count: usize) -> Vec<&T> {
+    let seeds = count.min(items.len());
+    (0..seeds)
+        .map(|seed| &items[seed * items.len() / seeds])
+        .collect()
+}
+
+/// Each seed's neighbours interleaved by rank, without the playlist's own songs and without repeats.
+fn blend(
+    playlist: &HashSet<String>,
+    lists: Vec<Vec<SubsonicSong>>,
+    limit: usize,
+) -> Vec<SubsonicSong> {
+    let mut seen = playlist.clone();
+    let mut lists: Vec<_> = lists.into_iter().map(Vec::into_iter).collect();
+    let mut blended = Vec::new();
+    while blended.len() < limit {
+        let round: Vec<SubsonicSong> = lists.iter_mut().filter_map(Iterator::next).collect();
+        if round.is_empty() {
+            break;
+        }
+        for song in round {
+            if seen.insert(song.id.clone()) {
+                blended.push(song);
+            }
+        }
+    }
+    blended.truncate(limit);
+    blended
 }
 
 impl Subsonic {
@@ -351,6 +388,35 @@ impl Source for Subsonic {
         ))
     }
 
+    /// Songs like the playlist's, by the same similarity track radio uses
+    /// (AudioMuse-AI's analysis where the server has it). A seed whose lookup
+    /// fails is skipped; the others still make a mix.
+    fn start_playlist_radio(&self, playlist_ref: &str) -> Result<TrackPage> {
+        let entries = self.client.get_playlist_entries(playlist_ref)?;
+        let playlist: HashSet<String> = entries.iter().map(|song| song.id.clone()).collect();
+
+        let per_seed = SIMILAR_SONGS_COUNT.div_ceil(PLAYLIST_RADIO_SEEDS);
+        let lists = spread(&entries, PLAYLIST_RADIO_SEEDS)
+            .into_iter()
+            .filter_map(
+                |seed| match self.client.get_similar_songs(&seed.id, per_seed) {
+                    Ok(songs) => Some(songs),
+                    Err(e) => {
+                        kopuz_plugin_sdk::debug!("playlist radio seed {} failed: {e}", seed.id);
+                        None
+                    }
+                },
+            )
+            .collect();
+
+        Ok(TrackPage::last(
+            blend(&playlist, lists, SIMILAR_SONGS_COUNT)
+                .into_iter()
+                .map(|song| self.track(song))
+                .collect(),
+        ))
+    }
+
     fn save_play_queue(
         &self,
         item_ids: &[String],
@@ -392,6 +458,18 @@ impl Source for Subsonic {
 mod tests {
     use super::*;
 
+    #[test]
+    fn spread_takes_as_many_seeds_as_it_can() {
+        let four = [0, 1, 2, 3];
+        let ten: Vec<usize> = (0..10).collect();
+
+        assert_eq!(spread(&four, 3), [&0, &1, &2]);
+        assert_eq!(spread(&ten, 3), [&0, &3, &6]);
+        assert_eq!(spread(&four[..2], 3), [&0, &1]);
+        assert!(spread(&four, 0).is_empty());
+        assert!(spread::<usize>(&[], 3).is_empty());
+    }
+
     fn song(id: &str, album_id: Option<&str>) -> SubsonicSong {
         serde_json::from_value(serde_json::json!({
             "id": id,
@@ -402,6 +480,20 @@ mod tests {
             "coverArt": "al-1_5f3a",
         }))
         .expect("valid Subsonic song")
+    }
+
+    #[test]
+    fn blend_interleaves_seeds_by_rank() {
+        let ids = |songs: Vec<SubsonicSong>| songs.into_iter().map(|s| s.id).collect::<Vec<_>>();
+        let lists = vec![
+            vec![song("a1", None), song("a2", None)],
+            vec![song("b1", None), song("b2", None)],
+        ];
+
+        assert_eq!(
+            ids(blend(&HashSet::new(), lists, 10)),
+            ["a1", "b1", "a2", "b2"]
+        );
     }
 
     #[test]

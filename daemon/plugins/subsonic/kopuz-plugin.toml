@@ -9,8 +9,8 @@ network = ["$server"]
 
 [[service]]
 id = "subsonic"
-capabilities = { sync = true, downloads = true, radio = ["track"], play-queue = true, playlists = "reorder" }
+capabilities = { sync = true, downloads = true, radio = ["track", "playlist"], play-queue = true, playlists = "reorder" }
 
 [[service]]
 id = "custom"
-capabilities = { sync = true, downloads = true, radio = ["track"], play-queue = true, playlists = "reorder" }
+capabilities = { sync = true, downloads = true, radio = ["track", "playlist"], play-queue = true, playlists = "reorder" }
