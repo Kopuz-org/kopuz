@@ -674,6 +674,7 @@ sort_field_genre = Жанр
 sort_field_album = Альбом
 sort_field_duration = Длительность
 sort_field_date_added = Дата добавления
+sort_field_last_played = Последнее воспроизведение
 sort_field_name = Имя
 sort_field_tracks = Треки
 sort_field_albums = Альбомы
@@ -996,6 +997,15 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Оценка
+rate_stars =
+    { $count ->
+        [one] Поставить { $count } звезду
+        [few] Поставить { $count } звезды
+        [many] Поставить { $count } звёзд
+       *[other] Поставить { $count } звезды
+    }
+clear_rating = Сбросить оценку
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1352,3 +1362,11 @@ interface_panel_side = Сторона
 interface_panel_side_description = С какой стороны страницы стоит колонка плейлистов.
 interface_queue_side = Сторона колонки очереди и текста
 interface_queue_side_description = С какой стороны открывается колонка очереди и текста.
+artist_similar = Similar artists
+artist_info_link = Подробнее об этом исполнителе
+radio_from_server = С вашего сервера
+radio_metadata_basis = AudioMuse пока не знает эти песни, поэтому это радио опирается на теги и Last.fm.
+mix_from_queue = Микс из очереди
+sonic_path_start = Начать звуковой путь отсюда
+sonic_path_end = Звуковой путь до этой песни
+sonic_path_marked = Звуковой путь начинается здесь. Выберите «Звуковой путь до этой песни» у другой песни.

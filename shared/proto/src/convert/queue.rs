@@ -32,6 +32,23 @@ pub fn queue_context_to_proto(value: &api::QueueContext) -> QueueContext {
         api::QueueContext::PlaylistRadio { id } => {
             queue_context::Kind::PlaylistRadio(queue_context::Id { id: id.clone() })
         }
+        api::QueueContext::AlbumRadio { id } => {
+            queue_context::Kind::AlbumRadio(queue_context::Id { id: id.clone() })
+        }
+        api::QueueContext::ArtistRadio { artist } => {
+            queue_context::Kind::ArtistRadio(queue_context::Key {
+                key: artist.clone(),
+            })
+        }
+        api::QueueContext::MixRadio { keys } => {
+            queue_context::Kind::MixRadio(queue_context::TrackKeys { keys: keys.clone() })
+        }
+        api::QueueContext::SonicPath { from, to } => {
+            queue_context::Kind::SonicPath(queue_context::SonicPath {
+                from: from.clone(),
+                to: to.clone(),
+            })
+        }
     };
     QueueContext { kind: Some(kind) }
 }
@@ -62,7 +79,36 @@ pub fn queue_context_from_proto(value: &QueueContext) -> Option<api::QueueContex
         queue_context::Kind::PlaylistRadio(seed) => api::QueueContext::PlaylistRadio {
             id: seed.id.clone(),
         },
+        queue_context::Kind::AlbumRadio(seed) => api::QueueContext::AlbumRadio {
+            id: seed.id.clone(),
+        },
+        queue_context::Kind::ArtistRadio(seed) => api::QueueContext::ArtistRadio {
+            artist: seed.key.clone(),
+        },
+        queue_context::Kind::MixRadio(seed) => api::QueueContext::MixRadio {
+            keys: seed.keys.clone(),
+        },
+        queue_context::Kind::SonicPath(path) => api::QueueContext::SonicPath {
+            from: path.from.clone(),
+            to: path.to.clone(),
+        },
     })
+}
+
+pub fn mix_basis_to_proto(value: Option<api::MixBasis>) -> MixBasis {
+    match value {
+        Some(api::MixBasis::Sonic) => MixBasis::Sonic,
+        Some(api::MixBasis::Metadata) => MixBasis::Metadata,
+        None => MixBasis::Unspecified,
+    }
+}
+
+pub fn mix_basis_from_proto(value: i32) -> Option<api::MixBasis> {
+    match MixBasis::try_from(value) {
+        Ok(MixBasis::Sonic) => Some(api::MixBasis::Sonic),
+        Ok(MixBasis::Metadata) => Some(api::MixBasis::Metadata),
+        Ok(MixBasis::Unspecified) | Err(_) => None,
+    }
 }
 
 pub fn set_queue_to_proto(value: &api::SetQueueRequest) -> SetQueueRequest {
@@ -252,6 +298,38 @@ mod tests {
     }
 
     #[test]
+    fn a_mix_context_and_its_basis_survive_the_wire() {
+        let contexts = [
+            api::QueueContext::AlbumRadio { id: "al".into() },
+            api::QueueContext::ArtistRadio {
+                artist: "ar".into(),
+            },
+            api::QueueContext::MixRadio {
+                keys: vec!["a".into(), "b".into()],
+            },
+            api::QueueContext::SonicPath {
+                from: "a".into(),
+                to: "b".into(),
+            },
+        ];
+        for context in contexts {
+            let back = queue_context_from_proto(&queue_context_to_proto(&context));
+            assert_eq!(back, Some(context));
+        }
+
+        for basis in [
+            None,
+            Some(api::MixBasis::Sonic),
+            Some(api::MixBasis::Metadata),
+        ] {
+            assert_eq!(
+                mix_basis_from_proto(mix_basis_to_proto(basis) as i32),
+                basis
+            );
+        }
+    }
+
+    #[test]
     fn a_snapshot_keeps_where_it_was_built_from() {
         let origins = [
             None,
@@ -273,6 +351,10 @@ mod tests {
             }),
             Some(api::QueueContext::TrackRadio { key: "k".into() }),
             Some(api::QueueContext::PlaylistRadio { id: "p".into() }),
+            Some(api::QueueContext::AlbumRadio { id: "al".into() }),
+            Some(api::QueueContext::ArtistRadio {
+                artist: "ar".into(),
+            }),
         ];
         for context in origins {
             let snapshot = api::QueueSnapshot {

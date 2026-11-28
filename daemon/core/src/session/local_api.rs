@@ -667,6 +667,12 @@ impl api::LibraryApi for LocalApi {
         self.library()?.artist(&artist).await
     }
 
+    async fn artist_info(&self, artist: String) -> Result<Option<api::ArtistInfoView>, ApiError> {
+        let artist = &artist;
+        self.recovering(|| async move { self.catalog()?.artist_info(artist).await })
+            .await
+    }
+
     async fn artist_sample_tracks(&self, page: Page) -> Result<api::TrackPage, ApiError> {
         self.library()?.artist_sample_tracks(page).await
     }
@@ -722,6 +728,12 @@ impl api::LibraryApi for LocalApi {
     async fn set_favorite(&self, key: String, favorite: bool) -> Result<(), ApiError> {
         let key = &key;
         self.recovering(|| async move { self.favorites_service()?.set(key, favorite).await })
+            .await
+    }
+
+    async fn set_star_rating(&self, key: String, stars: u8) -> Result<(), ApiError> {
+        let key = &key;
+        self.recovering(|| async move { self.library()?.set_star_rating(key, stars).await })
             .await
     }
 

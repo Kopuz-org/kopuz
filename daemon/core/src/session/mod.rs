@@ -222,6 +222,13 @@ async fn write_remote_queue(
     }
 }
 
+fn api_basis(basis: server::source::MixBasis) -> api::MixBasis {
+    match basis {
+        server::source::MixBasis::Sonic => api::MixBasis::Sonic,
+        server::source::MixBasis::Metadata => api::MixBasis::Metadata,
+    }
+}
+
 pub type FactoryOverride = Arc<dyn Fn(&Track) -> Option<SourceFactory> + Send + Sync>;
 
 enum SessionCmd {
@@ -1267,7 +1274,10 @@ impl Session {
             QueueEdit::ClearUpcoming => {
                 let from = self.upcoming_from();
                 if !self.model.clear_from(from) {
-                    return Ok(CommandAck { rev: self.rev });
+                    return Ok(CommandAck {
+                        rev: self.rev,
+                        basis: None,
+                    });
                 }
                 self.rearm_gapless();
                 Ok(self.publish(state_tx, true))
@@ -1276,7 +1286,10 @@ impl Session {
                 let from = self.upcoming_from();
                 if keys.is_empty() {
                     if !self.model.clear_from(from) {
-                        return Ok(CommandAck { rev: self.rev });
+                        return Ok(CommandAck {
+                            rev: self.rev,
+                            basis: None,
+                        });
                     }
                     self.rearm_gapless();
                     return Ok(self.publish(state_tx, true));
@@ -1289,7 +1302,10 @@ impl Session {
             QueueEdit::ShuffleUpcoming => {
                 let from = self.upcoming_from();
                 if len <= from + 1 {
-                    return Ok(CommandAck { rev: self.rev });
+                    return Ok(CommandAck {
+                        rev: self.rev,
+                        basis: None,
+                    });
                 }
                 self.model.shuffle_from(from);
                 self.rearm_gapless();
@@ -1394,7 +1410,11 @@ impl Session {
         }
         // Bounded so a hanging materializer (a slow source resolve) cannot
         // wedge the whole session command loop.
-        let RadioPage { tracks, more } = tokio::time::timeout(
+        let RadioPage {
+            tracks,
+            more,
+            basis,
+        } = tokio::time::timeout(
             MATERIALIZE_TIMEOUT,
             self.materializer.materialize_queue(&request.context),
         )
@@ -1465,7 +1485,9 @@ impl Session {
         if request.mode != QueueMode::Replace && was_empty && !self.model.is_empty() {
             self.origin = origin;
         }
-        Ok(self.publish(state_tx, true))
+        let mut ack = self.publish(state_tx, true);
+        ack.basis = basis.map(api_basis);
+        Ok(ack)
     }
 
     /// A radio seeded from the song already playing grows around it instead of starting it over.

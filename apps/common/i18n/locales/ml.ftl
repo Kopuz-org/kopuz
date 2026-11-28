@@ -655,6 +655,7 @@ sort_field_genre = വിഭാഗം
 sort_field_album = ആൽബം
 sort_field_duration = ദൈർഘ്യം
 sort_field_date_added = ചേർത്ത തീയതി
+sort_field_last_played = അവസാനം കേട്ടത്
 sort_field_name = പേര്
 sort_field_tracks = ട്രാക്കുകൾ
 sort_field_albums = ആൽബങ്ങൾ
@@ -977,6 +978,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = റേറ്റിംഗ്
+rate_stars =
+    { $count ->
+        [one] { $count } നക്ഷത്രം റേറ്റ് ചെയ്യുക
+       *[other] { $count } നക്ഷത്രം റേറ്റ് ചെയ്യുക
+    }
+clear_rating = റേറ്റിംഗ് മായ്ക്കുക
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1333,3 +1341,11 @@ interface_panel_side = വശം
 interface_panel_side_description = പ്ലേലിസ്റ്റ് കോളം പേജിന്റെ ഏത് വശത്ത്.
 interface_queue_side = ക്യൂ, വരികൾ കോളത്തിന്റെ വശം
 interface_queue_side_description = ക്യൂവും വരികളും ഏത് വശത്ത് തുറക്കും.
+artist_similar = Similar artists
+artist_info_link = ഈ കലാകാരനെക്കുറിച്ച് കൂടുതൽ
+radio_from_server = നിങ്ങളുടെ സെർവറിൽ നിന്ന്
+radio_metadata_basis = AudioMuse-ന് ഈ പാട്ടുകൾ ഇതുവരെ അറിയില്ല, അതിനാൽ ഈ റേഡിയോ ടാഗുകളെയും Last.fm-നെയും പിന്തുടരുന്നു.
+mix_from_queue = ക്യൂവിൽ നിന്നുള്ള മിക്സ്
+sonic_path_start = ഇവിടെ നിന്ന് സോണിക് പാത്ത് തുടങ്ങുക
+sonic_path_end = ഇവിടെ വരെയുള്ള സോണിക് പാത്ത്
+sonic_path_marked = സോണിക് പാത്ത് ഇവിടെ തുടങ്ങുന്നു. മറ്റൊരു പാട്ടിൽ “ഇവിടെ വരെയുള്ള സോണിക് പാത്ത്” തിരഞ്ഞെടുക്കുക.

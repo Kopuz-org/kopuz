@@ -211,10 +211,12 @@ pub struct LyricsView {
     pub plain_romanized: Vec<Option<String>>,
 }
 
-/// Listening stats: the active source's play counts keyed by track uid.
+/// Listening stats: the active source's play counts keyed by track uid, and its
+/// 1-5 star ratings keyed by track key.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StatsView {
     pub listen_counts: std::collections::HashMap<String, u64>,
+    pub ratings: std::collections::HashMap<String, u8>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -299,6 +301,16 @@ pub struct ArtistInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtistDetail {
     pub info: ArtistInfo,
+}
+
+/// What the active source says about an artist, for the artist page's About section.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArtistInfoView {
+    pub biography: Option<String>,
+    pub image: Option<crate::ArtworkRef>,
+    pub similar: Vec<SimilarArtist>,
+    /// A page about the artist elsewhere.
+    pub link: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

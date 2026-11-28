@@ -673,6 +673,7 @@ sort_field_genre = Gatunek
 sort_field_album = Album
 sort_field_duration = Czas trwania
 sort_field_date_added = Data dodania
+sort_field_last_played = Ostatnio odtwarzane
 sort_field_name = Nazwa
 sort_field_tracks = Ścieżki
 sort_field_albums = Albumy
@@ -995,6 +996,15 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Ocena
+rate_stars =
+    { $count ->
+        [one] Oceń na { $count } gwiazdkę
+        [few] Oceń na { $count } gwiazdki
+        [many] Oceń na { $count } gwiazdek
+       *[other] Oceń na { $count } gwiazdki
+    }
+clear_rating = Wyczyść ocenę
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1351,3 +1361,11 @@ interface_panel_side = Strona
 interface_panel_side_description = Po której stronie strony jest kolumna playlist.
 interface_queue_side = Strona kolumny kolejki i tekstu
 interface_queue_side_description = Po której stronie otwiera się kolumna kolejki i tekstu.
+artist_similar = Similar artists
+artist_info_link = Więcej o tym wykonawcy
+radio_from_server = Z Twojego serwera
+radio_metadata_basis = AudioMuse jeszcze nie zna tych utworów, więc to radio opiera się na tagach i Last.fm.
+mix_from_queue = Miks z kolejki
+sonic_path_start = Zacznij ścieżkę brzmieniową od tego utworu
+sonic_path_end = Ścieżka brzmieniowa do tego utworu
+sonic_path_marked = Ścieżka brzmieniowa zaczyna się tutaj. W innym utworze wybierz „Ścieżka brzmieniowa do tego utworu”.

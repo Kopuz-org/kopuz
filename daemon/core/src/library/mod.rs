@@ -36,6 +36,8 @@ pub struct LibraryService {
     /// Asked for lyrics and radio the sources have none of. Weak, since the
     /// plugins reach back into the library through the API.
     plugins: OnceLock<std::sync::Weak<crate::plugin_integrations::PluginIntegrations>>,
+    /// Held across a rating's source and store writes; see `rate_track`.
+    rating: tokio::sync::Mutex<()>,
 }
 
 /// Tracks that exist but the database has never seen: a browse shelf, a
@@ -231,6 +233,7 @@ impl LibraryService {
             artwork_in_flight: Arc::default(),
             photo_sweeps: std::sync::Mutex::default(),
             plugins: OnceLock::new(),
+            rating: tokio::sync::Mutex::default(),
         }
     }
 
@@ -515,7 +518,23 @@ impl LibraryService {
                 }
             })
             .collect();
-        Ok(api::StatsView { listen_counts })
+        let ratings = self
+            .db
+            .server_ratings(&self.query_source())
+            .await
+            .map_err(db_error)?;
+        Ok(api::StatsView {
+            listen_counts,
+            ratings,
+        })
+    }
+
+    /// Stars go to the source first; only what it accepted is kept locally, so the two never disagree.
+    pub async fn set_star_rating(&self, key: &str, stars: u8) -> Result<(), ApiError> {
+        let source = server::source::active(self.db.clone(), &self.current_sources());
+        rate_track(&self.rating, source.as_ref(), key, stars).await?;
+        self.invalidate(Table::Recents);
+        Ok(())
     }
 
     /// Lyrics for one library track, through the app's full provider chain
@@ -854,9 +873,12 @@ impl QueueMaterializer for LibraryService {
                 }
                 Ok(vec![self.radio_track(station_id, stream_id)])
             }
-            QueueContext::TrackRadio { .. } | QueueContext::PlaylistRadio { .. } => {
-                Ok(self.materialize_queue(context).await?.tracks)
-            }
+            QueueContext::TrackRadio { .. }
+            | QueueContext::PlaylistRadio { .. }
+            | QueueContext::AlbumRadio { .. }
+            | QueueContext::ArtistRadio { .. }
+            | QueueContext::MixRadio { .. }
+            | QueueContext::SonicPath { .. } => Ok(self.materialize_queue(context).await?.tracks),
         }
     }
 
@@ -864,6 +886,14 @@ impl QueueMaterializer for LibraryService {
         match context {
             QueueContext::TrackRadio { key } => self.catalog_service()?.track_radio(key).await,
             QueueContext::PlaylistRadio { id } => self.catalog_service()?.playlist_radio(id).await,
+            QueueContext::AlbumRadio { id } => self.catalog_service()?.album_radio(id).await,
+            QueueContext::ArtistRadio { artist } => {
+                self.catalog_service()?.artist_radio(artist).await
+            }
+            QueueContext::MixRadio { keys } => self.catalog_service()?.mix_radio(keys).await,
+            QueueContext::SonicPath { from, to } => {
+                self.catalog_service()?.sonic_path(from, to).await
+            }
             _ => Ok(RadioPage::last(self.materialize(context).await?)),
         }
     }
@@ -913,6 +943,39 @@ impl QueueMaterializer for LibraryService {
     }
 }
 
+const MAX_STARS: u8 = 5;
+
+/// The source takes the stars first; a refusal leaves the stored ratings as
+/// they were. `lock` keeps two quick ratings from crossing, where the source
+/// ends on one and the store on the other.
+async fn rate_track(
+    lock: &tokio::sync::Mutex<()>,
+    source: &dyn server::source::MediaSource,
+    key: &str,
+    stars: u8,
+) -> Result<(), ApiError> {
+    if key.trim().is_empty() {
+        return Err(ApiError::invalid_input("nothing to rate"));
+    }
+    if stars > MAX_STARS {
+        return Err(ApiError::invalid_input("a rating is 0 to 5 stars"));
+    }
+    if !source.capabilities().ratings {
+        return Err(ApiError::unsupported("ratings"));
+    }
+
+    let _held = lock.lock().await;
+    source
+        .set_rating(key, stars)
+        .await
+        .map_err(crate::sources::source_error)?;
+    source
+        .db()
+        .set_server_rating(source.source(), key, (stars > 0).then_some(stars))
+        .await
+        .map_err(db_error)
+}
+
 fn youtube_music_lyrics_auth(
     server: &config::MusicServer,
 ) -> Option<server::lyrics::YouTubeMusicLyricsAuth> {
@@ -937,6 +1000,174 @@ fn ranked(row: db::NamePlays) -> api::Ranked {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use server::source::{Capabilities, MediaSource, SourceError};
+
+    /// A local source that claims ratings and answers `set_rating` as told.
+    /// It logs what it accepts; an answer for `slow` stars comes late.
+    struct Rater {
+        inner: Box<dyn MediaSource>,
+        accept: bool,
+        ratings: bool,
+        slow: Option<u8>,
+        accepted: std::sync::Mutex<Vec<u8>>,
+    }
+
+    #[async_trait::async_trait]
+    impl MediaSource for Rater {
+        fn source(&self) -> &config::Source {
+            self.inner.source()
+        }
+        fn db(&self) -> &db::Db {
+            self.inner.db()
+        }
+        fn capabilities(&self) -> Capabilities {
+            Capabilities {
+                ratings: self.ratings,
+                ..self.inner.capabilities()
+            }
+        }
+        async fn add_to_playlist(
+            &self,
+            id: &str,
+            keys: &[String],
+        ) -> Result<Vec<String>, SourceError> {
+            self.inner.add_to_playlist(id, keys).await
+        }
+        async fn create_playlist(
+            &self,
+            name: &str,
+            keys: &[String],
+        ) -> Result<String, SourceError> {
+            self.inner.create_playlist(name, keys).await
+        }
+        async fn remove_from_playlist(
+            &self,
+            id: &str,
+            track: &Track,
+            position: usize,
+        ) -> Result<(), SourceError> {
+            self.inner.remove_from_playlist(id, track, position).await
+        }
+        async fn resolve_stream(
+            &self,
+            key: &str,
+            quality: config::StreamQuality,
+        ) -> Result<server::source::StreamInfo, SourceError> {
+            self.inner.resolve_stream(key, quality).await
+        }
+        async fn validate(&self) -> server::source::AuthOutcome {
+            self.inner.validate().await
+        }
+        async fn fetch_favorites(&self) -> Result<Vec<String>, SourceError> {
+            self.inner.fetch_favorites().await
+        }
+        async fn push_favorite(&self, key: &str, on: bool) -> Result<(), SourceError> {
+            self.inner.push_favorite(key, on).await
+        }
+        async fn set_rating(&self, _: &str, stars: u8) -> Result<(), SourceError> {
+            if !self.accept {
+                return Err(SourceError::Connectivity);
+            }
+            self.accepted.lock().expect("log").push(stars);
+            if self.slow == Some(stars) {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            Ok(())
+        }
+    }
+
+    fn unlocked() -> tokio::sync::Mutex<()> {
+        tokio::sync::Mutex::new(())
+    }
+
+    async fn rater(dir: &tempfile::TempDir, accept: bool, ratings: bool) -> Rater {
+        let database = db::init(&dir.path().join("rating.db")).await.expect("db");
+        Rater {
+            inner: server::source::local(database, config::Source::default()),
+            accept,
+            ratings,
+            slow: None,
+            accepted: std::sync::Mutex::default(),
+        }
+    }
+
+    async fn stored(source: &Rater) -> HashMap<String, u8> {
+        source
+            .db()
+            .server_ratings(source.source())
+            .await
+            .expect("ratings")
+    }
+
+    #[tokio::test]
+    async fn a_rating_the_source_took_is_stored_and_zero_clears_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = rater(&dir, true, true).await;
+
+        rate_track(&unlocked(), &source, "t1", 4)
+            .await
+            .expect("rate");
+        assert_eq!(stored(&source).await.get("t1"), Some(&4));
+
+        rate_track(&unlocked(), &source, "t1", 0)
+            .await
+            .expect("clear");
+        assert!(stored(&source).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn two_quick_ratings_end_on_the_same_stars_in_both_places() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = Rater {
+            slow: Some(1),
+            ..rater(&dir, true, true).await
+        };
+        let lock = tokio::sync::Mutex::new(());
+
+        // The source takes 1, then 5, but answers 1 last.
+        let first = rate_track(&lock, &source, "t1", 1);
+        let second = async {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            rate_track(&lock, &source, "t1", 5).await
+        };
+        let (first, second) = tokio::join!(first, second);
+        first.expect("rate 1");
+        second.expect("rate 5");
+
+        let last = *source
+            .accepted
+            .lock()
+            .expect("log")
+            .last()
+            .expect("accepted");
+        assert_eq!(stored(&source).await.get("t1"), Some(&last));
+    }
+
+    #[tokio::test]
+    async fn a_rating_the_source_refused_stores_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = rater(&dir, false, true).await;
+
+        assert!(rate_track(&unlocked(), &source, "t1", 4).await.is_err());
+        assert!(stored(&source).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn too_many_stars_or_no_capability_is_refused_before_the_source() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = rater(&dir, true, true).await;
+        let error = rate_track(&unlocked(), &source, "t1", 6)
+            .await
+            .expect_err("six stars");
+        assert_eq!(error.code, api::ErrorCode::InvalidInput);
+
+        let plain = rater(&dir, true, false).await;
+        let error = rate_track(&unlocked(), &plain, "t1", 3)
+            .await
+            .expect_err("no ratings");
+        assert_eq!(error.code, api::ErrorCode::Unsupported);
+        assert!(stored(&plain).await.is_empty());
+    }
 
     fn synced(text: &str) -> server::lyrics::LyricLine {
         server::lyrics::LyricLine {
@@ -1269,6 +1500,22 @@ mod tests {
 
         async fn playlist_radio(&self, _id: &str) -> Result<RadioPage, ApiError> {
             Err(ApiError::unsupported("radio"))
+        }
+
+        async fn album_radio(&self, _id: &str) -> Result<RadioPage, ApiError> {
+            Err(ApiError::unsupported("radio"))
+        }
+
+        async fn artist_radio(&self, _artist: &str) -> Result<RadioPage, ApiError> {
+            Err(ApiError::unsupported("radio"))
+        }
+
+        async fn mix_radio(&self, _keys: &[String]) -> Result<RadioPage, ApiError> {
+            Err(ApiError::unsupported("radio"))
+        }
+
+        async fn sonic_path(&self, _from: &str, _to: &str) -> Result<RadioPage, ApiError> {
+            Err(ApiError::unsupported("sonic path"))
         }
 
         async fn more_radio(&self, _cursor: &str) -> Result<RadioPage, ApiError> {

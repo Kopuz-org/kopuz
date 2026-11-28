@@ -657,6 +657,7 @@ sort_field_genre = Είδος
 sort_field_album = Άλμπουμ
 sort_field_duration = Διάρκεια
 sort_field_date_added = Ημερομηνία προσθήκης
+sort_field_last_played = Τελευταία αναπαραγωγή
 sort_field_name = Όνομα
 sort_field_tracks = Κομμάτια
 sort_field_albums = Άλμπουμ
@@ -979,6 +980,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Βαθμολογία
+rate_stars =
+    { $count ->
+        [one] Βαθμολόγηση με { $count } αστέρι
+       *[other] Βαθμολόγηση με { $count } αστέρια
+    }
+clear_rating = Διαγραφή βαθμολογίας
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1335,3 +1343,11 @@ interface_panel_side = Πλευρά
 interface_panel_side_description = Σε ποια πλευρά της σελίδας είναι η στήλη λιστών.
 interface_queue_side = Πλευρά στήλης ουράς και στίχων
 interface_queue_side_description = Σε ποια πλευρά ανοίγει η στήλη ουράς και στίχων.
+artist_similar = Similar artists
+artist_info_link = Περισσότερα για αυτόν τον καλλιτέχνη
+radio_from_server = Από τον διακομιστή σας
+radio_metadata_basis = Το AudioMuse δεν γνωρίζει ακόμη αυτά τα τραγούδια, γι' αυτό αυτό το ραδιόφωνο ακολουθεί ετικέτες και το Last.fm.
+mix_from_queue = Μίγμα από την ουρά
+sonic_path_start = Έναρξη ηχητικής διαδρομής εδώ
+sonic_path_end = Ηχητική διαδρομή μέχρι εδώ
+sonic_path_marked = Η ηχητική διαδρομή ξεκινά εδώ. Επιλέξτε «Ηχητική διαδρομή μέχρι εδώ» σε άλλο τραγούδι.
