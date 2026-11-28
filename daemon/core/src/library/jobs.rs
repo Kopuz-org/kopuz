@@ -362,6 +362,11 @@ impl LibraryService {
             ctx.progress("persisting", Some(done), Some(total), None);
             self.invalidate(Table::Tracks);
         }
+        self.db
+            .replace_server_track_stats(&src, &snapshot.track_stats)
+            .await
+            .map_err(db_error)?;
+        self.invalidate(Table::Recents);
         let linked = self.db.linked_artist_keys(&src).await.map_err(db_error)?;
         for (artist, url) in &snapshot.artists {
             let (Some(key), Some(url)) = (super::artist_art::credit_key(artist, &linked), url)

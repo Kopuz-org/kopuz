@@ -6,6 +6,7 @@ use std::path::Path;
 use config::{Browser, MusicServer, MusicService, SavedServer, Settings, Source};
 use sqlx::SqlitePool;
 
+use super::server_stats::PLAY_COUNTS;
 use crate::DbError;
 
 /// How many recent entries to keep per source.
@@ -54,13 +55,14 @@ pub async fn play_history(
     pool: &SqlitePool,
     source: &Source,
 ) -> Result<Vec<crate::PlayRecord>, DbError> {
-    let rows: Vec<(String, i64, Option<i64>)> = sqlx::query_as(
-        "SELECT track_key, count, last_played_at FROM listen_counts \
+    let sql = format!(
+        "SELECT track_key, count, last_played_at FROM {PLAY_COUNTS} \
           WHERE source = ?1 AND count > 0 ORDER BY count DESC, track_key",
-    )
-    .bind(source.as_str())
-    .fetch_all(pool)
-    .await?;
+    );
+    let rows: Vec<(String, i64, Option<i64>)> = sqlx::query_as(&sql)
+        .bind(source.as_str())
+        .fetch_all(pool)
+        .await?;
     Ok(rows
         .into_iter()
         .map(|(track_key, count, last_played_at)| crate::PlayRecord {
@@ -73,21 +75,21 @@ pub async fn play_history(
 
 /// Every play count, under the uid keys every reader of the map looks them up by.
 pub async fn listen_counts(pool: &SqlitePool) -> Result<HashMap<String, u64>, DbError> {
-    let counts = sqlx::query!(
+    let sql = format!(
         "SELECT lc.source, lc.track_key, lc.count, s.service \
-           FROM listen_counts lc LEFT JOIN servers s ON s.id = lc.source"
-    )
-    .fetch_all(pool)
-    .await?;
+           FROM {PLAY_COUNTS} lc LEFT JOIN servers s ON s.id = lc.source"
+    );
+    let counts: Vec<(String, String, i64, Option<String>)> =
+        sqlx::query_as(&sql).fetch_all(pool).await?;
     Ok(counts
         .into_iter()
-        .map(|r| {
-            let uid = match r.service {
-                Some(service) => format!("{}:{}", service.to_lowercase(), r.track_key),
-                None => r.track_key,
+        .map(|(source, track_key, count, service)| {
+            let uid = match service {
+                Some(service) => format!("{}:{}", service.to_lowercase(), track_key),
+                None => track_key,
             };
-            let key = Source::from_column(&r.source).listen_count_key(&uid);
-            (key, r.count.max(0) as u64)
+            let key = Source::from_column(&source).listen_count_key(&uid);
+            (key, count.max(0) as u64)
         })
         .collect())
 }
@@ -916,6 +918,7 @@ pub(super) async fn purge_source(
         "DELETE FROM favorites WHERE server_id = ?1",
         "DELETE FROM recently_played WHERE source = ?1",
         "DELETE FROM listen_counts WHERE source = ?1",
+        "DELETE FROM server_track_stats WHERE source = ?1",
         "DELETE FROM kv WHERE kind = ?1",
         "DELETE FROM artist_images WHERE source = ?1",
         "DELETE FROM queue_tracks WHERE source = ?1",

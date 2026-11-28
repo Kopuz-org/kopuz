@@ -619,6 +619,7 @@ sort_field_genre = Genre
 sort_field_album = Album
 sort_field_duration = Tagal
 sort_field_date_added = Petsa ng pagdagdag
+sort_field_last_played = Huling pinatugtog
 sort_field_name = Pangalan
 sort_field_tracks = Mga Track
 sort_field_albums = Mga Album
@@ -941,6 +942,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Rating
+rate_stars =
+    { $count ->
+        [one] I-rate ng { $count } star
+       *[other] I-rate ng { $count } star
+    }
+clear_rating = I-clear ang rating
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1297,3 +1305,20 @@ interface_panel_side = Gilid
 interface_panel_side_description = Sa aling gilid ng pahina ang column ng playlist.
 interface_queue_side = Gilid ng column ng queue at lyrics
 interface_queue_side_description = Sa aling gilid magbubukas ang column ng queue at lyrics.
+artist_similar = Similar artists
+artist_info_link = Higit pa tungkol sa artist na ito
+radio_from_server = Mula sa iyong server
+radio_metadata_basis = Hindi pa kilala ng AudioMuse ang mga kantang ito, kaya sinusunod ng radyong ito ang mga tag at Last.fm.
+mix_from_queue = Mix mula sa queue
+sonic_path_start = Simulan dito ang sonic path
+sonic_path_end = Sonic path hanggang dito
+sonic_path_marked = Dito nagsisimula ang sonic path. Piliin ang "Sonic path hanggang dito" sa ibang kanta.
+audiomuse = AudioMuse-AI
+audiomuse_url = Address ng AudioMuse-AI
+audiomuse_url_placeholder = http://host:8000
+audiomuse_token = API token ng AudioMuse-AI
+audiomuse_token_placeholder = Ilagay ang API token ng AudioMuse-AI
+describe_music = Musika ayon sa paglalarawan…
+described_searching = Naghahanap ng tugmang musika…
+discover_your_sound = Ang tunog mo
+discover_your_sound_hint = Mula sa iyong listening profile

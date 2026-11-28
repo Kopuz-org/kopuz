@@ -5,6 +5,8 @@ use std::sync::{Arc, PoisonError, RwLock};
 
 const MUSICBRAINZ_TOKEN: &str = "musicbrainz_token";
 const LIBREFM_SESSION_KEY: &str = "librefm_session_key";
+const AUDIOMUSE_URL: &str = "audiomuse_url";
+const AUDIOMUSE_TOKEN: &str = "audiomuse_token";
 /// An integration plugin's answers are stored as `plugin/<id>/<field>`.
 const PLUGIN_PREFIX: &str = "plugin/";
 
@@ -17,6 +19,8 @@ pub struct Credentials {
     /// The ListenBrainz user token.
     pub musicbrainz_token: String,
     pub librefm_session_key: String,
+    pub audiomuse_url: String,
+    pub audiomuse_token: String,
     /// Every answer an integration plugin was given, secret or not, by plugin id.
     /// None of it belongs in a settings file, since a secret may sit beside it.
     pub plugins: BTreeMap<String, PluginAnswers>,
@@ -27,6 +31,8 @@ impl Credentials {
         let mut take = |key: &str| rows.remove(key).unwrap_or_default();
         let musicbrainz_token = take(MUSICBRAINZ_TOKEN);
         let librefm_session_key = take(LIBREFM_SESSION_KEY);
+        let audiomuse_url = take(AUDIOMUSE_URL);
+        let audiomuse_token = take(AUDIOMUSE_TOKEN);
         let mut plugins: BTreeMap<String, PluginAnswers> = BTreeMap::new();
         for (key, value) in rows {
             let Some((id, field)) = key
@@ -43,6 +49,8 @@ impl Credentials {
         Self {
             musicbrainz_token,
             librefm_session_key,
+            audiomuse_url,
+            audiomuse_token,
             plugins,
         }
     }
@@ -58,6 +66,8 @@ impl Credentials {
                 LIBREFM_SESSION_KEY.to_string(),
                 self.librefm_session_key.as_str(),
             ),
+            (AUDIOMUSE_URL.to_string(), self.audiomuse_url.as_str()),
+            (AUDIOMUSE_TOKEN.to_string(), self.audiomuse_token.as_str()),
         ]);
         for (id, answers) in &self.plugins {
             for (field, value) in answers {

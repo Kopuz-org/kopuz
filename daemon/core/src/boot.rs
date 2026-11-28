@@ -320,6 +320,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     config_service.spawn_file_watch(session.settings_watch());
     let config_service_for_api = config_service.clone();
     let catalog = crate::CatalogService::new(database.clone(), session.clone(), library.clone());
+    catalog.attach_credentials(credentials.clone());
     library.attach_catalog(catalog.clone());
     artwork.attach_library(library.clone());
     artwork.attach_catalog(catalog.clone());

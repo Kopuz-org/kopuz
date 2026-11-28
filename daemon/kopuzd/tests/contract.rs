@@ -49,6 +49,23 @@ impl QueueMaterializer for StubLibrary {
             _ => Err(ApiError::unsupported("stub resolves raw tracks only")),
         }
     }
+
+    // A mix answers with the basis the stub's source claims.
+    async fn materialize_queue(
+        &self,
+        context: &QueueContext,
+    ) -> Result<server::source::RadioPage, ApiError> {
+        let QueueContext::MixRadio { keys } = context else {
+            return Ok(server::source::RadioPage::last(
+                self.materialize(context).await?,
+            ));
+        };
+        Ok(server::source::RadioPage {
+            tracks: keys.iter().map(|key| track(key)).collect(),
+            more: None,
+            basis: Some(server::source::MixBasis::Metadata),
+        })
+    }
 }
 
 fn track(key: &str) -> Track {
@@ -1049,6 +1066,31 @@ async fn plugins_are_not_installed_or_removed_over_tcp() {
             .await
             .expect_err("uninstall over tcp"),
     );
+}
+
+#[tokio::test]
+async fn a_mix_reports_how_it_was_picked_on_both_transports() {
+    let pair = spawn_pair().await;
+    let request = SetQueueRequest {
+        mode: QueueMode::Replace,
+        context: QueueContext::MixRadio {
+            keys: vec!["/a.wav".into(), "/b.wav".into()],
+        },
+        start_index: None,
+        shuffle: None,
+    };
+
+    let local = pair.local.set_queue(request.clone()).await.expect("local");
+    let wire = pair.wire.set_queue(request).await.expect("wire");
+
+    assert_eq!(local.basis, Some(api::MixBasis::Metadata));
+    assert_eq!(wire.basis, Some(api::MixBasis::Metadata));
+    let plain = pair
+        .wire
+        .set_queue(replace(&["/a.wav"]))
+        .await
+        .expect("plain queue");
+    assert_eq!(plain.basis, None);
 }
 
 #[tokio::test]
@@ -2121,6 +2163,14 @@ async fn artists_are_keyed_by_identity_on_both_transports() {
         assert_eq!(
             detail.info, **ada,
             "the page names the artist the grid does"
+        );
+        assert_eq!(
+            pair.local
+                .artist_info(ada.key.clone())
+                .await
+                .expect("local"),
+            pair.wire.artist_info(ada.key.clone()).await.expect("wire"),
+            "a source without artist info answers none the same way over the wire"
         );
     }
     let linked = adas

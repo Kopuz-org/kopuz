@@ -658,6 +658,7 @@ sort_field_genre = Género
 sort_field_album = Álbum
 sort_field_duration = Duración
 sort_field_date_added = Fecha de adición
+sort_field_last_played = Última reproducción
 sort_field_name = Nombre
 sort_field_tracks = Pistas
 sort_field_albums = Álbumes
@@ -980,6 +981,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Valoración
+rate_stars =
+    { $count ->
+        [one] Valorar con { $count } estrella
+       *[other] Valorar con { $count } estrellas
+    }
+clear_rating = Borrar valoración
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1336,3 +1344,20 @@ interface_panel_side = Lado
 interface_panel_side_description = En qué lado de la página va la columna de listas.
 interface_queue_side = Lado de la columna de cola y letra
 interface_queue_side_description = En qué lado de la página se abre la columna de cola y letra.
+artist_similar = Similar artists
+artist_info_link = Más sobre este artista
+radio_from_server = De tu servidor
+radio_metadata_basis = AudioMuse aún no conoce estas canciones, así que esta radio se guía por las etiquetas y Last.fm.
+mix_from_queue = Mezcla desde la cola
+sonic_path_start = Iniciar ruta sonora aquí
+sonic_path_end = Ruta sonora hasta aquí
+sonic_path_marked = La ruta sonora empieza aquí. Elige «Ruta sonora hasta aquí» en otra canción.
+audiomuse = AudioMuse-AI
+audiomuse_url = Dirección de AudioMuse-AI
+audiomuse_url_placeholder = http://host:8000
+audiomuse_token = Token de API de AudioMuse-AI
+audiomuse_token_placeholder = Introduce tu token de API de AudioMuse-AI
+describe_music = Música por descripción…
+described_searching = Buscando música que coincida…
+discover_your_sound = Tu sonido
+discover_your_sound_hint = Según tu perfil de escucha

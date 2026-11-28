@@ -646,6 +646,7 @@ sort_field_genre = Genere
 sort_field_album = Album
 sort_field_duration = Durata
 sort_field_date_added = Data di aggiunta
+sort_field_last_played = Ultimo ascolto
 sort_field_name = Nome
 sort_field_tracks = Tracce
 sort_field_albums = Album
@@ -968,6 +969,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Valutazione
+rate_stars =
+    { $count ->
+        [one] Valuta con { $count } stella
+       *[other] Valuta con { $count } stelle
+    }
+clear_rating = Cancella valutazione
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1324,3 +1332,20 @@ interface_panel_side = Lato
 interface_panel_side_description = Su quale lato della pagina sta la colonna delle playlist.
 interface_queue_side = Lato della colonna coda e testi
 interface_queue_side_description = Su quale lato della pagina si apre la colonna di coda e testi.
+artist_similar = Similar artists
+artist_info_link = Altro su questo artista
+radio_from_server = Dal tuo server
+radio_metadata_basis = AudioMuse non conosce ancora questi brani, quindi questa radio segue i tag e Last.fm.
+mix_from_queue = Mix dalla coda
+sonic_path_start = Inizia il percorso sonoro da qui
+sonic_path_end = Percorso sonoro fino a qui
+sonic_path_marked = Il percorso sonoro inizia qui. Scegli «Percorso sonoro fino a qui» su un altro brano.
+audiomuse = AudioMuse-AI
+audiomuse_url = Indirizzo di AudioMuse-AI
+audiomuse_url_placeholder = http://host:8000
+audiomuse_token = Token API di AudioMuse-AI
+audiomuse_token_placeholder = Inserisci il token API di AudioMuse-AI
+describe_music = Musica per descrizione…
+described_searching = Ricerca di musica corrispondente…
+discover_your_sound = Il tuo sound
+discover_your_sound_hint = Dal tuo profilo di ascolto

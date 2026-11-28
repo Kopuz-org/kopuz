@@ -677,6 +677,7 @@ sort_field_genre = Genre
 sort_field_album = Album
 sort_field_duration = Duration
 sort_field_date_added = Date added
+sort_field_last_played = Last played
 sort_field_name = Name
 sort_field_tracks = Tracks
 sort_field_albums = Albums
@@ -976,6 +977,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Rating
+rate_stars =
+    { $count ->
+        [one] Rate { $count } star
+       *[other] Rate { $count } stars
+    }
+clear_rating = Clear rating
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1332,3 +1340,20 @@ interface_panel_side = Side
 interface_panel_side_description = Which side of the page the playlists column sits on.
 interface_queue_side = Queue and lyrics column side
 interface_queue_side_description = Which side of the page the docked queue and lyrics column opens on.
+artist_similar = Similar artists
+artist_info_link = More about this artist
+radio_from_server = From your server
+radio_metadata_basis = AudioMuse doesn't know these songs yet, so this radio follows tags and Last.fm instead.
+mix_from_queue = Mix from queue
+sonic_path_start = Start sonic path here
+sonic_path_end = Sonic path to here
+sonic_path_marked = Sonic path starts here. Pick "Sonic path to here" on another song.
+audiomuse = AudioMuse-AI
+audiomuse_url = AudioMuse-AI address
+audiomuse_url_placeholder = http://host:8000
+audiomuse_token = AudioMuse-AI API token
+audiomuse_token_placeholder = Enter your AudioMuse-AI API token
+describe_music = Music by description…
+described_searching = Looking for matching music…
+discover_your_sound = Your sound
+discover_your_sound_hint = From your listening profile

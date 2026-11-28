@@ -42,11 +42,11 @@ pub use jobs::{
     DownloadCandidate, DownloadHistoryEntry, DownloadItemState, DownloadItemStatus, DownloadState,
 };
 pub use library::{
-    AlbumInfo, AlbumPage, AlbumQuery, ArtistCredit, ArtistDetail, ArtistInfo, ArtistPage,
-    ArtistQuery, DEFAULT_PAGE_LIMIT, DayPlays, ListeningStats, LyricChunkView, LyricLineView,
-    LyricsView, Page, Ranked, RankedTrack, SearchRequest, SearchResults, SearchSuggestion,
-    SimilarArtist, StatsView, TrackCounterpart, TrackFilter, TrackInfo, TrackPage, TrackSort,
-    TrackVersion, total_duration_secs,
+    AlbumInfo, AlbumPage, AlbumQuery, ArtistCredit, ArtistDetail, ArtistInfo, ArtistInfoView,
+    ArtistPage, ArtistQuery, DEFAULT_PAGE_LIMIT, DayPlays, ListeningStats, LyricChunkView,
+    LyricLineView, LyricsView, Page, Ranked, RankedTrack, SearchRequest, SearchResults,
+    SearchSuggestion, SimilarArtist, StatsView, TrackCounterpart, TrackFilter, TrackInfo,
+    TrackPage, TrackSort, TrackVersion, total_duration_secs,
 };
 pub use mutations::{ArtworkChange, ArtworkUpload, TrackMetadataPatch};
 pub use player::{
@@ -67,19 +67,20 @@ pub use prefs::{
     MAX_PREF_TOTAL_BYTES, MAX_PREF_VALUE_BYTES, PrefEntry,
 };
 pub use queue::{
-    QueueContext, QueueEdit, QueueItem, QueueMode, QueueSnapshot, QueueWindow, SetQueueRequest,
+    MixBasis, QueueContext, QueueEdit, QueueItem, QueueMode, QueueSnapshot, QueueWindow,
+    SetQueueRequest,
 };
-pub use radio::{RadioStationInfo, RadioStreamInfo};
+pub use radio::{RadioOrigin, RadioStationInfo, RadioStreamInfo};
 pub use schema::{
     ChoiceOption, FieldKind, FieldSpec, FieldValue, Icon, Problem, Text, decode_directories,
     encode_directories, spec_value, toggle_of, value_of,
 };
 pub use sources::{
-    AlbumPresentation, ArtistPresentation, BrowserProfile, BrowserSession, CheckOutcome, CheckStep,
-    ConnectKind, ConnectionCheck, CredentialProvision, DraftCheck, DraftProbe, FavoritesSyncMode,
-    FolderProbe, IntegrationInfo, PageEntry, PlaylistCapability, SearchFilter, ServerProbe,
-    ServiceInfo, ServiceRef, SignInKind, SourceAccount, SourceCapabilities, SourceDraft,
-    SourceFolderEntry, SourceInfo, SourceLoginRequest,
+    AUDIOMUSE_INTEGRATION, AlbumPresentation, ArtistPresentation, BrowserProfile, BrowserSession,
+    CheckOutcome, CheckStep, ConnectKind, ConnectionCheck, CredentialProvision, DraftCheck,
+    DraftProbe, FavoritesSyncMode, FolderProbe, IntegrationInfo, PageEntry, PlaylistCapability,
+    SearchFilter, ServerProbe, ServiceInfo, ServiceRef, SignInKind, SourceAccount,
+    SourceCapabilities, SourceDraft, SourceFolderEntry, SourceInfo, SourceLoginRequest,
 };
 
 pub use updates::{AvailableUpdate, UpdateStatus};
@@ -133,6 +134,8 @@ pub struct DaemonStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandAck {
     pub rev: u64,
+    /// For a queue built from a radio or mix: how the source picked its songs.
+    pub basis: Option<MixBasis>,
 }
 
 pub type EventStream = futures_util::stream::BoxStream<'static, ApiEvent>;
@@ -243,6 +246,9 @@ pub trait LibraryApi: Send + Sync {
     async fn artist(&self, artist: String) -> Result<ArtistDetail, ApiError>;
 
     async fn similar_artists(&self, name: String) -> Result<Vec<SimilarArtist>, ApiError>;
+    /// What the active source says about an artist: biography, similar artists, a link. `None` when
+    /// its capability [`SourceCapabilities::artist_info`] is off or it knows nothing of them.
+    async fn artist_info(&self, artist: String) -> Result<Option<ArtistInfoView>, ApiError>;
 
     /// One track per artist, for the artist grid's tiles.
     async fn artist_sample_tracks(&self, page: Page) -> Result<TrackPage, ApiError>;
@@ -328,6 +334,10 @@ pub trait LibraryApi: Send + Sync {
     /// the remote in the background of the call; a rejected push reverts the
     /// local state and surfaces the error.
     async fn set_favorite(&self, key: String, favorite: bool) -> Result<(), ApiError>;
+
+    /// 1 to 5 stars on a track, 0 clears; more than 5 is invalid input. Gated by
+    /// [`SourceCapabilities::ratings`]; a source without it answers `unsupported`.
+    async fn set_star_rating(&self, key: String, stars: u8) -> Result<(), ApiError>;
 
     /// Tell the active source to stop recommending this track. Gated by
     /// [`SourceCapabilities::dont_recommend`]; a source without it answers

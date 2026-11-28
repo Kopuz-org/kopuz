@@ -100,7 +100,7 @@ is a complete community plugin that adds a service of its own.
 id = "internet-archive"      # unique; also its directory name
 name = "Internet Archive"
 version = "0.1.0"
-api = "0.1"                  # the plugin API it was built against; "0.2" for the imports under Beyond HTTP
+api = "0.2"                  # the plugin API it was built against
 description = "Albums and live recordings from archive.org."
 
 [permissions]
@@ -122,7 +122,9 @@ capabilities = { sync = true, downloads = true }
 Capabilities default to off. The keys mirror the daemon's: `sync`,
 `downloads`, `uploads`, `storage-quota`, `play-queue`,
 `playlists = "none" | "add-remove" | "reorder"`,
-`radio = ["track", "playlist", "search"]`,
+`radio = ["track", "playlist", "search", "album", "artist", "tracks"]`,
+`ratings` (`set-rating`), `artist-info` (`fetch-artist-info`),
+`radio-stations` (`fetch-radio-stations`), `sonic-path` (`sonic-path`),
 `favorites-sync = "instant" | "paginated"`, and the rest listed in
 `daemon/plugin-host/src/manifest.rs`. A misspelled key is an error, not a
 silently disabled feature.
@@ -132,10 +134,16 @@ resolves; an address listed there would reach whatever it names without that
 check, so the manifest is refused. `$server` covers the configured server,
 whatever its address.
 
+API 0.2 adds `set-rating`, `start-mix` (seeded by `album`, `artist` or `tracks`
+in `radio`), `sonic-path`, `fetch-artist-info` and `fetch-radio-stations`; each
+is unsupported unless the plugin implements it. Tracks carry
+`play-count`, `last-played` and `rating`, and a radio or mix page
+says its `basis` (`sonic` or `metadata`). The manifest's `api` is `"0.2"`;
+a plugin built against 0.1 is refused and needs a rebuild.
+
 ### Beyond HTTP
 
-API `0.2` adds three imports for a service that does more than answer HTTP
-requests. A plugin that uses none of them stays on `0.1` and runs unchanged.
+Three imports serve a service that does more than answer HTTP requests.
 
 - **`tcp`** (`kopuz_plugin_sdk::tcp::Stream`) is a TCP connection for a
   protocol of the service's own. It is held to the `network` list exactly as
@@ -531,7 +539,7 @@ each:
       "id": "internet-archive",
       "name": "Internet Archive",
       "version": "0.1.0",
-      "api": "0.1",
+      "api": "0.2",
       "description": "Albums and live recordings from archive.org.",
       "author": "someone",
       "homepage": "https://github.com/someone/kopuz-internet-archive",
