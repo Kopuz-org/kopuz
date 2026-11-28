@@ -83,6 +83,10 @@ impl MediaSource for SpotifySource {
             explicit_flags: false,
             watch_history: false,
             complete_play_history: false,
+            ratings: false,
+            artist_info: false,
+            radio_stations: false,
+            sonic_path: false,
             library_actions: LibraryActions::NONE,
         }
     }
@@ -183,6 +187,7 @@ impl MediaSource for SpotifySource {
             albums,
             tracks,
             artists: Vec::new(),
+            track_stats: Vec::new(),
         })
     }
 

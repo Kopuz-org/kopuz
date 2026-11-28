@@ -13,6 +13,7 @@
   "cover_art_darkening": 45,
   "cover_fetch_strategy": "MusicBrainzOnly",
   "crossfade_seconds": 4,
+  "smart_crossfade": true,
   "custom_background_path": "/home/me/Pictures/wall.png",
   "custom_font_path": "",
   "custom_themes": {

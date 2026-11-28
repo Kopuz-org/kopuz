@@ -11,7 +11,10 @@ use api::{
     PlayerCommand, PlayerState, PositionAnchor, QueueContext, QueueEdit, QueueItem, QueueMode,
     QueueSummary, QueueWindow, SetQueueRequest,
 };
-use player::engine::{Event as EngineEvent, Phase as EnginePhase, SourceFactory, Transition};
+use player::engine::{
+    Event as EngineEvent, IncomingMix, LeadingSilence, Phase as EnginePhase, SourceFactory,
+    Transition,
+};
 use player::player::{LoadArgs, NowPlayingMeta, Player, PlayerInitError};
 use reader::Track;
 use server::playback_ref::{PlaybackItemRef, ResolvedStreamRef};
@@ -23,9 +26,11 @@ use crate::playback::{NetworkStream, network_factory};
 use crate::queue_model::{NextOutcome, QueueModel};
 
 mod load;
+mod mix_plan;
 mod origin;
 mod radio_feed;
 mod reconciler;
+mod smart_fade;
 mod stations;
 mod versions;
 pub(crate) use stations::has_unrecorded_station;
@@ -222,6 +227,13 @@ async fn write_remote_queue(
     }
 }
 
+fn api_basis(basis: server::source::MixBasis) -> api::MixBasis {
+    match basis {
+        server::source::MixBasis::Sonic => api::MixBasis::Sonic,
+        server::source::MixBasis::Metadata => api::MixBasis::Metadata,
+    }
+}
+
 pub type FactoryOverride = Arc<dyn Fn(&Track) -> Option<SourceFactory> + Send + Sync>;
 
 enum SessionCmd {
@@ -302,6 +314,12 @@ enum SessionCmd {
     CounterpartFound {
         uid: String,
         counterpart: Box<reader::Counterpart>,
+    },
+    /// What the transition plugins planned for mixing `pair` while session `token` played.
+    MixPlanned {
+        token: u64,
+        pair: mix_plan::Pair,
+        plan: Option<Box<crate::transition::TransitionPlan>>,
     },
 }
 
@@ -416,6 +434,7 @@ impl SessionHandle {
             cmd_tx: cmd_tx.clone(),
             factory_override,
             counterparts: std::collections::HashMap::new(),
+            mixes: mix_plan::MixPlans::default(),
         };
         // A fresh start is not a clear, and must not wipe what another device saved before the boot adopt reads it.
         session.remote_loaded = Some(session.remote_mark());
@@ -861,6 +880,7 @@ struct Session {
     factory_override: Option<FactoryOverride>,
     /// The source's answer per track, `None` included, so a requeued track is not asked twice.
     counterparts: std::collections::HashMap<String, Option<reader::Counterpart>>,
+    mixes: mix_plan::MixPlans,
 }
 
 impl Session {
@@ -1081,6 +1101,9 @@ impl Session {
                     self.publish(state_tx, true);
                 }
             }
+            SessionCmd::MixPlanned { token, pair, plan } => {
+                self.handle_mix_planned(token, pair, plan.map(|plan| *plan), state_tx)
+            }
         }
     }
 
@@ -1267,7 +1290,10 @@ impl Session {
             QueueEdit::ClearUpcoming => {
                 let from = self.upcoming_from();
                 if !self.model.clear_from(from) {
-                    return Ok(CommandAck { rev: self.rev });
+                    return Ok(CommandAck {
+                        rev: self.rev,
+                        basis: None,
+                    });
                 }
                 self.rearm_gapless();
                 Ok(self.publish(state_tx, true))
@@ -1276,7 +1302,10 @@ impl Session {
                 let from = self.upcoming_from();
                 if keys.is_empty() {
                     if !self.model.clear_from(from) {
-                        return Ok(CommandAck { rev: self.rev });
+                        return Ok(CommandAck {
+                            rev: self.rev,
+                            basis: None,
+                        });
                     }
                     self.rearm_gapless();
                     return Ok(self.publish(state_tx, true));
@@ -1289,7 +1318,10 @@ impl Session {
             QueueEdit::ShuffleUpcoming => {
                 let from = self.upcoming_from();
                 if len <= from + 1 {
-                    return Ok(CommandAck { rev: self.rev });
+                    return Ok(CommandAck {
+                        rev: self.rev,
+                        basis: None,
+                    });
                 }
                 self.model.shuffle_from(from);
                 self.rearm_gapless();
@@ -1394,7 +1426,11 @@ impl Session {
         }
         // Bounded so a hanging materializer (a slow source resolve) cannot
         // wedge the whole session command loop.
-        let RadioPage { tracks, more } = tokio::time::timeout(
+        let RadioPage {
+            tracks,
+            more,
+            basis,
+        } = tokio::time::timeout(
             MATERIALIZE_TIMEOUT,
             self.materializer.materialize_queue(&request.context),
         )
@@ -1465,7 +1501,9 @@ impl Session {
         if request.mode != QueueMode::Replace && was_empty && !self.model.is_empty() {
             self.origin = origin;
         }
-        Ok(self.publish(state_tx, true))
+        let mut ack = self.publish(state_tx, true);
+        ack.basis = basis.map(api_basis);
+        Ok(ack)
     }
 
     /// A radio seeded from the song already playing grows around it instead of starting it over.
@@ -1586,6 +1624,7 @@ impl Session {
 
     /// Keep the song after this one in the offline cache ahead of time, in play order, so shuffle's.
     pub(super) fn prefetch_next(&mut self) {
+        self.prefetch_mix();
         let cache = self.offline.cache().clone();
         if !cache.enabled()
             || self.offline.offline_mode()
@@ -2406,8 +2445,9 @@ impl Session {
 
     /// A track shorter than the preload never reaches the next position event.
     pub(super) fn arm_gapless_now(&mut self) -> bool {
-        let arm =
-            self.should_play_gapless() && self.should_arm_transition(self.player.get_position());
+        let next = self.peek_next_index();
+        let gapless = self.should_play_gapless(next.and_then(|idx| self.model.track_at(idx)));
+        let arm = gapless && self.should_arm_transition(self.player.get_position());
         if arm {
             self.arm_transition();
         }
@@ -2488,6 +2528,9 @@ impl Session {
             task.abort();
         }
         self.player.cancel_pending_load();
+        if let Some((token, _)) = self.mixes.loading {
+            self.drop_mix_plan(token);
+        }
     }
 
     fn allocate_token(&mut self) -> u64 {
@@ -2507,6 +2550,7 @@ impl Session {
         code: api::ErrorCode,
         error: impl std::fmt::Display,
     ) -> bool {
+        self.drop_mix_plan(token);
         let intent = self.intent;
         if intent.token() != token {
             return false;

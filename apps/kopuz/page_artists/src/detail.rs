@@ -3,14 +3,14 @@
 use std::rc::Rc;
 
 use api::{
-    AlbumInfo, AlbumPage, ArtworkTarget, SimilarArtist, SourceCapabilities, Table, TrackInfo,
-    TrackPage,
+    AlbumInfo, AlbumPage, ArtworkTarget, SimilarArtist, SoundView, SourceCapabilities, Table,
+    TrackInfo, TrackPage,
 };
 use components::album_collection::available_fields;
 use components::format::{t, t_with, total_duration};
 use components::track_sort::{Column, next_sort, sort_tracks};
 use components::{
-    AlbumCollection, Chip, DetailActions, DetailHeader, EmptyState, GridMode, Loading, Picture,
+    AlbumCollection, DetailActions, DetailHeader, EmptyState, GridMode, Loading, Picture,
     TrackActions, TrackHeader, TrackList, TrackListEvent, TrackListOptions, icons, menus,
 };
 use config::{AlbumSortField, AlbumViewMode, SortCriterion, SortDirection};
@@ -19,15 +19,18 @@ use gpui_kit::component::{ActiveTheme as _, Sizable as _};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
-    SharedString, Styled as _, Subscription, Task, Window, div, rems,
+    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Subscription, Task, Window, div, rems,
 };
 use store::{
-    ConfigModel, DownloadsModel, LayoutModel, Navigator, Offline, Pictured, PlayerModel, Query,
-    Route, SourcesModel, Target, actions,
+    AudioMuseModel, ConfigModel, DownloadsModel, LayoutModel, Offline, Pictured, PlayerModel,
+    Query, SourcesModel, Target, actions,
 };
 
 use crate::controls::{self, ViewModeKey};
+
+mod about;
 
 /// One artist from the library: tracks and albums.
 pub struct ArtistDetail {
@@ -36,6 +39,14 @@ pub struct ArtistDetail {
     plugin_panels: Entity<components::plugin_ui::PluginPanels>,
     tracks: Entity<Query<TrackPage>>,
     detail: Entity<Query<api::ArtistDetail>>,
+    // What the source says of the artist; empty for a source without artist info.
+    info: Entity<Query<Option<api::ArtistInfoView>>>,
+    // Held, asking nothing, until AudioMuse-AI is set up.
+    sound: Entity<Query<SoundView>>,
+    sound_on: bool,
+    about_open: bool,
+    // The About view is picked per page; tracks or albums is the remembered pref.
+    showing_about: bool,
     list: Entity<TrackList>,
     column: Option<(Column, SortDirection)>,
     // Derived once per change, not once per frame.
@@ -78,6 +89,22 @@ impl ArtistDetail {
                 cx,
             )
         });
+        let artist = key.clone();
+        let info = cx.new(|cx| {
+            Query::new(
+                &[],
+                move |api| {
+                    let artist = artist.clone();
+                    async move { api.artist_info(artist).await }
+                },
+                cx,
+            )
+        });
+        let sound = cx.new(|cx| Query::held(&[Table::Servers], SoundView::default(), cx));
+        let sound_on = AudioMuseModel::ready(cx);
+        if sound_on {
+            point_sound(&sound, key.clone(), cx);
+        }
         let asked = controls::criteria::<AlbumSortField>(cx);
         let billed = cx.new(|cx| {
             Query::new(
@@ -92,6 +119,11 @@ impl ArtistDetail {
             cx.observe(&tracks, |this, _, cx| this.sync_rows(cx)),
             cx.observe(&billed, |this, _, cx| this.rebuild_albums(cx)),
             cx.observe(&detail, |this, _, cx| this.ask_similar(cx)),
+            cx.observe(&info, |_, _, cx| cx.notify()),
+            cx.observe(&sound, |_, _, cx| cx.notify()),
+            cx.observe(&AudioMuseModel::global(cx), |this, _, cx| {
+                this.sync_sound(cx)
+            }),
             cx.observe(&LayoutModel::global(cx), |this, _, cx| {
                 this.reorder_albums(cx);
                 this.ask_similar(cx);
@@ -116,6 +148,11 @@ impl ArtistDetail {
             key,
             tracks,
             detail,
+            info,
+            sound,
+            sound_on,
+            about_open: false,
+            showing_about: false,
             list,
             column: None,
             keys: Rc::from([]),
@@ -130,6 +167,21 @@ impl ArtistDetail {
             asked_similar: None,
             _similar: None,
             _subscriptions: subscriptions,
+        }
+    }
+
+    /// Ask for the artist's sound once AudioMuse-AI is set up, and stop when it is cleared.
+    fn sync_sound(&mut self, cx: &mut Context<Self>) {
+        let ready = AudioMuseModel::ready(cx);
+        if ready == self.sound_on {
+            return;
+        }
+        self.sound_on = ready;
+        match ready {
+            true => point_sound(&self.sound, self.key.clone(), cx),
+            false => self
+                .sound
+                .update(cx, |query, cx| query.hold(SoundView::default(), cx)),
         }
     }
 
@@ -257,43 +309,6 @@ impl ArtistDetail {
         }));
     }
 
-    fn similar_row(&self, cx: &App) -> Option<AnyElement> {
-        let similar = self.similar.as_ref().filter(|found| !found.is_empty())?;
-        Some(
-            v_flex()
-                .gap_2()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(components::style::white(
-                            components::style::TEXT_SECONDARY,
-                            cx,
-                        ))
-                        .child(t("similar_artists")),
-                )
-                .child(
-                    h_flex()
-                        .flex_wrap()
-                        .gap_2()
-                        .children(similar.iter().map(|artist| {
-                            let chip =
-                                Chip::new(SharedString::from(format!("similar-{}", artist.name)))
-                                    .label(SharedString::from(artist.name.clone()));
-                            match artist.key.clone() {
-                                Some(key) => chip
-                                    .icon(icons::MIC)
-                                    .on_click(move |_, _, cx| {
-                                        Navigator::navigate(Route::Artist(key.clone()), cx)
-                                    })
-                                    .into_any_element(),
-                                None => div().opacity(0.6).child(chip).into_any_element(),
-                            }
-                        })),
-                )
-                .into_any_element(),
-        )
-    }
-
     /// A button per plugin panel, each opening it in a sheet: the list below fills the page, so a panel inline would squeeze it.
     fn plugin_section(&self, cx: &App) -> Option<AnyElement> {
         let panels = self.plugin_panels.read(cx).drawn(cx);
@@ -340,6 +355,10 @@ impl ArtistDetail {
 impl Render for ArtistDetail {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let albums_view = controls::albums_first(cx);
+        // About gets its own view: above the tracks it left the list a sliver.
+        let about = self.about(cx);
+        let has_about = about.is_some();
+        let page = cx.entity().downgrade();
         let failed = {
             let detail = self.detail.read(cx);
             detail
@@ -357,6 +376,8 @@ impl Render for ArtistDetail {
                 ),
             };
             EmptyState::new(message).icon(icons::MIC).into_any_element()
+        } else if let Some(about) = about.filter(|_| self.showing_about) {
+            self.about_view(about, cx)
         } else if albums_view {
             self.albums_view(window, cx)
         } else {
@@ -364,18 +385,41 @@ impl Render for ArtistDetail {
         };
         components::page()
             .gap_6()
-            .child(
-                h_flex()
-                    .w_full()
-                    .justify_end()
-                    .items_center()
-                    .child(controls::view_order_toggle(albums_view)),
-            )
+            .child(h_flex().w_full().justify_end().items_center().child(
+                controls::view_order_toggle(
+                    albums_view,
+                    has_about.then_some(self.showing_about),
+                    move |showing, cx| {
+                        page.update(cx, |page, cx| {
+                            page.showing_about = showing;
+                            cx.notify();
+                        })
+                        .ok();
+                    },
+                ),
+            ))
             .child(body)
     }
 }
 
 impl ArtistDetail {
+    fn about_view(&mut self, about: AnyElement, cx: &mut Context<Self>) -> AnyElement {
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .gap_12()
+            .child(self.hero(cx))
+            .child(
+                div()
+                    .id("artist-about")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .child(about),
+            )
+            .into_any_element()
+    }
+
     fn tracks_view(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let count = self.keys.len();
         let selecting = self.list.read(cx).is_selecting();
@@ -410,7 +454,6 @@ impl ArtistDetail {
             .min_h_0()
             .gap_12()
             .child(self.hero(cx))
-            .children(self.similar_row(cx))
             .children(self.plugin_section(cx))
             .child(body)
             .when(selecting, |view| view.child(self.selection_bar(cx)))
@@ -421,6 +464,7 @@ impl ArtistDetail {
         let capabilities = capabilities(cx);
         let artwork = self.artwork(cx);
         let artist = self.key.clone();
+        let radio_key = self.key.clone();
         let name = self.name(cx);
         let picture = Picture::new(artwork.as_ref(), Pictured::Artist(name.clone()));
         let menu = menus::menu_for(Target::Artist {
@@ -449,6 +493,9 @@ impl ArtistDetail {
                     .offline(self.offline)
                     .shuffle_play(commands::shuffle_play)
                     .play(commands::play_all)
+                    .artist_radio(move |_, _, cx| {
+                        actions::start_artist_radio(radio_key.clone(), cx)
+                    })
                     .download(commands::set_offline),
             )
             .into_any_element()
@@ -597,4 +644,16 @@ fn delete_tracks(keys: Vec<String>, cx: &mut App) {
 fn capabilities(cx: &App) -> SourceCapabilities {
     let model = SourcesModel::global(cx);
     model.read(cx).capabilities()
+}
+
+fn point_sound(query: &Entity<Query<SoundView>>, artist: String, cx: &mut App) {
+    query.update(cx, |query, cx| {
+        query.set_fetch(
+            move |api| {
+                let artist = artist.clone();
+                async move { api.artist_sound(artist).await }
+            },
+            cx,
+        )
+    });
 }

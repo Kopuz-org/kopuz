@@ -32,7 +32,10 @@ impl Session {
         if queue_changed && matches!(self.intent, PlaybackIntent::Committed { .. }) {
             self.prefetch_next();
         }
-        CommandAck { rev: self.rev }
+        CommandAck {
+            rev: self.rev,
+            basis: None,
+        }
     }
 
     pub(super) fn album_context_for_token(&self, token: u64) -> bool {
@@ -114,18 +117,40 @@ impl Session {
             .is_some_and(|track| track.duration == u64::MAX)
     }
 
-    pub(super) fn should_crossfade(&self) -> bool {
+    pub(super) fn should_crossfade(&self, next: Option<&reader::Track>) -> bool {
         // A drive has one optical head; overlapping tracks cause competing seeks.
         self.sources.active_service() != Some(config::MusicService::AudioCd)
             && self.settings.playback.crossfade_seconds > 0
+            && !self.joins_album(next)
             && self.phase == ApiPhase::Playing
             && self.player.can_resume()
     }
 
-    pub(super) fn should_play_gapless(&self) -> bool {
-        self.settings.playback.crossfade_seconds == 0
+    /// A smart crossfade fades in music, not the dead air a track may open with.
+    pub(super) fn leading_silence_for(&self, transition: Transition) -> LeadingSilence {
+        match transition {
+            Transition::Crossfade(_) if self.settings.playback.smart_crossfade => {
+                LeadingSilence::Trim
+            }
+            _ => LeadingSilence::Keep,
+        }
+    }
+
+    pub(super) fn should_play_gapless(&self, next: Option<&reader::Track>) -> bool {
+        (self.settings.playback.crossfade_seconds == 0 || self.joins_album(next))
             && self.phase == ApiPhase::Playing
             && self.player.can_resume()
+    }
+
+    /// Smart crossfades play the next track of the same album without a fade.
+    fn joins_album(&self, next: Option<&reader::Track>) -> bool {
+        if !self.settings.playback.smart_crossfade {
+            return false;
+        }
+        let (Some(current), Some(next)) = (self.model.current_track(), next) else {
+            return false;
+        };
+        super::smart_fade::continues_album(current, next)
     }
 
     pub(super) fn now_ms(&self) -> u64 {

@@ -114,12 +114,20 @@ impl QueueMaterializer for StubLibrary {
                 let name = match container {
                     QueueContext::Album { id }
                     | QueueContext::Playlist { id }
-                    | QueueContext::PlaylistRadio { id } => id.clone(),
-                    QueueContext::Artist { artist } => artist.clone(),
+                    | QueueContext::PlaylistRadio { id }
+                    | QueueContext::AlbumRadio { id } => id.clone(),
+                    QueueContext::Artist { artist } | QueueContext::ArtistRadio { artist } => {
+                        artist.clone()
+                    }
                     QueueContext::Genre { name } => name.clone(),
                     QueueContext::Radio { station_id, .. } => station_id.clone(),
                     QueueContext::TrackRadio { key } => key.clone(),
-                    QueueContext::Filter { .. } | QueueContext::Tracks { .. } => "filter".into(),
+                    QueueContext::Filter { .. }
+                    | QueueContext::Tracks { .. }
+                    | QueueContext::MixRadio { .. }
+                    | QueueContext::SonicPath { .. }
+                    | QueueContext::Described { .. }
+                    | QueueContext::Fingerprint => "filter".into(),
                 };
                 // A container named "empty" has nothing in it.
                 if name == "empty" {
@@ -3598,6 +3606,7 @@ impl QueueMaterializer for RadioLibrary {
             QueueContext::TrackRadio { key } => Ok(RadioPage {
                 tracks: radio_tracks(&[key, "r1", "r2", "r3", "r4", "r5"]),
                 more: Some("p1".into()),
+                basis: None,
             }),
             other => Ok(RadioPage::last(self.materialize(other).await?)),
         }
@@ -3615,10 +3624,12 @@ impl QueueMaterializer for RadioLibrary {
             "p1" => RadioPage {
                 tracks: radio_tracks(&["r6", "r3", "r7", "r8", "r9", "r10"]),
                 more: Some("p2".into()),
+                basis: None,
             },
             "p2" => RadioPage {
                 tracks: radio_tracks(&["r11", "r12", "r13"]),
                 more: Some("p1".into()),
+                basis: None,
             },
             _ => RadioPage::default(),
         })
@@ -4434,6 +4445,10 @@ impl server::source::MediaSource for RadioSource {
             explicit_flags: true,
             watch_history: false,
             complete_play_history: false,
+            ratings: false,
+            artist_info: false,
+            radio_stations: false,
+            sonic_path: false,
             accounts: false,
             music_videos: false,
             library_actions: server::source::LibraryActions::NONE,
@@ -5852,4 +5867,323 @@ async fn offline_mode_steps_over_queued_songs_without_a_copy() {
     })
     .await;
     assert_eq!(state.queue.index, Some(2), "ytm-gone was stepped over");
+}
+
+/// Frames one `drive_until` round pulls: 2048 interleaved stereo samples.
+const DRIVE_FRAMES: u32 = 1024;
+/// Where the stub plan mixes track-0 (6 s) into track-1.
+const PLAN_START: f64 = 3.5;
+const PLAN_LENGTH: f64 = 1.0;
+const PLAN_ENTRY: f64 = 1.0;
+const PLAN_STEP: f64 = 0.1;
+
+/// A library whose transition plugin plans the same mix for every pair, at once.
+struct PlannedLibrary(crate::transition::TransitionPlan);
+
+#[async_trait::async_trait]
+impl QueueMaterializer for PlannedLibrary {
+    async fn materialize(&self, context: &QueueContext) -> Result<Vec<Track>, ApiError> {
+        StubLibrary.materialize(context).await
+    }
+
+    async fn plugin_transition(
+        &self,
+        _outgoing: &str,
+        _incoming: &str,
+    ) -> Option<crate::transition::TransitionPlan> {
+        Some(self.0.clone())
+    }
+}
+
+/// A plain linear crossfade starting `start` seconds into the outgoing track.
+fn stub_plan(start: f64) -> crate::transition::TransitionPlan {
+    use crate::transition::{Bands, DeckCurves, TransitionPlan};
+
+    let points = (PLAN_LENGTH / PLAN_STEP) as usize + 1;
+    let ramp = |rising: bool| -> Vec<f32> {
+        (0..points)
+            .map(|point| point as f32 / (points - 1) as f32)
+            .map(|level| if rising { level } else { 1.0 - level })
+            .collect()
+    };
+    let curves = |rising: bool| DeckCurves {
+        volume: ramp(rising),
+        speed: vec![1.0; points],
+        high_db: vec![0.0; points],
+        mid_db: vec![0.0; points],
+        bass_db: vec![0.0; points],
+        highpass_hz: None,
+    };
+    TransitionPlan {
+        start,
+        length: PLAN_LENGTH,
+        entry: PLAN_ENTRY,
+        step: PLAN_STEP,
+        bands: Bands {
+            high_hz: 4000.0,
+            mid_hz: 1000.0,
+            mid_q: 0.5,
+            bass_hz: 180.0,
+        },
+        outgoing: curves(false),
+        incoming: curves(true),
+    }
+}
+
+async fn planned_harness(start: f64) -> Harness {
+    planned_harness_with(
+        PlannedLibrary(stub_plan(start)),
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+        None,
+        "track-1",
+    )
+    .await
+}
+
+/// `planned_harness` with its own library, sources and integration.
+async fn planned_harness_with(
+    library: impl QueueMaterializer + 'static,
+    factory: FactoryOverride,
+    external: Option<Arc<StubExternal>>,
+    next: &str,
+) -> Harness {
+    let sink = FakeSinkHandle::default();
+    let player =
+        Player::try_with_sink(Box::new(FakeSink(sink.clone()))).expect("headless player starts");
+    let engine_events = player.subscribe();
+    let mut services = PlaybackServices::default();
+    services.settings.playback.crossfade_seconds = 1;
+    let session = SessionHandle::spawn_with_factory(Arc::new(library), player, services, factory);
+    let harness = Harness {
+        api: LocalApi::new(session),
+        sink,
+        engine_events,
+    };
+    if let Some(external) = external {
+        harness.api.session.set_external_sink(external);
+    }
+    harness
+        .api
+        .set_queue(replace(&["track-0", next]))
+        .await
+        .expect("set queue");
+    // Not committed: a plan may open track-1 as soon as track-0 plays.
+    wait_state(&harness.api, "playing", |state| {
+        state.phase == ApiPhase::Playing
+    })
+    .await;
+    harness
+}
+
+/// `drive_until`, also returning how much audio it pulled.
+async fn drive_timed(
+    harness: &Harness,
+    description: &str,
+    predicate: impl Fn(&PlayerState) -> bool,
+) -> (PlayerState, Duration) {
+    let rounds = AtomicUsize::new(0);
+    let state = drive_until(harness, description, |state| {
+        rounds.fetch_add(1, Ordering::Relaxed);
+        predicate(state)
+    })
+    .await;
+    let frames = rounds.load(Ordering::Relaxed) as u32 * DRIVE_FRAMES;
+    let pulled = Duration::from_secs_f64(f64::from(frames) / f64::from(TEST_CONFIG.sample_rate));
+    (state, pulled)
+}
+
+fn crossfade_armed(state: &PlayerState) -> bool {
+    state.fading.is_some()
+        || matches!(
+            state.intent,
+            Intent::Loading {
+                from_token: Some(_),
+                ..
+            }
+        )
+}
+
+#[tokio::test]
+async fn a_planned_mix_arms_ahead_and_enters_where_it_plans() {
+    let harness = planned_harness(PLAN_START).await;
+
+    let (_, pulled) = drive_timed(&harness, "mix armed", crossfade_armed).await;
+    assert!(
+        pulled < Duration::from_secs(1),
+        "armed {pulled:?} in, not in the last second"
+    );
+
+    let (state, pulled) = drive_timed(&harness, "mix played", |state| {
+        state.queue.index == Some(1) && state.fading.is_none()
+    })
+    .await;
+    assert!(
+        pulled >= Duration::from_secs_f64(PLAN_START),
+        "track-0 played {pulled:?} into its mix"
+    );
+    let entered = state
+        .position
+        .map(|position| position.ms)
+        .unwrap_or_default();
+    assert!(
+        entered >= ((PLAN_ENTRY + PLAN_LENGTH / 2.0) * 1000.0) as u64,
+        "track-1 carries on from its entry point, at {entered} ms"
+    );
+}
+
+#[tokio::test]
+async fn a_plan_too_late_to_install_leaves_the_crossfade_window() {
+    let harness = planned_harness(2.0).await;
+
+    let (_, pulled) = drive_timed(&harness, "crossfade armed", crossfade_armed).await;
+    assert!(
+        pulled >= Duration::from_secs(4),
+        "armed in the last second, not at {pulled:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_missed_mix_is_not_armed_again() {
+    let harness = planned_harness(PLAN_START).await;
+    drive_until(&harness, "mix fading", |state| state.fading.is_some()).await;
+
+    // A seek drops the engine's plan and reverts the transition.
+    harness
+        .api
+        .player_command(PlayerCommand::Seek { position_ms: 200 })
+        .await
+        .expect("seek");
+    wait_state(&harness.api, "outgoing session restored", |state| {
+        state.fading.is_none()
+            && state.queue.index == Some(0)
+            && matches!(state.intent, Intent::Committed { .. })
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let (_, pulled) = drive_timed(&harness, "crossfade armed again", crossfade_armed).await;
+    assert!(
+        pulled >= Duration::from_secs(4),
+        "armed in the crossfade window, not at {pulled:?}"
+    );
+}
+
+/// The planned harness with track-1's source held at `gate`, failing once
+/// opened when `fails`.
+async fn planned_harness_gated(gate: Arc<(Mutex<bool>, Condvar)>, fails: bool) -> Harness {
+    planned_harness_with(
+        PlannedLibrary(stub_plan(PLAN_START)),
+        Arc::new(move |track| {
+            if track.id.key() != "track-1" {
+                return Some(wav_factory(track.duration.min(6)));
+            }
+            if fails {
+                return Some(gated_failing_factory(gate.clone()));
+            }
+            Some(gated_factory(track.duration.min(6), gate.clone()))
+        }),
+        None,
+        "track-1",
+    )
+    .await
+}
+
+fn open_gate(gate: &Arc<(Mutex<bool>, Condvar)>) {
+    let (lock, ready) = &**gate;
+    *lock.lock().expect("gate lock") = false;
+    ready.notify_all();
+}
+
+/// Where the last position anchor stands; the fake sink pulls faster than
+/// the wall clock it is carried forward by.
+fn position_ms(state: &PlayerState) -> u64 {
+    state.position.map(|anchor| anchor.ms).unwrap_or_default()
+}
+
+#[tokio::test]
+async fn a_mix_the_engine_refuses_plays_on_without_an_error() {
+    let gate = Arc::new((Mutex::new(true), Condvar::new()));
+    let harness = planned_harness_gated(gate.clone(), false).await;
+    drive_until(&harness, "mix armed", crossfade_armed).await;
+
+    // track-1 opens once track-0 has played to just short of the mix start;
+    // while it loads, the state carries no position, so count the audio.
+    let rounds = AtomicUsize::new(0);
+    let short_of_start = (PLAN_START - 0.1) * f64::from(TEST_CONFIG.sample_rate);
+    drive_until(&harness, "short of the mix start", |_| {
+        let pulled = rounds.fetch_add(1, Ordering::Relaxed) as u32 * DRIVE_FRAMES;
+        f64::from(pulled) >= short_of_start
+    })
+    .await;
+    open_gate(&gate);
+
+    let error = Mutex::new(None);
+    let state = drive_until(&harness, "track-1 plays", |state| {
+        if state.error.is_some() {
+            *error.lock().expect("error slot") = state.error.clone();
+        }
+        state.queue.index == Some(1) && state.fading.is_none()
+    })
+    .await;
+    assert_eq!(*error.lock().expect("error slot"), None);
+    // The ordinary 1 s crossfade has played that much of track-1 when it
+    // ends; from the plan's entry it would be past entry and fade.
+    let from_entry = ((PLAN_ENTRY + 1.0) * 1000.0) as u64;
+    assert!(
+        position_ms(&state) < from_entry,
+        "track-1 starts from its beginning, at {} ms",
+        position_ms(&state)
+    );
+}
+
+#[tokio::test]
+async fn a_failed_incoming_load_drops_the_outgoing_plan() {
+    let gate = Arc::new((Mutex::new(true), Condvar::new()));
+    let harness = planned_harness_gated(gate.clone(), true).await;
+    drive_until(&harness, "mix armed", crossfade_armed).await;
+    open_gate(&gate);
+
+    // Planned, track-0 would end with the mix at 4.5 s; dropped, it plays 6 s.
+    let (_, pulled) = drive_timed(&harness, "track-0 over", |state| {
+        state.queue.index != Some(0) || state.phase == ApiPhase::Ended
+    })
+    .await;
+    assert!(
+        pulled >= Duration::from_secs_f64(5.5),
+        "track-0 ended at {pulled:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_plan_past_the_track_end_leaves_the_crossfade_window() {
+    let harness = planned_harness(7.0).await;
+
+    let (_, pulled) = drive_timed(&harness, "crossfade armed", crossfade_armed).await;
+    assert!(
+        pulled >= Duration::from_secs(4),
+        "armed in the last second, not at {pulled:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_plan_into_an_integration_track_is_not_armed() {
+    let stub = Arc::new(StubExternal::default());
+    let harness = planned_harness_with(
+        PlannedLibrary(stub_plan(PLAN_START)),
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+        Some(stub.clone()),
+        "spotify:track-1",
+    )
+    .await;
+
+    // Past the plan's start, track-0 still plays in the engine.
+    let rounds = AtomicUsize::new(0);
+    let past_start = (PLAN_START + 0.5) * f64::from(TEST_CONFIG.sample_rate);
+    let state = drive_until(&harness, "past the mix start", |_| {
+        let pulled = rounds.fetch_add(1, Ordering::Relaxed) as u32 * DRIVE_FRAMES;
+        f64::from(pulled) >= past_start
+    })
+    .await;
+    assert_eq!(state.phase, ApiPhase::Playing, "{state:?}");
+    assert!(state.external.is_none(), "{state:?}");
 }

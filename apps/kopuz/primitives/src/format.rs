@@ -81,6 +81,18 @@ pub fn sample_rate(hz: u32) -> SharedString {
     }
 }
 
+const MAX_STARS: u8 = 5;
+
+/// Five stars, as many filled as `stars`, blank when unrated.
+pub fn stars(stars: u8) -> SharedString {
+    let filled = usize::from(stars.min(MAX_STARS));
+    if filled == 0 {
+        return SharedString::default();
+    }
+    let empty = usize::from(MAX_STARS) - filled;
+    format!("{}{}", "\u{2605}".repeat(filled), "\u{2606}".repeat(empty)).into()
+}
+
 /// "24-bit", blank for lossy audio or when unknown.
 pub fn bit_depth(bits: u8) -> SharedString {
     match bits {
@@ -100,6 +112,13 @@ pub fn bitrate(kbps: u16) -> SharedString {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stars_fill_from_the_left_and_unrated_is_blank() {
+        assert_eq!(stars(0), "");
+        assert_eq!(stars(2), "\u{2605}\u{2605}\u{2606}\u{2606}\u{2606}");
+        assert_eq!(stars(9), "\u{2605}".repeat(5));
+    }
 
     #[test]
     fn audio_quality_reads_in_its_units_and_blank_when_unknown() {

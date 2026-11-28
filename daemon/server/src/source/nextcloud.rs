@@ -70,6 +70,10 @@ const CAPABILITIES: Capabilities = Capabilities {
     explicit_flags: false,
     watch_history: false,
     complete_play_history: false,
+    ratings: false,
+    artist_info: false,
+    radio_stations: false,
+    sonic_path: false,
     library_actions: LibraryActions::NONE,
 };
 
@@ -247,6 +251,7 @@ impl MediaSource for NextcloudSource {
             albums: out_albums,
             tracks: out_tracks,
             artists: Vec::new(),
+            track_stats: Vec::new(),
         })
     }
 

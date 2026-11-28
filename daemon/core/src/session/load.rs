@@ -29,15 +29,24 @@ impl Session {
         let transition =
             if !allow_crossfade || restore_seek.is_some_and(|position| !position.is_zero()) {
                 Transition::Immediate
-            } else if self.should_crossfade() {
+            } else if self.should_crossfade(Some(&track)) {
                 Transition::Crossfade(Duration::from_secs(
                     self.settings.playback.crossfade_seconds as u64,
                 ))
-            } else if self.should_play_gapless() {
+            } else if self.should_play_gapless(Some(&track)) {
                 Transition::Gapless
             } else {
                 Transition::Immediate
             };
+        // A planned mix fades for its own length; the engine refuses it rather
+        // than start it otherwise.
+        let staged = self
+            .mixes
+            .take_staged(&track.id.key())
+            .filter(|_| matches!(transition, Transition::Crossfade(_)));
+        let transition = staged
+            .as_ref()
+            .map_or(transition, |staged| Transition::Crossfade(staged.length));
         let deferred = transition != Transition::Immediate;
         let item_ref = PlaybackItemRef::from_id(&track.id);
         let is_radio = item_ref.is_radio();
@@ -183,6 +192,17 @@ impl Session {
         }
         let from_token = self.intent.token();
         let token = self.allocate_token();
+        let entry = staged.as_ref().map(|staged| staged.entry);
+        self.mixes.loading = staged.as_ref().map(|_| (token, from_token));
+        self.mixes.incoming = staged.map(|staged| {
+            (
+                token,
+                IncomingMix {
+                    mix: staged.deck,
+                    from_token,
+                },
+            )
+        });
         self.set_intent(PlaybackIntent::Loading {
             token,
             idx,
@@ -268,7 +288,7 @@ impl Session {
             stream_quality: self.settings.playback.stream_quality,
             artwork,
             transition,
-            start_at: restore_seek.filter(|position| !position.is_zero()),
+            start_at: entry.or(restore_seek.filter(|position| !position.is_zero())),
             clear_pending_resume,
             cmd_tx: self.cmd_tx.clone(),
         };
@@ -337,6 +357,12 @@ impl Session {
             });
         let (reply_tx, reply_rx) = oneshot::channel();
         let service_replay_gain = prepared.track.replay_gain;
+        // The plan places the incoming track itself, dead air included.
+        let mix = self.mixes.take_incoming(prepared.token);
+        let leading_silence = match mix {
+            Some(_) => LeadingSilence::Keep,
+            None => self.leading_silence_for(prepared.transition),
+        };
         self.player.load(LoadArgs {
             token: prepared.token,
             factory: prepared.factory,
@@ -348,9 +374,11 @@ impl Session {
                 artwork: prepared.artwork,
             },
             transition: prepared.transition,
+            leading_silence,
             start_at: prepared.start_at,
             album_context: self.album_context_for_token(prepared.token),
             service_replay_gain,
+            mix,
             reply: Some(reply_tx),
         });
         let token = prepared.token;
@@ -397,6 +425,7 @@ impl Session {
         self.load_task = None;
         match finished.result {
             Some(Ok(outcome)) => {
+                self.mixes.settle(finished.token);
                 self.set_intent(PlaybackIntent::Committed {
                     token: finished.token,
                 });
@@ -460,6 +489,13 @@ impl Session {
                     self.publish(state_tx, false);
                 }
                 self.prefetch_next();
+            }
+            Some(Err(error)) if error.kind == player::engine::FailureKind::MixMissed => {
+                // Not a guard: a stale miss must not fall through to the failure arm.
+                let refused = self.mix_refused(finished.token);
+                if refused {
+                    self.publish(state_tx, false);
+                }
             }
             Some(Err(error)) => {
                 tracing::error!(error = %error, "playback failed");
@@ -807,8 +843,16 @@ impl ClassifiedLoad {
                             (info.url, info.format, info.user_agent, info.guard)
                         }
                         ResolvedStreamRef::SoundCloudHls(_)
-                        | ResolvedStreamRef::AppleMusicFmp4(_)
-                        | ResolvedStreamRef::Direct(_) => (stream_ref, None, None, None),
+                        | ResolvedStreamRef::AppleMusicFmp4(_) => (stream_ref, None, None, None),
+                        ResolvedStreamRef::Direct(_) => {
+                            // A source's own station stays on its plugin's hosts.
+                            let guard = source
+                                .filter(|_| {
+                                    self.is_radio && crate::radio::from_source(&self.item_id)
+                                })
+                                .and_then(|source| source.stream_guard());
+                            (stream_ref, None, None, guard)
+                        }
                     };
 
                 // The factory runs on the decode worker (no runtime), so hand
@@ -898,7 +942,9 @@ pub(super) fn engine_failure_code(kind: player::engine::FailureKind) -> api::Err
     match kind {
         player::engine::FailureKind::Unreachable => api::ErrorCode::SourceUnreachable,
         player::engine::FailureKind::NotFound => api::ErrorCode::NotFound,
-        player::engine::FailureKind::Other => api::ErrorCode::Internal,
+        player::engine::FailureKind::MixMissed | player::engine::FailureKind::Other => {
+            api::ErrorCode::Internal
+        }
     }
 }
 

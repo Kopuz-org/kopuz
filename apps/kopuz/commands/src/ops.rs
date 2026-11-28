@@ -72,6 +72,10 @@ pub fn toggle_favorite(target: &Target, cx: &mut App) {
     store::actions::set_favorites(keys, favorite, cx);
 }
 
+pub fn rate(target: &Target, stars: u8, cx: &mut App) {
+    actions::set_star_rating(track_keys(target), stars, cx);
+}
+
 pub fn toggle_download(target: &Target, cx: &mut App) {
     let keys = track_keys(target);
     let stored = all_stored(&keys, cx);

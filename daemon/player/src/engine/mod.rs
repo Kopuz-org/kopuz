@@ -7,6 +7,9 @@
 //! callback owns its own state and never takes a lock (see `rt.rs`).
 
 mod actor;
+mod deck;
+mod filter;
+mod mix;
 mod rt;
 mod sink;
 #[cfg(test)]
@@ -15,12 +18,13 @@ mod worker;
 
 pub(crate) use actor::ActorMsg;
 pub use actor::EngineHandle;
+pub use mix::{DeckMix, IncomingMix, MixCurves, MixError, MixFilters};
 pub use sink::{
     AudioSink, CpalSink, DataCallback, DataCallbackFactory, NullSink, SinkConfig, SinkEvent,
 };
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
 
 use config::{ChannelMode, EqualizerSettings, ReplayGainInfo, ReplayGainSettings};
@@ -41,6 +45,9 @@ pub enum FailureKind {
     Unreachable,
     /// The media is not where its track says.
     NotFound,
+    /// The load carried an `IncomingMix` the outgoing session could not
+    /// play; nothing started.
+    MixMissed,
     Other,
 }
 
@@ -95,6 +102,22 @@ pub enum Transition {
     Gapless,
 }
 
+/// Whether a track that starts through a crossfade drops the dead air at its
+/// head, so the fade-in carries music. Ignored when the load does not crossfade.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum LeadingSilence {
+    #[default]
+    Keep,
+    Trim,
+}
+
+/// Peak level (-50 dBFS) under which audio counts as silence.
+pub(crate) const SILENCE_PEAK: f32 = 0.003_162_278;
+/// How long a session must stay under `SILENCE_PEAK` to emit `Event::Silent`.
+pub(crate) const SILENCE_MIN_SPAN: Duration = Duration::from_millis(1500);
+/// The most leading silence `LeadingSilence::Trim` drops.
+pub(crate) const LEADING_SILENCE_CAP: Duration = Duration::from_secs(5);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Phase {
     #[default]
@@ -113,6 +136,9 @@ pub struct LoadOutcome {
     /// Audible on `TrackSwitched`. False when it fell back to an immediate switch
     /// because nothing was left to play first.
     pub gapless: bool,
+    /// The load's `IncomingMix` plays against the outgoing session's planned
+    /// mix. `crossfaded` is set too: the outgoing session fades out the same way.
+    pub mixed: bool,
 }
 
 /// Resolved once the source is playing (`Ok`) or failed to load (`Err`).
@@ -125,6 +151,7 @@ pub struct LoadRequest {
     pub factory: SourceFactory,
     pub duration: Duration,
     pub transition: Transition,
+    pub leading_silence: LeadingSilence,
     pub start_at: Option<Duration>,
     /// The queue is walking an album, so `ReplayGainMode::Auto` levels this
     /// track by its album gain instead of its own.
@@ -133,6 +160,10 @@ pub struct LoadRequest {
     /// tags win where it has them; this is what a transcoded stream, whose
     /// tags the server dropped, falls back to.
     pub service_replay_gain: ReplayGainInfo,
+    /// The incoming deck of a planned mix. Played only when `from_token` is
+    /// the current session with a `PlanOutgoing` still armed; otherwise the
+    /// load fails with `FailureKind::MixMissed` and the plan is dropped.
+    pub mix: Option<IncomingMix>,
     pub reply: Option<LoadReply>,
 }
 
@@ -146,6 +177,20 @@ pub enum Command {
     Seek {
         position: Duration,
         token: Option<u64>,
+    },
+    /// Play `mix` as session `token`'s outgoing deck from its source time `at`;
+    /// the session ends when the mix does. A load carrying an `IncomingMix`
+    /// from this token enters on the same output frame. `Event::MixMissed`
+    /// reports a plan that will not play.
+    PlanOutgoing {
+        token: u64,
+        at: Duration,
+        mix: DeckMix,
+    },
+    /// Drops session `token`'s plan while its mix has not started, so the
+    /// track plays to its end.
+    CancelPlan {
+        token: u64,
     },
     Pause,
     Resume,
@@ -188,12 +233,24 @@ pub enum Event {
     Ended {
         token: u64,
     },
+    /// The visible session has played nothing above `SILENCE_PEAK` for
+    /// `SILENCE_MIN_SPAN`. Once per silent stretch; audio above the threshold
+    /// re-arms it.
+    Silent {
+        token: u64,
+        position: Duration,
+    },
     /// The device asked for audio the decoder had not delivered yet (a stream rebuffering, a seek loading), so the position stands still.
     Stalled {
         token: u64,
     },
     /// Audio flows again after a `Stalled`.
     Resumed {
+        token: u64,
+    },
+    /// The `PlanOutgoing` for session `token` will not play: it was not the
+    /// live session, its decoder had passed `at`, or a seek dropped the plan.
+    MixMissed {
         token: u64,
     },
     /// A crossfade finished, or a gapless session took over at the last sample
@@ -218,6 +275,7 @@ pub struct FadingStatus {
     pub duration: Duration,
     pub(crate) base_micros: u64,
     pub(crate) played_samples: Arc<AtomicU64>,
+    pub(crate) drift_micros: Arc<AtomicI64>,
 }
 
 /// Lock-free snapshot published by the actor. Position is exact on demand:
@@ -236,6 +294,8 @@ pub struct EngineStatus {
     pub fading: Option<FadingStatus>,
     pub(crate) base_micros: u64,
     pub(crate) played_samples: Arc<AtomicU64>,
+    /// Source time a planned mix's speed curve moved the track past `played`.
+    pub(crate) drift_micros: Arc<AtomicI64>,
     pub(crate) channels: u32,
     pub(crate) sample_rate: u32,
     pub(crate) speed_permille: u32,
@@ -244,11 +304,13 @@ pub struct EngineStatus {
 
 pub(crate) const SPEED_NORMAL: u32 = 1_000;
 
-/// Position from a base offset plus the samples the RT callback has played,
-/// clamped to the track duration. Shared by the current and fading sessions.
+/// Position from a base offset plus the samples the RT callback has played
+/// and the mix decks' drift, clamped to the track duration. Shared by the
+/// current and fading sessions.
 fn position_from(
     base_micros: u64,
     played_samples: &AtomicU64,
+    drift_micros: &AtomicI64,
     channels: u32,
     sample_rate: u32,
     speed_permille: u32,
@@ -262,6 +324,7 @@ fn position_from(
     } else {
         base_micros
     };
+    let micros = micros.saturating_add_signed(drift_micros.load(Ordering::Relaxed));
     let raw = Duration::from_micros(micros);
     if duration > Duration::ZERO && raw > duration {
         duration
@@ -281,6 +344,7 @@ impl EngineStatus {
             fading: None,
             base_micros: 0,
             played_samples: Arc::new(AtomicU64::new(0)),
+            drift_micros: Arc::new(AtomicI64::new(0)),
             channels: 0,
             sample_rate: 0,
             speed_permille: SPEED_NORMAL,
@@ -306,6 +370,7 @@ impl EngineStatus {
         position_from(
             self.base_micros,
             &self.played_samples,
+            &self.drift_micros,
             self.channels,
             self.sample_rate,
             self.speed_permille,
@@ -321,6 +386,7 @@ impl EngineStatus {
         Some(position_from(
             fading.base_micros,
             &fading.played_samples,
+            &fading.drift_micros,
             self.channels,
             self.sample_rate,
             self.speed_permille,
