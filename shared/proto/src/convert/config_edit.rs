@@ -29,6 +29,7 @@ pub fn setting_key_to_proto(value: config::SettingKey) -> SettingKey {
             PlaybackKey::AutoplayRadio => SettingKey::AutoplayRadio,
             PlaybackKey::SkipExplicit => SettingKey::SkipExplicit,
             PlaybackKey::PauseWatchHistory => SettingKey::PauseWatchHistory,
+            PlaybackKey::SmartCrossfade => SettingKey::SmartCrossfade,
         },
         K::Ui(key) => match key {
             UiKey::Theme => SettingKey::Theme,
@@ -113,6 +114,7 @@ pub fn setting_key_from_proto(value: i32) -> Option<config::SettingKey> {
         SettingKey::AutoplayRadio => K::Playback(PlaybackKey::AutoplayRadio),
         SettingKey::SkipExplicit => K::Playback(PlaybackKey::SkipExplicit),
         SettingKey::PauseWatchHistory => K::Playback(PlaybackKey::PauseWatchHistory),
+        SettingKey::SmartCrossfade => K::Playback(PlaybackKey::SmartCrossfade),
         SettingKey::Theme => K::Ui(UiKey::Theme),
         SettingKey::LiveThemePath => K::Ui(UiKey::LiveThemePath),
         SettingKey::CustomThemes => K::Ui(UiKey::CustomThemes),
@@ -188,6 +190,7 @@ pub fn config_edit_to_proto(value: &config::SettingsEdit) -> ConfigEdit {
             Pb::AutoplayRadio(value) => Edit::AutoplayRadio(value),
             Pb::SkipExplicit(value) => Edit::SkipExplicit(value),
             Pb::PauseWatchHistory(value) => Edit::PauseWatchHistory(value),
+            Pb::SmartCrossfade(value) => Edit::SmartCrossfade(value),
         },
         Se::Ui(edit) => match edit {
             UiEdit::Theme(value) => Edit::Theme(value),
@@ -322,6 +325,7 @@ pub fn config_edit_from_proto(value: &ConfigEdit) -> Option<config::SettingsEdit
         Edit::AutoplayRadio(value) => Se::Playback(Pb::AutoplayRadio(value)),
         Edit::SkipExplicit(value) => Se::Playback(Pb::SkipExplicit(value)),
         Edit::PauseWatchHistory(value) => Se::Playback(Pb::PauseWatchHistory(value)),
+        Edit::SmartCrossfade(value) => Se::Playback(Pb::SmartCrossfade(value)),
         Edit::Theme(value) => Se::Ui(UiEdit::Theme(value)),
         Edit::LiveThemePath(value) => Se::Ui(UiEdit::LiveThemePath(value)),
         Edit::CustomThemes(value) => Se::Ui(UiEdit::CustomThemes(match value.op? {

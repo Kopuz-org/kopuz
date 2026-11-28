@@ -29,11 +29,11 @@ impl Session {
         let transition =
             if !allow_crossfade || restore_seek.is_some_and(|position| !position.is_zero()) {
                 Transition::Immediate
-            } else if self.should_crossfade() {
+            } else if self.should_crossfade(Some(&track)) {
                 Transition::Crossfade(Duration::from_secs(
                     self.settings.playback.crossfade_seconds as u64,
                 ))
-            } else if self.should_play_gapless() {
+            } else if self.should_play_gapless(Some(&track)) {
                 Transition::Gapless
             } else {
                 Transition::Immediate
@@ -807,8 +807,16 @@ impl ClassifiedLoad {
                             (info.url, info.format, info.user_agent, info.guard)
                         }
                         ResolvedStreamRef::SoundCloudHls(_)
-                        | ResolvedStreamRef::AppleMusicFmp4(_)
-                        | ResolvedStreamRef::Direct(_) => (stream_ref, None, None, None),
+                        | ResolvedStreamRef::AppleMusicFmp4(_) => (stream_ref, None, None, None),
+                        ResolvedStreamRef::Direct(_) => {
+                            // A source's own station stays on its plugin's hosts.
+                            let guard = source
+                                .filter(|_| {
+                                    self.is_radio && crate::radio::from_source(&self.item_id)
+                                })
+                                .and_then(|source| source.stream_guard());
+                            (stream_ref, None, None, guard)
+                        }
                     };
 
                 // The factory runs on the decode worker (no runtime), so hand

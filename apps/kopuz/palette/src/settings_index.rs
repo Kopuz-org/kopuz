@@ -64,6 +64,7 @@ pub static ROWS: &[Entry] = &[
     entry("lyrics_offset_auto", "metadata"),
     entry("lyrics_offset", "metadata"),
     entry("crossfade", "player"),
+    entry("smart_crossfade", "player"),
     entry("volume_scroll_step", "player"),
     entry("stream_quality", "player"),
     entry("channel_mode", "player"),

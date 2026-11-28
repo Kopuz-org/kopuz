@@ -185,16 +185,6 @@ impl Session {
     }
 
     pub(super) fn should_arm_transition(&mut self, position: Duration) -> bool {
-        let (window, gapless) = if self.should_crossfade() {
-            (
-                Duration::from_secs(self.settings.playback.crossfade_seconds as u64),
-                false,
-            )
-        } else if self.should_play_gapless() {
-            (GAPLESS_PRELOAD, true)
-        } else {
-            return false;
-        };
         if self.phase != ApiPhase::Playing
             || self.intent.is_loading()
             || self.pending_transition.is_some()
@@ -204,17 +194,21 @@ impl Session {
         {
             return false;
         }
+        let next = self.peek_next_index();
+        let next = next.and_then(|idx| self.model.track_at(idx));
+        let (window, gapless) = if self.should_crossfade(next) {
+            (
+                Duration::from_secs(self.settings.playback.crossfade_seconds as u64),
+                false,
+            )
+        } else if self.should_play_gapless(next) {
+            (GAPLESS_PRELOAD, true)
+        } else {
+            return false;
+        };
         // Handing a track to an integration stops the engine, so it waits for
         // the end of this one rather than cutting it short.
-        let gate = self.offline_gate();
-        let playable = super::playable(self.settings.playback.skip_explicit, gate.as_ref());
-        if gapless
-            && let NextOutcome::Play(idx) = self.model.peek_next_where(playable)
-            && self
-                .model
-                .track_at(idx)
-                .is_some_and(|track| self.sink_for(track).is_some())
-        {
+        if gapless && next.is_some_and(|track| self.sink_for(track).is_some()) {
             return false;
         }
 
@@ -227,11 +221,19 @@ impl Session {
     }
 
     pub(super) fn arm_transition(&mut self) {
-        let gate = self.offline_gate();
-        let playable = super::playable(self.settings.playback.skip_explicit, gate.as_ref());
-        let NextOutcome::Play(idx) = self.model.peek_next_where(playable) else {
+        let Some(idx) = self.peek_next_index() else {
             return;
         };
         self.start_load(idx, true);
+    }
+
+    /// The queue position that plays next, skipping what cannot play.
+    pub(super) fn peek_next_index(&mut self) -> Option<usize> {
+        let gate = self.offline_gate();
+        let playable = super::playable(self.settings.playback.skip_explicit, gate.as_ref());
+        match self.model.peek_next_where(playable) {
+            NextOutcome::Play(idx) => Some(idx),
+            _ => None,
+        }
     }
 }

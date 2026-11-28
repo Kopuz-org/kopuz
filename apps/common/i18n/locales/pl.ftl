@@ -673,6 +673,7 @@ sort_field_genre = Gatunek
 sort_field_album = Album
 sort_field_duration = Czas trwania
 sort_field_date_added = Data dodania
+sort_field_last_played = Ostatnio odtwarzane
 sort_field_name = Nazwa
 sort_field_tracks = Ścieżki
 sort_field_albums = Albumy
@@ -811,6 +812,8 @@ prefer_word_synced_lyrics_description = Ask every lyrics provider for word-by-wo
 lyrics_offset_description = Shift the lyrics against the audio, in milliseconds.
 lyrics_offset_auto_description = Shift by the engine's measured output latency, currently { $latency } ms.
 crossfade_description = Overlap the end of one track with the start of the next.
+smart_crossfade = Inteligentne przenikanie
+smart_crossfade_description = Odtwarzaj utwory jednego albumu bez przenikania.
 volume_scroll_step_description = How far one scroll over the volume control moves it.
 channel_mode_description = Remap the output channels, for one speaker or a broken headphone.
 device_change_behavior_description = What playback does when the audio output device changes.
@@ -995,6 +998,15 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Ocena
+rate_stars =
+    { $count ->
+        [one] Oceń na { $count } gwiazdkę
+        [few] Oceń na { $count } gwiazdki
+        [many] Oceń na { $count } gwiazdek
+       *[other] Oceń na { $count } gwiazdki
+    }
+clear_rating = Wyczyść ocenę
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1144,6 +1156,7 @@ error_browser_profile_signed_out = That browser profile is not signed in to the 
 error_browser_profile_no_token = The service did not show a token for that profile. Paste it instead.
 error_integration_unreachable = Could not reach the service. Check your connection.
 error_credential_rejected = The service does not accept that token. Paste your token instead.
+error_integration_failed = Usługa zwróciła błąd. Spróbuj ponownie później.
 error_default_source_undeletable = The default folder source cannot be deleted.
 error_empty_source_folder = A source folder cannot be empty.
 error_code_invalid_input = Not accepted: { $detail }
@@ -1351,3 +1364,26 @@ interface_panel_side = Strona
 interface_panel_side_description = Po której stronie strony jest kolumna playlist.
 interface_queue_side = Strona kolumny kolejki i tekstu
 interface_queue_side_description = Po której stronie otwiera się kolumna kolejki i tekstu.
+artist_info_link = Więcej o tym wykonawcy
+radio_from_server = Z Twojego serwera
+radio_metadata_basis = AudioMuse jeszcze nie zna tych utworów, więc to radio opiera się na tagach i Last.fm.
+mix_from_queue = Miks z kolejki
+sonic_path_start = Zacznij ścieżkę brzmieniową od tego utworu
+sonic_path_end = Ścieżka brzmieniowa do tego utworu
+sonic_path_marked = Ścieżka brzmieniowa zaczyna się tutaj. W innym utworze wybierz „Ścieżka brzmieniowa do tego utworu”.
+audiomuse = AudioMuse-AI
+audiomuse_url = Adres AudioMuse-AI
+audiomuse_url_placeholder = http://host:8000
+audiomuse_token = Token API AudioMuse-AI
+audiomuse_token_placeholder = Wpisz token API AudioMuse-AI
+describe_music = Muzyka według opisu…
+described_searching = Szukanie pasującej muzyki…
+discover_your_sound = Twoje brzmienie
+discover_your_sound_hint = Na podstawie Twojego profilu słuchania
+sounds_like = Brzmi podobnie do
+mood_danceable = Taneczny
+mood_aggressive = Agresywny
+mood_happy = Wesoły
+mood_party = Imprezowy
+mood_relaxed = Relaksujący
+mood_sad = Smutny

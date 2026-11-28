@@ -37,12 +37,12 @@ pub(crate) fn network_factory(
         let mut complete = complete;
         let build = || -> std::io::Result<_> {
             if is_radio {
-                let stream = server::stream::stream_buffer::StreamBuffer::new(
-                    stream_url,
-                    true,
-                    server::stream::stream_buffer::radio_client(yt_user_agent),
-                    icy_tx,
-                    rt_handle,
+                let client = server::stream::stream_buffer::guarded_radio_client(
+                    yt_user_agent,
+                    guard.clone(),
+                )?;
+                let stream = server::stream::stream_buffer::StreamBuffer::radio(
+                    stream_url, client, guard, icy_tx, rt_handle,
                 );
                 stream.wait_for_response_headers();
                 if let Some(error) = stream.response_error() {
@@ -224,4 +224,73 @@ pub(crate) fn network_factory(
         };
         build()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Read as _, Write as _};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::{NetworkStream, network_factory};
+
+    /// Lets only 127.0.0.1, as a plugin's reach would its own host.
+    struct LoopbackOnly;
+
+    impl utils::http::Reach for LoopbackOnly {
+        fn allows_host(&self, host: &str) -> bool {
+            host == "127.0.0.1"
+        }
+
+        fn may_be_local(&self, host: &str) -> bool {
+            host == "127.0.0.1"
+        }
+    }
+
+    /// Answers every request on a fresh port with `reply`; counts them.
+    fn serve(reply: String) -> (u16, Arc<AtomicUsize>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&hits);
+        std::thread::spawn(move || {
+            for socket in listener.incoming() {
+                let Ok(mut socket) = socket else {
+                    return;
+                };
+                counted.fetch_add(1, Ordering::SeqCst);
+                let mut request = [0u8; 1024];
+                let _ = socket.read(&mut request);
+                let _ = socket.write_all(reply.as_bytes());
+            }
+        });
+        (port, hits)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_guarded_station_does_not_follow_a_redirect_off_its_hosts() {
+        let (elsewhere, elsewhere_hits) =
+            serve("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_string());
+        let (start, _) = serve(format!(
+            "HTTP/1.1 302 Found\r\nLocation: http://localhost:{elsewhere}/live\r\nContent-Length: 0\r\n\r\n"
+        ));
+        let guard: utils::http::Guard = Arc::new(LoopbackOnly);
+        let factory = network_factory(
+            NetworkStream {
+                url: format!("http://127.0.0.1:{start}/live"),
+                format: None,
+                user_agent: None,
+                guard: Some(guard),
+            },
+            true,
+            None,
+            tokio::runtime::Handle::current(),
+            None,
+            None,
+        );
+
+        let opened = tokio::task::spawn_blocking(factory).await.expect("join");
+        assert!(opened.is_err(), "the station opened off its hosts");
+        assert_eq!(elsewhere_hits.load(Ordering::SeqCst), 0);
+    }
 }

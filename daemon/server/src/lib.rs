@@ -6,6 +6,7 @@
 pub mod applemusic;
 pub mod artist_photo;
 pub mod audio_cd;
+pub mod audiomuse;
 pub mod catalog;
 pub mod cookies;
 pub mod cover;

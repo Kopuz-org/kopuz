@@ -52,6 +52,8 @@ impl<T> Fetch<T> {
 /// A row of the landing, top to bottom.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Row {
+    /// One tile that starts AudioMuse-AI's pick from the listening profile.
+    YourSound,
     Mixes,
     /// The row for the page at this index of [`row_pages`].
     Page(usize),
@@ -77,10 +79,12 @@ pub enum Landing {
 }
 
 /// The rows to draw: a placeholder only where the source can fill the row, content only where it did.
+/// `sound` is whether AudioMuse-AI is set up; its row needs no read, so it never waits.
 pub fn plan(
     caps: &SourceCapabilities,
     rows: &Fetch<DiscoverRows>,
     pages: &[Fetch<Option<CatalogShelf>>],
+    sound: bool,
 ) -> Vec<(Row, Fill)> {
     let held = |pick: fn(&DiscoverRows) -> bool, possible: bool| match rows {
         Fetch::Loading => possible.then_some(Fill::Placeholder),
@@ -88,6 +92,9 @@ pub fn plan(
         Fetch::Failed(_) => None,
     };
     let mut out = Vec::new();
+    if sound {
+        out.push((Row::YourSound, Fill::Ready));
+    }
     if let Some(fill) = held(|rows| !rows.mixes.is_empty(), caps.discover) {
         out.push((Row::Mixes, fill));
     }
@@ -116,8 +123,9 @@ pub fn landing(
     caps: &SourceCapabilities,
     rows: &Fetch<DiscoverRows>,
     pages: &[Fetch<Option<CatalogShelf>>],
+    sound: bool,
 ) -> Landing {
-    let planned = plan(caps, rows, pages);
+    let planned = plan(caps, rows, pages, sound);
     if !planned.is_empty() {
         return Landing::Rows(planned);
     }
@@ -220,7 +228,7 @@ mod tests {
     fn placeholders_stand_only_where_the_source_can_fill_the_row() {
         let pages = [Fetch::Loading, Fetch::Loading];
         assert_eq!(
-            plan(&youtube(), &Fetch::Loading, &pages),
+            plan(&youtube(), &Fetch::Loading, &pages, false),
             [
                 (Row::Mixes, Fill::Placeholder),
                 (Row::Page(0), Fill::Placeholder),
@@ -228,7 +236,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            plan(&local(), &Fetch::Loading, &[]),
+            plan(&local(), &Fetch::Loading, &[], false),
             [
                 (Row::NeverPlayed, Fill::Placeholder),
                 (Row::ForgottenFavorites, Fill::Placeholder),
@@ -239,11 +247,11 @@ mod tests {
     #[test]
     fn an_empty_row_hides_itself() {
         assert_eq!(
-            plan(&local(), &rows(0, 4, 0), &[]),
+            plan(&local(), &rows(0, 4, 0), &[], false),
             [(Row::NeverPlayed, Fill::Ready)]
         );
         assert_eq!(
-            plan(&youtube(), &rows(2, 0, 0), &[]),
+            plan(&youtube(), &rows(2, 0, 0), &[], false),
             [(Row::Mixes, Fill::Ready)]
         );
     }
@@ -257,14 +265,14 @@ mod tests {
             Fetch::Failed(failed()),
         ];
         assert_eq!(
-            plan(&youtube(), &rows(0, 0, 0), &pages),
+            plan(&youtube(), &rows(0, 0, 0), &pages, false),
             [(Row::Page(0), Fill::Ready)]
         );
     }
 
     #[test]
     fn the_youtube_rows_never_show_on_a_library_without_pages() {
-        let planned = plan(&local(), &rows(0, 1, 1), &[]);
+        let planned = plan(&local(), &rows(0, 1, 1), &[], false);
         assert!(
             !planned
                 .iter()
@@ -276,7 +284,7 @@ mod tests {
     fn rows_that_failed_hide_and_the_rest_still_show() {
         let pages = [Fetch::Ready(Some(shelf("charts", 5)))];
         assert_eq!(
-            landing(&youtube(), &Fetch::Failed(failed()), &pages),
+            landing(&youtube(), &Fetch::Failed(failed()), &pages, false),
             Landing::Rows(vec![(Row::Page(0), Fill::Ready)])
         );
     }
@@ -284,12 +292,13 @@ mod tests {
     #[test]
     fn nothing_at_all_is_a_calm_empty_state() {
         let caps = SourceCapabilities::default();
-        assert_eq!(landing(&caps, &rows(0, 0, 0), &[]), Landing::Empty);
+        assert_eq!(landing(&caps, &rows(0, 0, 0), &[], false), Landing::Empty);
         assert_eq!(
             landing(
                 &caps,
                 &Fetch::Failed(ApiError::new(ErrorCode::Unsupported, "")),
-                &[]
+                &[],
+                false
             ),
             Landing::Empty
         );
@@ -299,14 +308,32 @@ mod tests {
     fn nothing_but_a_failure_says_so() {
         let pages = [Fetch::Failed(failed())];
         assert_eq!(
-            landing(&youtube(), &rows(0, 0, 0), &pages),
+            landing(&youtube(), &rows(0, 0, 0), &pages, false),
             Landing::Failed(failed())
         );
     }
 
     #[test]
+    fn the_sound_row_stands_ready_while_every_read_is_out_and_after_one_failed() {
+        let caps = SourceCapabilities::default();
+        let ready = vec![(Row::YourSound, Fill::Ready)];
+        assert_eq!(
+            landing(&caps, &Fetch::Loading, &[], true),
+            Landing::Rows(ready.clone())
+        );
+        assert_eq!(
+            landing(&caps, &Fetch::Failed(failed()), &[], true),
+            Landing::Rows(ready)
+        );
+        assert!(!plan(&caps, &rows(0, 0, 0), &[], false).contains(&(Row::YourSound, Fill::Ready)));
+    }
+
+    #[test]
     fn a_read_still_out_with_nothing_to_draw_is_waiting_not_empty() {
         let caps = SourceCapabilities::default();
-        assert_eq!(landing(&caps, &Fetch::Loading, &[]), Landing::Waiting);
+        assert_eq!(
+            landing(&caps, &Fetch::Loading, &[], false),
+            Landing::Waiting
+        );
     }
 }
