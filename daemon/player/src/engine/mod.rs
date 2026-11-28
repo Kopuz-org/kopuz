@@ -95,6 +95,22 @@ pub enum Transition {
     Gapless,
 }
 
+/// Whether a track that starts through a crossfade drops the dead air at its
+/// head, so the fade-in carries music. Ignored when the load does not crossfade.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum LeadingSilence {
+    #[default]
+    Keep,
+    Trim,
+}
+
+/// Peak level (-50 dBFS) under which audio counts as silence.
+pub(crate) const SILENCE_PEAK: f32 = 0.003_162_278;
+/// How long a session must stay under `SILENCE_PEAK` to emit `Event::Silent`.
+pub(crate) const SILENCE_MIN_SPAN: Duration = Duration::from_millis(1500);
+/// The most leading silence `LeadingSilence::Trim` drops.
+pub(crate) const LEADING_SILENCE_CAP: Duration = Duration::from_secs(5);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Phase {
     #[default]
@@ -125,6 +141,7 @@ pub struct LoadRequest {
     pub factory: SourceFactory,
     pub duration: Duration,
     pub transition: Transition,
+    pub leading_silence: LeadingSilence,
     pub start_at: Option<Duration>,
     /// The queue is walking an album, so `ReplayGainMode::Auto` levels this
     /// track by its album gain instead of its own.
@@ -187,6 +204,13 @@ pub enum Event {
     },
     Ended {
         token: u64,
+    },
+    /// The visible session has played nothing above `SILENCE_PEAK` for
+    /// `SILENCE_MIN_SPAN`. Once per silent stretch; audio above the threshold
+    /// re-arms it.
+    Silent {
+        token: u64,
+        position: Duration,
     },
     /// The device asked for audio the decoder had not delivered yet (a stream rebuffering, a seek loading), so the position stands still.
     Stalled {

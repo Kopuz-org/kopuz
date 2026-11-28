@@ -34,6 +34,7 @@ impl AppleMusicSource {
                 .map(crate::applemusic::track_from_song_data)
                 .collect(),
             more: Some(format!("{station}{STATION_PAGE_SEPARATOR}{page}")),
+            basis: None,
         })
     }
 }
@@ -75,6 +76,10 @@ impl MediaSource for AppleMusicSource {
             explicit_flags: false,
             watch_history: false,
             complete_play_history: false,
+            ratings: false,
+            artist_info: false,
+            radio_stations: false,
+            sonic_path: false,
             library_actions: LibraryActions::NONE,
         }
     }
@@ -294,6 +299,7 @@ impl MediaSource for AppleMusicSource {
             albums,
             tracks,
             artists: Vec::new(),
+            track_stats: Vec::new(),
         })
     }
 

@@ -49,6 +49,10 @@ impl MediaSource for LocalSource {
             explicit_flags: false,
             watch_history: false,
             complete_play_history: true,
+            ratings: false,
+            artist_info: false,
+            radio_stations: false,
+            sonic_path: false,
             library_actions: LibraryActions::NONE,
         }
     }

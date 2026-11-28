@@ -21,8 +21,8 @@ use gpui_kit::{
     pulsating_between,
 };
 use store::{
-    Chrome, Invalidation, Link, Pictured, Query, Route, SourcesModel, TablesChanged, Target,
-    actions,
+    AudioMuseModel, Chrome, Invalidation, Link, Pictured, Query, Route, SourcesModel,
+    TablesChanged, Target, actions,
 };
 
 use crate::genres::genres_of;
@@ -68,6 +68,7 @@ impl Landing {
         let subscriptions = vec![
             // Capabilities arrive with the source list, so the first ask follows that answer.
             cx.observe(&sources, |this, _, cx| this.follow_sources(cx)),
+            cx.observe(&AudioMuseModel::global(cx), |_, _, cx| cx.notify()),
             cx.subscribe(&invalidation, |this, _, event: &TablesChanged, cx| {
                 if event.is_all() && this.started {
                     this.ask(false, cx);
@@ -286,6 +287,7 @@ impl Landing {
 
     fn title(&self, row: Row) -> SharedString {
         match row {
+            Row::YourSound => t("discover_your_sound"),
             Row::Mixes => t("discover_your_mixes"),
             Row::Page(index) => self
                 .pages
@@ -313,6 +315,7 @@ impl Landing {
         }
         let shown = fade.sample(true, motion::MEDIUM, window, cx);
         let content = match (row, &self.rows) {
+            (Row::YourSound, _) => Some(sound_row(self.title(row))),
             (Row::Mixes, _) => self
                 .shelves
                 .update(cx, |shelves, cx| shelves.row(MIXES, cx)),
@@ -356,10 +359,33 @@ impl Landing {
             .icon(icons::icon(icons::REFRESH))
             .label(t("refresh"))
             .on_click(cx.listener(|this, _, _, cx| this.ask(true, cx)));
-        PageHeader::new(t("discover"))
-            .flush()
-            .action(refresh)
-            .action(search)
+        let describe = AudioMuseModel::ready(cx).then(|| {
+            Button::new("discover-describe")
+                .custom(style::quiet_button(
+                    style::white(style::TEXT_STRONG, cx),
+                    cx,
+                ))
+                .small()
+                .rounded_full()
+                .border_1()
+                .border_color(style::white(style::BORDER, cx))
+                .icon(icons::icon(icons::SEARCH))
+                .label(t("describe_music"))
+                .on_click(cx.listener(|_, _, window, cx| {
+                    components::dialogs::open_rename(
+                        t("describe_music"),
+                        "",
+                        actions::start_described,
+                        window,
+                        cx,
+                    )
+                }))
+        });
+        let mut header = PageHeader::new(t("discover")).flush();
+        if let Some(describe) = describe {
+            header = header.action(describe);
+        }
+        header.action(refresh).action(search)
     }
 }
 
@@ -372,7 +398,9 @@ impl Render for Landing {
             self.caps = sources.is_loaded().then(|| sources.capabilities());
         }
         let landing = match &self.caps {
-            Some(caps) => rows::landing(caps, &self.rows, &self.page_rows),
+            Some(caps) => {
+                rows::landing(caps, &self.rows, &self.page_rows, AudioMuseModel::ready(cx))
+            }
             None => rows::Landing::Waiting,
         };
         let body = match landing {
@@ -430,6 +458,7 @@ fn row_key(page: &PageEntry) -> String {
 /// A row's stable name, for its element ids and its fade.
 fn row_name(row: Row, pages: &[PageEntry]) -> String {
     match row {
+        Row::YourSound => "your-sound".to_string(),
         Row::Mixes => MIXES.to_string(),
         Row::Page(index) => pages.get(index).map(row_key).unwrap_or_default(),
         Row::NeverPlayed => "never-played".to_string(),
@@ -462,6 +491,27 @@ fn pulsing(prefix: &SharedString, slot: usize, cx: &App) -> AnyElement {
             |tile, delta| tile.opacity(delta),
         )
         .into_any_element()
+}
+
+/// The one tile that starts AudioMuse-AI's pick from the listening profile.
+fn sound_row(title: SharedString) -> AnyElement {
+    Carousel::new(
+        "discover-your-sound",
+        title.clone(),
+        1,
+        TILE,
+        move |_, _, _| {
+            Tile::new("your-sound-tile", title.clone())
+                .subtitle(t("discover_your_sound_hint"))
+                .size(TILE)
+                .placeholder(icons::RADIO)
+                .on_click(|_, _, cx| actions::start_fingerprint(cx))
+                .play(PlayState::Idle, |_, _, cx| actions::start_fingerprint(cx))
+                .into_any_element()
+        },
+    )
+    .gap(GAP)
+    .into_any_element()
 }
 
 /// Albums nobody has played: each tile opens its album.
@@ -528,6 +578,9 @@ mod tests {
     fn every_row_title_resolves_in_kopuz() {
         for key in [
             "discover_your_mixes",
+            "discover_your_sound",
+            "discover_your_sound_hint",
+            "describe_music",
             "discover_never_played",
             "discover_forgotten_favorites",
             "browse_genres",
@@ -550,6 +603,7 @@ mod tests {
             },
         ];
         let names: std::collections::HashSet<String> = [
+            Row::YourSound,
             Row::Mixes,
             Row::Page(0),
             Row::Page(1),
@@ -559,6 +613,6 @@ mod tests {
         .into_iter()
         .map(|row| row_name(row, &pages))
         .collect();
-        assert_eq!(names.len(), 5);
+        assert_eq!(names.len(), 6);
     }
 }

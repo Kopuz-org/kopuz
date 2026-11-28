@@ -5,6 +5,7 @@ interface source {
         auth-outcome, auth-session, check, connection, library-snapshot,
         playlist-entry, playlist-meta, remote-play-queue, source-error, storage-quota,
         search-results, stream-info, stream-quality, track, track-page, artist-listing,
+        artist-info, mix-seed, radio-station,
     };
 
     login: func(connection: connection, username: string, password: string) -> result<auth-session, source-error>;
@@ -38,6 +39,8 @@ interface source {
         fetch-favorites: func() -> result<list<string>, source-error>;
         fetch-favorites-page: func(cursor: option<string>) -> result<track-page, source-error>;
         push-favorite: func(item-id: string, on: bool) -> result<_, source-error>;
+        /// 1 to 5 stars, or 0 to clear.
+        set-rating: func(item-id: string, stars: u8) -> result<_, source-error>;
 
         resolve-stream: func(item-id: string, quality: stream-quality) -> result<stream-info, source-error>;
         download-track: func(item-id: string) -> result<list<u8>, source-error>;
@@ -47,6 +50,12 @@ interface source {
         start-radio: func(seed-ref: string) -> result<track-page, source-error>;
         start-playlist-radio: func(playlist-ref: string) -> result<track-page, source-error>;
         more-radio: func(cursor: string) -> result<track-page, source-error>;
+        start-mix: func(seed: mix-seed, refs: list<string>) -> result<track-page, source-error>;
+        /// Songs leading step by step from one to the other, both included.
+        sonic-path: func(from-id: string, to-id: string, count: u32) -> result<track-page, source-error>;
+
+        fetch-artist-info: func(artist-id: string) -> result<option<artist-info>, source-error>;
+        fetch-radio-stations: func() -> result<list<radio-station>, source-error>;
 
         save-play-queue: func(item-ids: list<string>, current-index: u32, position-ms: u64) -> result<bool, source-error>;
         get-play-queue: func() -> result<option<remote-play-queue>, source-error>;

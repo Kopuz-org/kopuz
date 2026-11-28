@@ -10,8 +10,8 @@ use std::time::Duration;
 use config::{ChannelMode, EqualizerSettings, ReplayGainInfo, ReplayGainSettings};
 
 use crate::engine::{
-    ActorMsg, AudioSink, Command, CpalSink, EngineHandle, EngineStatus, Event, LoadReply,
-    LoadRequest, Phase, SinkEvent, SourceFactory, Transition,
+    ActorMsg, AudioSink, Command, CpalSink, EngineHandle, EngineStatus, Event, LeadingSilence,
+    LoadReply, LoadRequest, Phase, SinkEvent, SourceFactory, Transition,
 };
 #[cfg(any(
     target_os = "macos",
@@ -56,6 +56,7 @@ pub struct LoadArgs {
     pub factory: SourceFactory,
     pub meta: NowPlayingMeta,
     pub transition: Transition,
+    pub leading_silence: LeadingSilence,
     pub start_at: Option<Duration>,
     /// The queue is walking an album; see [`LoadRequest::album_context`].
     pub album_context: bool,
@@ -148,6 +149,7 @@ impl Player {
             factory,
             meta,
             transition,
+            leading_silence,
             start_at,
             album_context,
             service_replay_gain,
@@ -158,6 +160,7 @@ impl Player {
             factory,
             duration: meta.duration,
             transition,
+            leading_silence,
             start_at,
             album_context,
             service_replay_gain,
@@ -426,6 +429,7 @@ mod tests {
                 artwork: None,
             },
             transition: Transition::Crossfade(Duration::from_secs(2)),
+            leading_silence: LeadingSilence::Keep,
             start_at: None,
             album_context: false,
             service_replay_gain: ReplayGainInfo::default(),

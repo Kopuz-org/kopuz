@@ -287,6 +287,8 @@ calls! {
     fn fetch_favorites_page => call_fetch_favorites_page(cursor: Option<&str> => cursor) -> Fallible<wit::TrackPage>;
     fn push_favorite => call_push_favorite(item_id: &str => item_id, on: bool => on) -> Fallible<()>;
 
+    fn set_rating => call_set_rating(item_id: &str => item_id, stars: u8 => stars) -> Fallible<()>;
+
     fn resolve_stream => call_resolve_stream(
         item_id: &str => item_id,
         quality: wit::StreamQuality => quality
@@ -298,6 +300,18 @@ calls! {
     fn start_radio => call_start_radio(seed_ref: &str => seed_ref) -> Fallible<wit::TrackPage>;
     fn start_playlist_radio => call_start_playlist_radio(playlist_ref: &str => playlist_ref) -> Fallible<wit::TrackPage>;
     fn more_radio => call_more_radio(cursor: &str => cursor) -> Fallible<wit::TrackPage>;
+    fn start_mix => call_start_mix(
+        seed: wit::MixSeed => seed,
+        refs: &[String] => refs
+    ) -> Fallible<wit::TrackPage>;
+    fn sonic_path => call_sonic_path(
+        from_id: &str => from_id,
+        to_id: &str => to_id,
+        count: u32 => count
+    ) -> Fallible<wit::TrackPage>;
+
+    fn fetch_artist_info => call_fetch_artist_info(artist_id: &str => artist_id) -> Fallible<Option<wit::ArtistInfo>>;
+    fn fetch_radio_stations => call_fetch_radio_stations() -> Fallible<Vec<wit::RadioStation>>;
 
     fn save_play_queue => call_save_play_queue(
         item_ids: &[String] => item_ids,

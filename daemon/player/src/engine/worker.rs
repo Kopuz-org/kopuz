@@ -33,6 +33,10 @@ pub(crate) enum WorkerCmd {
         channels: usize,
         sample_rate: u32,
         start_at: Option<Duration>,
+        /// Drop silence at the head of the track. Carries the ring's `played`
+        /// counter, which skipped samples are added to so position stays on the
+        /// track's timeline.
+        lead_trim: Option<Arc<AtomicU64>>,
         /// Ring generation this decode feeds; echoed back on `Eof`.
         epoch: u64,
     },
@@ -109,6 +113,15 @@ struct Output {
     channels: usize,
     sample_rate: u32,
     epoch: u64,
+    /// Head-of-track silence still to drop; `None` once audio starts, the cap
+    /// is spent, or a seek replaced the ring.
+    lead: Option<LeadTrim>,
+}
+
+struct LeadTrim {
+    played: Arc<AtomicU64>,
+    /// Interleaved samples that may still be dropped.
+    budget: usize,
 }
 
 /// Reused per-packet conversion buffers so steady-state decode allocates
@@ -206,6 +219,7 @@ fn run(
             channels,
             sample_rate,
             start_at,
+            lead_trim,
             epoch,
         }) => {
             if let Some(target) = start_at {
@@ -220,12 +234,17 @@ fn run(
                     }
                 }
             }
+            let cap = super::LEADING_SILENCE_CAP.as_secs_f64() * sample_rate as f64;
             Output {
                 producer,
                 written,
                 channels,
                 sample_rate,
                 epoch,
+                lead: lead_trim.map(|played| LeadTrim {
+                    played,
+                    budget: cap as usize * channels,
+                }),
             }
         }
         _ => return,
@@ -341,6 +360,8 @@ fn run(
             }
         }
 
+        let samples = trim_lead(&mut output, samples);
+
         let change = write_all(
             cmd_rx,
             &mut output,
@@ -390,6 +411,7 @@ fn park_at_eof(
                     channels,
                     sample_rate,
                     epoch,
+                    lead: None,
                 };
                 return match seek_reader(format, decoder, track_id, target) {
                     SeekOutcome::Done => ParkOutcome::Resume,
@@ -429,6 +451,7 @@ fn apply_command(
                 channels,
                 sample_rate,
                 epoch,
+                lead: None,
             };
             match seek_reader(format, decoder, track_id, target) {
                 SeekOutcome::Done => {
@@ -474,6 +497,41 @@ fn drain_commands(
             Err(TryRecvError::Disconnected) => return Some(FlowChange::Exit),
         }
     }
+}
+
+/// Frames at the head of `samples` whose every sample is under the silence
+/// threshold, at most `max_frames`.
+fn silent_prefix(samples: &[f32], channels: usize, max_frames: usize) -> usize {
+    samples
+        .chunks_exact(channels.max(1))
+        .take(max_frames)
+        .take_while(|frame| {
+            frame
+                .iter()
+                .all(|sample| sample.abs() < super::SILENCE_PEAK)
+        })
+        .count()
+}
+
+/// Drops the silent head of a track that starts through a smart crossfade.
+/// Skipped samples count as written and played, like a seek forward, so the
+/// position reflects the track's timeline and the drain check stays balanced.
+fn trim_lead<'a>(output: &mut Output, samples: &'a [f32]) -> &'a [f32] {
+    let Some(lead) = output.lead.as_mut() else {
+        return samples;
+    };
+
+    let channels = output.channels.max(1);
+    let skip = silent_prefix(samples, channels, lead.budget / channels) * channels;
+    lead.budget -= skip;
+    output.written.fetch_add(skip as u64, Ordering::Relaxed);
+    lead.played.fetch_add(skip as u64, Ordering::Relaxed);
+
+    // Audio began or the cap ran out: nothing more to drop.
+    if skip < samples.len() || lead.budget == 0 {
+        output.lead = None;
+    }
+    &samples[skip..]
 }
 
 /// Write the full sample block, backing off while the ring is full and
