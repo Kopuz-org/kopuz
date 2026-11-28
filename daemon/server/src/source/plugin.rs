@@ -12,10 +12,10 @@ use plugin_host::manifest;
 use plugin_host::{PluginError, Session, wit};
 
 use super::{
-    AlbumType, ArtistView, AuthOutcome, Capabilities, Check, CheckOutcome, CheckStep,
-    FavoritesPage, FavoritesSync, LibraryActions, LibrarySnapshot, MediaSource, PlaylistMeta,
-    PlaylistOps, PlaylistPage, RadioPage, RadioSeeds, RemotePlayQueue, SourceError, StorageQuota,
-    StreamInfo, mirror_added, mirror_created,
+    AlbumType, ArtistInfo, ArtistView, AuthOutcome, Capabilities, Check, CheckOutcome, CheckStep,
+    FavoritesPage, FavoritesSync, LibraryActions, LibrarySnapshot, MediaSource, MixBasis, MixSeed,
+    PlaylistMeta, PlaylistOps, PlaylistPage, RadioPage, RadioSeeds, RadioStation, RemotePlayQueue,
+    SourceError, StorageQuota, StreamInfo, mirror_added, mirror_created,
 };
 
 pub(super) struct PluginSource {
@@ -106,6 +106,10 @@ impl PluginSource {
         RadioPage {
             tracks: self.tracks(page.tracks),
             more: page.next,
+            basis: page.basis.map(|basis| match basis {
+                wit::MixBasis::Sonic => MixBasis::Sonic,
+                wit::MixBasis::Metadata => MixBasis::Metadata,
+            }),
         }
     }
 
@@ -119,6 +123,33 @@ impl PluginSource {
                 track_from(self.service, track, bit_depth)
             })
             .collect()
+    }
+}
+
+/// The daemon streams a station outside the sandbox, so one off the plugin's hosts is dropped like such a track stream.
+fn reachable_stations(
+    reach: &crate::plugins::Reach,
+    stations: Vec<wit::RadioStation>,
+) -> Vec<RadioStation> {
+    stations
+        .into_iter()
+        .filter(|station| reach.allows(&station.stream_url))
+        .map(|station| RadioStation {
+            id: station.id,
+            name: station.name,
+            stream_url: station.stream_url,
+            homepage: station.homepage,
+        })
+        .collect()
+}
+
+/// Keyed by item id, which is the key a plugin track is stored under.
+fn track_stats(track: &wit::Track) -> db::ServerTrackStats {
+    db::ServerTrackStats {
+        track_key: track.item_id.clone(),
+        play_count: track.play_count,
+        last_played_at: track.last_played,
+        rating: track.rating.filter(|stars| (1..=5).contains(stars)),
     }
 }
 
@@ -280,6 +311,9 @@ pub(crate) fn capabilities(declared: &manifest::Capabilities) -> Capabilities {
             track: seeds(manifest::RadioSeed::Track),
             playlist: seeds(manifest::RadioSeed::Playlist),
             search: seeds(manifest::RadioSeed::Search),
+            album: seeds(manifest::RadioSeed::Album),
+            artist: seeds(manifest::RadioSeed::Artist),
+            tracks: seeds(manifest::RadioSeed::Tracks),
         },
         play_queue: declared.play_queue,
         playlists: match declared.playlists {
@@ -301,6 +335,10 @@ pub(crate) fn capabilities(declared: &manifest::Capabilities) -> Capabilities {
         explicit_flags: declared.explicit_flags,
         watch_history: declared.watch_history,
         complete_play_history: declared.complete_play_history,
+        ratings: declared.ratings,
+        artist_info: declared.artist_info,
+        radio_stations: declared.radio_stations,
+        sonic_path: declared.sonic_path,
         library_actions: LibraryActions {
             rate: action(manifest::LibraryAction::Rate),
             follow: action(manifest::LibraryAction::Follow),
@@ -422,14 +460,20 @@ impl MediaSource for PluginSource {
     ) -> Result<Option<Box<dyn symphonia::core::io::MediaSource>>, SourceError> {
         let plugin = self.session.plugin();
         let reads_folders = plugin.manifest().permissions.reads_folders();
-        if !reads_folders && !plugin.manifest().may_encrypt_streams() {
-            return Ok(None);
-        }
-        let stream = answer(
+        // Only asked to learn whether the stream needs the host; a failure is left to
+        // the configured-quality resolve, which reports its own.
+        let resolved = answer(
             self.session
                 .resolve_stream(item_id, wit::StreamQuality::High)
                 .await,
-        )?;
+        );
+        let stream = match resolved {
+            Ok(stream) => stream,
+            Err(error) => {
+                tracing::debug!(%error, "stream probe failed; using the ordinary path");
+                return Ok(None);
+            }
+        };
         if reads_folders && let Some(path) = self.artwork().local_file(&stream.url) {
             let file = std::fs::File::open(&path).map_err(|error| {
                 SourceError::Backend(format!("could not open {}: {error}", path.display()))
@@ -562,6 +606,50 @@ impl MediaSource for PluginSource {
         Ok(self.radio_page(page))
     }
 
+    async fn set_rating(&self, item_id: &str, stars: u8) -> Result<(), SourceError> {
+        answer(self.session.set_rating(item_id, stars).await)
+    }
+
+    async fn start_mix(&self, seed: MixSeed, refs: &[String]) -> Result<RadioPage, SourceError> {
+        let seed = match seed {
+            MixSeed::Album => wit::MixSeed::Album,
+            MixSeed::Artist => wit::MixSeed::Artist,
+            MixSeed::Tracks => wit::MixSeed::Tracks,
+        };
+        let page = answer(self.session.start_mix(seed, refs).await)?;
+        Ok(self.radio_page(page))
+    }
+
+    async fn sonic_path(
+        &self,
+        from_id: &str,
+        to_id: &str,
+        count: u32,
+    ) -> Result<RadioPage, SourceError> {
+        let page = answer(self.session.sonic_path(from_id, to_id, count).await)?;
+        Ok(self.radio_page(page))
+    }
+
+    async fn fetch_artist_info(&self, artist_id: &str) -> Result<Option<ArtistInfo>, SourceError> {
+        let info = answer(self.session.fetch_artist_info(artist_id).await)?;
+        let artwork = self.artwork();
+        Ok(info.map(|info| ArtistInfo {
+            biography: info.biography,
+            image: artwork.cover(info.image),
+            similar: info.similar.into_iter().map(credit_from).collect(),
+            link: info.link,
+        }))
+    }
+
+    fn stream_guard(&self) -> Option<utils::http::Guard> {
+        self.artwork().stream_guard()
+    }
+
+    async fn fetch_radio_stations(&self) -> Result<Vec<RadioStation>, SourceError> {
+        let stations = answer(self.session.fetch_radio_stations().await)?;
+        Ok(reachable_stations(&self.artwork(), stations))
+    }
+
     async fn save_play_queue(
         &self,
         queue: &[reader::Track],
@@ -627,10 +715,12 @@ impl MediaSource for PluginSource {
 
     async fn fetch_library(&self) -> Result<LibrarySnapshot, SourceError> {
         let snapshot = answer(self.session.fetch_library().await)?;
+        let track_stats = snapshot.tracks.iter().map(track_stats).collect();
         Ok(LibrarySnapshot {
             albums: self.albums(snapshot.albums),
             tracks: self.tracks(snapshot.tracks),
             artists: self.listings(snapshot.artists),
+            track_stats,
         })
     }
 
@@ -776,6 +866,29 @@ mod tests {
     }
 
     #[test]
+    fn a_community_plugin_keeps_only_stations_it_could_reach() {
+        let station = |id: &str, url: &str| wit::RadioStation {
+            id: id.into(),
+            name: id.into(),
+            stream_url: url.into(),
+            homepage: None,
+        };
+        let stations = vec![
+            station("own", "https://music.example/live.mp3"),
+            station("listed", "https://archive.org/stream.ogg"),
+            station("lan", "http://192.168.1.1/admin"),
+            station("elsewhere", "https://radio.example/live"),
+        ];
+
+        let kept: Vec<String> = reachable_stations(&community(), stations)
+            .into_iter()
+            .map(|station| station.id)
+            .collect();
+
+        assert_eq!(kept, ["own", "listed"]);
+    }
+
+    #[test]
     fn a_community_plugin_keeps_only_covers_it_could_reach() {
         let artwork = community();
         let kept = |raw: &str| artwork.cover(Some(raw.into()));
@@ -910,6 +1023,9 @@ mod tests {
                     album_peak: None,
                 },
                 explicit: false,
+                play_count: None,
+                last_played: None,
+                rating: None,
             },
             24,
         );

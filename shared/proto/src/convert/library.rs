@@ -307,12 +307,22 @@ pub fn lyrics_from_proto(value: &Lyrics) -> api::LyricsView {
 pub fn stats_to_proto(value: &api::StatsView) -> Stats {
     Stats {
         listen_counts: value.listen_counts.clone().into_iter().collect(),
+        ratings: value
+            .ratings
+            .iter()
+            .map(|(key, stars)| (key.clone(), u32::from(*stars)))
+            .collect(),
     }
 }
 
 pub fn stats_from_proto(value: &Stats) -> api::StatsView {
     api::StatsView {
         listen_counts: value.listen_counts.clone().into_iter().collect(),
+        ratings: value
+            .ratings
+            .iter()
+            .map(|(key, stars)| (key.clone(), u8::try_from(*stars).unwrap_or(u8::MAX)))
+            .collect(),
     }
 }
 
@@ -450,6 +460,78 @@ pub fn artist_info_from_proto(value: &ArtistInfo) -> api::ArtistInfo {
         track_count: value.track_count,
         album_count: value.album_count,
         artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
+    }
+}
+
+pub fn artist_about_to_proto(value: &api::ArtistInfoView) -> ArtistAbout {
+    ArtistAbout {
+        biography: value.biography.clone(),
+        image: value.image.as_ref().map(artwork_ref_to_proto),
+        similar: value
+            .similar
+            .iter()
+            .map(|artist| SimilarArtist {
+                name: artist.name.clone(),
+                key: artist.key.clone(),
+            })
+            .collect(),
+        link: value.link.clone(),
+    }
+}
+
+pub fn artist_about_from_proto(value: &ArtistAbout) -> api::ArtistInfoView {
+    api::ArtistInfoView {
+        biography: value.biography.clone(),
+        image: value.image.as_ref().and_then(artwork_ref_from_proto),
+        similar: value
+            .similar
+            .iter()
+            .map(|artist| api::SimilarArtist {
+                name: artist.name.clone(),
+                key: artist.key.clone(),
+            })
+            .collect(),
+        link: value.link.clone(),
+    }
+}
+
+pub fn sound_to_proto(value: &api::SoundView) -> Sound {
+    Sound {
+        similar_albums: value
+            .similar_albums
+            .iter()
+            .map(album_info_to_proto)
+            .collect(),
+        similar_artists: value
+            .similar_artists
+            .iter()
+            .map(|artist| SimilarArtist {
+                name: artist.name.clone(),
+                key: artist.key.clone(),
+            })
+            .collect(),
+        tags: value.tags.clone(),
+        moods: value.moods.clone(),
+    }
+}
+
+pub fn sound_from_proto(value: &Sound) -> api::SoundView {
+    api::SoundView {
+        similar_albums: value
+            .similar_albums
+            .iter()
+            .map(album_info_from_proto)
+            .collect(),
+        similar_artists: value
+            .similar_artists
+            .iter()
+            .map(|artist| api::SimilarArtist {
+                name: artist.name.clone(),
+                key: artist.key.clone(),
+            })
+            .collect(),
+        tags: value.tags.clone(),
+        moods: value.moods.clone(),
     }
 }
 
@@ -671,6 +753,64 @@ mod tests {
             }),
         };
         assert_eq!(track, track_info_from_proto(&track_info_to_proto(&track)));
+    }
+
+    #[test]
+    fn artist_info_round_trips() {
+        let info = api::ArtistInfoView {
+            biography: Some("Plays jazz.".into()),
+            image: Some(api::ArtworkRef::new(
+                api::ArtworkTarget::Catalog("artist-info:ar-1".into()),
+                7,
+            )),
+            similar: vec![
+                api::SimilarArtist {
+                    name: "Boris".into(),
+                    key: Some("ar-2".into()),
+                },
+                api::SimilarArtist {
+                    name: "Nobody".into(),
+                    key: None,
+                },
+            ],
+            link: Some("https://www.last.fm/music/Ada".into()),
+        };
+        assert_eq!(info, artist_about_from_proto(&artist_about_to_proto(&info)));
+        let bare = api::ArtistInfoView::default();
+        assert_eq!(bare, artist_about_from_proto(&artist_about_to_proto(&bare)));
+    }
+
+    #[test]
+    fn sound_round_trips() {
+        let sound = api::SoundView {
+            similar_albums: vec![api::AlbumInfo {
+                id: "al-1".into(),
+                title: "Low".into(),
+                artist: "Ada".into(),
+                genre: "Jazz".into(),
+                year: 1999,
+                artwork: None,
+                artist_key: Some("ar-1".into()),
+            }],
+            similar_artists: vec![api::SimilarArtist {
+                name: "Boris".into(),
+                key: Some("ar-2".into()),
+            }],
+            tags: vec!["metal".into(), "heavy metal".into()],
+            moods: vec!["aggressive".into()],
+        };
+        assert_eq!(sound, sound_from_proto(&sound_to_proto(&sound)));
+        let bare = api::SoundView::default();
+        assert_eq!(bare, sound_from_proto(&sound_to_proto(&bare)));
+    }
+
+    #[test]
+    fn stats_carry_play_counts_and_star_ratings() {
+        let stats = api::StatsView {
+            listen_counts: [("local:a".to_string(), 7)].into(),
+            ratings: [("a".to_string(), 5), ("b".to_string(), 1)].into(),
+        };
+        assert_eq!(stats, stats_from_proto(&stats_to_proto(&stats)));
     }
 
     #[test]

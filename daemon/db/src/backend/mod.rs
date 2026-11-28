@@ -21,6 +21,7 @@ mod queries;
 mod rows;
 mod scrobble;
 mod scrobble_queue;
+mod server_stats;
 
 pub use scrobble::{QueuedScrobbleRow, ScrobbleService};
 mod writes;
@@ -448,6 +449,13 @@ impl ReadStore for Native {
         cfg_store::play_history(&self.pool(), source).await
     }
 
+    async fn server_ratings(
+        &self,
+        source: &crate::Source,
+    ) -> Result<std::collections::HashMap<String, u8>, DbError> {
+        server_stats::ratings(&self.pool(), source).await
+    }
+
     async fn favorites_liked_at(&self, server_id: &str) -> Result<Vec<(String, i64)>, DbError> {
         queries::favorites_liked_at(&self.pool(), server_id).await
     }
@@ -699,6 +707,23 @@ impl Storage for Native {
         track_key: &str,
     ) -> Result<(), DbError> {
         cfg_store::bump_listen_count(&self.pool(), source, track_key).await
+    }
+
+    async fn replace_server_track_stats(
+        &self,
+        source: &crate::Source,
+        stats: &[crate::ServerTrackStats],
+    ) -> Result<(), DbError> {
+        server_stats::replace(&self.pool(), source, stats).await
+    }
+
+    async fn set_server_rating(
+        &self,
+        source: &crate::Source,
+        track_key: &str,
+        rating: Option<u8>,
+    ) -> Result<(), DbError> {
+        server_stats::set_rating(&self.pool(), source, track_key, rating).await
     }
 
     async fn push_recent(&self, source: &crate::Source, track_key: &str) -> Result<(), DbError> {

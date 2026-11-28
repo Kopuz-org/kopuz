@@ -89,12 +89,52 @@ impl From<db::DbError> for SourceError {
 pub struct RadioPage {
     pub tracks: Vec<reader::Track>,
     pub more: Option<String>,
+    /// What picked the songs; none for a page that is not a radio or mix.
+    pub basis: Option<MixBasis>,
 }
 
 impl RadioPage {
     pub fn last(tracks: Vec<reader::Track>) -> Self {
-        Self { tracks, more: None }
+        Self {
+            tracks,
+            more: None,
+            basis: None,
+        }
     }
+}
+
+/// How a radio or mix found its songs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MixBasis {
+    /// Analysis of the audio itself.
+    Sonic,
+    /// Tags, listening data or a metadata service.
+    Metadata,
+}
+
+/// What a mix starts from; each ref is an item id of that kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MixSeed {
+    Album,
+    Artist,
+    Tracks,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArtistInfo {
+    pub biography: Option<String>,
+    pub image: Option<String>,
+    pub similar: Vec<reader::ArtistCredit>,
+    /// A page about the artist elsewhere.
+    pub link: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RadioStation {
+    pub id: String,
+    pub name: String,
+    pub stream_url: String,
+    pub homepage: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -136,6 +176,12 @@ pub struct RadioSeeds {
     /// results: a catalog search is a list of unrelated matches, not an album.
     /// Needs `track`.
     pub search: bool,
+    /// Backs [`MediaSource::start_mix`](super::MediaSource::start_mix) seeded from an album.
+    pub album: bool,
+    /// Backs [`MediaSource::start_mix`](super::MediaSource::start_mix) seeded from an artist.
+    pub artist: bool,
+    /// Backs [`MediaSource::start_mix`](super::MediaSource::start_mix) seeded from several tracks.
+    pub tracks: bool,
 }
 
 impl RadioSeeds {
@@ -144,6 +190,9 @@ impl RadioSeeds {
         track: false,
         playlist: false,
         search: false,
+        album: false,
+        artist: false,
+        tracks: false,
     };
 
     /// A song seed only, the Subsonic/OpenSubsonic shape.
@@ -151,6 +200,9 @@ impl RadioSeeds {
         track: true,
         playlist: false,
         search: false,
+        album: false,
+        artist: false,
+        tracks: false,
     };
 
     /// Both seeds, the catalog-remote shape.
@@ -158,6 +210,9 @@ impl RadioSeeds {
         track: true,
         playlist: true,
         search: false,
+        album: false,
+        artist: false,
+        tracks: false,
     };
 }
 
@@ -222,6 +277,8 @@ pub struct LibrarySnapshot {
     pub tracks: Vec<reader::Track>,
     /// The source's own artist listing, with each photo URL it has.
     pub artists: Vec<(reader::ArtistCredit, Option<String>)>,
+    /// What the server reports per track for the account: plays and ratings.
+    pub track_stats: Vec<db::ServerTrackStats>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -265,6 +322,13 @@ pub struct Capabilities {
     pub watch_history: bool,
     /// Every play of its tracks goes through kopuz, so kopuz's play counts are its whole listening history.
     pub complete_play_history: bool,
+    /// The account can rate tracks and albums.
+    pub ratings: bool,
+    pub artist_info: bool,
+    /// It lists internet radio stations.
+    pub radio_stations: bool,
+    /// Backs [`MediaSource::sonic_path`](super::MediaSource::sonic_path).
+    pub sonic_path: bool,
     pub library_actions: LibraryActions,
 }
 

@@ -7003,6 +7003,7 @@ dependencies = [
  "kopuz-proto",
  "kopuz-radio",
  "kopuz-reader",
+ "kopuz-server",
  "kopuz-utils",
  "libc",
  "reqwest 0.13.4",

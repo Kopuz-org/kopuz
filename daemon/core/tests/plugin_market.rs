@@ -22,7 +22,7 @@ const MANIFEST: &str = r#"
 id = "echo"
 name = "Echo"
 version = "1.0.0"
-api = "0.1"
+api = "0.2"
 description = "A test plugin."
 
 [permissions]
@@ -56,7 +56,7 @@ fn marketplace(
             "id": id,
             "name": "Echo",
             "version": "1.0.0",
-            "api": "0.1",
+            "api": "0.2",
             "author": "tests",
             "services": ["echo-service"],
             "network": ["$server"],

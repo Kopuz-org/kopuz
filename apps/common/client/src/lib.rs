@@ -197,6 +197,7 @@ impl api::PlayerApi for GrpcApi {
         .map_err(wire_error)?;
         Ok(CommandAck {
             rev: response.get_ref().rev,
+            basis: None,
         })
     }
 
@@ -226,6 +227,7 @@ impl api::PlayerApi for GrpcApi {
             .map_err(wire_error)?;
         Ok(CommandAck {
             rev: ack.get_ref().rev,
+            basis: convert::mix_basis_from_proto(ack.get_ref().basis),
         })
     }
 
@@ -237,6 +239,7 @@ impl api::PlayerApi for GrpcApi {
             .map_err(wire_error)?;
         Ok(CommandAck {
             rev: ack.get_ref().rev,
+            basis: None,
         })
     }
 
@@ -358,6 +361,37 @@ impl api::LibraryApi for GrpcApi {
             .await
             .map_err(wire_error)?;
         Ok(convert::album_page_from_proto(albums.get_ref()))
+    }
+
+    async fn artist_info(&self, artist: String) -> Result<Option<api::ArtistInfoView>, ApiError> {
+        let response = self
+            .client()
+            .get_artist_info(Request::new(proto::ArtistRequest { key: artist }))
+            .await
+            .map_err(wire_error)?;
+        Ok(response
+            .get_ref()
+            .about
+            .as_ref()
+            .map(convert::artist_about_from_proto))
+    }
+
+    async fn album_sound(&self, album: String) -> Result<api::SoundView, ApiError> {
+        let response = self
+            .client()
+            .get_album_sound(Request::new(proto::AlbumRef { id: album }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::sound_from_proto(response.get_ref()))
+    }
+
+    async fn artist_sound(&self, artist: String) -> Result<api::SoundView, ApiError> {
+        let response = self
+            .client()
+            .get_artist_sound(Request::new(proto::ArtistRequest { key: artist }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::sound_from_proto(response.get_ref()))
     }
 
     async fn album(&self, id: String) -> Result<Option<api::AlbumInfo>, ApiError> {
@@ -690,6 +724,17 @@ impl api::LibraryApi for GrpcApi {
     async fn set_favorite(&self, key: String, favorite: bool) -> Result<(), ApiError> {
         self.client()
             .set_favorite(Request::new(proto::FavoriteRequest { key, favorite }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn set_star_rating(&self, key: String, stars: u8) -> Result<(), ApiError> {
+        self.client()
+            .set_star_rating(Request::new(proto::StarRatingRequest {
+                key,
+                stars: u32::from(stars),
+            }))
             .await
             .map_err(wire_error)?;
         Ok(())

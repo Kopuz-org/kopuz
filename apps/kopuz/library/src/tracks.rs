@@ -251,6 +251,7 @@ impl Library {
             .cover(covers)
             .stored(store::DownloadsModel::global(cx).read(cx).is_stored(&key))
             .plays(self.plays_for(track))
+            .rating(self.rating_for(track))
             .genre(self.genre_of(track).to_string())
             .playing(self.is_playing(&key))
             .selected(selected)

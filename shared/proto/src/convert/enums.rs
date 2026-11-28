@@ -243,6 +243,7 @@ pub fn album_order_field_to_proto(value: ::config::AlbumSortField) -> AlbumOrder
         ::config::AlbumSortField::Genre => AlbumOrderField::Genre,
         ::config::AlbumSortField::RecentlyAdded => AlbumOrderField::RecentlyAdded,
         ::config::AlbumSortField::TrackCount => AlbumOrderField::TrackCount,
+        ::config::AlbumSortField::LastPlayed => AlbumOrderField::LastPlayed,
     }
 }
 
@@ -254,6 +255,7 @@ pub fn album_order_field_from_proto(value: i32) -> ::config::AlbumSortField {
         AlbumOrderField::Genre => ::config::AlbumSortField::Genre,
         AlbumOrderField::RecentlyAdded => ::config::AlbumSortField::RecentlyAdded,
         AlbumOrderField::TrackCount => ::config::AlbumSortField::TrackCount,
+        AlbumOrderField::LastPlayed => ::config::AlbumSortField::LastPlayed,
         AlbumOrderField::Title | AlbumOrderField::Unspecified => ::config::AlbumSortField::Title,
     }
 }
@@ -363,6 +365,7 @@ mod tests {
             ::config::AlbumSortField::Genre,
             ::config::AlbumSortField::RecentlyAdded,
             ::config::AlbumSortField::TrackCount,
+            ::config::AlbumSortField::LastPlayed,
         ] {
             assert_eq!(
                 field,

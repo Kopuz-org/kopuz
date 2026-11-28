@@ -55,3 +55,4 @@ client = { workspace = true }
 tempfile = { workspace = true }
 async-trait = { workspace = true }
 radio = { workspace = true }
+server = { workspace = true }
