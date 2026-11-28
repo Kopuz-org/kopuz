@@ -96,10 +96,18 @@ enum Play {
     Custom(Act),
 }
 
+/// What a radio starts from, which decides the capability that shows its button.
+#[derive(Clone, Copy)]
+enum RadioKind {
+    Playlist,
+    Album,
+    Artist,
+}
+
 enum Item {
     Play(Play),
     Shuffle(Shuffle),
-    Radio(Act),
+    Radio(RadioKind, Act),
     Download(ToggleAct),
     Delete(Act),
     Share(Act),
@@ -177,8 +185,29 @@ impl DetailActions {
     }
 
     /// Start a radio; shown only where the source runs playlist radio.
-    pub fn radio(mut self, start: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
-        self.items.push(Item::Radio(Rc::new(start)));
+    pub fn radio(self, start: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
+        self.radio_of(RadioKind::Playlist, start)
+    }
+
+    /// Start a mix from the album; shown only where the source runs album radio.
+    pub fn album_radio(self, start: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
+        self.radio_of(RadioKind::Album, start)
+    }
+
+    /// Start a mix from the artist; shown only where the source runs artist radio.
+    pub fn artist_radio(
+        self,
+        start: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.radio_of(RadioKind::Artist, start)
+    }
+
+    fn radio_of(
+        mut self,
+        kind: RadioKind,
+        start: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.items.push(Item::Radio(kind, Rc::new(start)));
         self
     }
 
@@ -270,7 +299,11 @@ impl RenderOnce for DetailActions {
                     })
                     .into_any_element()
                 }
-                Item::Radio(start) => match capabilities.playlist_radio {
+                Item::Radio(kind, start) => match match kind {
+                    RadioKind::Playlist => capabilities.playlist_radio,
+                    RadioKind::Album => capabilities.album_radio,
+                    RadioKind::Artist => capabilities.artist_radio,
+                } {
                     true => ring(
                         IconButton::new(format!("{id}-radio"), icons::RADIO)
                             .size(metrics.round)

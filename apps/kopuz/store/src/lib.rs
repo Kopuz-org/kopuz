@@ -4,6 +4,7 @@ pub mod actions;
 pub mod ambient;
 mod artwork;
 mod artwork_edit;
+mod audiomuse;
 mod backdrop;
 mod catalog_cache;
 mod catalog_marks;
@@ -36,6 +37,7 @@ mod settings_section;
 mod setup;
 mod signin;
 mod sleep;
+mod sonic_path;
 mod sources;
 mod target;
 mod updates;
@@ -44,6 +46,7 @@ use gpui_kit::{App, AppContext as _, Entity, Global};
 
 pub use artwork::{Arrival, ArtworkBytes, ArtworkKey, Residents, artwork_source};
 pub use artwork_edit::{content_type_for, pick_and_upload, pick_image, remove_artwork};
+pub use audiomuse::AudioMuseModel;
 pub use backdrop::{blurred_backdrop, resolve_backdrop};
 pub use catalog_cache::{Cached, CatalogCache, Ticket};
 pub use catalog_marks::CatalogMarks;
@@ -86,6 +89,7 @@ pub use signin::{
     sign_in_again, sign_in_wait, start_sign_in,
 };
 pub use sleep::{SleepAfter, SleepTimer};
+pub use sonic_path::SonicPathStart;
 pub use sources::{NetworkNotice, SourceStatus, SourcesModel, SwitchStarted};
 pub use target::{CatalogEntry, Kind, RowEdit, RowScope, Target, TrackActions};
 pub use updates::UpdateModel;
@@ -173,4 +177,6 @@ pub fn init(cx: &mut App) {
     register(cx, SetupModel::new);
     register(cx, UpdateModel::new);
     register(cx, plugin_actions::PluginActions::new);
+    register(cx, SonicPathStart::new);
+    register(cx, AudioMuseModel::new);
 }

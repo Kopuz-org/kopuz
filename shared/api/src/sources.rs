@@ -107,6 +107,17 @@ pub struct SourceCapabilities {
     pub watch_history: bool,
     /// Every play of its tracks goes through kopuz, so kopuz's play counts are its whole listening history.
     pub complete_play_history: bool,
+    /// The account can rate tracks and albums.
+    pub ratings: bool,
+    pub artist_info: bool,
+    /// It lists internet radio stations.
+    pub radio_stations: bool,
+    /// It finds songs leading from one track to another.
+    pub sonic_path: bool,
+    pub album_radio: bool,
+    pub artist_radio: bool,
+    /// A mix of several tracks.
+    pub mix_radio: bool,
     pub playlists: PlaylistCapability,
     pub artists: ArtistPresentation,
     pub albums: AlbumPresentation,
@@ -320,6 +331,9 @@ pub struct BrowserProfile {
     pub browser: String,
     pub name: String,
 }
+
+/// The id of the AudioMuse-AI integration; its `configured` flag is what a client gates sonic search on.
+pub const AUDIOMUSE_INTEGRATION: &str = "audiomuse";
 
 /// Something configured per account rather than per source: a scrobbler, a
 /// metadata service, a presence integration. Same shape as a service, so the

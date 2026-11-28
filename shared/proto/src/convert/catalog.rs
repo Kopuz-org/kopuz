@@ -395,6 +395,7 @@ pub fn radio_station_to_proto(value: &api::RadioStationInfo) -> RadioStationInfo
         pinned: value.pinned,
         artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
         icon: value.icon.clone(),
+        from_source: value.origin == api::RadioOrigin::Source,
     }
 }
 
@@ -416,6 +417,10 @@ pub fn radio_station_from_proto(value: &RadioStationInfo) -> api::RadioStationIn
         pinned: value.pinned,
         artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
         icon: value.icon.clone(),
+        origin: match value.from_source {
+            true => api::RadioOrigin::Source,
+            false => api::RadioOrigin::Registry,
+        },
     }
 }
 
@@ -622,10 +627,19 @@ mod tests {
             pinned: true,
             artwork: None,
             icon: "fa-solid fa-radio".into(),
+            origin: api::RadioOrigin::Registry,
         };
         assert_eq!(
             station,
             radio_station_from_proto(&radio_station_to_proto(&station))
+        );
+        let served = api::RadioStationInfo {
+            origin: api::RadioOrigin::Source,
+            ..station
+        };
+        assert_eq!(
+            served,
+            radio_station_from_proto(&radio_station_to_proto(&served))
         );
     }
 

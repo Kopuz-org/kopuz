@@ -1,4 +1,4 @@
-package kopuz:plugin@0.1.0;
+package kopuz:plugin@0.2.0;
 
 world source-plugin {
     import http;
