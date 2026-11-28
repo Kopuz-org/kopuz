@@ -731,6 +731,73 @@ pub fn audio_config(data: &[u8]) -> Option<AudioConfig> {
     })
 }
 
+const MDHD: u32 = u32::from_be_bytes(*b"mdhd");
+const MVHD: u32 = u32::from_be_bytes(*b"mvhd");
+const MEHD: u32 = u32::from_be_bytes(*b"mehd");
+
+/// `(timescale, duration)` from an `mdhd` or `mvhd` body, which share a layout.
+fn header_times(data: &[u8], body_start: usize, body_end: usize) -> Option<(u32, u64)> {
+    let wide = *data.get(body_start)? == 1;
+    let (timescale_at, duration_at, duration_len) = if wide {
+        (body_start + 20, body_start + 24, 8)
+    } else {
+        (body_start + 12, body_start + 16, 4)
+    };
+    if duration_at + duration_len > body_end {
+        return None;
+    }
+    let duration = if wide {
+        u64be(data, duration_at)
+    } else {
+        u64::from(u32be(data, duration_at))
+    };
+    Some((u32be(data, timescale_at), duration))
+}
+
+/// The track's length, read from its init segment.
+///
+/// A fragmented file may leave `mdhd` at zero, or all ones for "unknown", and
+/// state the length in `mehd` instead, counted in `mvhd`'s timescale. Each is
+/// tried in turn.
+pub fn track_duration(data: &[u8]) -> Option<std::time::Duration> {
+    let usable = |timescale: u32, duration: u64| {
+        let known = duration != 0 && duration != u64::from(u32::MAX) && duration != u64::MAX;
+        (timescale != 0 && known)
+            .then(|| std::time::Duration::from_secs_f64(duration as f64 / f64::from(timescale)))
+    };
+
+    let (moov_bs, moov_be) = find_deep(data, 0, data.len(), MOOV)?;
+    let movie =
+        find_child(data, moov_bs, moov_be, MVHD).and_then(|(bs, be, _)| header_times(data, bs, be));
+
+    let media = find_deep(data, moov_bs, moov_be, MDHD)
+        .and_then(|(bs, be)| header_times(data, bs, be))
+        .and_then(|(timescale, duration)| usable(timescale, duration));
+    if media.is_some() {
+        return media;
+    }
+
+    let fragments = find_deep(data, moov_bs, moov_be, MEHD).and_then(|(bs, be)| {
+        let wide = *data.get(bs)? == 1;
+        let len = if wide { 8 } else { 4 };
+        if bs + 4 + len > be {
+            return None;
+        }
+        Some(if wide {
+            u64be(data, bs + 4)
+        } else {
+            u64::from(u32be(data, bs + 4))
+        })
+    });
+    if let (Some((timescale, _)), Some(duration)) = (movie, fragments)
+        && let Some(found) = usable(timescale, duration)
+    {
+        return Some(found);
+    }
+
+    movie.and_then(|(timescale, duration)| usable(timescale, duration))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -804,6 +871,60 @@ mod tests {
 
     fn concat(parts: &[Vec<u8>]) -> Vec<u8> {
         parts.iter().flatten().copied().collect()
+    }
+
+    fn version0_header(timescale: u32, duration: u32) -> Vec<u8> {
+        let mut body = vec![0u8; 12];
+        body.extend_from_slice(&timescale.to_be_bytes());
+        body.extend_from_slice(&duration.to_be_bytes());
+        body
+    }
+
+    fn movie(mvhd: Vec<u8>, trak_children: Vec<u8>, mvex_children: Vec<u8>) -> Vec<u8> {
+        let mdia = boxed(b"mdia", &trak_children);
+        let trak = boxed(b"trak", &mdia);
+        let mvex = boxed(b"mvex", &mvex_children);
+        boxed(b"moov", &concat(&[boxed(b"mvhd", &mvhd), trak, mvex]))
+    }
+
+    #[test]
+    fn the_media_header_gives_the_length_when_it_has_one() {
+        let data = movie(
+            version0_header(1000, 0),
+            boxed(b"mdhd", &version0_header(44_100, 44_100 * 3)),
+            Vec::new(),
+        );
+        assert_eq!(
+            track_duration(&data),
+            Some(std::time::Duration::from_secs(3))
+        );
+    }
+
+    /// Fragmented files often leave `mdhd` empty and put the length in `mehd`,
+    /// which counts in the movie's timescale rather than the track's.
+    #[test]
+    fn an_empty_media_header_falls_back_to_the_fragment_length() {
+        let mut mehd = vec![0u8; 4];
+        mehd.extend_from_slice(&5_000u32.to_be_bytes());
+        let data = movie(
+            version0_header(1000, 0),
+            boxed(b"mdhd", &version0_header(44_100, 0)),
+            boxed(b"mehd", &mehd),
+        );
+        assert_eq!(
+            track_duration(&data),
+            Some(std::time::Duration::from_secs(5))
+        );
+    }
+
+    #[test]
+    fn a_file_stating_no_length_anywhere_has_none() {
+        let data = movie(
+            version0_header(1000, u32::MAX),
+            boxed(b"mdhd", &version0_header(44_100, 0)),
+            Vec::new(),
+        );
+        assert_eq!(track_duration(&data), None);
     }
 
     /// An init segment whose sole track is encrypted and has id 1, so a

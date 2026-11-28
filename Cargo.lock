@@ -7324,6 +7324,7 @@ dependencies = [
  "lofty",
  "m3u8-rs",
  "md5",
+ "ndk-sys",
  "nextcloud-rs",
  "percent-encoding",
  "pinyin",
