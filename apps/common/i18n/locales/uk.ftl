@@ -673,6 +673,7 @@ sort_field_genre = Жанр
 sort_field_album = Альбом
 sort_field_duration = Тривалість
 sort_field_date_added = Дата додавання
+sort_field_last_played = Востаннє відтворено
 sort_field_name = Ім'я
 sort_field_tracks = Треки
 sort_field_albums = Альбоми
@@ -995,6 +996,15 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Оцінка
+rate_stars =
+    { $count ->
+        [one] Поставити { $count } зірку
+        [few] Поставити { $count } зірки
+        [many] Поставити { $count } зірок
+       *[other] Поставити { $count } зірки
+    }
+clear_rating = Скинути оцінку
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1351,3 +1361,27 @@ interface_panel_side = Бік
 interface_panel_side_description = З якого боку сторінки стоїть колонка плейлистів.
 interface_queue_side = Бік колонки черги й тексту
 interface_queue_side_description = З якого боку відкривається колонка черги й тексту.
+artist_similar = Similar artists
+artist_info_link = Докладніше про цього виконавця
+radio_from_server = З вашого сервера
+radio_metadata_basis = AudioMuse ще не знає цих пісень, тож це радіо спирається на теги та Last.fm.
+mix_from_queue = Мікс із черги
+sonic_path_start = Почати звуковий шлях звідси
+sonic_path_end = Звуковий шлях до цієї пісні
+sonic_path_marked = Звуковий шлях починається тут. Виберіть «Звуковий шлях до цієї пісні» в іншої пісні.
+audiomuse = AudioMuse-AI
+audiomuse_url = Адреса AudioMuse-AI
+audiomuse_url_placeholder = http://host:8000
+audiomuse_token = API-токен AudioMuse-AI
+audiomuse_token_placeholder = Введіть API-токен AudioMuse-AI
+describe_music = Музика за описом…
+described_searching = Шукаємо відповідну музику…
+discover_your_sound = Ваше звучання
+discover_your_sound_hint = За вашим профілем прослуховування
+sounds_like = Звучить як
+mood_danceable = Танцювальна
+mood_aggressive = Агресивна
+mood_happy = Весела
+mood_party = Для вечірки
+mood_relaxed = Розслаблена
+mood_sad = Сумна

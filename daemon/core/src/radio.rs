@@ -1,10 +1,11 @@
 //! Internet radio registry, search, and pins. The registry is rebuilt when its
 //! configuration changes; the session plays stations by id.
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex, PoisonError};
 
-use api::{ApiError, ArtworkTarget, ErrorCode, RadioStationInfo, RadioStreamInfo};
-use radio::manifest::{MetadataSourceDef, StationManifest};
+use api::{ApiError, ArtworkTarget, ErrorCode, RadioOrigin, RadioStationInfo, RadioStreamInfo};
+use radio::manifest::{MetadataSourceDef, StationManifest, StreamDef};
 use radio::registry::StationRegistry;
 use tokio::sync::{RwLock, watch};
 
@@ -20,6 +21,40 @@ pub struct RadioService {
     session: SessionHandle,
     /// The last rebuild skipped the registry imports for offline mode.
     imports_held: std::sync::atomic::AtomicBool,
+    /// The ids of the active source's stations now in the registry.
+    from_source: Mutex<HashSet<String>>,
+}
+
+/// Source station ids start with this, so none can be a registry's or the directory's.
+const SOURCE_STATION_PREFIX: &str = "server-";
+
+/// Whether `station_id` names one of the active source's own stations.
+pub(crate) fn from_source(station_id: &str) -> bool {
+    station_id.starts_with(SOURCE_STATION_PREFIX)
+}
+
+/// Not the directory's stream id, which makes a play count a click there.
+const SOURCE_STREAM_ID: &str = "live";
+
+/// A source's own station as a playable manifest; its stream URL is any host, like a registry's.
+fn source_manifest(station: server::source::RadioStation) -> StationManifest {
+    StationManifest {
+        schema_version: "1.0".to_string(),
+        id: format!("{SOURCE_STATION_PREFIX}{}", station.id),
+        name: station.name.trim().to_string(),
+        description: station.homepage.unwrap_or_default(),
+        icon: "fa-solid fa-radio".to_string(),
+        tags: Vec::new(),
+        streams: vec![StreamDef {
+            id: SOURCE_STREAM_ID.to_string(),
+            name: "Live".to_string(),
+            url: station.stream_url,
+            codec: None,
+            bitrate: None,
+            icon: None,
+        }],
+        metadata: None,
+    }
 }
 
 /// A station's own picture, where its metadata carries one.
@@ -32,7 +67,7 @@ fn manifest_artwork(manifest: &StationManifest) -> Option<String> {
 
 /// The wire row. `name` and `description` stay as the registry authored them
 /// -- often translation keys -- because only the client knows the locale.
-fn station_info(manifest: &StationManifest, pinned: bool) -> RadioStationInfo {
+fn station_info(manifest: &StationManifest, pinned: bool, origin: RadioOrigin) -> RadioStationInfo {
     RadioStationInfo {
         artwork: manifest_artwork(manifest)
             .map(|url| crate::artwork::url_ref(ArtworkTarget::Station(manifest.id.clone()), &url)),
@@ -51,6 +86,7 @@ fn station_info(manifest: &StationManifest, pinned: bool) -> RadioStationInfo {
             .collect(),
         pinned,
         icon: manifest.icon.clone(),
+        origin,
     }
 }
 
@@ -68,6 +104,7 @@ impl RadioService {
             library,
             session,
             imports_held: std::sync::atomic::AtomicBool::new(false),
+            from_source: Mutex::default(),
         })
     }
 
@@ -145,15 +182,61 @@ impl RadioService {
     }
 
     pub async fn stations(&self) -> Vec<RadioStationInfo> {
+        self.adopt_source_stations().await;
         let registry = self.registry.read().await;
+        let from_source = self
+            .from_source
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         registry
             .all_stations()
             .into_iter()
-            .map(|station| {
-                let pinned = registry.is_registry_station(&station.id);
-                station_info(station, pinned)
+            .map(|station| match from_source.contains(&station.id) {
+                true => station_info(station, false, RadioOrigin::Source),
+                false => {
+                    let pinned = registry.is_registry_station(&station.id);
+                    station_info(station, pinned, RadioOrigin::Registry)
+                }
             })
             .collect()
+    }
+
+    /// What the active source lists; a source without stations, one offline or one failing lists none.
+    async fn source_stations(&self) -> Vec<StationManifest> {
+        if self.library.offline_reads() {
+            return Vec::new();
+        }
+        let source = server::source::active(self.db.clone(), &self.session.sources());
+        if !source.capabilities().radio_stations {
+            return Vec::new();
+        }
+        match source.fetch_radio_stations().await {
+            Ok(stations) => stations.into_iter().map(source_manifest).collect(),
+            Err(error) => {
+                tracing::warn!(%error, "the source's radio stations are unavailable");
+                Vec::new()
+            }
+        }
+    }
+
+    /// Swap the registry's source stations for the active source's now, so playing one by id works.
+    async fn adopt_source_stations(&self) {
+        let listed = self.source_stations().await;
+        let mut registry = self.registry.write().await;
+        let mut held = self
+            .from_source
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        for id in held.drain() {
+            registry.remove(&id);
+        }
+        for manifest in listed {
+            held.insert(manifest.id.clone());
+            registry.insert_manifest(manifest);
+        }
+        drop(held);
+        self.library
+            .set_station_registry(Arc::new(registry.clone()));
     }
 
     /// The station's icon URL, for the artwork service to proxy.
@@ -181,7 +264,7 @@ impl RadioService {
             let manifest = radio::browser::to_manifest(&station);
             let known = registry.get(&manifest.id).is_some();
             let pinned = registry.is_registry_station(&manifest.id);
-            found.push(station_info(&manifest, pinned));
+            found.push(station_info(&manifest, pinned, RadioOrigin::Registry));
 
             if !known {
                 registry.insert_manifest(manifest);
@@ -247,4 +330,43 @@ fn registry_key(config: &config::Settings) -> String {
         .map(|entry| entry.url.as_str())
         .collect::<Vec<_>>()
         .join(",")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_source_station_plays_from_its_own_stream_under_its_own_id() {
+        let manifest = source_manifest(server::source::RadioStation {
+            id: "r-1".into(),
+            name: " Jazz FM ".into(),
+            stream_url: "http://radio.test/jazz".into(),
+            homepage: Some("http://radio.test".into()),
+        });
+
+        assert_eq!(manifest.id, "server-r-1");
+        assert_eq!(manifest.name, "Jazz FM");
+        assert_eq!(manifest.streams.len(), 1);
+        assert_eq!(manifest.streams[0].url, "http://radio.test/jazz");
+        assert_ne!(manifest.streams[0].id, radio::browser::BROWSER_STREAM_ID);
+    }
+
+    #[test]
+    fn a_removed_source_station_is_no_longer_listed_or_playable() {
+        let mut registry = StationRegistry::new();
+        let manifest = source_manifest(server::source::RadioStation {
+            id: "r-1".into(),
+            name: "Jazz FM".into(),
+            stream_url: "http://radio.test/jazz".into(),
+            homepage: None,
+        });
+        let id = manifest.id.clone();
+        registry.insert_manifest(manifest);
+        assert!(registry.get(&id).is_some());
+
+        registry.remove(&id);
+        assert!(registry.get(&id).is_none());
+        assert!(registry.all_stations().is_empty());
+    }
 }

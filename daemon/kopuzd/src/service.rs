@@ -463,6 +463,35 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::artist_detail_to_proto(&detail)))
     }
 
+    async fn get_artist_info(
+        &self,
+        request: Request<proto::ArtistRequest>,
+    ) -> Result<Response<proto::ArtistInfoResponse>, Status> {
+        let artist = request.get_ref().key.clone();
+        let about = self.0.api.artist_info(artist).await.map_err(failed)?;
+        Ok(Response::new(proto::ArtistInfoResponse {
+            about: about.as_ref().map(convert::artist_about_to_proto),
+        }))
+    }
+
+    async fn get_album_sound(
+        &self,
+        request: Request<proto::AlbumRef>,
+    ) -> Result<Response<proto::Sound>, Status> {
+        let album = request.get_ref().id.clone();
+        let sound = self.0.api.album_sound(album).await.map_err(failed)?;
+        Ok(Response::new(convert::sound_to_proto(&sound)))
+    }
+
+    async fn get_artist_sound(
+        &self,
+        request: Request<proto::ArtistRequest>,
+    ) -> Result<Response<proto::Sound>, Status> {
+        let artist = request.get_ref().key.clone();
+        let sound = self.0.api.artist_sound(artist).await.map_err(failed)?;
+        Ok(Response::new(convert::sound_to_proto(&sound)))
+    }
+
     async fn get_artist_sample_tracks(
         &self,
         request: Request<proto::Page>,
@@ -1097,11 +1126,14 @@ impl Kopuz for KopuzGrpc {
     async fn set_queue(
         &self,
         request: Request<proto::SetQueueRequest>,
-    ) -> Result<Response<proto::MutationResult>, Status> {
+    ) -> Result<Response<proto::SetQueueResult>, Status> {
         let request = convert::set_queue_from_proto(request.get_ref())
             .ok_or_else(|| Status::invalid_argument("missing queue context"))?;
         let ack = self.0.api.set_queue(request).await.map_err(failed)?;
-        Ok(Response::new(proto::MutationResult { rev: ack.rev }))
+        Ok(Response::new(proto::SetQueueResult {
+            rev: ack.rev,
+            basis: convert::mix_basis_to_proto(ack.basis) as i32,
+        }))
     }
 
     async fn edit_queue(
@@ -1181,6 +1213,21 @@ impl Kopuz for KopuzGrpc {
             .await
             .map_err(failed)?;
         Ok(Response::new(proto::SetFavoriteResponse {}))
+    }
+
+    async fn set_star_rating(
+        &self,
+        request: Request<proto::StarRatingRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let request = request.get_ref();
+        // A count past u8 is past 5 too, so the core refuses it as invalid.
+        let stars = u8::try_from(request.stars).unwrap_or(u8::MAX);
+        self.0
+            .api
+            .set_star_rating(request.key.clone(), stars)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
     }
 
     async fn dont_recommend(

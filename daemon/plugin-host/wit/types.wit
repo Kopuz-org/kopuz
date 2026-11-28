@@ -63,6 +63,12 @@ interface types {
         credits: list<artist-credit>,
         replay-gain: replay-gain,
         explicit: bool,
+        /// The account's plays on the server, which already include kopuz's own scrobbles.
+        play-count: option<u32>,
+        /// Unix seconds of the account's last play on the server.
+        last-played: option<s64>,
+        /// The account's 1 to 5 stars; none when unrated.
+        rating: option<u8>,
     }
 
     record album {
@@ -105,6 +111,39 @@ interface types {
     record track-page {
         tracks: list<track>,
         next: option<string>,
+        /// What a radio or mix page was chosen by; none for any other page.
+        basis: option<mix-basis>,
+    }
+
+    /// How a radio or mix found its songs.
+    enum mix-basis {
+        /// Analysis of the audio itself, such as AudioMuse-AI's.
+        sonic,
+        /// Tags, listening data or a metadata service, such as Last.fm.
+        metadata,
+    }
+
+    /// What a mix starts from; each ref is an item id of that kind.
+    enum mix-seed {
+        album,
+        artist,
+        tracks,
+    }
+
+    record artist-info {
+        biography: option<string>,
+        /// In the host's stored cover form.
+        image: option<string>,
+        similar: list<artist-credit>,
+        /// A page about the artist elsewhere, such as Last.fm.
+        link: option<string>,
+    }
+
+    record radio-station {
+        id: string,
+        name: string,
+        stream-url: string,
+        homepage: option<string>,
     }
 
     record remote-play-queue {

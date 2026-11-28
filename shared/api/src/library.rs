@@ -211,10 +211,12 @@ pub struct LyricsView {
     pub plain_romanized: Vec<Option<String>>,
 }
 
-/// Listening stats: the active source's play counts keyed by track uid.
+/// Listening stats: the active source's play counts keyed by track uid, and its
+/// 1-5 star ratings keyed by track key.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StatsView {
     pub listen_counts: std::collections::HashMap<String, u64>,
+    pub ratings: std::collections::HashMap<String, u8>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -299,6 +301,29 @@ pub struct ArtistInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtistDetail {
     pub info: ArtistInfo,
+}
+
+/// What the active source says about an artist, for the artist page's About section.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArtistInfoView {
+    pub biography: Option<String>,
+    pub image: Option<crate::ArtworkRef>,
+    pub similar: Vec<SimilarArtist>,
+    /// A page about the artist elsewhere.
+    pub link: Option<String>,
+}
+
+/// What an album or an artist sounds like, from the AudioMuse-AI analysis; every list is empty without it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SoundView {
+    /// Albums of the library that sound alike, closest first; empty for an artist.
+    pub similar_albums: Vec<AlbumInfo>,
+    /// Artists of the library that sound alike, closest first; empty for an album.
+    pub similar_artists: Vec<SimilarArtist>,
+    /// Genre and style tags, strongest first.
+    pub tags: Vec<String>,
+    /// The few moods that stand out (`danceable`, `aggressive`, `happy`, `party`, `relaxed`, `sad`).
+    pub moods: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

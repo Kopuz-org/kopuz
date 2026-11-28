@@ -27,7 +27,7 @@ macro_rules! manifest {
             "id = \"", $id, "\"\n",
             "name = \"", $name, "\"\n",
             "version = \"", env!("CARGO_PKG_VERSION"), "\"\n",
-            "api = \"0.1\"\n",
+            "api = \"0.2\"\n",
             "description = \"", $description, "\"\n",
             $("[[service]]\nid = \"", $service, "\"\n",)*
         )

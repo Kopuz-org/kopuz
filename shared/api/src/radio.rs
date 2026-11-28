@@ -17,6 +17,16 @@ pub struct RadioStreamInfo {
     pub icon: Option<String>,
 }
 
+/// Where a station comes from, which decides the group it is listed in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RadioOrigin {
+    /// The configured registries and the public directory.
+    #[default]
+    Registry,
+    /// The active source's own station list, such as a Subsonic server's.
+    Source,
+}
+
 /// A station as a browser renders it. `name` and `description` may be
 /// translation keys, for the same reason as above.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -32,4 +42,5 @@ pub struct RadioStationInfo {
     pub artwork: Option<crate::ArtworkRef>,
     /// An icon name the registry authored, for a client that draws icons.
     pub icon: String,
+    pub origin: RadioOrigin,
 }

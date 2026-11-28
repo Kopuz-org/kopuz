@@ -327,7 +327,7 @@ mod tests {
     #[tokio::test]
     async fn startup_that_never_finishes_times_out() {
         let manifest = Manifest::parse(
-            "id = \"stuck\"\nname = \"Stuck\"\nversion = \"0.1.0\"\napi = \"0.1\"\n",
+            "id = \"stuck\"\nname = \"Stuck\"\nversion = \"0.1.0\"\napi = \"0.2\"\n",
         )
         .expect("manifest");
         let plugin = Plugin::new(manifest, Code::Native, Origin::Installed);
