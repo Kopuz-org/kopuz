@@ -338,3 +338,18 @@ fn every_built_in_service_has_a_plugin() {
         assert_eq!(plugin.is_native(), native, "{}", service.id());
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_resolve_leaves_the_stream_to_the_ordinary_path() {
+    // The Subsonic plugin cannot build a stream URL from this base, so its resolve fails.
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, "http://[bad");
+    let src = source::resolve(db, &sources, &active);
+
+    let opened = src.open_stream("s-1", None).await;
+    assert!(
+        matches!(opened, Ok(None)),
+        "load goes on to the configured-quality resolve, got {:?}",
+        opened.err()
+    );
+}

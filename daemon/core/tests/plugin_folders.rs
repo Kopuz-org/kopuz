@@ -22,7 +22,7 @@ const MANIFEST: &str = r#"
 id = "songs"
 name = "Songs"
 version = "1.0.0"
-api = "0.1"
+api = "0.2"
 description = "Songs a game keeps on this computer."
 
 [permissions]
@@ -47,7 +47,7 @@ fn marketplace(dir: &Path, component: &[u8], folders: &str) -> String {
             "id": "songs",
             "name": "Songs",
             "version": "1.0.0",
-            "api": "0.1",
+            "api": "0.2",
             "author": "tests",
             "services": ["songs-service"],
             "network": [],
