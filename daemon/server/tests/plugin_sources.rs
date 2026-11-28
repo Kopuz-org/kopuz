@@ -144,6 +144,7 @@ async fn the_subsonic_plugin_syncs_a_library_through_the_facade() {
     assert!(caps.sync && caps.downloads && caps.play_queue);
     assert!(caps.radio.track && !caps.radio.playlist);
     assert_eq!(caps.playlists, PlaylistOps::Reorder);
+    assert!(caps.ratings);
 
     assert_eq!(src.validate().await, AuthOutcome::Valid);
 
@@ -319,6 +320,78 @@ async fn a_playlist_delete_lands_on_the_server() {
     assert!(deletes[0].contains("id=pl-1"), "{}", deletes[0]);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_custom_server_reports_ratings_too() {
+    let server = FakeServer::start(subsonic_library()).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Custom, &server.url);
+
+    assert!(
+        source::resolve(db, &sources, &active)
+            .capabilities()
+            .ratings
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rating_lands_on_the_server() {
+    let mut routes = subsonic_library();
+    routes.insert("/rest/setRating.view", subsonic_ok(serde_json::json!({})));
+    let server = FakeServer::start(routes).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, &server.url);
+    let src = source::resolve(db, &sources, &active);
+
+    src.set_rating("s-1", 4).await.expect("rated");
+    src.set_rating("s-1", 0).await.expect("cleared");
+
+    let ratings: Vec<String> = server
+        .requests()
+        .into_iter()
+        .filter(|r| r.starts_with("/rest/setRating.view"))
+        .collect();
+    assert_eq!(ratings.len(), 2, "requests: {:?}", server.requests());
+    assert!(ratings[0].contains("id=s-1") && ratings[0].contains("rating=4"));
+    assert!(ratings[1].contains("rating=0"), "{}", ratings[1]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sync_reports_the_servers_play_stats() {
+    let mut routes = subsonic_library();
+    routes.insert(
+        "/rest/getAlbum.view",
+        subsonic_ok(serde_json::json!({
+            "album": { "song": [{
+                "id": "s-1", "title": "One", "playCount": 3,
+                "played": "2026-11-20T18:04:11.123Z", "userRating": 5
+            }] }
+        })),
+    );
+    let server = FakeServer::start(routes).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, &server.url);
+    let src = source::resolve(db, &sources, &active);
+
+    let library = src.fetch_library().await.expect("library");
+
+    assert_eq!(library.tracks.len(), 1);
+    assert_eq!(library.tracks[0].id.uid(), "subsonic:s-1");
+    assert_eq!(
+        library.track_stats,
+        [db::ServerTrackStats {
+            track_key: "s-1".into(),
+            play_count: Some(3),
+            last_played_at: Some(1_795_197_851),
+            rating: Some(5),
+        }]
+    );
+    assert!(
+        server
+            .requests()
+            .iter()
+            .any(|r| r.starts_with("/rest/getAlbum.view"))
+    );
+}
 #[test]
 fn every_built_in_service_has_a_plugin() {
     let registry = server::plugins::registry();
@@ -337,4 +410,110 @@ fn every_built_in_service_has_a_plugin() {
         );
         assert_eq!(plugin.is_native(), native, "{}", service.id());
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_resolve_leaves_the_stream_to_the_ordinary_path() {
+    // The Subsonic plugin cannot build a stream URL from this base, so its resolve fails.
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, "http://[bad");
+    let src = source::resolve(db, &sources, &active);
+
+    let opened = src.open_stream("s-1", None).await;
+    assert!(
+        matches!(opened, Ok(None)),
+        "load goes on to the configured-quality resolve, got {:?}",
+        opened.err()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn artist_info_comes_back_as_plain_text_with_a_stored_image_ref() {
+    let mut routes = subsonic_library();
+    routes.insert(
+        "/rest/getArtistInfo2.view",
+        subsonic_ok(serde_json::json!({
+            "artistInfo2": {
+                "biography": "Jazz &amp; more. <a href=\"https://www.last.fm/music/Ada\">Read more on Last.fm</a>",
+                "lastFmUrl": "https://www.last.fm/music/Ada",
+                "largeImageUrl": "https://img.test/large.jpg",
+                "mediumImageUrl": "https://img.test/medium.jpg",
+                "similarArtist": [{ "id": "ar-2", "name": "Boris" }]
+            }
+        })),
+    );
+    let server = FakeServer::start(routes).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, &server.url);
+    let src = source::resolve(db, &sources, &active);
+
+    assert!(src.capabilities().artist_info);
+    let info = src
+        .fetch_artist_info("ar-1")
+        .await
+        .expect("answered")
+        .expect("has info");
+
+    assert_eq!(info.biography.as_deref(), Some("Jazz & more."));
+    assert_eq!(info.link.as_deref(), Some("https://www.last.fm/music/Ada"));
+    assert_eq!(info.similar.len(), 1);
+    assert_eq!(info.similar[0].name, "Boris");
+    assert_eq!(info.similar[0].id.as_deref(), Some("ar-2"));
+    assert_eq!(
+        info.image.as_deref(),
+        Some("directurl:https://img.test/large.jpg")
+    );
+
+    let asked = server
+        .requests()
+        .into_iter()
+        .find(|r| r.starts_with("/rest/getArtistInfo2.view"))
+        .expect("asked");
+    assert!(
+        asked.contains("id=ar-1") && asked.contains("count=20"),
+        "{asked}"
+    );
+    assert!(asked.contains("includeNotPresent=false"), "{asked}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_artist_without_a_biography_has_no_info() {
+    let mut routes = subsonic_library();
+    routes.insert(
+        "/rest/getArtistInfo2.view",
+        subsonic_ok(serde_json::json!({ "artistInfo2": { "biography": "" } })),
+    );
+    let server = FakeServer::start(routes).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Subsonic, &server.url);
+    let src = source::resolve(db, &sources, &active);
+
+    assert_eq!(src.fetch_artist_info("ar-1").await.expect("answered"), None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_servers_internet_radio_stations_are_listed() {
+    let mut routes = subsonic_library();
+    routes.insert(
+        "/rest/getInternetRadioStations.view",
+        subsonic_ok(serde_json::json!({
+            "internetRadioStations": { "internetRadioStation": [
+                { "id": "r-1", "name": "Jazz FM", "streamUrl": "http://radio.test/jazz", "homePageUrl": "http://radio.test" },
+                { "id": "r-2", "name": "Bare", "streamUrl": "http://radio.test/bare" }
+            ] }
+        })),
+    );
+    let server = FakeServer::start(routes).await;
+    let db = db::init(&unique_db()).await.unwrap();
+    let (sources, active) = sources_for(MusicService::Custom, &server.url);
+    let src = source::resolve(db, &sources, &active);
+
+    assert!(src.capabilities().radio_stations);
+    let stations = src.fetch_radio_stations().await.expect("listed");
+
+    assert_eq!(stations.len(), 2);
+    assert_eq!(stations[0].id, "r-1");
+    assert_eq!(stations[0].stream_url, "http://radio.test/jazz");
+    assert_eq!(stations[0].homepage.as_deref(), Some("http://radio.test"));
+    assert_eq!(stations[1].homepage, None);
 }

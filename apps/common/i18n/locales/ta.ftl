@@ -655,6 +655,7 @@ sort_field_genre = வகை
 sort_field_album = ஆல்பம்
 sort_field_duration = கால அளவு
 sort_field_date_added = சேர்க்கப்பட்ட தேதி
+sort_field_last_played = கடைசியாக இயக்கியது
 sort_field_name = பெயர்
 sort_field_tracks = தடங்கள்
 sort_field_albums = ஆல்பங்கள்
@@ -977,6 +978,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = மதிப்பீடு
+rate_stars =
+    { $count ->
+        [one] { $count } நட்சத்திரம் மதிப்பிடுங்கள்
+       *[other] { $count } நட்சத்திரம் மதிப்பிடுங்கள்
+    }
+clear_rating = மதிப்பீட்டை அழி
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1333,3 +1341,6 @@ interface_panel_side = பக்கம்
 interface_panel_side_description = பிளேலிஸ்ட் நெடுவரிசை பக்கத்தின் எந்தப் பக்கம்.
 interface_queue_side = வரிசை, வரிகள் நெடுவரிசையின் பக்கம்
 interface_queue_side_description = வரிசையும் வரிகளும் எந்தப் பக்கம் திறக்கும்.
+artist_similar = Similar artists
+artist_info_link = இந்தக் கலைஞர் பற்றி மேலும்
+radio_from_server = உங்கள் சேவையகத்திலிருந்து

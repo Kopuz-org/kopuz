@@ -658,6 +658,7 @@ sort_field_genre = Genre
 sort_field_album = Album
 sort_field_duration = Durée
 sort_field_date_added = Date d'ajout
+sort_field_last_played = Dernière écoute
 sort_field_name = Nom
 sort_field_tracks = Pistes
 sort_field_albums = Albums
@@ -980,6 +981,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Note
+rate_stars =
+    { $count ->
+        [one] Noter { $count } étoile
+       *[other] Noter { $count } étoiles
+    }
+clear_rating = Effacer la note
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1336,3 +1344,6 @@ interface_panel_side = Côté
 interface_panel_side_description = De quel côté de la page se trouve la colonne des playlists.
 interface_queue_side = Côté de la colonne file et paroles
 interface_queue_side_description = De quel côté de la page s'ouvre la colonne file d'attente et paroles.
+artist_similar = Similar artists
+artist_info_link = En savoir plus sur cet artiste
+radio_from_server = Depuis votre serveur

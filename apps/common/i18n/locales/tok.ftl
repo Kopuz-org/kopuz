@@ -625,6 +625,7 @@ sort_field_genre = kule
 sort_field_album = kulupu pi kalama sama
 sort_field_duration = tenpo
 sort_field_date_added = tenpo kama
+sort_field_last_played = kute lon tenpo pini
 sort_field_name = nimi
 sort_field_tracks = kalama musi
 sort_field_albums = kulupu pi kalama sama
@@ -947,6 +948,12 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = nanpa pona
+rate_stars =
+    { $count ->
+       *[other] o pana e mun { $count }
+    }
+clear_rating = o weka e nanpa pona
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1303,3 +1310,6 @@ interface_panel_side = poka
 interface_panel_side_description = kulupu kalama li lon poka seme.
 interface_queue_side = poka pi linja kalama
 interface_queue_side_description = linja kalama en nimi li open lon poka seme.
+artist_similar = Similar artists
+artist_info_link = sona mute pi jan pali ni
+radio_from_server = tan pana sina

@@ -625,6 +625,7 @@ sort_field_genre = Tür
 sort_field_album = Albüm
 sort_field_duration = Süre
 sort_field_date_added = Eklenme tarihi
+sort_field_last_played = Son çalınan
 sort_field_name = Ad
 sort_field_tracks = Parçalar
 sort_field_albums = Albümler
@@ -947,6 +948,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Derecelendirme
+rate_stars =
+    { $count ->
+        [one] { $count } yıldız ver
+       *[other] { $count } yıldız ver
+    }
+clear_rating = Derecelendirmeyi temizle
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1292,3 +1300,6 @@ interface_panel_side = Taraf
 interface_panel_side_description = Çalma listesi sütununun sayfanın hangi tarafında duracağı.
 interface_queue_side = Sıra ve şarkı sözü sütunu tarafı
 interface_queue_side_description = Sabitlenen sıra ve şarkı sözü sütununun sayfanın hangi tarafında açılacağı.
+artist_similar = Similar artists
+artist_info_link = Bu sanatçı hakkında daha fazlası
+radio_from_server = Sunucunuzdan

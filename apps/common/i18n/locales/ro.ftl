@@ -665,6 +665,7 @@ sort_field_genre = Gen
 sort_field_album = Album
 sort_field_duration = Durată
 sort_field_date_added = Data adăugării
+sort_field_last_played = Ultima redare
 sort_field_name = Nume
 sort_field_tracks = Piese
 sort_field_albums = Albume
@@ -987,6 +988,14 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Evaluare
+rate_stars =
+    { $count ->
+        [one] Evaluează cu { $count } stea
+        [few] Evaluează cu { $count } stele
+       *[other] Evaluează cu { $count } de stele
+    }
+clear_rating = Șterge evaluarea
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1343,3 +1352,6 @@ interface_panel_side = Parte
 interface_panel_side_description = Pe ce parte a paginii stă coloana de playlisturi.
 interface_queue_side = Partea coloanei de coadă și versuri
 interface_queue_side_description = Pe ce parte se deschide coloana de coadă și versuri.
+artist_similar = Similar artists
+artist_info_link = Mai multe despre acest artist
+radio_from_server = De pe serverul tău

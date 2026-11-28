@@ -619,6 +619,7 @@ sort_field_genre = Genre
 sort_field_album = Album
 sort_field_duration = Durasi
 sort_field_date_added = Tanggal ditambahkan
+sort_field_last_played = Terakhir diputar
 sort_field_name = Nama
 sort_field_tracks = Trek
 sort_field_albums = Album
@@ -941,6 +942,12 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Rating
+rate_stars =
+    { $count ->
+       *[other] Beri { $count } bintang
+    }
+clear_rating = Hapus rating
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1297,3 +1304,6 @@ interface_panel_side = Sisi
 interface_panel_side_description = Di sisi mana kolom daftar putar berada.
 interface_queue_side = Sisi kolom antrean dan lirik
 interface_queue_side_description = Di sisi mana kolom antrean dan lirik terbuka.
+artist_similar = Similar artists
+artist_info_link = Selengkapnya tentang artis ini
+radio_from_server = Dari server Anda

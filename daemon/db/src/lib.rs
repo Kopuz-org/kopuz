@@ -84,7 +84,7 @@ pub enum TrackSort {
     Album,
     /// Most-recently-added first (insertion order).
     DateAdded,
-    /// Most-played first (`listen_counts` join), ties by title.
+    /// Most-played first (`play_counts` join), ties by title.
     PlayCount,
     /// Disc → track → title: the order an album plays in.
     TrackNumber,
@@ -277,6 +277,18 @@ pub struct PlayRecord {
     pub count: u64,
     /// Unix seconds; `None` for a play counted before times were kept that had already left the recent history, so long ago.
     pub last_played_at: Option<i64>,
+}
+
+/// What a source's server reports for one track and the signed-in account.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ServerTrackStats {
+    pub track_key: String,
+    /// The server's plays, kopuz's own scrobbles included.
+    pub play_count: Option<u32>,
+    /// Unix seconds.
+    pub last_played_at: Option<i64>,
+    /// 1 to 5 stars.
+    pub rating: Option<u8>,
 }
 
 /// Per-artist images: `(overrides, photos)`. `overrides` are user-set custom
@@ -535,6 +547,12 @@ pub trait ReadStore: Send + Sync {
     /// Every played track of `source`, most played first.
     async fn play_history(&self, source: &Source) -> Result<Vec<PlayRecord>, DbError>;
 
+    /// `source`'s rated tracks: track key to 1-5 stars.
+    async fn server_ratings(
+        &self,
+        source: &Source,
+    ) -> Result<std::collections::HashMap<String, u8>, DbError>;
+
     /// `server_id`'s favorite refs with the Unix second each was liked.
     async fn favorites_liked_at(&self, server_id: &str) -> Result<Vec<(String, i64)>, DbError>;
 
@@ -746,6 +764,21 @@ pub trait Storage: ReadStore {
 
     /// Increment one track's play count in its source partition.
     async fn bump_listen_count(&self, source: &Source, track_key: &str) -> Result<(), DbError>;
+
+    /// Replace everything `source`'s server reported, as a sync does.
+    async fn replace_server_track_stats(
+        &self,
+        source: &Source,
+        stats: &[ServerTrackStats],
+    ) -> Result<(), DbError>;
+
+    /// One track's stars, `None` to clear, after the server took them.
+    async fn set_server_rating(
+        &self,
+        source: &Source,
+        track_key: &str,
+        rating: Option<u8>,
+    ) -> Result<(), DbError>;
 
     /// Record a play for this source's recently-played history (caps + trims).
     async fn push_recent(&self, source: &Source, track_key: &str) -> Result<(), DbError>;

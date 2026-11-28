@@ -651,6 +651,7 @@ sort_field_genre = Genre
 sort_field_album = Album
 sort_field_duration = Längd
 sort_field_date_added = Tillagt datum
+sort_field_last_played = Senast spelad
 sort_field_name = Namn
 sort_field_tracks = Låtar
 sort_field_albums = Album
@@ -973,6 +974,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Betyg
+rate_stars =
+    { $count ->
+        [one] Betygsätt med { $count } stjärna
+       *[other] Betygsätt med { $count } stjärnor
+    }
+clear_rating = Rensa betyg
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1329,3 +1337,6 @@ interface_panel_side = Sida
 interface_panel_side_description = Vilken sida av sidan spellistkolumnen sitter på.
 interface_queue_side = Sida för kö- och låttextkolumnen
 interface_queue_side_description = Vilken sida den dockade kö- och låttextkolumnen öppnas på.
+artist_similar = Similar artists
+artist_info_link = Mer om den här artisten
+radio_from_server = Från din server

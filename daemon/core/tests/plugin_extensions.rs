@@ -12,7 +12,7 @@ const MANIFEST: &str = r#"
 id = "echo"
 name = "Echo"
 version = "1.0.0"
-api = "0.1"
+api = "0.2"
 
 [permissions]
 network = ["$server"]
@@ -58,7 +58,7 @@ fn marketplace(dir: &Path) -> String {
             "id": "echo",
             "name": "Echo",
             "version": "1.0.0",
-            "api": "0.1",
+            "api": "0.2",
             "services": ["echo-service"],
             "network": ["$server"],
             "manifest": { "url": format!("file://{}", manifest_path.display()), "sha256": sha(MANIFEST.as_bytes()) },

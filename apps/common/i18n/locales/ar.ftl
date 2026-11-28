@@ -663,6 +663,7 @@ sort_field_genre = التصنيف
 sort_field_album = الألبوم
 sort_field_duration = المدة
 sort_field_date_added = تاريخ الإضافة
+sort_field_last_played = آخر تشغيل
 sort_field_name = الاسم
 sort_field_tracks = المقاطع
 sort_field_albums = الألبومات
@@ -985,6 +986,17 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = التقييم
+rate_stars =
+    { $count ->
+        [zero] قيّم بـ { $count } نجمة
+        [one] قيّم بنجمة واحدة
+        [two] قيّم بنجمتين
+        [few] قيّم بـ { $count } نجوم
+        [many] قيّم بـ { $count } نجمة
+       *[other] قيّم بـ { $count } نجمة
+    }
+clear_rating = مسح التقييم
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1341,3 +1353,6 @@ interface_panel_side = الجانب
 interface_panel_side_description = في أي جانب من الصفحة يكون عمود قوائم التشغيل.
 interface_queue_side = جانب عمود الانتظار والكلمات
 interface_queue_side_description = في أي جانب يُفتح عمود قائمة الانتظار والكلمات.
+artist_similar = Similar artists
+artist_info_link = المزيد عن هذا الفنان
+radio_from_server = من خادمك

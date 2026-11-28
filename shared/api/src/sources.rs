@@ -107,6 +107,17 @@ pub struct SourceCapabilities {
     pub watch_history: bool,
     /// Every play of its tracks goes through kopuz, so kopuz's play counts are its whole listening history.
     pub complete_play_history: bool,
+    /// The account can rate tracks and albums.
+    pub ratings: bool,
+    pub artist_info: bool,
+    /// It lists internet radio stations.
+    pub radio_stations: bool,
+    /// It finds songs leading from one track to another.
+    pub sonic_path: bool,
+    pub album_radio: bool,
+    pub artist_radio: bool,
+    /// A mix of several tracks.
+    pub mix_radio: bool,
     pub playlists: PlaylistCapability,
     pub artists: ArtistPresentation,
     pub albums: AlbumPresentation,
