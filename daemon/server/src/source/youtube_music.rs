@@ -130,6 +130,10 @@ impl MediaSource for YtSource {
             explicit_flags: true,
             watch_history: self.client.is_authenticated(),
             complete_play_history: false,
+            ratings: false,
+            artist_info: false,
+            radio_stations: false,
+            sonic_path: false,
             library_actions: if self.client.is_authenticated() {
                 LibraryActions::ALL
             } else {
@@ -942,6 +946,7 @@ fn radio_page(page: crate::ytmusic::mix::MixPage) -> RadioPage {
     RadioPage {
         tracks: page.tracks,
         more,
+        basis: None,
     }
 }
 

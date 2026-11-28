@@ -9,7 +9,7 @@
 
 use std::io::{Seek as _, SeekFrom};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::time::Duration;
 
@@ -20,8 +20,11 @@ use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, Track, TrackType};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use symphonia::core::units::Time;
+use symphonia::core::packet::Packet;
+use symphonia::core::units::{Time, TimeBase};
 
+use super::deck::{Deck, Side};
+use super::mix::{DeckMix, MixStart};
 use super::{ActorMsg, Failure, SourceFactory};
 use crate::replaygain;
 
@@ -30,12 +33,29 @@ pub(crate) enum WorkerCmd {
     Start {
         producer: rtrb::Producer<f32>,
         written: Arc<AtomicU64>,
+        /// Source time the mix decks read beyond the ring, in microseconds.
+        drift: Arc<AtomicI64>,
         channels: usize,
         sample_rate: u32,
         start_at: Option<Duration>,
+        /// Drop silence at the head of the track. Carries the ring's `played`
+        /// counter, which skipped samples are added to so position stays on the
+        /// track's timeline.
+        lead_trim: Option<Arc<AtomicU64>>,
         /// Ring generation this decode feeds; echoed back on `Eof`.
         epoch: u64,
+        /// The incoming deck of a planned mix, played from the first sample.
+        mix: Option<DeckMix>,
     },
+    /// Play `mix` as the outgoing deck from source time `at` on, then end the
+    /// stream. Refused (through `start`) once decoding has passed `at`.
+    Mix {
+        at: Duration,
+        mix: DeckMix,
+        start: MixStart,
+    },
+    /// Drop the armed outgoing deck; a mix already playing carries on.
+    CancelMix,
     /// Re-seek and switch to a fresh ring (the old one was swapped out of the
     /// audio callback; pre-seek samples die with it). Carries the output config
     /// because a device rebuild can revive a session onto a stream with a
@@ -44,6 +64,7 @@ pub(crate) enum WorkerCmd {
         target: Duration,
         producer: rtrb::Producer<f32>,
         written: Arc<AtomicU64>,
+        drift: Arc<AtomicI64>,
         channels: usize,
         sample_rate: u32,
         /// New ring generation; a stale `Eof` tagged with the old epoch is
@@ -109,6 +130,41 @@ struct Output {
     channels: usize,
     sample_rate: u32,
     epoch: u64,
+    /// Head-of-track silence still to drop; `None` once audio starts, the cap
+    /// is spent, or a seek replaced the ring.
+    lead: Option<LeadTrim>,
+    /// Source time, in seconds, of the next frame to decode.
+    clock: f64,
+    /// A planned mix this ring plays; a seek drops it with the ring.
+    mix: Option<MixPhase>,
+    /// Input frames the mix decks read beyond what they wrote, published to
+    /// `drift` so position follows the track, not the ring.
+    drift_frames: f64,
+    drift: Arc<AtomicI64>,
+}
+
+enum MixPhase {
+    /// The outgoing deck waits for its source time `at`, in seconds. Until
+    /// then `lead_in`, the incoming deck of the mix before, plays on.
+    Armed {
+        at: f64,
+        start: MixStart,
+        deck: Deck,
+        lead_in: Option<Deck>,
+    },
+    Live(Deck),
+}
+
+impl MixPhase {
+    fn done(&self) -> bool {
+        matches!(self, Self::Live(deck) if deck.done())
+    }
+}
+
+struct LeadTrim {
+    played: Arc<AtomicU64>,
+    /// Interleaved samples that may still be dropped.
+    budget: usize,
 }
 
 /// Reused per-packet conversion buffers so steady-state decode allocates
@@ -173,6 +229,7 @@ fn run(
         return fail(Failure::from("no supported audio tracks found".to_string()));
     };
     let mut track_id = track.id;
+    let time_base = track.time_base;
 
     let Some(audio_params) = audio_params_for_track(track) else {
         return fail(Failure::from("no audio codec parameters".to_string()));
@@ -203,10 +260,13 @@ fn run(
         Ok(WorkerCmd::Start {
             producer,
             written,
+            drift,
             channels,
             sample_rate,
             start_at,
+            lead_trim,
             epoch,
+            mix,
         }) => {
             if let Some(target) = start_at {
                 let outcome = seek_reader(format.as_mut(), decoder.as_mut(), track_id, target);
@@ -220,12 +280,23 @@ fn run(
                     }
                 }
             }
+            let cap = super::LEADING_SILENCE_CAP.as_secs_f64() * sample_rate as f64;
             Output {
                 producer,
                 written,
                 channels,
                 sample_rate,
                 epoch,
+                lead: lead_trim.map(|played| LeadTrim {
+                    played,
+                    budget: cap as usize * channels,
+                }),
+                clock: start_at.unwrap_or_default().as_secs_f64(),
+                mix: mix.map(|mix| {
+                    MixPhase::Live(Deck::new(mix, Side::Incoming, sample_rate, channels))
+                }),
+                drift_frames: 0.0,
+                drift,
             }
         }
         _ => return,
@@ -261,6 +332,8 @@ fn run(
     }
 
     let mut scratch = Scratch::default();
+    let mut lead = Vec::new();
+    let mut mixed = Vec::new();
     loop {
         let change = drain_commands(
             cmd_rx,
@@ -328,11 +401,16 @@ fn run(
             }
         };
 
+        let speed_permille = speed.load(std::sync::atomic::Ordering::Relaxed);
+        let packet_start = packet_seconds(&packet, time_base).unwrap_or(output.clock);
+        output.clock =
+            packet_start + decoded.frames() as f64 / f64::from(decoded.spec().rate().max(1));
+
         let samples = audio_buf_to_f32_interleaved(
             &decoded,
             output.channels,
             output.sample_rate,
-            speed.load(std::sync::atomic::Ordering::Relaxed),
+            speed_permille,
             &mut scratch,
         );
         if output_gain != 1.0 {
@@ -341,21 +419,193 @@ fn run(
             }
         }
 
+        let decoded_len = samples.len();
+        let samples = trim_lead(&mut output, samples);
+        let at = MixAt {
+            packet_start,
+            skipped: decoded_len - samples.len(),
+            speed_permille,
+        };
+        let (head, tail) = mix_packet(&mut output, samples, at, &mut lead, &mut mixed);
+
         let change = write_all(
             cmd_rx,
             &mut output,
-            samples,
+            head,
             format.as_mut(),
             decoder.as_mut(),
             track_id,
-        );
+        )
+        .or_else(|| {
+            write_all(
+                cmd_rx,
+                &mut output,
+                tail,
+                format.as_mut(),
+                decoder.as_mut(),
+                track_id,
+            )
+        });
         match change {
             None => {}
             Some(FlowChange::Seeked) => continue,
             Some(FlowChange::Reprobe(t)) => reprobe_or_fail!(t),
             Some(FlowChange::Exit) => return,
         }
+
+        // The outgoing deck played its whole mix: the track ends here.
+        if output.mix.as_ref().is_some_and(MixPhase::done) {
+            send(WorkerMsg::Eof {
+                token,
+                epoch: output.epoch,
+            });
+            park_and_handle!()
+        }
     }
+}
+
+/// Source time of a packet's first frame, when the track has a time base.
+fn packet_seconds(packet: &Packet, time_base: Option<TimeBase>) -> Option<f64> {
+    let time_base = time_base?;
+    let ticks = packet.pts.get() as f64;
+    Some(ticks * f64::from(time_base.numer.get()) / f64::from(time_base.denom.get()))
+}
+
+/// Where a decoded packet sits on the source timeline.
+struct MixAt {
+    /// Source time of the packet's first frame, in seconds.
+    packet_start: f64,
+    /// Interleaved samples `trim_lead` dropped from its head.
+    skipped: usize,
+    speed_permille: u32,
+}
+
+/// Splits a packet into the part written before the outgoing deck's mix and
+/// the part that deck rendered into `mixed`. When the deck's `at` falls inside
+/// the packet, the split is the first frame at or past it, and its ring index
+/// is published so the callback can bring the incoming deck in there. Before
+/// the split, a lead-in deck renders into `lead`.
+fn mix_packet<'a>(
+    output: &mut Output,
+    samples: &'a [f32],
+    at: MixAt,
+    lead: &'a mut Vec<f32>,
+    mixed: &'a mut Vec<f32>,
+) -> (&'a [f32], &'a [f32]) {
+    let mix_at = match output.mix.as_mut() {
+        None => return (samples, &[]),
+        Some(MixPhase::Live(deck)) => {
+            output.drift_frames += play_deck(deck, samples, mixed);
+            publish_drift(output, at.speed_permille);
+            return (&[], mixed);
+        }
+        Some(MixPhase::Armed { at, .. }) => *at,
+    };
+
+    let channels = output.channels.max(1);
+    let rate = f64::from(output.sample_rate) * f64::from(super::SPEED_NORMAL)
+        / f64::from(at.speed_permille.max(1));
+    let frames = frames_until(mix_at - at.packet_start, rate);
+    let split = (frames * channels)
+        .saturating_sub(at.skipped)
+        .min(samples.len());
+    let (head, rest) = samples.split_at(split);
+
+    let head: &[f32] = match output.mix.as_mut() {
+        Some(MixPhase::Armed {
+            lead_in: Some(deck),
+            ..
+        }) => {
+            output.drift_frames += play_deck(deck, head, lead);
+            lead
+        }
+        _ => head,
+    };
+    if rest.is_empty() {
+        publish_drift(output, at.speed_permille);
+        return (head, &[]);
+    }
+
+    // The lead-in's carry, under two frames, ends with it.
+    let Some(MixPhase::Armed {
+        start, mut deck, ..
+    }) = output.mix.take()
+    else {
+        return (head, &[]);
+    };
+    start.set(output.written.load(Ordering::Relaxed) + head.len() as u64);
+    output.drift_frames += play_deck(&mut deck, rest, mixed);
+    output.mix = Some(MixPhase::Live(deck));
+    publish_drift(output, at.speed_permille);
+    (head, mixed)
+}
+
+/// Plays `input` through `deck`; returns the input frames it read beyond
+/// the frames it wrote.
+fn play_deck(deck: &mut Deck, input: &[f32], out: &mut Vec<f32>) -> f64 {
+    let before = deck.drift();
+    deck.process(input, out);
+    deck.drift() - before
+}
+
+/// Publishes the decks' drift as source time. A ring frame holds
+/// `speed_permille / SPEED_NORMAL` frames of the track.
+fn publish_drift(output: &Output, speed_permille: u32) {
+    let rate = f64::from(output.sample_rate.max(1));
+    let speed = f64::from(speed_permille) / f64::from(super::SPEED_NORMAL);
+    let micros = output.drift_frames * speed / rate * 1e6;
+    output.drift.store(micros.round() as i64, Ordering::Relaxed);
+}
+
+/// Float error in a frame offset; a split this close past a whole frame
+/// stays on it.
+const FRAME_NOISE: f64 = 1e-6;
+
+/// Output frames from a packet's start to the first frame at or past
+/// `seconds` into it.
+fn frames_until(seconds: f64, rate: f64) -> usize {
+    (seconds * rate - FRAME_NOISE).ceil().max(0.0) as usize
+}
+
+/// Drops an armed outgoing deck, back to its lead-in if one played.
+fn disarm_mix(output: &mut Output) {
+    let Some(MixPhase::Armed { start, lead_in, .. }) = output
+        .mix
+        .take_if(|phase| matches!(phase, MixPhase::Armed { .. }))
+    else {
+        return;
+    };
+    start.refuse();
+    output.mix = lead_in.map(MixPhase::Live);
+}
+
+/// Arms the outgoing deck, or refuses when the decode has passed `at` or a
+/// mix still runs. An incoming deck past its mix plays on until `at`; a plan
+/// armed before is replaced.
+fn arm_mix(output: &mut Output, at: Duration, mix: DeckMix, start: MixStart) {
+    let at = at.as_secs_f64();
+    if at < output.clock {
+        start.refuse();
+        return;
+    }
+    let lead_in = match output.mix.take() {
+        None => None,
+        Some(MixPhase::Armed { lead_in, .. }) => lead_in,
+        Some(MixPhase::Live(deck)) if deck.holding() => Some(deck),
+        Some(running) => {
+            output.mix = Some(running);
+            start.refuse();
+            return;
+        }
+    };
+    let deck = Deck::new(mix, Side::Outgoing, output.sample_rate, output.channels);
+    start.arm();
+    output.mix = Some(MixPhase::Armed {
+        at,
+        start,
+        deck,
+        lead_in,
+    });
 }
 
 enum ParkOutcome {
@@ -380,6 +630,7 @@ fn park_at_eof(
                 target,
                 producer,
                 written,
+                drift,
                 channels,
                 sample_rate,
                 epoch,
@@ -390,6 +641,11 @@ fn park_at_eof(
                     channels,
                     sample_rate,
                     epoch,
+                    lead: None,
+                    clock: target.as_secs_f64(),
+                    mix: None,
+                    drift_frames: 0.0,
+                    drift,
                 };
                 return match seek_reader(format, decoder, track_id, target) {
                     SeekOutcome::Done => ParkOutcome::Resume,
@@ -397,6 +653,9 @@ fn park_at_eof(
                 };
             }
             Ok(WorkerCmd::Stop) | Err(_) => return ParkOutcome::Exit,
+            // The track has ended; nothing is left to mix from.
+            Ok(WorkerCmd::Mix { start, .. }) => start.refuse(),
+            Ok(WorkerCmd::CancelMix) => {}
             Ok(WorkerCmd::Start { .. }) => {
                 tracing::warn!("unexpected Start for an already-started decode worker");
             }
@@ -419,6 +678,7 @@ fn apply_command(
             target,
             producer,
             written,
+            drift,
             channels,
             sample_rate,
             epoch,
@@ -429,6 +689,11 @@ fn apply_command(
                 channels,
                 sample_rate,
                 epoch,
+                lead: None,
+                clock: target.as_secs_f64(),
+                mix: None,
+                drift_frames: 0.0,
+                drift,
             };
             match seek_reader(format, decoder, track_id, target) {
                 SeekOutcome::Done => {
@@ -439,6 +704,14 @@ fn apply_command(
             }
         }
         WorkerCmd::Stop => Some(FlowChange::Exit),
+        WorkerCmd::Mix { at, mix, start } => {
+            arm_mix(output, at, mix, start);
+            None
+        }
+        WorkerCmd::CancelMix => {
+            disarm_mix(output);
+            None
+        }
         WorkerCmd::Start { .. } => {
             tracing::warn!("unexpected Start for an already-started decode worker");
             None
@@ -474,6 +747,41 @@ fn drain_commands(
             Err(TryRecvError::Disconnected) => return Some(FlowChange::Exit),
         }
     }
+}
+
+/// Frames at the head of `samples` whose every sample is under the silence
+/// threshold, at most `max_frames`.
+fn silent_prefix(samples: &[f32], channels: usize, max_frames: usize) -> usize {
+    samples
+        .chunks_exact(channels.max(1))
+        .take(max_frames)
+        .take_while(|frame| {
+            frame
+                .iter()
+                .all(|sample| sample.abs() < super::SILENCE_PEAK)
+        })
+        .count()
+}
+
+/// Drops the silent head of a track that starts through a smart crossfade.
+/// Skipped samples count as written and played, like a seek forward, so the
+/// position reflects the track's timeline and the drain check stays balanced.
+fn trim_lead<'a>(output: &mut Output, samples: &'a [f32]) -> &'a [f32] {
+    let Some(lead) = output.lead.as_mut() else {
+        return samples;
+    };
+
+    let channels = output.channels.max(1);
+    let skip = silent_prefix(samples, channels, lead.budget / channels) * channels;
+    lead.budget -= skip;
+    output.written.fetch_add(skip as u64, Ordering::Relaxed);
+    lead.played.fetch_add(skip as u64, Ordering::Relaxed);
+
+    // Audio began or the cap ran out: nothing more to drop.
+    if skip < samples.len() || lead.budget == 0 {
+        output.lead = None;
+    }
+    &samples[skip..]
 }
 
 /// Write the full sample block, backing off while the ring is full and
@@ -723,5 +1031,20 @@ fn resample(samples: &[f32], channels: usize, src_rate: u32, dst_rate: u32, out:
             };
             out.push(s0 + (s1 - s0) * frac as f32);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::frames_until;
+
+    #[test]
+    fn a_mix_splits_on_the_first_frame_at_or_past_its_start() {
+        // 0.48 frames in: frame 0 is still before the start.
+        assert_eq!(frames_until(10e-6, 48_000.0), 1);
+        assert_eq!(frames_until(0.0, 48_000.0), 0);
+        // Float noise around a whole frame must not push it one later.
+        assert_eq!(frames_until(3.0 - 2.9, 44_100.0), 4_410);
+        assert_eq!(frames_until(-0.5, 44_100.0), 0);
     }
 }

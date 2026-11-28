@@ -4,19 +4,20 @@
 //! token-tagged events.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwap;
 use config::{ChannelMode, EqualizerSettings, ReplayGainInfo, ReplayGainSettings};
 
-use super::rt::{GainRamp, Retired, RtCmd, RtSession, RtState};
+use super::mix::{DeckMix, IncomingMix, MixMark, MixStart};
+use super::rt::{Blend, GainRamp, Retired, RtCmd, RtSession, RtState};
 use super::sink::{AudioSink, DataCallbackFactory, SinkConfig};
 use super::worker::{WorkerCmd, WorkerHandle, WorkerMsg};
 use super::{
-    Command, EngineStatus, Event, FadingStatus, Failure, LoadOutcome, LoadReply, LoadRequest,
-    Phase, Transition,
+    Command, EngineStatus, Event, FadingStatus, Failure, FailureKind, LeadingSilence, LoadOutcome,
+    LoadReply, LoadRequest, Phase, Transition,
 };
 use crate::player::PlayerInitError;
 #[cfg(any(target_os = "android", target_os = "linux", target_os = "macos"))]
@@ -125,6 +126,13 @@ impl EngineHandle {
     }
 }
 
+/// How far ahead of playback a planned entrance must lie when the incoming
+/// load is ready, so the callback cannot play past it before the swap lands.
+const MIX_LEAD: Duration = Duration::from_millis(200);
+/// How long a probed incoming load waits for the outgoing worker to answer
+/// its plan before it starts with the transition instead.
+const MIX_ANSWER_WAIT: Duration = Duration::from_secs(1);
+
 impl Drop for EngineHandle {
     fn drop(&mut self) {
         // Fire-and-forget: the actor tears itself down; joining here would
@@ -137,9 +145,15 @@ struct Session {
     token: u64,
     worker: WorkerHandle,
     written: Arc<AtomicU64>,
+    /// Source time the mix decks read beyond the ring; see `WorkerCmd::Start`.
+    drift: Arc<AtomicI64>,
     played: Arc<AtomicU64>,
     eof_flag: Arc<AtomicBool>,
     starved: Arc<AtomicBool>,
+    /// The callback's run of silent samples; see `RtSession::quiet`.
+    quiet: Arc<AtomicU64>,
+    /// `Event::Silent` went out for the current silent stretch.
+    silence_reported: bool,
     /// Reported as stalled; `played` at that moment, which audio flowing again moves past.
     stalled_at: Option<u64>,
     /// Linear ReplayGain factor the audio callback reads for this session.
@@ -161,6 +175,8 @@ struct Session {
     /// so an `Eof` in flight across a seek is ignored (it targets the ring the
     /// seek already replaced) instead of ending the freshly-seeked session.
     ring_epoch: u64,
+    /// Where this session's planned outgoing mix starts, once armed.
+    mix_start: Option<MixStart>,
 }
 
 /// Everything needed to start a probed source, independent of the reply.
@@ -169,23 +185,36 @@ struct StartPlan {
     worker: WorkerHandle,
     duration: Duration,
     transition: Transition,
+    leading_silence: LeadingSilence,
     start_at: Option<Duration>,
     album_context: bool,
     service_replay_gain: ReplayGainInfo,
+    mix: Option<IncomingMix>,
 }
 
 struct Pending {
     plan: StartPlan,
     reply: Option<LoadReply>,
+    /// The probe's result, kept while the load waits on a plan's answer.
+    probed: Option<Probed>,
+}
+
+struct Probed {
+    source_sample_rate: Option<u32>,
+    seekable: bool,
+    replay_gain: ReplayGainInfo,
+    at: Instant,
 }
 
 /// Producer/consumer halves of a fresh session ring plus its counters.
 struct RingParts {
     producer: rtrb::Producer<f32>,
     written: Arc<AtomicU64>,
+    drift: Arc<AtomicI64>,
     played: Arc<AtomicU64>,
     eof: Arc<AtomicBool>,
     starved: Arc<AtomicBool>,
+    quiet: Arc<AtomicU64>,
     rt_session: RtSession,
 }
 
@@ -198,12 +227,15 @@ fn make_ring(config: SinkConfig, gain: Arc<AtomicU32>) -> RingParts {
     let played = Arc::new(AtomicU64::new(0));
     let eof = Arc::new(AtomicBool::new(false));
     let starved = Arc::new(AtomicBool::new(false));
+    let quiet = Arc::new(AtomicU64::new(0));
     RingParts {
         producer,
         written,
+        drift: Arc::new(AtomicI64::new(0)),
         played: played.clone(),
         eof: eof.clone(),
         starved: starved.clone(),
+        quiet: quiet.clone(),
         rt_session: RtSession {
             consumer,
             played,
@@ -211,6 +243,7 @@ fn make_ring(config: SinkConfig, gain: Arc<AtomicU32>) -> RingParts {
             gain,
             eof,
             starved,
+            quiet,
         },
     }
 }
@@ -378,6 +411,8 @@ impl Actor {
                 self.publish();
             }
             Command::Seek { position, token } => self.handle_seek(position, token),
+            Command::PlanOutgoing { token, at, mix } => self.handle_plan(token, at, mix),
+            Command::CancelPlan { token } => self.cancel_plan(token),
             Command::Pause => {
                 self.paused.store(true, Ordering::Relaxed);
                 self.sink.pause();
@@ -506,9 +541,11 @@ impl Actor {
             factory,
             duration,
             transition,
+            leading_silence,
             start_at,
             album_context,
             service_replay_gain,
+            mix,
             reply,
         } = request;
 
@@ -526,14 +563,17 @@ impl Actor {
                 }
             };
         self.pending = Some(Pending {
+            probed: None,
             plan: StartPlan {
                 token,
                 worker,
                 duration,
                 transition,
+                leading_silence,
                 start_at,
                 album_context,
                 service_replay_gain,
+                mix,
             },
             reply,
         });
@@ -555,15 +595,28 @@ impl Actor {
                     // gone, so the worker exits by itself.
                     return;
                 }
-                let pending = self.pending.take().expect("checked above");
-                self.start_session(pending, source_sample_rate, seekable, replay_gain);
+                let Some(pending) = self.pending.as_mut() else {
+                    return;
+                };
+                pending.probed = Some(Probed {
+                    source_sample_rate,
+                    seekable,
+                    replay_gain,
+                    at: Instant::now(),
+                });
+                self.start_probed();
             }
             WorkerMsg::Eof { token, epoch } => {
                 // A short queued track can finish decoding before it is heard.
-                if let Some(session) = [self.current.as_mut(), self.queued.as_mut()]
-                    .into_iter()
-                    .flatten()
-                    .find(|session| session.token == token && session.ring_epoch == epoch)
+                // The outgoing side of a planned mix ends on its own `Eof`.
+                if let Some(session) = [
+                    self.current.as_mut(),
+                    self.queued.as_mut(),
+                    self.fading.as_mut(),
+                ]
+                .into_iter()
+                .flatten()
+                .find(|session| session.token == token && session.ring_epoch == epoch)
                 {
                     session.eof = true;
                     session.eof_flag.store(true, Ordering::Release);
@@ -610,15 +663,57 @@ impl Actor {
         }
     }
 
+    /// Starts the probed pending load, unless it mixes into a plan the
+    /// outgoing worker has not answered yet: then it waits, on each tick, up
+    /// to `MIX_ANSWER_WAIT`.
+    fn start_probed(&mut self) {
+        let Some(pending) = self.pending.as_ref() else {
+            return;
+        };
+        let Some(probed) = pending.probed.as_ref() else {
+            return;
+        };
+        if self.plan_unanswered(&pending.plan) && probed.at.elapsed() < MIX_ANSWER_WAIT {
+            return;
+        }
+        let Some(mut pending) = self.pending.take() else {
+            return;
+        };
+        let Some(probed) = pending.probed.take() else {
+            return;
+        };
+        self.start_session(pending, probed);
+    }
+
+    /// The live session `plan` mixes from has a plan its worker has not
+    /// armed or refused yet.
+    fn plan_unanswered(&self, plan: &StartPlan) -> bool {
+        let Some(mix) = plan.mix.as_ref() else {
+            return false;
+        };
+        self.current
+            .as_ref()
+            .filter(|current| current.token == mix.from_token)
+            .and_then(|current| current.mix_start.as_ref())
+            .is_some_and(|start| start.mark() == MixMark::Pending)
+    }
+
     /// A probed source is ready: decide crossfade vs immediate and start it.
-    fn start_session(
-        &mut self,
-        pending: Pending,
-        source_sample_rate: Option<u32>,
-        seekable: bool,
-        replay_gain: ReplayGainInfo,
-    ) {
-        let Pending { plan, reply } = pending;
+    fn start_session(&mut self, pending: Pending, probed: Probed) {
+        let Probed {
+            source_sample_rate,
+            seekable,
+            replay_gain,
+            ..
+        } = probed;
+        let Pending { plan, reply, .. } = pending;
+        if let Some(mix) = plan.mix.as_ref()
+            && self.mix_ready(mix).is_none()
+        {
+            let from_token = mix.from_token;
+            self.refuse_mix_load(plan, reply, from_token);
+            return;
+        }
         let token = plan.token;
 
         match self.try_start_session(plan, source_sample_rate, seekable, replay_gain) {
@@ -664,12 +759,17 @@ impl Actor {
             worker,
             duration,
             transition,
+            leading_silence,
             start_at,
             album_context,
             service_replay_gain,
+            mix,
         } = plan;
 
         self.drop_queued();
+        // A planned mix outranks the transition: it takes the outgoing session first.
+        let mixing = self.take_mix_outgoing(mix.as_ref());
+        let mixed = mixing.is_some();
         let fade = match transition {
             Transition::Crossfade(fade) if !fade.is_zero() => Some(fade),
             _ => None,
@@ -703,14 +803,24 @@ impl Actor {
 
         // Branch only on the fade decision; the ring/start/swap/install tail is
         // shared. `config`, `fade_frames`, and `crossfaded` capture the delta.
-        let (config, fade, crossfaded) = if let Some((fade, config, outgoing)) = outgoing {
+        let (config, fade, crossfaded) = if let Some((config, outgoing, start)) = mixing {
+            self.stop_fading();
+            self.fading = Some(outgoing);
+            self.fade_generation += 1;
+            let generation = self.fade_generation;
+            (config, Some(Blend::Overlay { start, generation }), true)
+        } else if let Some((fade, config, outgoing)) = outgoing {
             self.stop_fading();
             self.fading = Some(outgoing);
             self.fade_generation += 1;
             let fade_frames = (fade.as_secs_f64() * config.sample_rate as f64).round() as u64;
+            let generation = self.fade_generation;
             (
                 config,
-                Some((fade_frames.max(1), self.fade_generation)),
+                Some(Blend::Crossfade {
+                    frames: fade_frames.max(1),
+                    generation,
+                }),
                 true,
             )
         } else if let Some(config) = gapless_config {
@@ -766,27 +876,39 @@ impl Actor {
         let RingParts {
             producer,
             written,
+            drift,
             played,
             eof,
             starved,
+            quiet,
             rt_session,
         } = make_ring(config, gain.clone());
+        // Only a track that really crossfades in has dead air worth dropping;
+        // a planned mix enters exactly where the plan says.
+        let lead_trim = (crossfaded && !mixed && leading_silence == LeadingSilence::Trim)
+            .then(|| played.clone());
         let _ = worker.cmd_tx.send(WorkerCmd::Start {
             producer,
             written: written.clone(),
+            drift: drift.clone(),
+            lead_trim,
             channels: config.channels,
             sample_rate: config.sample_rate,
             start_at,
             epoch: 0,
+            mix: mix.filter(|_| mixed).map(|incoming| incoming.mix),
         });
 
         let session = Session {
             token,
             worker,
             written,
+            drift,
             played,
             eof_flag: eof,
             starved,
+            quiet,
+            silence_reported: false,
             stalled_at: None,
             gain,
             replay_gain,
@@ -799,6 +921,7 @@ impl Actor {
             eof: false,
             ended: false,
             ring_epoch: 0,
+            mix_start: None,
         };
         if gapless {
             self.send_rt(RtCmd::Queue {
@@ -817,7 +940,113 @@ impl Actor {
         Ok(LoadOutcome {
             crossfaded,
             gapless,
+            mixed,
         })
+    }
+
+    /// The live session `mix` answers, with the output config and its mix
+    /// start, when its worker armed the plan, playback is still `MIX_LEAD`
+    /// short of the start, and the stream can blend now.
+    fn take_mix_outgoing(
+        &mut self,
+        mix: Option<&IncomingMix>,
+    ) -> Option<(SinkConfig, Session, MixStart)> {
+        let (config, start) = self.mix_ready(mix?)?;
+        let outgoing = self.current.take()?;
+        Some((config, outgoing, start))
+    }
+
+    /// The output config and mix start `mix` would enter on, see `take_mix_outgoing`.
+    fn mix_ready(&self, mix: &IncomingMix) -> Option<(SinkConfig, MixStart)> {
+        let from_token = mix.from_token;
+        if self.paused.load(Ordering::Relaxed) || self.rt_tx.is_none() {
+            return None;
+        }
+        let config = self.sink.config()?;
+        let lead = (MIX_LEAD.as_secs_f64() * f64::from(config.sample_rate)) as u64
+            * config.channels as u64;
+        let current = self
+            .current
+            .as_ref()
+            .filter(|current| current.token == from_token && !current.ended)?;
+        let played = current.played.load(Ordering::Relaxed);
+        let start = current
+            .mix_start
+            .clone()
+            .filter(|start| match start.mark() {
+                MixMark::Armed => true,
+                MixMark::At(index) => index >= played.saturating_add(lead),
+                MixMark::Pending | MixMark::Refused => false,
+            })?;
+        Some((config, start))
+    }
+
+    /// A load whose mix cannot play starts nothing: the outgoing track keeps
+    /// playing past its dropped plan, and the caller picks the transition.
+    fn refuse_mix_load(&mut self, plan: StartPlan, reply: Option<LoadReply>, from_token: u64) {
+        self.cancel_plan(from_token);
+        self.retire_worker(plan.worker);
+        if let Some(reply) = reply {
+            let _ = reply.send(Err(Failure {
+                kind: FailureKind::MixMissed,
+                message: "the planned mix cannot play".to_string(),
+            }));
+        }
+        self.emit(Event::MixMissed { token: from_token });
+        self.publish();
+    }
+
+    /// Drops the live session's plan. Its worker disarms an armed one; once
+    /// the decode has passed the start, the ring already holds the outgoing
+    /// deck up to the mix end, so a seek to where playback is replaces it.
+    fn cancel_plan(&mut self, token: u64) {
+        let Some(current) = self
+            .current
+            .as_mut()
+            .filter(|current| current.token == token)
+        else {
+            return;
+        };
+        let Some(start) = current.mix_start.take() else {
+            return;
+        };
+        let live = matches!(start.mark(), MixMark::At(_));
+        if !live || !current.seekable || self.fading.is_some() {
+            let _ = current.worker.cmd_tx.send(WorkerCmd::CancelMix);
+            return;
+        }
+
+        let Some(config) = self.sink.config() else {
+            return;
+        };
+        let position = super::position_from(
+            current.base_micros,
+            &current.played,
+            &current.drift,
+            config.channels as u32,
+            config.sample_rate,
+            self.speed.load(Ordering::Relaxed),
+            current.duration,
+        );
+        self.handle_seek(position, Some(token));
+    }
+
+    /// Hands the plan to the live session's worker, which arms or refuses it.
+    fn handle_plan(&mut self, token: u64, at: Duration, mix: DeckMix) {
+        let Some(current) = self
+            .current
+            .as_mut()
+            .filter(|current| current.token == token && !current.eof && !current.ended)
+        else {
+            self.emit(Event::MixMissed { token });
+            return;
+        };
+        let start = MixStart::pending();
+        current.mix_start = Some(start.clone());
+        let _ = current
+            .worker
+            .cmd_tx
+            .send(WorkerCmd::Mix { at, mix, start });
     }
 
     /// Stop a worker and detach its join handle into the graveyard. Never
@@ -906,6 +1135,8 @@ impl Actor {
         };
         // Captured before the latch is cleared below; drives the resume rule.
         let revive_from_ended = current.ended;
+        // The worker drops a planned mix with the old ring.
+        let dropped_plan = current.mix_start.take().map(|_| current.token);
 
         // Keep a guard gap before the end so a seek can't land past the last
         // packet (matches the old engine's END_GUARD).
@@ -924,6 +1155,7 @@ impl Actor {
             target,
             producer: ring.producer,
             written: ring.written.clone(),
+            drift: ring.drift.clone(),
             // The live config rides along: a device rebuild may have changed
             // the rate/channels since this session's Start, and the decode
             // must retarget with the ring or play at the wrong pitch.
@@ -932,9 +1164,12 @@ impl Actor {
             epoch: current.ring_epoch,
         });
         current.written = ring.written;
+        current.drift = ring.drift;
         current.played = ring.played;
         current.eof_flag = ring.eof;
         current.starved = ring.starved;
+        current.quiet = ring.quiet;
+        current.silence_reported = false;
         current.stalled_at = current.stalled_at.map(|_| 0);
         current.base_micros = target.as_micros() as u64;
         current.eof = false;
@@ -946,6 +1181,9 @@ impl Actor {
             session: rt_session,
             fade: None,
         });
+        if let Some(token) = dropped_plan {
+            self.emit(Event::MixMissed { token });
+        }
         // Seeking a track out of its ended state resumes playback: `Ended` is
         // terminal and end-of-queue quiesced the device, so scrubbing back in
         // is an intent to listen. A seek on a merely-paused track (ended ==
@@ -1067,8 +1305,11 @@ impl Actor {
             self.handle_device_error(device_lost);
         }
         self.reap_rt_retired();
+        self.start_probed();
         self.latch_drain_complete();
         self.report_stall();
+        self.report_silence();
+        self.report_refused_mix();
         self.emit_throttled_position();
 
         // Finished detached workers just get dropped (JoinHandle drop detaches);
@@ -1176,6 +1417,56 @@ impl Actor {
         self.emit(event);
     }
 
+    /// Tells subscribers once when the visible session has gone quiet; the
+    /// callback only counts, so nothing here touches the audio thread.
+    fn report_silence(&mut self) {
+        let Some(config) = self.sink.config() else {
+            return;
+        };
+        let paused = self.paused.load(Ordering::Relaxed);
+        let Some(current) = self.current.as_mut() else {
+            return;
+        };
+        let min_samples = (super::SILENCE_MIN_SPAN.as_secs_f64()
+            * config.sample_rate as f64
+            * config.channels as f64) as u64;
+        let quiet = current.quiet.load(Ordering::Relaxed);
+        if quiet == 0 {
+            current.silence_reported = false;
+            return;
+        }
+        if paused || current.ended || current.silence_reported || quiet < min_samples {
+            return;
+        }
+        current.silence_reported = true;
+        let token = current.token;
+        let position = self.status.load().position();
+        self.emit(Event::Silent { token, position });
+    }
+
+    /// A worker that had already decoded past its plan's `at` refused it.
+    fn report_refused_mix(&mut self) {
+        let mut refused = [None; 2];
+        for (slot, session) in refused
+            .iter_mut()
+            .zip([self.current.as_mut(), self.fading.as_mut()])
+        {
+            let Some(session) = session else {
+                continue;
+            };
+            if session
+                .mix_start
+                .take_if(|start| start.mark() == MixMark::Refused)
+                .is_some()
+            {
+                *slot = Some(session.token);
+            }
+        }
+        for token in refused.into_iter().flatten() {
+            self.emit(Event::MixMissed { token });
+        }
+    }
+
     /// Position once per second while playing — subscribers render seconds,
     /// and every event is a wakeup on their side.
     fn emit_throttled_position(&mut self) {
@@ -1219,6 +1510,7 @@ impl Actor {
             duration: f.duration,
             base_micros: f.base_micros,
             played_samples: f.played.clone(),
+            drift_micros: f.drift.clone(),
         });
         let output_latency_micros = self.sink.output_latency_micros();
         let status = match &self.current {
@@ -1231,6 +1523,7 @@ impl Actor {
                 fading,
                 base_micros: current.base_micros,
                 played_samples: current.played.clone(),
+                drift_micros: current.drift.clone(),
                 channels,
                 sample_rate,
                 speed_permille: self.speed.load(Ordering::Relaxed),
@@ -1245,6 +1538,7 @@ impl Actor {
                 fading,
                 base_micros: 0,
                 played_samples: Arc::new(AtomicU64::new(0)),
+                drift_micros: Arc::new(AtomicI64::new(0)),
                 channels: 0,
                 sample_rate: 0,
                 speed_permille: self.speed.load(Ordering::Relaxed),

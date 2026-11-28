@@ -259,6 +259,40 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("radio continuation"))
     }
 
+    /// Start a mix from an album, an artist or several tracks, by item id.
+    async fn start_mix(&self, _seed: MixSeed, _refs: &[String]) -> Result<RadioPage, SourceError> {
+        Err(SourceError::unsupported("mixes"))
+    }
+
+    /// Songs leading step by step from one track to another, both included.
+    async fn sonic_path(
+        &self,
+        _from_id: &str,
+        _to_id: &str,
+        _count: u32,
+    ) -> Result<RadioPage, SourceError> {
+        Err(SourceError::unsupported("sonic path"))
+    }
+
+    /// 1 to 5 stars, or 0 to clear.
+    async fn set_rating(&self, _item_id: &str, _stars: u8) -> Result<(), SourceError> {
+        Err(SourceError::unsupported("ratings"))
+    }
+
+    async fn fetch_artist_info(&self, _artist_id: &str) -> Result<Option<ArtistInfo>, SourceError> {
+        Err(SourceError::unsupported("artist info"))
+    }
+
+    async fn fetch_radio_stations(&self) -> Result<Vec<RadioStation>, SourceError> {
+        Err(SourceError::unsupported("radio stations"))
+    }
+
+    /// What the daemon holds a stream this source lists to, such as one of
+    /// its radio stations; nothing for a source kopuz trusts.
+    fn stream_guard(&self) -> Option<utils::http::Guard> {
+        None
+    }
+
     /// Whether the server now holds `queue`. A queue holding tracks the source
     /// does not own has no remote form, so an impl skips it (`false`) rather
     /// than saving a partial one. An empty queue clears the server's.

@@ -29,11 +29,11 @@ impl Session {
         let transition =
             if !allow_crossfade || restore_seek.is_some_and(|position| !position.is_zero()) {
                 Transition::Immediate
-            } else if self.should_crossfade() {
+            } else if self.should_crossfade(Some(&track)) {
                 Transition::Crossfade(Duration::from_secs(
                     self.settings.playback.crossfade_seconds as u64,
                 ))
-            } else if self.should_play_gapless() {
+            } else if self.should_play_gapless(Some(&track)) {
                 Transition::Gapless
             } else {
                 Transition::Immediate
@@ -348,9 +348,11 @@ impl Session {
                 artwork: prepared.artwork,
             },
             transition: prepared.transition,
+            leading_silence: self.leading_silence_for(prepared.transition),
             start_at: prepared.start_at,
             album_context: self.album_context_for_token(prepared.token),
             service_replay_gain,
+            mix: None,
             reply: Some(reply_tx),
         });
         let token = prepared.token;
@@ -807,8 +809,16 @@ impl ClassifiedLoad {
                             (info.url, info.format, info.user_agent, info.guard)
                         }
                         ResolvedStreamRef::SoundCloudHls(_)
-                        | ResolvedStreamRef::AppleMusicFmp4(_)
-                        | ResolvedStreamRef::Direct(_) => (stream_ref, None, None, None),
+                        | ResolvedStreamRef::AppleMusicFmp4(_) => (stream_ref, None, None, None),
+                        ResolvedStreamRef::Direct(_) => {
+                            // A source's own station stays on its plugin's hosts.
+                            let guard = source
+                                .filter(|_| {
+                                    self.is_radio && crate::radio::from_source(&self.item_id)
+                                })
+                                .and_then(|source| source.stream_guard());
+                            (stream_ref, None, None, guard)
+                        }
                     };
 
                 // The factory runs on the decode worker (no runtime), so hand
@@ -898,7 +908,9 @@ pub(super) fn engine_failure_code(kind: player::engine::FailureKind) -> api::Err
     match kind {
         player::engine::FailureKind::Unreachable => api::ErrorCode::SourceUnreachable,
         player::engine::FailureKind::NotFound => api::ErrorCode::NotFound,
-        player::engine::FailureKind::Other => api::ErrorCode::Internal,
+        player::engine::FailureKind::MixMissed | player::engine::FailureKind::Other => {
+            api::ErrorCode::Internal
+        }
     }
 }
 

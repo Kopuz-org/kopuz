@@ -49,6 +49,9 @@ service Kopuz {
   rpc GetArtistTracks(ArtistTracksRequest) returns (TrackPage);
   rpc GetArtist(ArtistRequest) returns (ArtistDetail);
   rpc GetSimilarArtists(SimilarArtistsRequest) returns (SimilarArtists);
+  rpc GetArtistInfo(ArtistRequest) returns (ArtistInfoResponse);
+  rpc GetAlbumSound(AlbumRef) returns (Sound);
+  rpc GetArtistSound(ArtistRequest) returns (Sound);
   rpc GetArtistSampleTracks(Page) returns (TrackPage);
   rpc GetGenres(GetGenresRequest) returns (GenreList);
   rpc GetTopGenre(GetTopGenreRequest) returns (TopGenreResponse);
@@ -92,13 +95,14 @@ service Kopuz {
   rpc GetDownloads(GetDownloadsRequest) returns (DownloadList);
   rpc GetConfig(GetConfigRequest) returns (ConfigView);
 
-  rpc SetQueue(SetQueueRequest) returns (MutationResult);
+  rpc SetQueue(SetQueueRequest) returns (SetQueueResult);
   rpc EditQueue(QueueEditRequest) returns (MutationResult);
   rpc GetExternalDevices(ExternalDevicesRequest) returns (ExternalDeviceList);
   rpc GetOutputDevices(GetOutputDevicesRequest) returns (OutputDeviceList);
   rpc SelectExternalDevice(SelectExternalDeviceRequest) returns (Unit);
   rpc OpenListenLink(OpenListenLinkRequest) returns (Unit);
   rpc SetFavorite(FavoriteRequest) returns (SetFavoriteResponse);
+  rpc SetStarRating(StarRatingRequest) returns (Unit);
   rpc DontRecommend(DontRecommendRequest) returns (Unit);
   rpc Rate(RateRequest) returns (Unit);
   rpc Follow(FollowRequest) returns (Unit);
@@ -254,6 +258,18 @@ message SetVersion {
 message MutationResult {
   // State revision containing the mutation's effect.
   uint64 rev = 1;
+}
+
+// How a radio or mix found its songs; unspecified for a queue that is neither.
+enum MixBasis {
+  MIX_BASIS_UNSPECIFIED = 0;
+  MIX_BASIS_SONIC = 1;
+  MIX_BASIS_METADATA = 2;
+}
+
+message SetQueueResult {
+  uint64 rev = 1;
+  MixBasis basis = 2;
 }
 
 // ---------------- events ----------------
@@ -550,6 +566,19 @@ message QueueContext {
     Key track_radio = 8;
     Id playlist_radio = 9;
     string artist_key = 10;
+    // The source's mix seeded by an album, an artist, or several tracks.
+    Id album_radio = 11;
+    Key artist_radio = 12;
+    TrackKeys mix_radio = 13;
+    SonicPath sonic_path = 14;
+    // AudioMuse-AI's text search, and its picks from the listening profile.
+    string described = 15;
+    Fingerprint fingerprint = 16;
+  }
+  message Fingerprint {}
+  message SonicPath {
+    string from = 1;
+    string to = 2;
   }
   message TrackKeys {
     repeated string keys = 1;
@@ -794,6 +823,25 @@ message ArtistDetail {
   reserved 2; // was the artist's albums, which GetAlbums lists by artist key
 }
 
+message ArtistAbout {
+  optional string biography = 1;
+  optional ArtworkRef image = 2;
+  repeated SimilarArtist similar = 3;
+  optional string link = 4;
+}
+
+message ArtistInfoResponse {
+  optional ArtistAbout about = 1;
+}
+
+// What an album or artist sounds like; every list is empty without AudioMuse-AI.
+message Sound {
+  repeated AlbumInfo similar_albums = 1;
+  repeated SimilarArtist similar_artists = 2;
+  repeated string tags = 3;
+  repeated string moods = 4;
+}
+
 message GetGenresRequest {}
 
 message GenreList {
@@ -1028,6 +1076,17 @@ message SourceCapabilities {
   bool rip_audio = 34;
   // The playlist holding the account's favorites; a playlist radio of it is the favorites radio.
   optional string favorites_playlist = 35;
+  // The account can rate tracks and albums.
+  bool ratings = 36;
+  bool artist_info = 37;
+  // It lists internet radio stations.
+  bool radio_stations = 38;
+  // It finds songs leading from one track to another.
+  bool sonic_path = 39;
+  bool album_radio = 40;
+  bool artist_radio = 41;
+  // A mix of several tracks.
+  bool mix_radio = 42;
 }
 
 message SearchFilter {
@@ -1577,6 +1636,8 @@ message RadioStationInfo {
   bool pinned = 6;
   optional ArtworkRef artwork = 7;
   string icon = 8;
+  // Listed by the active source rather than a registry.
+  bool from_source = 9;
 }
 
 message GetRadioStationsRequest {}
@@ -1774,6 +1835,7 @@ message TrackRef {
 
 message Stats {
   map<string, uint64> listen_counts = 1;
+  map<string, uint32> ratings = 2;
 }
 
 message Lyrics {
@@ -1810,6 +1872,11 @@ message Favorites {
 message FavoriteRequest {
   string key = 1;
   bool favorite = 2;
+}
+
+message StarRatingRequest {
+  string key = 1;
+  uint32 stars = 2;
 }
 
 message StartJobRequest {
@@ -1984,6 +2051,7 @@ message ConfigEdit {
   oneof edit {
     float volume_scroll_step = 40;
     uint32 crossfade_seconds = 41;
+    bool smart_crossfade = 93;
     BackBehavior back_behavior = 43;
     ChannelMode channel_mode = 44;
     EqualizerSettings equalizer = 45;
@@ -2155,6 +2223,7 @@ enum SettingKey {
   SETTING_KEY_AUTOPLAY_RADIO = 73;
   SETTING_KEY_SKIP_EXPLICIT = 74;
   SETTING_KEY_PAUSE_WATCH_HISTORY = 75;
+  SETTING_KEY_SMART_CROSSFADE = 93;
   SETTING_KEY_SYNC_INTERVAL_MINUTES = 78;
   SETTING_KEY_DISCORD_PRESENCE = 79;
   SETTING_KEY_DISCORD_PRESENCE_SOURCE = 80;
@@ -2457,6 +2526,7 @@ message Config {
   bool autoplay_radio = 73;
   bool skip_explicit = 74;
   bool pause_watch_history = 75;
+  optional bool smart_crossfade = 93;
   // Absent from a peer that predates it, which must not read as 0 (never).
   optional uint32 sync_interval_minutes = 78;
   optional bool discord_presence = 79;
@@ -2599,6 +2669,7 @@ enum AlbumOrderField {
   ALBUM_ORDER_FIELD_GENRE = 4;
   ALBUM_ORDER_FIELD_RECENTLY_ADDED = 5;
   ALBUM_ORDER_FIELD_TRACK_COUNT = 6;
+  ALBUM_ORDER_FIELD_LAST_PLAYED = 7;
 }
 
 enum ArtistOrderField {
@@ -2721,6 +2792,7 @@ enum ErrorReason {
   ERROR_REASON_NETWORK_DOWN = 22;
   ERROR_REASON_OFFLINE_MODE = 23;
   ERROR_REASON_BROWSER_OPEN = 24;
+  ERROR_REASON_INTEGRATION_FAILED = 25;
 }
 
 enum ErrorCode {

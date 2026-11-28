@@ -127,6 +127,8 @@ pub enum AlbumSortField {
     /// When the album's newest track was added.
     RecentlyAdded,
     TrackCount,
+    /// When one of the album's tracks was last played, here or on its server.
+    LastPlayed,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -862,6 +864,10 @@ pub struct Playback {
     #[serde(default = "default_crossfade_seconds")]
     #[garde(range(max = 12))]
     pub crossfade_seconds: u8,
+    /// Shape each crossfade to the music: none inside an album, past silence.
+    #[serde(default = "default_smart_crossfade")]
+    #[garde(skip)]
+    pub smart_crossfade: bool,
     #[serde(default)]
     #[garde(skip)]
     pub back_behavior: BackBehavior,
@@ -908,6 +914,7 @@ impl Default for Playback {
         Self {
             volume_scroll_step: default_volume_scroll_step(),
             crossfade_seconds: default_crossfade_seconds(),
+            smart_crossfade: default_smart_crossfade(),
             back_behavior: BackBehavior::RewindThenPrev,
             channel_mode: ChannelMode::Stereo,
             equalizer: EqualizerSettings::default(),
@@ -1352,6 +1359,10 @@ pub fn default_sidebar_order() -> Vec<String> {
 
 fn default_volume_scroll_step() -> f32 {
     0.05
+}
+
+fn default_smart_crossfade() -> bool {
+    true
 }
 
 fn default_crossfade_seconds() -> u8 {

@@ -239,6 +239,12 @@ impl StationRegistry {
         self.stations.insert(manifest.id.clone(), manifest);
     }
 
+    /// Forget a station, wherever it came from.
+    pub fn remove(&mut self, id: &str) {
+        self.runtime_ids.remove(id);
+        self.stations.remove(id);
+    }
+
     /// Demote a pinned station back to a runtime insert; stays playable.
     pub fn unpin_station(&mut self, id: &str) {
         if self.stations.contains_key(id) {

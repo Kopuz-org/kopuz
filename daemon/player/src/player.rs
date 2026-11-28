@@ -10,8 +10,9 @@ use std::time::Duration;
 use config::{ChannelMode, EqualizerSettings, ReplayGainInfo, ReplayGainSettings};
 
 use crate::engine::{
-    ActorMsg, AudioSink, Command, CpalSink, EngineHandle, EngineStatus, Event, LoadReply,
-    LoadRequest, Phase, SinkEvent, SourceFactory, Transition,
+    ActorMsg, AudioSink, Command, CpalSink, DeckMix, EngineHandle, EngineStatus, Event,
+    IncomingMix, LeadingSilence, LoadReply, LoadRequest, Phase, SinkEvent, SourceFactory,
+    Transition,
 };
 #[cfg(any(
     target_os = "macos",
@@ -56,11 +57,14 @@ pub struct LoadArgs {
     pub factory: SourceFactory,
     pub meta: NowPlayingMeta,
     pub transition: Transition,
+    pub leading_silence: LeadingSilence,
     pub start_at: Option<Duration>,
     /// The queue is walking an album; see [`LoadRequest::album_context`].
     pub album_context: bool,
     /// See [`LoadRequest::service_replay_gain`].
     pub service_replay_gain: ReplayGainInfo,
+    /// See [`LoadRequest::mix`].
+    pub mix: Option<IncomingMix>,
     /// Resolves once the source is playing or failed; dropped on cancellation.
     pub reply: Option<LoadReply>,
 }
@@ -148,9 +152,11 @@ impl Player {
             factory,
             meta,
             transition,
+            leading_silence,
             start_at,
             album_context,
             service_replay_gain,
+            mix,
             reply,
         } = args;
         self.engine.send(Command::Load(LoadRequest {
@@ -158,9 +164,11 @@ impl Player {
             factory,
             duration: meta.duration,
             transition,
+            leading_silence,
             start_at,
             album_context,
             service_replay_gain,
+            mix,
             reply,
         }));
         // Push the OS now-playing display now only for an immediate switch (the
@@ -183,6 +191,16 @@ impl Player {
             self.metadata_token = Some(token);
         }
         self.update_now_playing_system();
+    }
+
+    /// Plan session `token`'s outgoing deck; see [`Command::PlanOutgoing`].
+    pub fn plan_outgoing(&self, token: u64, at: Duration, mix: DeckMix) {
+        self.engine.send(Command::PlanOutgoing { token, at, mix });
+    }
+
+    /// Drop session `token`'s plan before its mix begins.
+    pub fn cancel_plan(&self, token: u64) {
+        self.engine.send(Command::CancelPlan { token });
     }
 
     /// Drop a load that is still resolving without touching live playback.
@@ -426,9 +444,11 @@ mod tests {
                 artwork: None,
             },
             transition: Transition::Crossfade(Duration::from_secs(2)),
+            leading_silence: LeadingSilence::Keep,
             start_at: None,
             album_context: false,
             service_replay_gain: ReplayGainInfo::default(),
+            mix: None,
             reply: None,
         };
         let mut first = load(1);
