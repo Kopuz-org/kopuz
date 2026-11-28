@@ -985,6 +985,17 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = التقييم
+rate_stars =
+    { $count ->
+        [zero] قيّم بـ { $count } نجمة
+        [one] قيّم بنجمة واحدة
+        [two] قيّم بنجمتين
+        [few] قيّم بـ { $count } نجوم
+        [many] قيّم بـ { $count } نجمة
+       *[other] قيّم بـ { $count } نجمة
+    }
+clear_rating = مسح التقييم
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.

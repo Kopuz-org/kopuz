@@ -23,9 +23,10 @@ pub mod bindings {
 }
 
 pub use bindings::kopuz::plugin::types::{
-    Album, ArtistCredit, ArtistListing, AuthOutcome, AuthSession, Check, CheckOutcome, CheckStep,
-    Connection, LibrarySnapshot, PlaylistEntry, PlaylistMeta, RemotePlayQueue, ReplayGain,
-    SearchResults, SourceError, StorageQuota, StreamInfo, StreamQuality, Track, TrackPage,
+    Album, ArtistCredit, ArtistInfo, ArtistListing, AuthOutcome, AuthSession, Check, CheckOutcome,
+    CheckStep, Connection, LibrarySnapshot, MixBasis, MixSeed, PlaylistEntry, PlaylistMeta,
+    RadioStation, RemotePlayQueue, ReplayGain, SearchResults, SourceError, StorageQuota,
+    StreamInfo, StreamQuality, Track, TrackPage,
 };
 
 pub type Result<T, E = SourceError> = std::result::Result<T, E>;
@@ -160,13 +161,20 @@ impl Default for Track {
             credits: Vec::new(),
             replay_gain: ReplayGain::default(),
             explicit: false,
+            play_count: None,
+            last_played: None,
+            rating: None,
         }
     }
 }
 
 impl TrackPage {
     pub fn last(tracks: Vec<Track>) -> Self {
-        TrackPage { tracks, next: None }
+        TrackPage {
+            tracks,
+            next: None,
+            basis: None,
+        }
     }
 }
 
@@ -359,6 +367,31 @@ pub trait Source: Sized + 'static {
     fn more_radio(&self, cursor: &str) -> Result<TrackPage> {
         let _ = cursor;
         Err(SourceError::unsupported("radio continuation"))
+    }
+
+    fn start_mix(&self, seed: MixSeed, refs: &[String]) -> Result<TrackPage> {
+        let _ = (seed, refs);
+        Err(SourceError::unsupported("mixes"))
+    }
+
+    fn sonic_path(&self, from_id: &str, to_id: &str, count: u32) -> Result<TrackPage> {
+        let _ = (from_id, to_id, count);
+        Err(SourceError::unsupported("sonic path"))
+    }
+
+    fn fetch_artist_info(&self, artist_id: &str) -> Result<Option<ArtistInfo>> {
+        let _ = artist_id;
+        Err(SourceError::unsupported("artist info"))
+    }
+
+    fn fetch_radio_stations(&self) -> Result<Vec<RadioStation>> {
+        Err(SourceError::unsupported("radio stations"))
+    }
+
+    /// 1 to 5 stars, or 0 to clear.
+    fn set_rating(&self, item_id: &str, stars: u8) -> Result<()> {
+        let _ = (item_id, stars);
+        Err(SourceError::unsupported("ratings"))
     }
 
     fn save_play_queue(
@@ -566,6 +599,33 @@ macro_rules! export_source {
             }
             fn more_radio(&self, cursor: ::std::string::String) -> $crate::Result<$crate::TrackPage> {
                 $crate::Source::more_radio(&self.0, &cursor)
+            }
+            fn set_rating(&self, item_id: ::std::string::String, stars: u8) -> $crate::Result<()> {
+                $crate::Source::set_rating(&self.0, &item_id, stars)
+            }
+            fn start_mix(
+                &self,
+                seed: $crate::MixSeed,
+                refs: ::std::vec::Vec<::std::string::String>,
+            ) -> $crate::Result<$crate::TrackPage> {
+                $crate::Source::start_mix(&self.0, seed, &refs)
+            }
+            fn sonic_path(
+                &self,
+                from_id: ::std::string::String,
+                to_id: ::std::string::String,
+                count: u32,
+            ) -> $crate::Result<$crate::TrackPage> {
+                $crate::Source::sonic_path(&self.0, &from_id, &to_id, count)
+            }
+            fn fetch_artist_info(
+                &self,
+                artist_id: ::std::string::String,
+            ) -> $crate::Result<::std::option::Option<$crate::ArtistInfo>> {
+                $crate::Source::fetch_artist_info(&self.0, &artist_id)
+            }
+            fn fetch_radio_stations(&self) -> $crate::Result<::std::vec::Vec<$crate::RadioStation>> {
+                $crate::Source::fetch_radio_stations(&self.0)
             }
             fn save_play_queue(
                 &self,

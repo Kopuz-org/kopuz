@@ -307,12 +307,22 @@ pub fn lyrics_from_proto(value: &Lyrics) -> api::LyricsView {
 pub fn stats_to_proto(value: &api::StatsView) -> Stats {
     Stats {
         listen_counts: value.listen_counts.clone().into_iter().collect(),
+        ratings: value
+            .ratings
+            .iter()
+            .map(|(key, stars)| (key.clone(), u32::from(*stars)))
+            .collect(),
     }
 }
 
 pub fn stats_from_proto(value: &Stats) -> api::StatsView {
     api::StatsView {
         listen_counts: value.listen_counts.clone().into_iter().collect(),
+        ratings: value
+            .ratings
+            .iter()
+            .map(|(key, stars)| (key.clone(), u8::try_from(*stars).unwrap_or(u8::MAX)))
+            .collect(),
     }
 }
 
@@ -671,6 +681,15 @@ mod tests {
             }),
         };
         assert_eq!(track, track_info_from_proto(&track_info_to_proto(&track)));
+    }
+
+    #[test]
+    fn stats_carry_play_counts_and_star_ratings() {
+        let stats = api::StatsView {
+            listen_counts: [("local:a".to_string(), 7)].into(),
+            ratings: [("a".to_string(), 5), ("b".to_string(), 1)].into(),
+        };
+        assert_eq!(stats, stats_from_proto(&stats_to_proto(&stats)));
     }
 
     #[test]
