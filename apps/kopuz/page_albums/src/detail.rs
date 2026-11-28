@@ -4,13 +4,14 @@ use std::rc::Rc;
 
 use api::{
     AlbumInfo, AlbumPresentation, ArtworkRef, ArtworkTarget, CatalogDetail, CatalogDetailRequest,
-    CatalogItemKind, SourceCapabilities, Table, TrackInfo,
+    CatalogItemKind, SoundView, SourceCapabilities, Table, TrackInfo,
 };
 use components::format::{t, t_with};
 use components::{
-    DetailActions, DetailHeader, EditableCover, EmptyState, HeaderLayout, Heading, IconButton,
-    IconTone, Link, Loading, Look, Picture, SectionHeading, Tone, TrackActions, TrackList,
-    TrackListEvent, TrackListOptions, TrackSection, icons, menus, style,
+    Arrows, Carousel, DetailActions, DetailHeader, EditableCover, EmptyState, HeaderLayout,
+    Heading, IconButton, IconTone, Link, Loading, Look, Picture, SectionHeading, Tone,
+    TrackActions, TrackList, TrackListEvent, TrackListOptions, TrackSection, album_tile, icons,
+    menus, sound_profile, style,
 };
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -22,7 +23,8 @@ use gpui_kit::{
     StatefulInteractiveElement as _, Styled, Subscription, Window, div, px, rems,
 };
 use store::{
-    DownloadsModel, Offline, Pictured, PlayerModel, Query, Route, SourcesModel, Target, actions,
+    AudioMuseModel, DownloadsModel, Offline, Pictured, PlayerModel, Query, Route, SourcesModel,
+    Target, actions,
 };
 
 use crate::{ops, rip};
@@ -32,6 +34,7 @@ const REMOTE_COVER: Pixels = px(300.);
 // `w-12 h-12`, the outlined select-all beside the hero's play.
 const HERO_SECONDARY: Pixels = px(48.);
 const COVER: &str = "album-cover";
+const SOUND_TILE: Pixels = px(176.);
 
 /// One disc's rows; its list reports a play by the album-wide index its subscription carries.
 struct DiscGroup {
@@ -44,6 +47,9 @@ pub struct AlbumDetail {
     album: Entity<Query<Option<AlbumInfo>>>,
     tracks: Entity<Query<Vec<TrackInfo>>>,
     remote: Entity<Query<Option<CatalogDetail>>>,
+    // Held, asking nothing, until AudioMuse-AI is set up.
+    sound: Entity<Query<SoundView>>,
+    sound_on: bool,
     rows: Vec<TrackInfo>,
     // Derived from the rows and the downloads once per change, not once per frame.
     keys: Rc<[String]>,
@@ -96,10 +102,19 @@ impl AlbumDetail {
                 cx,
             )
         });
+        let sound = cx.new(|cx| Query::held(&[Table::Servers], SoundView::default(), cx));
+        let sound_on = AudioMuseModel::ready(cx);
+        if sound_on {
+            point_sound(&sound, album_id.clone(), cx);
+        }
 
         let sources = SourcesModel::global(cx);
         let downloads = DownloadsModel::global(cx);
         let subscriptions = vec![
+            cx.observe(&AudioMuseModel::global(cx), |this, _, cx| {
+                this.sync_sound(cx)
+            }),
+            cx.observe(&sound, |_, _, cx| cx.notify()),
             cx.observe(&album, |this, _, cx| this.sync(cx)),
             cx.observe(&sources, |this, _, cx| this.sync(cx)),
             cx.observe(&tracks, |this, _, cx| this.refresh_rows(cx)),
@@ -124,6 +139,8 @@ impl AlbumDetail {
             album,
             tracks,
             remote,
+            sound,
+            sound_on,
             rows: Vec::new(),
             keys: Rc::from([]),
             total_ms: None,
@@ -186,6 +203,54 @@ impl AlbumDetail {
             self.refresh_rows(cx);
         }
         cx.notify();
+    }
+
+    /// Ask for the album's sound once AudioMuse-AI is set up, and stop when it is cleared.
+    fn sync_sound(&mut self, cx: &mut Context<Self>) {
+        let ready = AudioMuseModel::ready(cx);
+        if ready == self.sound_on {
+            return;
+        }
+        self.sound_on = ready;
+        match ready {
+            true => point_sound(&self.sound, self.id.to_string(), cx),
+            false => self
+                .sound
+                .update(cx, |query, cx| query.hold(SoundView::default(), cx)),
+        }
+    }
+
+    /// The album's tags and moods over the albums that sound like it; nothing while loading or empty.
+    fn sound_section(&self, cx: &App) -> Option<AnyElement> {
+        if !self.sound_on {
+            return None;
+        }
+        let sound = self.sound.read(cx).value()?;
+        let profile = sound_profile(sound);
+        if profile.is_none() && sound.similar_albums.is_empty() {
+            return None;
+        }
+        let albums = Rc::new(sound.similar_albums.clone());
+        let row = (!albums.is_empty()).then(|| {
+            Carousel::new(
+                "album-sounds-like",
+                t("sounds_like"),
+                albums.len(),
+                SOUND_TILE,
+                move |at, _, _| album_tile(&albums[at]).size(SOUND_TILE).into_any_element(),
+            )
+            .heading(Heading::Group)
+            .arrows(Arrows::Always)
+        });
+        Some(
+            v_flex()
+                .w_full()
+                .gap_4()
+                .mt_8()
+                .children(profile)
+                .children(row)
+                .into_any_element(),
+        )
     }
 
     fn refresh_rows(&mut self, cx: &mut Context<Self>) {
@@ -319,7 +384,7 @@ impl AlbumDetail {
             .font_weight(gpui_kit::FontWeight::BOLD)
     }
 
-    fn tracks_body(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn tracks_body(&self, footer: Option<AnyElement>, cx: &mut Context<Self>) -> AnyElement {
         if self.rows.is_empty() {
             if let Some(reason) = self.tracks.read(cx).error().map(store::human) {
                 return EmptyState::failed(
@@ -360,6 +425,7 @@ impl AlbumDetail {
             .when(!self.plugin_panels.read(cx).is_empty(cx), |body| {
                 body.child(div().mt_12().child(self.plugin_panels.clone()))
             })
+            .children(footer)
             .into_any_element()
     }
 
@@ -432,6 +498,7 @@ impl AlbumDetail {
                 .label(t("cd_rip_flac"))
                 .on_click(move |_, window, cx| rip::open(keys.clone(), window, cx))
         });
+        let album_id = album.id.clone();
         let mut header = DetailHeader::new(SharedString::from(album.title.clone()))
             .cover(
                 self.cover(&album, components::skin::arrangement().pages.hero, radius)
@@ -450,6 +517,7 @@ impl AlbumDetail {
                     .offline(self.offline)
                     .shuffle_play(commands::shuffle_play)
                     .play(commands::play_all)
+                    .album_radio(move |_, _, cx| actions::start_album_radio(album_id.clone(), cx))
                     .extra(select_all)
                     .when_some(rip, |actions, rip| actions.extra(rip))
                     .download(commands::set_offline),
@@ -462,7 +530,7 @@ impl AlbumDetail {
             .pb_8()
             .overflow_hidden()
             .child(div().flex_shrink_0().mb_12().child(header))
-            .child(self.tracks_body(cx))
+            .child(self.tracks_body(self.sound_section(cx), cx))
             .children(self.selection_bar(cx))
             .into_any_element()
     }
@@ -530,7 +598,7 @@ impl AlbumDetail {
                             .min_w_0()
                             .h_full()
                             .min_h_0()
-                            .child(self.tracks_body(cx)),
+                            .child(self.tracks_body(None, cx)),
                     ),
             )
             .into_any_element()
@@ -679,6 +747,18 @@ fn point_tracks(query: &Entity<Query<Vec<TrackInfo>>>, ids: Vec<String>, cx: &mu
             move |api| {
                 let ids = ids.clone();
                 async move { collect_album_tracks(api, ids).await }
+            },
+            cx,
+        )
+    });
+}
+
+fn point_sound(query: &Entity<Query<SoundView>>, album: String, cx: &mut App) {
+    query.update(cx, |query, cx| {
+        query.set_fetch(
+            move |api| {
+                let album = album.clone();
+                async move { api.album_sound(album).await }
             },
             cx,
         )

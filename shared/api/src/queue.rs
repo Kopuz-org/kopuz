@@ -44,13 +44,51 @@ pub enum QueueContext {
     PlaylistRadio {
         id: String,
     },
+    /// The source's mix seeded by an album, which leaves the album's own songs out.
+    AlbumRadio {
+        id: String,
+    },
+    ArtistRadio {
+        artist: String,
+    },
+    /// The source's mix seeded by several tracks, such as a queue.
+    MixRadio {
+        keys: Vec<String>,
+    },
+    /// Songs stepping from one track to another by how they sound.
+    SonicPath {
+        from: String,
+        to: String,
+    },
+    /// Songs AudioMuse-AI finds for a free-text description of the sound.
+    Described {
+        query: String,
+    },
+    /// Songs AudioMuse-AI picks from the listening profile it holds.
+    Fingerprint,
 }
 
 impl QueueContext {
-    /// Whether a queue built from this one is "playing from" something: every context but a raw track list names a container.
+    /// Whether a queue built from this one is "playing from" something: not a raw track list, a mix of tracks, a sonic path or an AudioMuse-AI pick.
     pub fn names_container(&self) -> bool {
-        !matches!(self, Self::Tracks { .. })
+        !matches!(
+            self,
+            Self::Tracks { .. }
+                | Self::MixRadio { .. }
+                | Self::SonicPath { .. }
+                | Self::Described { .. }
+                | Self::Fingerprint
+        )
     }
+}
+
+/// How a radio or mix found its songs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MixBasis {
+    /// By analysing the audio.
+    Sonic,
+    /// By tags, listening data or a metadata service.
+    Metadata,
 }
 
 #[derive(Debug, Clone, PartialEq)]

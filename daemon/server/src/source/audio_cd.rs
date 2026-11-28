@@ -61,6 +61,10 @@ impl MediaSource for AudioCdSource {
             explicit_flags: false,
             watch_history: false,
             complete_play_history: false,
+            ratings: false,
+            artist_info: false,
+            radio_stations: false,
+            sonic_path: false,
             library_actions: LibraryActions::NONE,
         }
     }
@@ -181,5 +185,6 @@ pub(super) fn snapshot(disc: crate::audio_cd::Disc) -> LibrarySnapshot {
         }],
         tracks,
         artists: Vec::new(),
+        track_stats: Vec::new(),
     }
 }

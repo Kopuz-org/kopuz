@@ -623,7 +623,7 @@ mod tests {
 
     fn manifest(id: &str, version: &str, services: &[&str]) -> String {
         let mut text =
-            format!("id = \"{id}\"\nname = \"{id}\"\nversion = \"{version}\"\napi = \"0.1\"\n");
+            format!("id = \"{id}\"\nname = \"{id}\"\nversion = \"{version}\"\napi = \"0.2\"\n");
         for service in services {
             text.push_str(&format!("[[service]]\nid = \"{service}\"\n"));
         }

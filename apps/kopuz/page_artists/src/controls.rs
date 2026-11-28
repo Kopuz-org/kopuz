@@ -70,6 +70,7 @@ impl SortTarget for AlbumSortField {
             Self::Genre => "sort_field_genre",
             Self::RecentlyAdded => "sort_field_date_added",
             Self::TrackCount => "sort_field_tracks",
+            Self::LastPlayed => "sort_field_last_played",
         }
     }
 
