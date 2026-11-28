@@ -619,6 +619,7 @@ sort_field_genre = Thể loại
 sort_field_album = Album
 sort_field_duration = Thời lượng
 sort_field_date_added = Ngày thêm
+sort_field_last_played = Phát gần nhất
 sort_field_name = Tên
 sort_field_tracks = Bài hát
 sort_field_albums = Album
@@ -941,6 +942,12 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Đánh giá
+rate_stars =
+    { $count ->
+       *[other] Đánh giá { $count } sao
+    }
+clear_rating = Xóa đánh giá
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.

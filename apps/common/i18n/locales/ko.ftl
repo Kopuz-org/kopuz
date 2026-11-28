@@ -625,6 +625,7 @@ sort_field_genre = 장르
 sort_field_album = 앨범
 sort_field_duration = 재생 시간
 sort_field_date_added = 추가된 날짜
+sort_field_last_played = 마지막 재생
 sort_field_name = 이름
 sort_field_tracks = 트랙
 sort_field_albums = 앨범
@@ -947,6 +948,12 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = 평점
+rate_stars =
+    { $count ->
+       *[other] 별 { $count }개로 평가
+    }
+clear_rating = 평점 지우기
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.

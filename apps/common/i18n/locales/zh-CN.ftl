@@ -625,6 +625,7 @@ sort_field_genre = 流派
 sort_field_album = 专辑
 sort_field_duration = 时长
 sort_field_date_added = 添加日期
+sort_field_last_played = 上次播放
 sort_field_name = 名称
 sort_field_tracks = 曲目
 sort_field_albums = 专辑
@@ -947,6 +948,12 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = 评分
+rate_stars =
+    { $count ->
+       *[other] 评 { $count } 星
+    }
+clear_rating = 清除评分
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.

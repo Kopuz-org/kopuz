@@ -433,6 +433,7 @@ impl Source for SoundCloud {
         Ok(TrackPage {
             tracks,
             next: next_href(&json),
+            basis: None,
         })
     }
 

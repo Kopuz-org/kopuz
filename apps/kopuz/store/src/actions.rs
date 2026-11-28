@@ -255,6 +255,15 @@ pub fn set_favorites(keys: Vec<String>, favorite: bool, cx: &mut App) {
     );
 }
 
+/// Give each track `stars` (0 clears) on the active source; a refusal is toasted.
+pub fn set_star_rating(keys: Vec<String>, stars: u8, cx: &mut App) {
+    for key in keys {
+        run(cx, move |api| async move {
+            api.set_star_rating(key, stars).await
+        });
+    }
+}
+
 /// A random index below `len`, from the hasher's per-process seed.
 fn pseudo_random(len: usize) -> u32 {
     use std::hash::{BuildHasher, Hasher};

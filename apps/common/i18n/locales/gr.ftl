@@ -657,6 +657,7 @@ sort_field_genre = Είδος
 sort_field_album = Άλμπουμ
 sort_field_duration = Διάρκεια
 sort_field_date_added = Ημερομηνία προσθήκης
+sort_field_last_played = Τελευταία αναπαραγωγή
 sort_field_name = Όνομα
 sort_field_tracks = Κομμάτια
 sort_field_albums = Άλμπουμ
@@ -979,6 +980,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Βαθμολογία
+rate_stars =
+    { $count ->
+        [one] Βαθμολόγηση με { $count } αστέρι
+       *[other] Βαθμολόγηση με { $count } αστέρια
+    }
+clear_rating = Διαγραφή βαθμολογίας
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.

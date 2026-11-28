@@ -619,6 +619,7 @@ sort_field_genre = Genre
 sort_field_album = Album
 sort_field_duration = Durasi
 sort_field_date_added = Tanggal ditambahkan
+sort_field_last_played = Terakhir diputar
 sort_field_name = Nama
 sort_field_tracks = Trek
 sort_field_albums = Album
@@ -941,6 +942,12 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Rating
+rate_stars =
+    { $count ->
+       *[other] Beri { $count } bintang
+    }
+clear_rating = Hapus rating
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.

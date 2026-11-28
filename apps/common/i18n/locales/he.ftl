@@ -657,6 +657,7 @@ sort_field_genre = ז’אנר
 sort_field_album = אלבום
 sort_field_duration = משך
 sort_field_date_added = תאריך הוספה
+sort_field_last_played = הושמע לאחרונה
 sort_field_name = שם
 sort_field_tracks = שירים
 sort_field_albums = אלבומים
@@ -979,6 +980,14 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = דירוג
+rate_stars =
+    { $count ->
+        [one] דירוג: כוכב אחד
+        [two] דירוג: { $count } כוכבים
+       *[other] דירוג: { $count } כוכבים
+    }
+clear_rating = ניקוי הדירוג
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.

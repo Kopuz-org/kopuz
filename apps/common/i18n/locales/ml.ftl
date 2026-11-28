@@ -655,6 +655,7 @@ sort_field_genre = വിഭാഗം
 sort_field_album = ആൽബം
 sort_field_duration = ദൈർഘ്യം
 sort_field_date_added = ചേർത്ത തീയതി
+sort_field_last_played = അവസാനം കേട്ടത്
 sort_field_name = പേര്
 sort_field_tracks = ട്രാക്കുകൾ
 sort_field_albums = ആൽബങ്ങൾ
@@ -977,6 +978,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = റേറ്റിംഗ്
+rate_stars =
+    { $count ->
+        [one] { $count } നക്ഷത്രം റേറ്റ് ചെയ്യുക
+       *[other] { $count } നക്ഷത്രം റേറ്റ് ചെയ്യുക
+    }
+clear_rating = റേറ്റിംഗ് മായ്ക്കുക
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.

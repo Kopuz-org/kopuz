@@ -631,6 +631,7 @@ sort_field_genre = ジャンル
 sort_field_album = アルバム
 sort_field_duration = 再生時間
 sort_field_date_added = 追加日
+sort_field_last_played = 最後に再生
 sort_field_name = 名前
 sort_field_tracks = トラック
 sort_field_albums = アルバム
@@ -953,6 +954,12 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = 評価
+rate_stars =
+    { $count ->
+       *[other] 星 { $count } 個で評価
+    }
+clear_rating = 評価をクリア
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.

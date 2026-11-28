@@ -725,6 +725,12 @@ impl api::LibraryApi for LocalApi {
             .await
     }
 
+    async fn set_star_rating(&self, key: String, stars: u8) -> Result<(), ApiError> {
+        let key = &key;
+        self.recovering(|| async move { self.library()?.set_star_rating(key, stars).await })
+            .await
+    }
+
     async fn dont_recommend(&self, key: String) -> Result<(), ApiError> {
         let key = &key;
         self.recovering(|| async move { self.favorites_service()?.dont_recommend(key).await })

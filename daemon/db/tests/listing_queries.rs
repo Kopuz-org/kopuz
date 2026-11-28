@@ -337,6 +337,42 @@ async fn albums_sort_each_field_in_both_directions() {
 }
 
 #[tokio::test]
+async fn albums_sort_by_their_latest_play_here_or_on_the_server() {
+    let (database, _dir, source) = library().await;
+    // Delta was played here; Alpha's newest play was on the server, later.
+    database
+        .bump_listen_count(&source, "/d1.flac")
+        .await
+        .unwrap();
+    let later = i64::from(u32::MAX);
+    let stat = |key: &str, last_played_at| db::ServerTrackStats {
+        track_key: key.into(),
+        play_count: Some(1),
+        last_played_at: Some(last_played_at),
+        rating: None,
+    };
+    database
+        .replace_server_track_stats(&source, &[stat("/a2.flac", later), stat("/b1.flac", 10)])
+        .await
+        .unwrap();
+    let ordered = |descending| AlbumQuery {
+        sort: sorted(AlbumSortField::LastPlayed, descending),
+        ..albums(&source)
+    };
+
+    assert_eq!(
+        titles(&database, &ordered(true)).await,
+        ["Alpha", "Delta", "beta", "100% Pure", "Epsilon"],
+        "never-played albums last, in the default order"
+    );
+    assert_eq!(
+        titles(&database, &ordered(false)).await,
+        ["beta", "Delta", "Alpha", "100% Pure", "Epsilon"],
+        "never-played albums last in either direction"
+    );
+}
+
+#[tokio::test]
 async fn album_sort_criteria_stack() {
     let (database, _dir, source) = library().await;
     let query = AlbumQuery {

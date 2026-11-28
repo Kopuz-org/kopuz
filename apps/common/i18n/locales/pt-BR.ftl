@@ -656,6 +656,7 @@ sort_field_genre = Gênero
 sort_field_album = Álbum
 sort_field_duration = Duração
 sort_field_date_added = Data de adição
+sort_field_last_played = Última reprodução
 sort_field_name = Nome
 sort_field_tracks = Faixas
 sort_field_albums = Álbuns
@@ -978,6 +979,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Avaliação
+rate_stars =
+    { $count ->
+        [one] Avaliar com { $count } estrela
+       *[other] Avaliar com { $count } estrelas
+    }
+clear_rating = Limpar avaliação
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.

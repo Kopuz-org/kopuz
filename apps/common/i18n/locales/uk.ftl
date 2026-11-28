@@ -673,6 +673,7 @@ sort_field_genre = Жанр
 sort_field_album = Альбом
 sort_field_duration = Тривалість
 sort_field_date_added = Дата додавання
+sort_field_last_played = Востаннє відтворено
 sort_field_name = Ім'я
 sort_field_tracks = Треки
 sort_field_albums = Альбоми
@@ -995,6 +996,15 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Оцінка
+rate_stars =
+    { $count ->
+        [one] Поставити { $count } зірку
+        [few] Поставити { $count } зірки
+        [many] Поставити { $count } зірок
+       *[other] Поставити { $count } зірки
+    }
+clear_rating = Скинути оцінку
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.

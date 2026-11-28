@@ -625,6 +625,7 @@ sort_field_genre = Műfaj
 sort_field_album = Album
 sort_field_duration = Időtartam
 sort_field_date_added = Hozzáadás dátuma
+sort_field_last_played = Utoljára lejátszva
 sort_field_name = Név
 sort_field_tracks = Dalok
 sort_field_albums = Albumok
@@ -947,6 +948,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Értékelés
+rate_stars =
+    { $count ->
+        [one] Értékelés: { $count } csillag
+       *[other] Értékelés: { $count } csillag
+    }
+clear_rating = Értékelés törlése
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.

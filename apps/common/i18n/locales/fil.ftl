@@ -619,6 +619,7 @@ sort_field_genre = Genre
 sort_field_album = Album
 sort_field_duration = Tagal
 sort_field_date_added = Petsa ng pagdagdag
+sort_field_last_played = Huling pinatugtog
 sort_field_name = Pangalan
 sort_field_tracks = Mga Track
 sort_field_albums = Mga Album
@@ -941,6 +942,13 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = Rating
+rate_stars =
+    { $count ->
+        [one] I-rate ng { $count } star
+       *[other] I-rate ng { $count } star
+    }
+clear_rating = I-clear ang rating
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
