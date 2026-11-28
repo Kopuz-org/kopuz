@@ -663,6 +663,7 @@ sort_field_genre = التصنيف
 sort_field_album = الألبوم
 sort_field_duration = المدة
 sort_field_date_added = تاريخ الإضافة
+sort_field_last_played = آخر تشغيل
 sort_field_name = الاسم
 sort_field_tracks = المقاطع
 sort_field_albums = الألبومات
@@ -985,6 +986,17 @@ library_group_unknown = Unknown
 library_columns = Columns
 library_column_plays = Plays
 library_column_format = Format
+library_column_rating = التقييم
+rate_stars =
+    { $count ->
+        [zero] قيّم بـ { $count } نجمة
+        [one] قيّم بنجمة واحدة
+        [two] قيّم بنجمتين
+        [few] قيّم بـ { $count } نجوم
+        [many] قيّم بـ { $count } نجمة
+       *[other] قيّم بـ { $count } نجمة
+    }
+clear_rating = مسح التقييم
 library_column_quality = Quality
 library_density = Row height
 library_density_description = How much room each row is given.
@@ -1134,6 +1146,7 @@ error_browser_profile_signed_out = That browser profile is not signed in to the 
 error_browser_profile_no_token = The service did not show a token for that profile. Paste it instead.
 error_integration_unreachable = Could not reach the service. Check your connection.
 error_credential_rejected = The service does not accept that token. Paste your token instead.
+error_integration_failed = ردّت الخدمة بخطأ. حاول مرة أخرى لاحقًا.
 error_default_source_undeletable = The default folder source cannot be deleted.
 error_empty_source_folder = A source folder cannot be empty.
 error_code_invalid_input = Not accepted: { $detail }
@@ -1341,3 +1354,26 @@ interface_panel_side = الجانب
 interface_panel_side_description = في أي جانب من الصفحة يكون عمود قوائم التشغيل.
 interface_queue_side = جانب عمود الانتظار والكلمات
 interface_queue_side_description = في أي جانب يُفتح عمود قائمة الانتظار والكلمات.
+artist_info_link = المزيد عن هذا الفنان
+radio_from_server = من خادمك
+radio_metadata_basis = لا يعرف AudioMuse هذه الأغاني بعد، لذا يعتمد هذا الراديو على الوسوم وLast.fm بدلًا من ذلك.
+mix_from_queue = مزيج من قائمة الانتظار
+sonic_path_start = ابدأ المسار الصوتي من هنا
+sonic_path_end = مسار صوتي إلى هنا
+sonic_path_marked = يبدأ المسار الصوتي من هنا. اختر «مسار صوتي إلى هنا» على أغنية أخرى.
+audiomuse = AudioMuse-AI
+audiomuse_url = عنوان AudioMuse-AI
+audiomuse_url_placeholder = http://host:8000
+audiomuse_token = رمز API لـ AudioMuse-AI
+audiomuse_token_placeholder = أدخل رمز API لـ AudioMuse-AI
+describe_music = موسيقى حسب الوصف…
+described_searching = جارٍ البحث عن موسيقى مطابقة…
+discover_your_sound = صوتك
+discover_your_sound_hint = من ملف الاستماع الخاص بك
+sounds_like = يبدو مثل
+mood_danceable = راقص
+mood_aggressive = عدواني
+mood_happy = مبهج
+mood_party = حفلات
+mood_relaxed = هادئ
+mood_sad = حزين

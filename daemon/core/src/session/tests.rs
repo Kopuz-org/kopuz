@@ -114,12 +114,20 @@ impl QueueMaterializer for StubLibrary {
                 let name = match container {
                     QueueContext::Album { id }
                     | QueueContext::Playlist { id }
-                    | QueueContext::PlaylistRadio { id } => id.clone(),
-                    QueueContext::Artist { artist } => artist.clone(),
+                    | QueueContext::PlaylistRadio { id }
+                    | QueueContext::AlbumRadio { id } => id.clone(),
+                    QueueContext::Artist { artist } | QueueContext::ArtistRadio { artist } => {
+                        artist.clone()
+                    }
                     QueueContext::Genre { name } => name.clone(),
                     QueueContext::Radio { station_id, .. } => station_id.clone(),
                     QueueContext::TrackRadio { key } => key.clone(),
-                    QueueContext::Filter { .. } | QueueContext::Tracks { .. } => "filter".into(),
+                    QueueContext::Filter { .. }
+                    | QueueContext::Tracks { .. }
+                    | QueueContext::MixRadio { .. }
+                    | QueueContext::SonicPath { .. }
+                    | QueueContext::Described { .. }
+                    | QueueContext::Fingerprint => "filter".into(),
                 };
                 // A container named "empty" has nothing in it.
                 if name == "empty" {
@@ -3598,6 +3606,7 @@ impl QueueMaterializer for RadioLibrary {
             QueueContext::TrackRadio { key } => Ok(RadioPage {
                 tracks: radio_tracks(&[key, "r1", "r2", "r3", "r4", "r5"]),
                 more: Some("p1".into()),
+                basis: None,
             }),
             other => Ok(RadioPage::last(self.materialize(other).await?)),
         }
@@ -3615,10 +3624,12 @@ impl QueueMaterializer for RadioLibrary {
             "p1" => RadioPage {
                 tracks: radio_tracks(&["r6", "r3", "r7", "r8", "r9", "r10"]),
                 more: Some("p2".into()),
+                basis: None,
             },
             "p2" => RadioPage {
                 tracks: radio_tracks(&["r11", "r12", "r13"]),
                 more: Some("p1".into()),
+                basis: None,
             },
             _ => RadioPage::default(),
         })
@@ -4434,6 +4445,10 @@ impl server::source::MediaSource for RadioSource {
             explicit_flags: true,
             watch_history: false,
             complete_play_history: false,
+            ratings: false,
+            artist_info: false,
+            radio_stations: false,
+            sonic_path: false,
             accounts: false,
             music_videos: false,
             library_actions: server::source::LibraryActions::NONE,

@@ -807,8 +807,16 @@ impl ClassifiedLoad {
                             (info.url, info.format, info.user_agent, info.guard)
                         }
                         ResolvedStreamRef::SoundCloudHls(_)
-                        | ResolvedStreamRef::AppleMusicFmp4(_)
-                        | ResolvedStreamRef::Direct(_) => (stream_ref, None, None, None),
+                        | ResolvedStreamRef::AppleMusicFmp4(_) => (stream_ref, None, None, None),
+                        ResolvedStreamRef::Direct(_) => {
+                            // A source's own station stays on its plugin's hosts.
+                            let guard = source
+                                .filter(|_| {
+                                    self.is_radio && crate::radio::from_source(&self.item_id)
+                                })
+                                .and_then(|source| source.stream_guard());
+                            (stream_ref, None, None, guard)
+                        }
                     };
 
                 // The factory runs on the decode worker (no runtime), so hand

@@ -14,10 +14,10 @@ pub mod bindings {
         default_bindings_module: "kopuz_plugin_sdk::integration::bindings",
         additional_derives: [PartialEq],
         with: {
-            "kopuz:plugin/types@0.1.0": crate::bindings::kopuz::plugin::types,
-            "kopuz:plugin/http@0.1.0": crate::bindings::kopuz::plugin::http,
-            "kopuz:plugin/log@0.1.0": crate::bindings::kopuz::plugin::log,
-            "kopuz:plugin/tcp@0.1.0": crate::bindings::kopuz::plugin::tcp,
+            "kopuz:plugin/types@0.2.0": crate::bindings::kopuz::plugin::types,
+            "kopuz:plugin/http@0.2.0": crate::bindings::kopuz::plugin::http,
+            "kopuz:plugin/log@0.2.0": crate::bindings::kopuz::plugin::log,
+            "kopuz:plugin/tcp@0.2.0": crate::bindings::kopuz::plugin::tcp,
         },
     });
 }

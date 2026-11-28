@@ -1,7 +1,7 @@
 //! The list. Order here is the order a menu draws and the order the palette falls back to.
 
 use api::{PlaylistCapability, Rating};
-use components::format::t;
+use components::format::{t, t_with};
 use components::icons;
 use gpui_kit::App;
 use store::layout::Pin;
@@ -45,6 +45,30 @@ fn one_track(target: &Target, _: &App) -> bool {
 
 fn many_tracks(target: &Target, cx: &App) -> bool {
     ops::track_keys(target).len() > 1 && ops::caps(cx).edit_tags
+}
+
+fn can_rate(target: &Target, cx: &App) -> bool {
+    has_tracks(target, cx) && ops::caps(cx).ratings
+}
+
+/// One "Rate N stars" entry; a menu has no submenu, so each count is its own item.
+macro_rules! rate_command {
+    ($id:literal, $stars:literal) => {
+        Command {
+            id: $id,
+            labels: &["rate_stars"],
+            label: |_, _| t_with("rate_stars", &[("count", $stars.into())]),
+            icon: None,
+            group: Group::Library,
+            section: Section::Act,
+            keys: NO_KEYS,
+            danger: false,
+            applies: TRACKS,
+            available: can_rate,
+            run: |target, _, cx| ops::rate(&target, $stars, cx),
+            action: None,
+        }
+    };
 }
 
 pub fn all() -> &'static [Command] {
@@ -147,6 +171,25 @@ static COMMANDS: &[Command] = &[
         run: |target, _, cx| ops::toggle_favorite(&target, cx),
         action: Some(|| Box::new(components::track_list::FavoriteSelection)),
     },
+    rate_command!("track.rate_1", 1),
+    rate_command!("track.rate_2", 2),
+    rate_command!("track.rate_3", 3),
+    rate_command!("track.rate_4", 4),
+    rate_command!("track.rate_5", 5),
+    Command {
+        id: "track.rate_clear",
+        labels: &["clear_rating"],
+        label: |_, _| t("clear_rating"),
+        icon: None,
+        group: Group::Library,
+        section: Section::Act,
+        keys: NO_KEYS,
+        danger: false,
+        applies: TRACKS,
+        available: can_rate,
+        run: |target, _, cx| ops::rate(&target, 0, cx),
+        action: None,
+    },
     Command {
         id: "track.radio",
         labels: &["start_radio"],
@@ -161,6 +204,45 @@ static COMMANDS: &[Command] = &[
         run: |target, _, cx| {
             if let Some(key) = ops::first_key(&target) {
                 actions::start_track_radio(key, cx);
+            }
+        },
+        action: None,
+    },
+    Command {
+        id: "track.sonic_start",
+        labels: &["sonic_path_start"],
+        label: |_, _| t("sonic_path_start"),
+        icon: Some(icons::RADIO),
+        group: Group::Playback,
+        section: Section::Act,
+        keys: NO_KEYS,
+        danger: false,
+        applies: TRACKS,
+        available: |target, cx| one_track(target, cx) && ops::caps(cx).sonic_path,
+        run: |target, _, cx| {
+            if let Some(key) = ops::first_key(&target) {
+                actions::mark_sonic_path_start(key, cx);
+            }
+        },
+        action: None,
+    },
+    Command {
+        id: "track.sonic_end",
+        labels: &["sonic_path_end"],
+        label: |_, _| t("sonic_path_end"),
+        icon: Some(icons::RADIO),
+        group: Group::Playback,
+        section: Section::Act,
+        keys: NO_KEYS,
+        danger: false,
+        applies: TRACKS,
+        available: |target, cx| {
+            let marked = store::SonicPathStart::global(cx).read(cx).from().is_some();
+            marked && one_track(target, cx) && ops::caps(cx).sonic_path
+        },
+        run: |target, _, cx| {
+            if let Some(key) = ops::first_key(&target) {
+                actions::finish_sonic_path(key, cx);
             }
         },
         action: None,
@@ -477,6 +559,24 @@ static COMMANDS: &[Command] = &[
         action: None,
     },
     Command {
+        id: "album.radio",
+        labels: &["start_radio"],
+        label: |_, _| t("start_radio"),
+        icon: Some(icons::RADIO),
+        group: Group::Playback,
+        section: Section::Act,
+        keys: NO_KEYS,
+        danger: false,
+        applies: ALBUM,
+        available: |_, cx| ops::caps(cx).album_radio,
+        run: |target, _, cx| {
+            if let Some(id) = ops::album_id(&target) {
+                actions::start_album_radio(id, cx);
+            }
+        },
+        action: None,
+    },
+    Command {
         id: "album.add_to_queue",
         labels: &["add_all_to_queue"],
         label: |_, _| t("add_all_to_queue"),
@@ -593,6 +693,24 @@ static COMMANDS: &[Command] = &[
         applies: ARTIST,
         available: yes,
         run: |target, _, cx| ops::play_artist(&target, cx),
+        action: None,
+    },
+    Command {
+        id: "artist.radio",
+        labels: &["start_radio"],
+        label: |_, _| t("start_radio"),
+        icon: Some(icons::RADIO),
+        group: Group::Playback,
+        section: Section::Act,
+        keys: NO_KEYS,
+        danger: false,
+        applies: ARTIST,
+        available: |_, cx| ops::caps(cx).artist_radio,
+        run: |target, _, cx| {
+            if let Target::Artist { key, .. } = target {
+                actions::start_artist_radio(key, cx);
+            }
+        },
         action: None,
     },
     Command {
@@ -859,6 +977,22 @@ static COMMANDS: &[Command] = &[
         action: None,
     },
     // The app itself: no target, driven by key or palette.
+    Command {
+        id: "queue.mix",
+        labels: &["mix_from_queue"],
+        label: |_, _| t("mix_from_queue"),
+        icon: Some(icons::RADIO),
+        group: Group::Queue,
+        section: Section::Hidden,
+        keys: NO_KEYS,
+        danger: false,
+        applies: NOTHING,
+        available: |_, cx| {
+            ops::caps(cx).mix_radio && !store::QueueModel::global(cx).read(cx).is_empty()
+        },
+        run: |_, _, cx| actions::start_queue_mix(cx),
+        action: None,
+    },
     Command {
         id: "player.toggle",
         labels: &["play_pause"],
@@ -1202,6 +1336,28 @@ static COMMANDS: &[Command] = &[
         available: yes,
         run: |_, _, cx| Navigator::navigate(Route::Radio, cx),
         action: Some(|| Box::new(crate::keys::GoRadio)),
+    },
+    Command {
+        id: "audiomuse.describe",
+        labels: &["describe_music"],
+        label: |_, _| t("describe_music"),
+        icon: Some(icons::SEARCH),
+        group: Group::Playback,
+        section: Section::Hidden,
+        keys: NO_KEYS,
+        danger: false,
+        applies: NOTHING,
+        available: |_, cx| store::AudioMuseModel::ready(cx),
+        run: |_, window, cx| {
+            components::dialogs::open_rename(
+                t("describe_music"),
+                "",
+                actions::start_described,
+                window,
+                cx,
+            )
+        },
+        action: None,
     },
     Command {
         id: "downloads.add_url",

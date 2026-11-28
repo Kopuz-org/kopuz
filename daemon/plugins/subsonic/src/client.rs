@@ -2,9 +2,11 @@ use std::cell::OnceCell;
 use std::time::Duration;
 
 use kopuz_plugin_sdk::http::{self, Client};
-use kopuz_plugin_sdk::{ReplayGain, SourceError};
+use kopuz_plugin_sdk::{MixBasis, ReplayGain, SourceError};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+
+use crate::stats;
 
 const SUBSONIC_API_VERSION: &str = "1.16.1";
 const CLIENT_NAME: &str = "kopuz";
@@ -20,6 +22,9 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 /// against a real library that ranges from 0.15s (warm) to over 50s (cold), so
 /// the ordinary budget turned most radio starts into a silent timeout.
 const SIMILAR_SONGS_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// Similar artists asked of `getArtistInfo2`.
+const SIMILAR_ARTISTS_COUNT: usize = 20;
 
 /// The OpenSubsonic extension that exposes analysis-backed similarity. A server
 /// advertises it only when something implements it (on Navidrome, the
@@ -94,6 +99,10 @@ pub struct SubsonicSong {
     pub disc_number: Option<u32>,
     pub cover_art: Option<String>,
     pub replay_gain: Option<SubsonicReplayGain>,
+    pub play_count: Option<u32>,
+    /// ISO-8601 time of the account's last play.
+    pub played: Option<String>,
+    pub user_rating: Option<u32>,
 }
 
 /// One entry of an OpenSubsonic song's `artists` list.
@@ -116,6 +125,14 @@ pub struct SubsonicReplayGain {
 }
 
 impl SubsonicSong {
+    pub fn last_played(&self) -> Option<i64> {
+        self.played.as_deref().and_then(stats::unix_secs)
+    }
+
+    pub fn rating(&self) -> Option<u8> {
+        stats::stars(self.user_rating)
+    }
+
     pub fn replay_gain(&self) -> ReplayGain {
         let Some(gain) = &self.replay_gain else {
             return ReplayGain::default();
@@ -139,6 +156,13 @@ pub struct SubsonicPlaylist {
     pub id: String,
     pub name: String,
     pub cover_art: Option<String>,
+}
+
+/// Songs like a seed, and which kind of lookup found them.
+pub struct Similar {
+    pub songs: Vec<SubsonicSong>,
+    /// None when the server has no analysis-backed similarity to compare with.
+    pub basis: Option<MixBasis>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -193,6 +217,20 @@ struct GetAlbumList2Data {
 struct AlbumSongsContainer {
     #[serde(default)]
     song: Vec<SubsonicSong>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ArtistAlbumsContainer {
+    #[serde(default)]
+    album: Vec<SubsonicAlbum>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetArtistData {
+    #[serde(default)]
+    artist: Option<ArtistAlbumsContainer>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -314,6 +352,47 @@ struct GetOpenSubsonicExtensionsData {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SubsonicArtistInfo {
+    pub biography: Option<String>,
+    pub last_fm_url: Option<String>,
+    pub medium_image_url: Option<String>,
+    pub large_image_url: Option<String>,
+    #[serde(default)]
+    pub similar_artist: Vec<SubsonicArtist>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetArtistInfoData {
+    #[serde(default)]
+    artist_info2: Option<SubsonicArtistInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubsonicRadioStation {
+    pub id: String,
+    pub name: String,
+    pub stream_url: String,
+    pub home_page_url: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InternetRadioStationsContainer {
+    #[serde(default)]
+    internet_radio_station: Vec<SubsonicRadioStation>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetInternetRadioStationsData {
+    #[serde(default)]
+    internet_radio_stations: Option<InternetRadioStationsContainer>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct GetPlayQueueData {
     #[serde(default)]
     play_queue: Option<SubsonicPlayQueue>,
@@ -369,21 +448,60 @@ impl SubsonicClient {
     /// library, which is both better matched and far quicker than the
     /// metadata-agent route. Everything else falls back to plain
     /// `getSimilarSongs`, which every Subsonic server since API 1.11.0 exposes.
-    pub fn get_similar_songs(
+    /// The basis is none on a server without the extension, so no hint shows there.
+    pub fn get_similar_songs(&self, song_id: &str, count: usize) -> Result<Similar, SourceError> {
+        if !self.has_sonic_similarity() {
+            let songs = self.get_similar_songs_by_metadata(song_id, count)?;
+            return Ok(Similar { songs, basis: None });
+        }
+
+        match self.get_sonic_similar_tracks(song_id, count) {
+            Ok(songs) if !songs.is_empty() => {
+                return Ok(Similar {
+                    songs,
+                    basis: Some(MixBasis::Sonic),
+                });
+            }
+            Ok(_) => kopuz_plugin_sdk::debug!("sonic similarity returned nothing for {song_id}"),
+            Err(e) => kopuz_plugin_sdk::warn!("sonic similarity failed for {song_id}: {e}"),
+        }
+        let songs = self.get_similar_songs_by_metadata(song_id, count)?;
+        Ok(Similar {
+            songs,
+            basis: Some(MixBasis::Metadata),
+        })
+    }
+
+    /// OpenSubsonic `findSonicPath`: songs that step from one song to another, both included.
+    pub fn find_sonic_path(
         &self,
-        song_id: &str,
+        from_id: &str,
+        to_id: &str,
         count: usize,
     ) -> Result<Vec<SubsonicSong>, SourceError> {
-        if self.has_sonic_similarity() {
-            match self.get_sonic_similar_tracks(song_id, count) {
-                Ok(songs) if !songs.is_empty() => return Ok(songs),
-                Ok(_) => {
-                    kopuz_plugin_sdk::debug!("sonic similarity returned nothing for {song_id}")
-                }
-                Err(e) => kopuz_plugin_sdk::warn!("sonic similarity failed for {song_id}: {e}"),
-            }
+        if !self.has_sonic_similarity() {
+            return Err(SourceError::unsupported("sonic path"));
         }
-        self.get_similar_songs_by_metadata(song_id, count)
+
+        let data = self.call_within::<GetSonicSimilarTracksData>(
+            "findSonicPath.view",
+            vec![
+                ("startSongId".to_string(), from_id.to_string()),
+                ("endSongId".to_string(), to_id.to_string()),
+                ("count".to_string(), count.to_string()),
+            ],
+            SIMILAR_SONGS_TIMEOUT,
+        )?;
+        Ok(data.sonic_match.into_iter().map(|m| m.entry).collect())
+    }
+
+    /// An artist's albums, as `getArtist` lists them.
+    pub fn get_artist_albums(&self, artist_id: &str) -> Result<Vec<SubsonicAlbum>, SourceError> {
+        let data = self.call::<GetArtistData>(
+            "getArtist.view",
+            vec![("id".to_string(), artist_id.to_string())],
+        )?;
+        Ok(data.artist.map(|a| a.album).unwrap_or_default())
     }
 
     /// Whether the server advertises [`SONIC_SIMILARITY_EXTENSION`]. Probed once
@@ -546,6 +664,28 @@ impl SubsonicClient {
             .collect())
     }
 
+    pub fn get_artist_info(
+        &self,
+        artist_id: &str,
+    ) -> Result<Option<SubsonicArtistInfo>, SourceError> {
+        let params = vec![
+            ("id".to_string(), artist_id.to_string()),
+            ("count".to_string(), SIMILAR_ARTISTS_COUNT.to_string()),
+            ("includeNotPresent".to_string(), "false".to_string()),
+        ];
+        let data = self.call::<GetArtistInfoData>("getArtistInfo2.view", params)?;
+        Ok(data.artist_info2)
+    }
+
+    pub fn get_radio_stations(&self) -> Result<Vec<SubsonicRadioStation>, SourceError> {
+        let data =
+            self.call::<GetInternetRadioStationsData>("getInternetRadioStations.view", Vec::new())?;
+        Ok(data
+            .internet_radio_stations
+            .map(|stations| stations.internet_radio_station)
+            .unwrap_or_default())
+    }
+
     pub fn get_starred_song_ids(&self) -> Result<Vec<String>, SourceError> {
         let data = self.call::<GetStarred2Data>("getStarred2.view", Vec::new())?;
         Ok(data
@@ -562,6 +702,14 @@ impl SubsonicClient {
     pub fn unstar(&self, item_id: &str) -> Result<(), SourceError> {
         self.call::<EmptyData>("unstar.view", vec![("id".to_string(), item_id.to_string())])
             .map(|_| ())
+    }
+
+    pub fn set_rating(&self, item_id: &str, stars: u8) -> Result<(), SourceError> {
+        let params = vec![
+            ("id".to_string(), item_id.to_string()),
+            ("rating".to_string(), stars.to_string()),
+        ];
+        self.call::<EmptyData>("setRating.view", params).map(|_| ())
     }
 
     pub fn stream_url(&self, item_id: &str) -> Result<String, SourceError> {
@@ -738,6 +886,39 @@ mod tests {
     /// nesting level deserializes to an empty list rather than an error, which
     /// reaches the user as a radio button that does nothing.
     #[test]
+    fn song_stats_parse() {
+        let song: SubsonicSong = serde_json::from_value(serde_json::json!({
+            "id": "s", "title": "T", "playCount": 7,
+            "played": "2026-11-20T18:04:11.123Z", "userRating": 4
+        }))
+        .unwrap();
+        assert_eq!(song.play_count, Some(7));
+        assert_eq!(song.last_played(), Some(1_795_197_851));
+        assert_eq!(song.rating(), Some(4));
+    }
+
+    #[test]
+    fn an_offset_play_time_parses_and_zero_stars_is_no_rating() {
+        let song: SubsonicSong = serde_json::from_value(serde_json::json!({
+            "id": "s", "title": "T", "played": "2026-11-20T19:04:11+01:00", "userRating": 0
+        }))
+        .unwrap();
+        assert_eq!(song.last_played(), Some(1_795_197_851));
+        assert_eq!(song.rating(), None);
+    }
+
+    #[test]
+    fn a_song_without_stats_reports_none() {
+        let song: SubsonicSong =
+            serde_json::from_value(serde_json::json!({"id": "s", "title": "T", "played": "never"}))
+                .unwrap();
+        assert_eq!(
+            (song.play_count, song.last_played(), song.rating()),
+            (None, None, None)
+        );
+    }
+
+    #[test]
     fn similar_songs_response_parses() {
         let data: GetSimilarSongsData = parse(serde_json::json!({
             "subsonic-response": {
@@ -783,6 +964,44 @@ mod tests {
 
         assert_eq!(data.sonic_match.len(), 1);
         assert_eq!(data.sonic_match[0].entry.id, "song-2");
+    }
+
+    #[test]
+    fn artist_info_response_parses() {
+        let data: GetArtistInfoData = parse(serde_json::json!({
+            "subsonic-response": {
+                "status": "ok",
+                "artistInfo2": {
+                    "biography": "Bio",
+                    "lastFmUrl": "https://last.fm/x",
+                    "largeImageUrl": "https://img.test/l.jpg",
+                    "similarArtist": [{ "id": "ar-2", "name": "Boris" }]
+                }
+            }
+        }));
+        let info = data.artist_info2.expect("info");
+        assert_eq!(
+            info.large_image_url.as_deref(),
+            Some("https://img.test/l.jpg")
+        );
+        assert_eq!(info.similar_artist[0].id, "ar-2");
+    }
+
+    #[test]
+    fn radio_stations_response_parses() {
+        let data: GetInternetRadioStationsData = parse(serde_json::json!({
+            "subsonic-response": {
+                "status": "ok",
+                "internetRadioStations": { "internetRadioStation": [
+                    { "id": "r1", "name": "Jazz", "streamUrl": "http://s/1", "homePageUrl": "http://h" }
+                ] }
+            }
+        }));
+        let stations = data
+            .internet_radio_stations
+            .expect("stations")
+            .internet_radio_station;
+        assert_eq!(stations[0].home_page_url.as_deref(), Some("http://h"));
     }
 
     #[test]
