@@ -1394,7 +1394,7 @@ impl Session {
         }
         // Bounded so a hanging materializer (a slow source resolve) cannot
         // wedge the whole session command loop.
-        let RadioPage { tracks, more } = tokio::time::timeout(
+        let RadioPage { tracks, more, .. } = tokio::time::timeout(
             MATERIALIZE_TIMEOUT,
             self.materializer.materialize_queue(&request.context),
         )
